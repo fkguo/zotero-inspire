@@ -29,11 +29,14 @@ async function getInspireMeta(item) {
     let metaInspire = {};
 
     let doi = item.getField('DOI');
+    const url = item.getField('url');
+
     let idtype = 'doi';
-    if (!doi) { // if no doi, 
-        idtype = 'arxiv';
+    if (!doi) { 
         let extra = item.getField('extra');
+
         if (extra.includes('arXiv:')) {
+            idtype = 'arxiv';
             const regexArxivId = 'arXiv:(.+)'
             /* in this way, different situations are included:
             New and old types of arXiv number; 
@@ -41,25 +44,35 @@ async function getInspireMeta(item) {
             */
             let arxiv_split = extra.match(regexArxivId)[1].split(' ')
             arxiv_split[0] == '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
-        } else {
-            const url = item.getField('url');
+        } else if (url) {
             const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
             const m = patt.exec(url);
             if (!m) {
-                return "No valid arxiv ID found in url"
+                if (url.includes('doi')) {
+                    doi = url.replace('https://doi.org/', '')
+                } else {
+                    return "No valid arxiv ID found in url"
+                } 
             } else {
+                idtype = 'arxiv';
                 doi = m[1]
             }
+        } else {
+            const regexDOIinExtra = 'DOI: (.+)'
+            extra.includes('DOI: ') && (doi = extra.match(regexDOIinExtra)[1])
         }
+    } else {
+        doi.includes("https") && (doi = doi.replace('https://doi.org/', ''))
     }
-    if (!doi) {
-        return -1;
-    }
+    // if (!doi) {
+    //     return -1;
+    // }
+
     const edoi = encodeURIComponent(doi);
 
-    const url = "https://inspirehep.net/api/" + idtype + "/" + edoi;
+    const urlInspire = "https://inspirehep.net/api/" + idtype + "/" + edoi;
     let status = null;
-    const response = await fetch(url)
+    const response = await fetch(urlInspire)
         //   .then(response => response.json())
         .then(response => {
             if (response.status !== "404") {
@@ -98,13 +111,15 @@ async function getInspireMeta(item) {
                 metaInspire.issue = pubinfo_first.journal_issue
             }
         }
-        let abstractInspire = meta['abstracts']
-        if (abstractInspire.length > 1) {
-            for (i = 0; i < abstractInspire.length; i++) {
-                abstractInspire[i].source == "arXiv" && (metaInspire.abstractNote = abstractInspire[i].value)
+        if (meta['abstracts']) {
+            let abstractInspire = meta['abstracts']
+            if (abstractInspire.length > 1) {
+                for (i = 0; i < abstractInspire.length; i++) {
+                    abstractInspire[i].source == "arXiv" && (metaInspire.abstractNote = abstractInspire[i].value)
+                }
+            } else {
+                metaInspire.abstractNote = abstractInspire[0].value
             }
-        } else {
-            metaInspire.abstractNote = abstractInspire[0].value
         }
     } catch (err) {
         return -1;

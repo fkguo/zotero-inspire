@@ -31,7 +31,13 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 		
 	- `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, and `abstract`.
 
+## Prerequisite
 
+The add-on fetch search for the INSPIRE record according to DOI or arXiv numbers. For it to work as expected,
+- the DOI should be either in the `DOI` fiel, or in the `extra` field in the format of `DOI: `.
+- as for arXiv papers, there should be either a url in the `URL` field, or an arXiv ID in the `extra` field in the format of  `arXiv:`.
+
+There are old papers in the INSPIRE database without a DOI number. However, the INSPIRE API currently does not support using the citekey to access the relevant publication.
 
 ## Installation
 
