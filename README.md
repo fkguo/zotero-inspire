@@ -14,7 +14,7 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 - The add-on will update the following fields:
 	- INSPIRE uses a unique `recid` for each publication in the database (called `control_number` in the `.json` file obtained via the [INSPIRE API](https://github.com/inspirehep/rest-api-doc)). The INSPIRE `recid` is set to the field of `Loc. in Archive` (and `INSPIRE` to `Archive`) for the selected Zotero item.
-		- This also enables us to write a look-up engine using this `recid` to exactly reach the INSPIRE page of that publication. The look-up engine can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.file`, and put the path to the INSPIRE icon file after `"_icon":`:
+		- This also enables to write a look-up engine using this `recid` to exactly reach the INSPIRE page of that publication. The look-up engine can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.file`, and put the path to the INSPIRE icon file after `"_icon":`:
 		```json
 		{
 			"_name": "INSPIRE",
@@ -30,14 +30,11 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 		```
 		
 	- `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, and `abstract`.
+	- It will also get the citation count with and without self-citations for each selected item. One can also choose to update only the citation counts by selecting `Citations` in the menu. 
+	- The current INSPIRE system does not display the citation count without self citations for a given paper. However, this number is in the medadata, and can be extracted with this add-on.
+- By default, those items that could not be found using either DOI or arXiv ID in INSPIRE will be automatically tagged as `⛔ No INSPIRE recid found`. The automatic tagging can be turned off in `Tools` → `INSPIRE Metadata Updater Preferences...`.
 
-## Prerequisite
 
-The add-on fetch search for the INSPIRE record according to DOI or arXiv numbers. For it to work as expected,
-- the DOI should be either in the `DOI` fiel, or in the `extra` field in the format of `DOI: `.
-- as for arXiv papers, there should be either a url in the `URL` field, or an arXiv ID in the `extra` field in the format of  `arXiv:`.
-
-There are old papers in the INSPIRE database without a DOI number. However, the INSPIRE API currently does not support using the citekey to access the relevant publication.
 
 ## Installation
 

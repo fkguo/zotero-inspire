@@ -3,10 +3,13 @@
 <!ENTITY inspire-autoretrieve-label "INSPIRE Metadata for new items">
 <!ENTITY inspire-autoretrieve-full-label "With abstracts">
 <!ENTITY inspire-autoretrieve-noabstract-label "Without abstracts">
+<!ENTITY inspire-autoretrieve-citations-label "Citation counts">
 <!ENTITY inspire-autoretrieve-no-label "No">
 <!ENTITY inspire-menu-label "Update INSPIRE Metadata">
 <!ENTITY inspire-menu-full-label "With abstracts">
 <!ENTITY inspire-menu-noabstract-label "Without abstracts">
+<!ENTITY inspire-menu-citations-label "Citation counts">
 
 <!ENTITY inspire-updatecollection-label "Update INSPIRE Metadata w/ Abstracts">
 <!ENTITY inspire-updatecollection-noabstract-label "Update INSPIRE Metadata w/o Abstracts">
+<!ENTITY inspire-updatecollection-citations-label "Update INSPIRE Citation Counts">

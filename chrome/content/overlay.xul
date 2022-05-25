@@ -25,6 +25,10 @@
                     id="zotero-itemmenu-inspire-noabstract"
                     label="&inspire-menu-noabstract-label;"
                     oncommand="Zotero.Inspire.updateSelectedItems('noabstract')"/>
+                <menuitem
+                    id="zotero-itemmenu-inspire-citations"
+                    label="&inspire-menu-citations-label;"
+                    oncommand="Zotero.Inspire.updateSelectedItems('citations')"/>
             </menupopup>
         </menu>
     </popup>
@@ -42,6 +46,11 @@
                   id="zotero-collectionmenu-inspire-noabstract"
                   label="&inspire-updatecollection-noabstract-label;"
                   oncommand="Zotero.Inspire.updateSelectedCollection('noabstract');" />
+        <menuitem class="menuitem-iconic"
+        image="chrome://zoteroinspire/skin/inspire@2x.png"
+                  id="zotero-collectionmenu-inspire-citations"
+                  label="&inspire-updatecollection-citations-label;"
+                  oncommand="Zotero.Inspire.updateSelectedCollection('citations');" />
     </popup>
 
     <menupopup id="menu_ToolsPopup">
@@ -59,6 +68,11 @@
               type="checkbox"
               label="&inspire-autoretrieve-noabstract-label;"
               oncommand="Zotero.Inspire.changePref('noabstract');"/>
+          <menuitem
+              id="menu_Tools-inspire-menu-popup-citations"
+              type="checkbox"
+              label="&inspire-autoretrieve-citations-label;"
+              oncommand="Zotero.Inspire.changePref('citations');"/>
           <menuitem
               id="menu_Tools-inspire-menu-popup-none"
               type="checkbox"

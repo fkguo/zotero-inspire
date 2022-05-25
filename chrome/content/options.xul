@@ -22,6 +22,7 @@
       <radiogroup id="id-inspire-autoretrieve" preference="pref-inspire-autoretrieve">
         <radio label="&autoretrieve-full-label;" value='full'/>
         <radio label="&autoretrieve-noabstract-label;" value='noabstract'/>
+        <radio label="&autoretrieve-citations-label;" value='citations'/>
         <radio label="&autoretrieve-no-label;" value='none'/>
       </radiogroup>
     </groupbox>

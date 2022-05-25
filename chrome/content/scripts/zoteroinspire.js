@@ -21,6 +21,7 @@ Zotero.Inspire = {};
  possible operations:
  - full: fetching medatadata including abstract
  - noabstract: no abstract
+ - citations: update citation counts for INSPIRE
  - none: nothing
  */
 async function getInspireMeta(item) {
@@ -32,7 +33,7 @@ async function getInspireMeta(item) {
     const url = item.getField('url');
 
     let idtype = 'doi';
-    if (!doi) { 
+    if (!doi) {
         let extra = item.getField('extra');
 
         if (extra.includes('arXiv:')) {
@@ -52,7 +53,7 @@ async function getInspireMeta(item) {
                     doi = url.replace('https://doi.org/', '')
                 } else {
                     return "No valid arxiv ID found in url"
-                } 
+                }
             } else {
                 idtype = 'arxiv';
                 doi = m[1]
@@ -121,6 +122,8 @@ async function getInspireMeta(item) {
                 metaInspire.abstractNote = abstractInspire[0].value
             }
         }
+        metaInspire.citation_count = meta['citation_count']
+        metaInspire.citation_count_wo_self_citations = meta['citation_count_without_self_citations']
     } catch (err) {
         return -1;
     }
@@ -135,6 +138,8 @@ async function getInspireMeta(item) {
 */
 function setInspireMeta(item, metaInspire, operation) {
 
+    const today = new Date(Date.now()).toLocaleDateString('zh-CN');
+
     if (item.getField('publicationTitle').includes('arXiv')) {
         item.setField('publicationTitle', "")
     }
@@ -143,18 +148,35 @@ function setInspireMeta(item, metaInspire, operation) {
     }
     // item.setField('archiveLocation', metaInspire);
     if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
-        item.setField('archive', "INSPIRE");
-        item.setField('archiveLocation', metaInspire.recid);
+        if (operation == 'full' || operation == 'noabstract') {
+            item.setField('archive', "INSPIRE");
+            item.setField('archiveLocation', metaInspire.recid);
 
-        metaInspire.journalAbbreviation && item.setField('journalAbbreviation', metaInspire.journalAbbreviation);
-        // to avoid setting undefined to zotero items
-        metaInspire.volume && item.setField('volume', metaInspire.volume);
-        metaInspire.pages && item.setField('pages', metaInspire.pages);
-        metaInspire.date && item.setField('date', metaInspire.date);
-        metaInspire.issue && item.setField('issue', metaInspire.issue);
-        metaInspire.DOI && item.setField('DOI', metaInspire.DOI);
+            metaInspire.journalAbbreviation && item.setField('journalAbbreviation', metaInspire.journalAbbreviation);
+            // to avoid setting undefined to zotero items
+            metaInspire.volume && item.setField('volume', metaInspire.volume);
+            metaInspire.pages && item.setField('pages', metaInspire.pages);
+            metaInspire.date && item.setField('date', metaInspire.date);
+            metaInspire.issue && item.setField('issue', metaInspire.issue);
+            metaInspire.DOI && item.setField('DOI', metaInspire.DOI);
+
+            let extra = item.getField('extra')
+            // remove old citation counts 
+            extra = extra.replace(/^.*citations.*$\n/mg, "");
+            extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
+            item.setField('extra', extra)
+        };
+
         if (operation == "full" && metaInspire.abstractNote) {
             item.setField('abstractNote', metaInspire.abstractNote)
+        };
+
+        if (operation == "citations") {
+            let extra = item.getField('extra')
+            // remove old citation counts
+            extra = extra.replace(/^.*citations.*$\n/mg, "");
+            extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
+            item.setField('extra', extra)
         }
     }
 }
@@ -194,6 +216,9 @@ Zotero.Inspire.notifierCallback = {
                 case "noabstract":
                     Zotero.Inspire.updateItems(Zotero.Items.get(ids), "noabstract");
                     break;
+                case "citations":
+                    Zotero.Inspire.updateItems(Zotero.Items.get(ids), "citations");
+                    break;
                 default:
                     break;
             }
@@ -209,11 +234,14 @@ Zotero.Inspire.setCheck = function () {
         "menu_Tools-inspire-menu-popup-full");
     let tools_noabstract = document.getElementById(
         "menu_Tools-inspire-menu-popup-noabstract");
+    let tools_citations = document.getElementById(
+        "menu_Tools-inspire-menu-popup-citations");
     let tools_none = document.getElementById(
         "menu_Tools-inspire-menu-popup-none");
     const pref = Zotero.Inspire.getPref("autoretrieve");
     tools_full.setAttribute("checked", Boolean(pref === "full"));
     tools_noabstract.setAttribute("checked", Boolean(pref === "noabstract"));
+    tools_citations.setAttribute("checked", Boolean(pref === "citations"));
     tools_none.setAttribute("checked", Boolean(pref === "none"));
 };
 
@@ -286,6 +314,11 @@ Zotero.Inspire.resetState = function (operation) {
                         "INSPIRE metadata updated for " +
                         Zotero.Inspire.counter + " items.");
                 }
+                if (operation == "citations") {
+                    Zotero.Inspire.progressWindow.progress.setText(
+                        "INSPIRE citation counts updated for " +
+                        Zotero.Inspire.counter + " items.");
+                }
                 Zotero.Inspire.progressWindow.show();
                 Zotero.Inspire.progressWindow.startCloseTimer(4000);
                 final_count_shown = true;
@@ -331,6 +364,10 @@ Zotero.Inspire.updateItems = function (items0, operation) {
         Zotero.Inspire.progressWindow.changeHeadline(
             "Getting INSPIRE metadata", icon);
     }
+    if (operation == "citations") {
+        Zotero.Inspire.progressWindow.changeHeadline(
+            "Getting INSPIRE citation counts", icon);
+    }
     const inspireIcon =
         'chrome://zoteroinspire/skin/inspire' +
         (Zotero.hiDPI ? "@2x" : "") + '.png';
@@ -365,7 +402,7 @@ Zotero.Inspire.updateNextItem = function (operation) {
 };
 
 Zotero.Inspire.updateItem = async function (item, operation) {
-    if (operation == "full" || operation == "noabstract") {
+    if (operation == "full" || operation == "noabstract" || operation == "citations") {
 
         const metaInspire = await getInspireMeta(item);
         // if (metaInspire !== {}) {
