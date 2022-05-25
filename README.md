@@ -15,19 +15,19 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 - The add-on will update the following fields:
 	- INSPIRE uses a unique `recid` for each publication in the database (called `control_number` in the `.json` file obtained via the [INSPIRE API](https://github.com/inspirehep/rest-api-doc)). The INSPIRE `recid` is set to the field of `Loc. in Archive` (and `INSPIRE` to `Archive`) for the selected Zotero item.
 		- This also enables us to write a look-up engine using this `recid` to exactly reach the INSPIRE page of that publication. The look-up engine can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.file`, and put the path to the INSPIRE icon file after `"_icon":`:
-			```json
-			 {
-					"_name": "INSPIRE",
-					"_alias": "INSPIRE",
-					"_description": "INSPIRE",
-					"_icon": ,  // path to the INSPIRE icon,
-					"_hidden": false,
-					"_urlTemplate": "https://inspirehep.net/literature/{z:archiveLocation}",
-					"_urlNamespaces": {
-					  	"z": "http://www.zotero.org/namespaces/openSearch#"
-					}
+		```json
+		{
+			"_name": "INSPIRE",
+			"_alias": "INSPIRE",
+			"_description": "INSPIRE",
+			"_icon": ,  // path to the INSPIRE icon,
+			"_hidden": false,
+			"_urlTemplate": "https://inspirehep.net/literature/{z:archiveLocation}",
+			"_urlNamespaces": {
+				"z": "http://www.zotero.org/namespaces/openSearch#"
 			}
-			```
+		}
+		```
 		
 	- `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, and `abstract`.
 
