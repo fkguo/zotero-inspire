@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<RDF:RDF
+    xmlns:em="http://www.mozilla.org/2004/em-rdf#"
+    xmlns:NC="http://home.netscape.com/NC-rdf#"
+    xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <RDF:Description
+        RDF:about="urn:mozilla:install-manifest"
+        em:id="zoteroinspire@itp.ac.cn"
+        em:name="Zotero INSPIRE Metadata Updater"
+        em:version="0.1"
+        em:type="2"
+        em:creator="FK Guo"
+        em:description="Zotero plugin for updating metadata from INSPIRE-HEP"
+        em:homepageURL="https://github.com/fkguo/zotero-inspire"
+        em:updateURL="https://raw.githubusercontent.com/fkguo/zotero-inspire/master/update.rdf">
+        <em:type>2</em:type>
+        <em:targetApplication>
+            <Description>
+                <em:id>zotero@chnm.gmu.edu</em:id>
+                <em:minVersion>6.0</em:minVersion>
+                <em:maxVersion>6.*</em:maxVersion>
+            </Description>
+        </em:targetApplication>
+    </RDF:Description>
+</RDF:RDF>

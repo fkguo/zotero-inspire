@@ -1,0 +1,9 @@
+<!ENTITY inspire-name "INSPIRE Metadata Updater">
+<!ENTITY inspire-preferences "INSPIRE Metadata Updater Preferences">
+<!ENTITY autoretrieve-label "Fetch INSPIRE Metadata for new items">
+<!ENTITY autoretrieve-full-label "With abstracts">
+<!ENTITY autoretrieve-noabstract-label "Without abstracts">
+<!ENTITY autoretrieve-no-label "No">
+<!ENTITY notfound-tag-label "INSPIRE Recid Not Found Tagging">
+<!ENTITY notfound-tag-desc "Add tags to items for which no INSPIRE recids were found">
+<!ENTITY tag-norecid-label "Tag customization. If you don't want a tag, simply leave it empty,">

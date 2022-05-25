@@ -1,0 +1,7 @@
+content zoteroinspire chrome/content/
+
+overlay chrome://zotero/content/zoteroPane.xul chrome://zoteroinspire/content/overlay.xul
+
+locale  zoteroinspire  en-US   chrome/locale/en-US/
+
+skin    zoteroinspire  default chrome/skin/default/zoteroinspire/

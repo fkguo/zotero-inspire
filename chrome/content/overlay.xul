@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+
+<!DOCTYPE overlay SYSTEM "chrome://zoteroinspire/locale/overlay.dtd">
+
+<overlay id="zoteroinspire" xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+
+    <script src="chrome://zoteroinspire/content/scripts/zoteroinspire.js" />
+    <script src="chrome://zotero/content/include.js"/>
+
+    <stringbundleset id="stringbundleset">
+        <stringbundle
+            id="inspire-bundle"
+            src="chrome://zoteroinspire/locale/zoteroinspire.properties"/>
+    </stringbundleset>
+
+    <popup
+        id="zotero-itemmenu">
+        <menu class="menu-iconic" image="chrome://zoteroinspire/skin/inspire@2x.png" id="zotero-itemmenu-inspire-menu" label="&inspire-menu-label;">
+            <menupopup id="zotero-itemmenu-inspire-menupopup">
+                <menuitem
+                    id="zotero-itemmenu-inspire-full"
+                    label="&inspire-menu-full-label;"
+                    oncommand="Zotero.Inspire.updateSelectedItems('full')"/>
+                <menuitem
+                    id="zotero-itemmenu-inspire-noabstract"
+                    label="&inspire-menu-noabstract-label;"
+                    oncommand="Zotero.Inspire.updateSelectedItems('noabstract')"/>
+            </menupopup>
+        </menu>
+    </popup>
+
+
+    <popup id="zotero-collectionmenu">
+        <menuseparator />
+        <menuitem class="menuitem-iconic"
+        image="chrome://zoteroinspire/skin/inspire@2x.png"
+                  id="zotero-collectionmenu-inspire"
+                  label="&inspire-updatecollection-label;"
+                  oncommand="Zotero.Inspire.updateSelectedCollection('full');" />
+        <menuitem class="menuitem-iconic"
+        image="chrome://zoteroinspire/skin/inspire@2x.png"
+                  id="zotero-collectionmenu-inspire-noabstract"
+                  label="&inspire-updatecollection-noabstract-label;"
+                  oncommand="Zotero.Inspire.updateSelectedCollection('noabstract');" />
+    </popup>
+
+    <menupopup id="menu_ToolsPopup">
+      <menuitem id="menu_Tools-inspire-preferences" label="&inspire-preferences-label;" oncommand="Zotero.Inspire.openPreferenceWindow();"/>
+      <!-- The following is for an easy view in the Tools menu -->
+      <menu id="menu_Tools-inspire-menu" label="&inspire-autoretrieve-label;">
+        <menupopup id="menu_Tools-inspire-menu-popup" onpopupshowing="Zotero.Inspire.setCheck();">
+          <menuitem
+              id="menu_Tools-inspire-menu-popup-full"
+              type="checkbox"
+              label="&inspire-autoretrieve-full-label;"
+              oncommand="Zotero.Inspire.changePref('full');"/>
+          <menuitem
+              id="menu_Tools-inspire-menu-popup-noabstract"
+              type="checkbox"
+              label="&inspire-autoretrieve-noabstract-label;"
+              oncommand="Zotero.Inspire.changePref('noabstract');"/>
+          <menuitem
+              id="menu_Tools-inspire-menu-popup-none"
+              type="checkbox"
+              label="&inspire-autoretrieve-no-label;"
+              oncommand="Zotero.Inspire.changePref('none');"/>
+        </menupopup>
+      </menu>
+    </menupopup>
+
+
+</overlay>
