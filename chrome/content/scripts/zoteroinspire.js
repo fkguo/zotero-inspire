@@ -15,9 +15,11 @@ Zotero.Inspire = {};
 
 /* Definitions of functions fetching and setting metadata using the INSPIRE api
 
- getInspireMeta(item): get the INSPIRE recid and check for publication metadata for arxiv papers
+ getInspireMeta(item): get the INSPIRE recid and check for publication metadata 
  setInspireMeta(item, metaInspire, operation): set the Zotero item fields
 
+If there is no DOI or arXiv ID, we may add the INSPIRE recid the "Loc. in Archive" field by hand. 
+ 
  possible operations:
  - full: fetching medatadata including abstract
  - noabstract: no abstract
@@ -51,23 +53,27 @@ async function getInspireMeta(item) {
             if (!m) {
                 if (url.includes('doi')) {
                     doi = url.replace('https://doi.org/', '')
-                } else {
-                    return "No valid arxiv ID found in url"
+                }
+                else {
+                    idtype = 'literature';
+                    doi = item.getField('archiveLocation')
+                    // return "No valid arxiv ID found in url"
                 }
             } else {
                 idtype = 'arxiv';
                 doi = m[1]
             }
-        } else {
+        } else if (extra.includes('DOI: ')) {
             const regexDOIinExtra = 'DOI: (.+)'
-            extra.includes('DOI: ') && (doi = extra.match(regexDOIinExtra)[1])
+            doi = extra.match(regexDOIinExtra)[1]
+        } else {
+            idtype = 'literature';
+            doi = item.getField('archiveLocation')
+            // Zotero.debug("literature")
         }
-    } else {
-        doi.includes("https") && (doi = doi.replace('https://doi.org/', ''))
-    }
-    // if (!doi) {
-    //     return -1;
-    // }
+    } else if (doi.includes("https")) {
+        doi = doi.replace('https://doi.org/', '')
+    } 
 
     const edoi = encodeURIComponent(doi);
 
@@ -140,12 +146,13 @@ function setInspireMeta(item, metaInspire, operation) {
 
     const today = new Date(Date.now()).toLocaleDateString('zh-CN');
 
-    if (item.getField('publicationTitle').includes('arXiv')) {
-        item.setField('publicationTitle', "")
-    }
-    if (item.getField('proceedingsTitle').includes('arXiv')) {
-        item.setField('proceedingsTitle', "")
-    }
+    // if (item.getField('publicationTitle').includes('arXiv')) {
+    //     item.setField('publicationTitle', "")
+    // }
+    // if (item.getField('proceedingsTitle').includes('arXiv')) {
+    //     item.setField('proceedingsTitle', "")
+    // }
+    
     // item.setField('archiveLocation', metaInspire);
     if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
         if (operation == 'full' || operation == 'noabstract') {
@@ -162,6 +169,7 @@ function setInspireMeta(item, metaInspire, operation) {
 
             let extra = item.getField('extra')
             // remove old citation counts 
+            extra = extra.replace(/^.*recid*$\n/mg, "");
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
             item.setField('extra', extra)
@@ -174,6 +182,7 @@ function setInspireMeta(item, metaInspire, operation) {
         if (operation == "citations") {
             let extra = item.getField('extra')
             // remove old citation counts
+            extra = extra.replace(/^.*recid.*$\n/mg, "");
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
             item.setField('extra', extra)
