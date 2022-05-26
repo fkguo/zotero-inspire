@@ -32,6 +32,7 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 	- `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, and `abstract`.
 	- It will also get the citation count with and without self-citations for each selected item. One can also choose to update only the citation counts by selecting `Citations` in the menu. 
 	- The current INSPIRE system does not display the citation count without self citations for a given paper. However, this number is in the medadata, and can be extracted with this add-on.
+	- The [Better BibTeX (BBT)](https://retorque.re/zotero-better-bibtex) plugin can pin the citation key from INSPIRE. When we add new arXiv articles, sometimes BBT fails to get the INSPIRE record. In that case, this plugin writes the INSPIRE citation key to the `Extra` field so that it is pinned correctly (the BBT plugin needs to be installed).
 - By default, those items that could not be found using either DOI or arXiv ID in INSPIRE will be automatically tagged as `⛔ No INSPIRE recid found`. The automatic tagging can be turned off in `Tools` → `INSPIRE Metadata Updater Preferences...`.
 
 

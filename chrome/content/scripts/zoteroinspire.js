@@ -53,8 +53,7 @@ async function getInspireMeta(item) {
             if (!m) {
                 if (url.includes('doi')) {
                     doi = url.replace('https://doi.org/', '')
-                }
-                else {
+                } else {
                     idtype = 'literature';
                     doi = item.getField('archiveLocation')
                     // return "No valid arxiv ID found in url"
@@ -73,7 +72,7 @@ async function getInspireMeta(item) {
         }
     } else if (doi.includes("https")) {
         doi = doi.replace('https://doi.org/', '')
-    } 
+    }
 
     const edoi = encodeURIComponent(doi);
 
@@ -130,6 +129,8 @@ async function getInspireMeta(item) {
         }
         metaInspire.citation_count = meta['citation_count']
         metaInspire.citation_count_wo_self_citations = meta['citation_count_without_self_citations']
+        // there are more than one citkeys for some items. take the first one
+        metaInspire.citekey = meta['texkeys'][0]
     } catch (err) {
         return -1;
     }
@@ -145,6 +146,7 @@ async function getInspireMeta(item) {
 function setInspireMeta(item, metaInspire, operation) {
 
     const today = new Date(Date.now()).toLocaleDateString('zh-CN');
+    let extra = item.getField('extra')
 
     // if (item.getField('publicationTitle').includes('arXiv')) {
     //     item.setField('publicationTitle', "")
@@ -152,7 +154,7 @@ function setInspireMeta(item, metaInspire, operation) {
     // if (item.getField('proceedingsTitle').includes('arXiv')) {
     //     item.setField('proceedingsTitle', "")
     // }
-    
+
     // item.setField('archiveLocation', metaInspire);
     if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
         if (operation == 'full' || operation == 'noabstract') {
@@ -167,9 +169,7 @@ function setInspireMeta(item, metaInspire, operation) {
             metaInspire.issue && item.setField('issue', metaInspire.issue);
             metaInspire.DOI && item.setField('DOI', metaInspire.DOI);
 
-            let extra = item.getField('extra')
             // remove old citation counts 
-            extra = extra.replace(/^.*recid*$\n/mg, "");
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
             item.setField('extra', extra)
@@ -180,15 +180,20 @@ function setInspireMeta(item, metaInspire, operation) {
         };
 
         if (operation == "citations") {
-            let extra = item.getField('extra')
             // remove old citation counts
-            extra = extra.replace(/^.*recid.*$\n/mg, "");
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
-            item.setField('extra', extra)
         }
+
+        if (extra.includes('zotero-undef')) {
+            extra = extra.replace(/^.*type: article.*$\n/mg, '')
+            extra = extra.replace(/^.*zotero-undef.*$/mg, `Citation Key: ${metaInspire.citekey}`);
+        }
+        item.setField('extra', extra)
+
     }
 }
+
 
 // Preference managers
 
