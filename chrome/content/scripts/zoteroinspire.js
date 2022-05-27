@@ -38,7 +38,7 @@ async function getInspireMeta(item) {
     if (!doi) {
         let extra = item.getField('extra');
 
-        if (extra.includes('arXiv:')) {
+        if (extra.includes('arXiv:')) { // arXiv number from Extra
             idtype = 'arxiv';
             const regexArxivId = 'arXiv:(.+)'
             /* in this way, different situations are included:
@@ -47,20 +47,20 @@ async function getInspireMeta(item) {
             */
             let arxiv_split = extra.match(regexArxivId)[1].split(' ')
             arxiv_split[0] == '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
+            metaInspire.urlArxiv = 'https://arxiv.org/abs/' + doi 
         } else if (url) {
             const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
             const m = patt.exec(url);
-            if (!m) {
+            if (!m) { // DOI from url
                 if (url.includes('doi')) {
                     doi = url.replace('https://doi.org/', '')
-                } else {
+                } else { // INSPIRE recid from archiveLocation (by hand)
                     idtype = 'literature';
                     doi = item.getField('archiveLocation')
-                    // return "No valid arxiv ID found in url"
                 }
-            } else {
+            } else { // arxiv number from from url
                 idtype = 'arxiv';
-                doi = m[1]
+                doi = m[1];  
             }
         } else if (extra.includes('DOI: ')) {
             const regexDOIinExtra = 'DOI: (.+)'
@@ -161,7 +161,7 @@ function setInspireMeta(item, metaInspire, operation) {
             item.setField('archive', "INSPIRE");
             item.setField('archiveLocation', metaInspire.recid);
 
-            metaInspire.journalAbbreviation && item.setField('journalAbbreviation', metaInspire.journalAbbreviation);
+            metaInspire.journalAbbreviation && item.setField('journalAbbreviation', metaInspire.journalAbbreviation); 
             // to avoid setting undefined to zotero items
             metaInspire.volume && item.setField('volume', metaInspire.volume);
             metaInspire.pages && item.setField('pages', metaInspire.pages);
@@ -184,6 +184,9 @@ function setInspireMeta(item, metaInspire, operation) {
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
         }
+
+        // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
+        metaInspire.urlArxiv && item.setField('url', metaInspire.urlArxiv)
 
         if (extra.includes('zotero-undef')) {
             extra = extra.replace(/^.*type: article.*$\n/mg, '')
@@ -424,6 +427,9 @@ Zotero.Inspire.updateItem = async function (item, operation) {
             if (item.hasTag(Zotero.Inspire.getPref("tag_norecid"))) {
                 item.removeTag(Zotero.Inspire.getPref("tag_norecid"));
                 item.saveTx();
+            }
+            if (metaInspire.journalAbbreviation && item.itemType !== 'journalArticle') {
+                item.setType(Zotero.ItemTypes.getID('journalArticle'));
             }
             setInspireMeta(item, metaInspire, operation);
             item.saveTx();
