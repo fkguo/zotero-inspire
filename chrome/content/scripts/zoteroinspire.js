@@ -31,23 +31,23 @@ async function getInspireMeta(item) {
     let meta = null;
     let metaInspire = {};
 
-    let doi = item.getField('DOI');
+    const doi0 = item.getField('DOI');
+    let doi = doi0;
     const url = item.getField('url');
 
     let idtype = 'doi';
-    if (!doi) {
+    if (!doi || doi.includes('arXiv')) {
         let extra = item.getField('extra');
 
-        if (extra.includes('arXiv:')) { // arXiv number from Extra
+        if (extra.includes('arXiv:') || extra.includes('_eprint:')) { // arXiv number from Extra
             idtype = 'arxiv';
-            const regexArxivId = 'arXiv:(.+)'
+            const regexArxivId = /(arXiv:|_eprint:)(.+)/ //'arXiv:(.+)'
             /* in this way, different situations are included:
             New and old types of arXiv number; 
             whether or not the arXiv line is at the end of extra
             */
-            let arxiv_split = extra.match(regexArxivId)[1].split(' ')
-            arxiv_split[0] == '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
-            metaInspire.urlArxiv = 'https://arxiv.org/abs/' + doi 
+            let arxiv_split = extra.match(regexArxivId)[2].split(' ')
+            arxiv_split[0] === '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
         } else if (url) {
             const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
             const m = patt.exec(url);
@@ -88,7 +88,8 @@ async function getInspireMeta(item) {
         })
         .catch(err => null);
 
-    if (status == null) {
+    // Zotero.debug('getInspireMeta response: ', response, 'status: ', status)
+    if (status === null) {
         return -1;
     }
 
@@ -115,23 +116,30 @@ async function getInspireMeta(item) {
                 }
                 metaInspire.date = pubinfo_first.year;
                 metaInspire.issue = pubinfo_first.journal_issue
-            }
+            };
+        }
+
+        metaInspire.arxiv = meta['arxiv_eprints'] && meta['arxiv_eprints'][0]
+        if (idtype = 'arxiv') {
+            metaInspire.urlArxiv = (!doi0) && 'https://arxiv.org/abs/' + doi 
         }
         if (meta['abstracts']) {
             let abstractInspire = meta['abstracts']
-            if (abstractInspire.length > 1) {
-                for (i = 0; i < abstractInspire.length; i++) {
-                    abstractInspire[i].source == "arXiv" && (metaInspire.abstractNote = abstractInspire[i].value)
-                }
-            } else {
-                metaInspire.abstractNote = abstractInspire[0].value
+            metaInspire.abstractNote = abstractInspire[0].value
+            if (abstractInspire.length >0) for (i = 0; i < abstractInspire.length; i++) {
+                if (abstractInspire[i].source === "arXiv") {
+                    (metaInspire.abstractNote = abstractInspire[i].value);
+                    break;
+                } 
             }
         }
         metaInspire.citation_count = meta['citation_count']
         metaInspire.citation_count_wo_self_citations = meta['citation_count_without_self_citations']
         // there are more than one citkeys for some items. take the first one
         metaInspire.citekey = meta['texkeys'][0]
+        // Zotero.debug('getInspireMeta: ', metaInspire)
     } catch (err) {
+        // Zotero.debug('getInspireMeta-err: ', metaInspire)
         return -1;
     }
 
@@ -147,6 +155,7 @@ function setInspireMeta(item, metaInspire, operation) {
 
     const today = new Date(Date.now()).toLocaleDateString('zh-CN');
     let extra = item.getField('extra')
+    let publication = item.getField('publicationTitle')
 
     // if (item.getField('publicationTitle').includes('arXiv')) {
     //     item.setField('publicationTitle', "")
@@ -157,7 +166,7 @@ function setInspireMeta(item, metaInspire, operation) {
 
     // item.setField('archiveLocation', metaInspire);
     if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
-        if (operation == 'full' || operation == 'noabstract') {
+        if (operation === 'full' || operation === 'noabstract') {
             item.setField('archive', "INSPIRE");
             item.setField('archiveLocation', metaInspire.recid);
 
@@ -175,18 +184,33 @@ function setInspireMeta(item, metaInspire, operation) {
             item.setField('extra', extra)
         };
 
-        if (operation == "full" && metaInspire.abstractNote) {
+        if (operation === "full" && metaInspire.abstractNote) {
             item.setField('abstractNote', metaInspire.abstractNote)
         };
 
-        if (operation == "citations") {
+        if (operation === "citations") {
             // remove old citation counts
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
         }
 
+        // The current arXiv.org Zotero translator put all cross-listed categories after the ID, and the primary category is not the first. Here we replace that list by only the primary one.
         // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
-        metaInspire.urlArxiv && item.setField('url', metaInspire.urlArxiv)
+        if (metaInspire.arxiv) {
+            const arxivId = metaInspire.arxiv.value
+            let arxivPrimeryCategory = metaInspire.arxiv.categories[0] 
+            if (/^\d/.test(arxivId)) {
+                // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
+                const numberOfArxiv = (extra.match(/^.*arXiv:.*$/mg) || '').length
+                numberOfArxiv === 2 && (extra = extra.replace(/^arXiv:.*$\n/m,''))
+                const arXivInfo = `arXiv: ${arxivId} [${arxivPrimeryCategory}]`
+                extra = extra.replace(/^.*(arXiv|_eprint).*$/mg, arXivInfo);
+                publication.startsWith('arXiv:') && item.setField('publicationTitle', arXivInfo)
+            } else {
+                extra = extra.replace(/^.*(arXiv|_eprint).*$/mg, `arXiv: ${arxivId}`);
+            }
+            metaInspire.urlArxiv && item.setField('url', metaInspire.urlArxiv)
+        }
 
         if (extra.includes('zotero-undef')) {
             extra = extra.replace(/^.*type: article.*$\n/mg, '')
@@ -225,7 +249,7 @@ Zotero.Inspire.init = function () {
 
 Zotero.Inspire.notifierCallback = {
     notify: function (event, type, ids, extraData) {
-        if (event == 'add') {
+        if (event === 'add') {
             switch (Zotero.Inspire.getPref("autoretrieve")) {
                 case "full":
                     Zotero.Inspire.updateItems(Zotero.Items.get(ids), "full");
@@ -285,7 +309,7 @@ Zotero.Inspire.openPreferenceWindow = function (paneID, action) {
 
 
 Zotero.Inspire.resetState = function (operation) {
-    if (operation == "initial") {
+    if (operation === "initial") {
         if (Zotero.Inspire.progressWindow) {
             Zotero.Inspire.progressWindow.close();
         }
@@ -326,12 +350,12 @@ Zotero.Inspire.resetState = function (operation) {
                 Zotero.Inspire.progressWindow.changeHeadline("Finished");
                 Zotero.Inspire.progressWindow.progress = new Zotero.Inspire.progressWindow.ItemProgress(icon);
                 Zotero.Inspire.progressWindow.progress.setProgress(100);
-                if (operation == "full" || operation == "noabstract") {
+                if (operation === "full" || operation === "noabstract") {
                     Zotero.Inspire.progressWindow.progress.setText(
                         "INSPIRE metadata updated for " +
                         Zotero.Inspire.counter + " items.");
                 }
-                if (operation == "citations") {
+                if (operation === "citations") {
                     Zotero.Inspire.progressWindow.progress.setText(
                         "INSPIRE citation counts updated for " +
                         Zotero.Inspire.counter + " items.");
@@ -358,7 +382,8 @@ Zotero.Inspire.updateSelectedItems = function (operation) {
 };
 
 Zotero.Inspire.updateItems = function (items0, operation) {
-    const items = items0.filter(item => !item.isFeedItem);
+    // don't update note items
+    const items = items0.filter(item => (item.isRegularItem() && !item.isFeedItem));
 
     if (items.length === 0 ||
         Zotero.Inspire.numberOfUpdatedItems <
@@ -377,11 +402,11 @@ Zotero.Inspire.updateItems = function (items0, operation) {
         });
     const icon = 'chrome://zotero/skin/toolbar-advanced-search' +
         (Zotero.hiDPI ? "@2x" : "") + '.png';
-    if (operation == "full" || operation == "noabstract") {
+    if (operation === "full" || operation === "noabstract") {
         Zotero.Inspire.progressWindow.changeHeadline(
             "Getting INSPIRE metadata", icon);
     }
-    if (operation == "citations") {
+    if (operation === "citations") {
         Zotero.Inspire.progressWindow.changeHeadline(
             "Getting INSPIRE citation counts", icon);
     }
@@ -397,7 +422,7 @@ Zotero.Inspire.updateItems = function (items0, operation) {
 Zotero.Inspire.updateNextItem = function (operation) {
     Zotero.Inspire.numberOfUpdatedItems++;
 
-    if (Zotero.Inspire.current == Zotero.Inspire.toUpdate - 1) {
+    if (Zotero.Inspire.current === Zotero.Inspire.toUpdate - 1) {
         Zotero.Inspire.progressWindow.close();
         Zotero.Inspire.resetState(operation);
         return;
@@ -419,7 +444,7 @@ Zotero.Inspire.updateNextItem = function (operation) {
 };
 
 Zotero.Inspire.updateItem = async function (item, operation) {
-    if (operation == "full" || operation == "noabstract" || operation == "citations") {
+    if (operation === "full" || operation === "noabstract" || operation === "citations") {
 
         const metaInspire = await getInspireMeta(item);
         // if (metaInspire !== {}) {

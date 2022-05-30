@@ -7,7 +7,7 @@
         RDF:about="urn:mozilla:install-manifest"
         em:id="zoteroinspire@itp.ac.cn"
         em:name="Zotero INSPIRE Metadata Updater"
-        em:version="0.2.3"
+        em:version="0.2.4"
         em:type="2"
         em:creator="FK Guo"
         em:description="Zotero plugin for updating metadata from INSPIRE-HEP"
