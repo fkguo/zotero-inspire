@@ -15,7 +15,7 @@ Zotero.Inspire = {};
 
 /* Definitions of functions fetching and setting metadata using the INSPIRE api
 
- getInspireMeta(item): get the INSPIRE recid and check for publication metadata 
+ getInspireMeta(item, operation): get the INSPIRE recid and check for publication metadata 
  setInspireMeta(item, metaInspire, operation): set the Zotero item fields
 
 If there is no DOI or arXiv ID, we may add the INSPIRE recid the "Loc. in Archive" field by hand. 
@@ -26,18 +26,19 @@ If there is no DOI or arXiv ID, we may add the INSPIRE recid the "Loc. in Archiv
  - citations: update citation counts for INSPIRE
  - none: nothing
  */
-async function getInspireMeta(item) {
+async function getInspireMeta(item, operation) {
 
-    let meta = null;
     let metaInspire = {};
 
     const doi0 = item.getField('DOI');
     let doi = doi0;
     const url = item.getField('url');
+    let extra = item.getField('extra');
+    let searchOrNot = 0;
 
     let idtype = 'doi';
-    if (!doi || doi.includes('arXiv')) {
-        let extra = item.getField('extra');
+    var arxivReg = new RegExp(/arxiv/i)
+    if (!doi || arxivReg.test(doi)) {
 
         if (extra.includes('arXiv:') || extra.includes('_eprint:')) { // arXiv number from Extra
             idtype = 'arxiv';
@@ -48,35 +49,60 @@ async function getInspireMeta(item) {
             */
             let arxiv_split = extra.match(regexArxivId)[2].split(' ')
             arxiv_split[0] === '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
-        } else if (url) {
+        } else if (/(doi|arxiv|\/literature\/)/i.test(url)) {
+            // patt taken from the Citations Count plugin
             const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
             const m = patt.exec(url);
             if (!m) { // DOI from url
-                if (url.includes('doi')) {
-                    doi = url.replace('https://doi.org/', '')
-                } else { // INSPIRE recid from archiveLocation (by hand)
-                    idtype = 'literature';
-                    doi = item.getField('archiveLocation')
+                if (/doi/i.test(url)) {
+                    doi = url.replace(/^.+doi.org\//, '')
+                } else if (url.includes('/literature/')) {
+                    let _recid = /[^/]*$/.exec(url)
+                    if (_recid[0].match(/^\d+/)) {
+                        idtype = 'literature';
+                        doi = _recid[0]
+                    }
                 }
             } else { // arxiv number from from url
                 idtype = 'arxiv';
-                doi = m[1];  
+                doi = m[1];
             }
-        } else if (extra.includes('DOI: ')) {
-            const regexDOIinExtra = 'DOI: (.+)'
+        } else if (/DOI:/i.test(extra)) { // DOI in extra
+            const regexDOIinExtra = /DOI:(.+)/i
+            doi = extra.match(regexDOIinExtra)[1].trim()
+        } else if (/doi\.org\//i.test(extra)) {
+            const regexDOIinExtra = /doi\.org\/(.+)/i
             doi = extra.match(regexDOIinExtra)[1]
-        } else {
-            idtype = 'literature';
-            doi = item.getField('archiveLocation')
-            // Zotero.debug("literature")
+        } else { // INSPIRE recid in archiveLocation or Citation Key in Extra
+            let _recid = item.getField('archiveLocation');
+            if (_recid.match(/^\d+/)) {
+                idtype = 'literature';
+                doi = _recid
+            } else if (extra.includes('Citation Key:')) { // no DOI or arxiv or recid, try with the citekey
+                searchOrNot = 1;
+            } else {
+                return -1
+            }
         }
-    } else if (doi.includes("https")) {
-        doi = doi.replace('https://doi.org/', '')
+    } else if (/doi/i.test(doi)) { //doi.includes("doi")
+        doi = doi.replace(/^.+doi.org\//, '') //doi.replace('https://doi.org/', '')
     }
 
-    const edoi = encodeURIComponent(doi);
+    const t0 = performance.now();
 
-    const urlInspire = "https://inspirehep.net/api/" + idtype + "/" + edoi;
+    let urlInspire = "";
+    if (searchOrNot === 0) {
+        const edoi = encodeURIComponent(doi);
+        urlInspire = "https://inspirehep.net/api/" + idtype + "/" + edoi;
+    } else if (searchOrNot === 1) {
+        const citekey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
+        urlInspire = "https://inspirehep.net/api/literature?q=" + encodeURIComponent(citekey);
+    }
+
+    if (!urlInspire) return -1;
+    // Zotero.debug("urlInspire: ");
+    // Zotero.debug(urlInspire)
+
     let status = null;
     const response = await fetch(urlInspire)
         //   .then(response => response.json())
@@ -94,55 +120,139 @@ async function getInspireMeta(item) {
     }
 
     try {
-        meta = response['metadata'];
-        metaInspire.recid = meta['control_number']
-        // get only the first doi
-        if (meta['dois'] !== undefined) {
-            metaInspire.DOI = meta['dois'][0].value
-        }
-        const publication_info = meta['publication_info']
-        if (publication_info) {
-            pubinfo_first = publication_info[0]
-            if (pubinfo_first.journal_title) {
-                let jAbbrev = ""
-                jAbbrev = pubinfo_first.journal_title;
-                metaInspire.journalAbbreviation = jAbbrev.replace(".", ". ");
-                metaInspire.volume = pubinfo_first.journal_volume;
-                if (pubinfo_first.artid) {
-                    metaInspire.pages = pubinfo_first.artid;
-                } else {
-                    metaInspire.pages = pubinfo_first.page_start
-                    pubinfo_first.page_end && (metaInspire.pages = metaInspire.pages + "-" + pubinfo_first.page_end)
-                }
-                metaInspire.date = pubinfo_first.year;
-                metaInspire.issue = pubinfo_first.journal_issue
-            };
-        }
-
-        metaInspire.arxiv = meta['arxiv_eprints'] && meta['arxiv_eprints'][0]
-        if (idtype = 'arxiv') {
-            metaInspire.urlArxiv = (!doi0) && 'https://arxiv.org/abs/' + doi 
-        }
-        if (meta['abstracts']) {
-            let abstractInspire = meta['abstracts']
-            metaInspire.abstractNote = abstractInspire[0].value
-            if (abstractInspire.length >0) for (i = 0; i < abstractInspire.length; i++) {
-                if (abstractInspire[i].source === "arXiv") {
-                    (metaInspire.abstractNote = abstractInspire[i].value);
-                    break;
-                } 
+        const meta = (() => {
+            if (searchOrNot === 0) {
+                return response['metadata']
+            } else { // If the citekey starts with Du:, then it will return nonunique hits
+                const hits = response['hits'].hits
+                if (hits.length === 1) return hits[0].metadata
             }
-        }
+        })()
+
+
+        const t1 = performance.now();
+        Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`)
+
+        metaInspire.recid = meta['control_number']
+
         metaInspire.citation_count = meta['citation_count']
         metaInspire.citation_count_wo_self_citations = meta['citation_count_without_self_citations']
-        // there are more than one citkeys for some items. take the first one
-        metaInspire.citekey = meta['texkeys'][0]
-        // Zotero.debug('getInspireMeta: ', metaInspire)
+
+        if (operation !== 'citation') {
+
+            // get only the first doi
+            if (meta['dois']) {
+                metaInspire.DOI = meta['dois'][0].value
+            }
+
+            const publication_info = meta['publication_info']
+            if (publication_info) {
+                pubinfo_first = publication_info[0]
+                if (pubinfo_first.journal_title) {
+                    let jAbbrev = ""
+                    jAbbrev = pubinfo_first.journal_title;
+                    metaInspire.journalAbbreviation = jAbbrev.replace(/\.\s|\./g, ". ");
+                    pubinfo_first.journal_volume && (metaInspire.volume = pubinfo_first.journal_volume);
+                    if (pubinfo_first.artid) {
+                        metaInspire.pages = pubinfo_first.artid;
+                    } else if (pubinfo_first.page_start) {
+                        metaInspire.pages = pubinfo_first.page_start
+                        pubinfo_first.page_end && (metaInspire.pages = metaInspire.pages + "-" + pubinfo_first.page_end)
+                    }
+                    metaInspire.date = pubinfo_first.year;
+                    metaInspire.issue = pubinfo_first.journal_issue
+                };
+            }
+
+            const metaArxiv = meta['arxiv_eprints']
+
+            if (metaArxiv) {
+                metaInspire.arxiv = metaArxiv[0]
+                metaInspire.urlArxiv = 'https://arxiv.org/abs/' + metaInspire.arxiv.value
+            }
+
+            const metaAbstract = meta['abstracts']
+
+            if (metaAbstract) {
+                let abstractInspire = metaAbstract
+                metaInspire.abstractNote = abstractInspire[0].value
+                if (abstractInspire.length > 0) for (i = 0; i < abstractInspire.length; i++) {
+                    if (abstractInspire[i].source === "arXiv") {
+                        (metaInspire.abstractNote = abstractInspire[i].value);
+                        break;
+                    }
+                }
+            }
+
+            metaInspire.title = meta['titles'][0].title
+            // metaInspire.authors = meta['authors']
+            //document_type examples: ["book"], ["article"], ["article", "conference paper"], ["proceedings"], ["book chapter"]
+            metaInspire.document_type = meta['document_type']
+            // there are more than one citkeys for some items. take the first one
+            metaInspire.citekey = meta['texkeys'][0]
+            meta['isbns'] && (metaInspire.isbns = meta['isbns'].map(e => e.value))
+            if (meta['imprints']) {
+                meta['imprints'][0].publisher && (metaInspire.publisher = meta['imprints'][0].publisher);
+                meta['imprints'][0].date && (metaInspire.date = meta['imprints'][0].date)
+            }
+
+            metaInspire.title = meta['titles'][0].title
+
+            var creators = [];
+            /* INSPIRE tricky points:
+            Not all items have 'author_count' in the metadata;
+            some authors have only full_name, instead of last_name and first_name;
+            some items even do not have `authors`
+            */
+            const metaCol = meta['collaborations']
+            metaCol && (metaInspire.collaborations = metaCol.map(e => e.value))
+
+            const metaAuthors = meta['authors']
+            if (metaAuthors) {
+                const authorCount = meta['author_count'] || metaAuthors.length;
+                let maxAuthorCount = authorCount;
+                // keep only 3 authors if there are more than 10
+                if (authorCount > 10) (maxAuthorCount = 3);
+
+                let authorName = [, ""]
+                for (let j = 0; j < maxAuthorCount; j++) {
+                    authorName = metaAuthors[j].full_name.split(', ')
+                    creators[j] = {
+                        firstName: authorName[1],
+                        lastName: authorName[0],
+                        creatorType: 'author'
+                    }
+                    metaAuthors[j].inspire_roles && (creators[j].creatorType = metaAuthors[j].inspire_roles[0])
+                }
+
+                if (authorCount > 10) {
+                    creators.push({
+                        name: 'others',
+                        creatorType: 'author'
+                    })
+                }
+            } else if (metaCol) {
+                for (i = 0; i < metaCol.length; i++) {
+                    creators[i] = {
+                        name: metaInspire.collaborations[i],
+                        creatorType: "author"
+                    }
+                }
+            }
+
+            metaInspire.creators = creators
+            
+            const t2 = performance.now();
+            Zotero.debug(`Assigning meta took ${t2 - t1} milliseconds.`)
+        }
     } catch (err) {
-        // Zotero.debug('getInspireMeta-err: ', metaInspire)
+        Zotero.debug('getInspireMeta-err: ')
+        Zotero.debug(metaInspire)
         return -1;
     }
 
+    // Zotero.debug("getInspireMeta final: ");
+    // Zotero.debug(metaInspire)
     return metaInspire;
 }
 
@@ -151,18 +261,11 @@ async function getInspireMeta(item) {
   The zotero item fields are listed at 
   https://www.zotero.org/support/dev/client_coding/javascript_api/search_fields
 */
-function setInspireMeta(item, metaInspire, operation) {
+async function setInspireMeta(item, metaInspire, operation) {
 
     const today = new Date(Date.now()).toLocaleDateString('zh-CN');
     let extra = item.getField('extra')
     let publication = item.getField('publicationTitle')
-
-    // if (item.getField('publicationTitle').includes('arXiv')) {
-    //     item.setField('publicationTitle', "")
-    // }
-    // if (item.getField('proceedingsTitle').includes('arXiv')) {
-    //     item.setField('proceedingsTitle', "")
-    // }
 
     // item.setField('archiveLocation', metaInspire);
     if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
@@ -170,18 +273,77 @@ function setInspireMeta(item, metaInspire, operation) {
             item.setField('archive', "INSPIRE");
             item.setField('archiveLocation', metaInspire.recid);
 
-            metaInspire.journalAbbreviation && item.setField('journalAbbreviation', metaInspire.journalAbbreviation); 
+            if (metaInspire.journalAbbreviation) {
+                if (item.itemType === "journalArticle") { //metaInspire.document_type[0]  === "article"
+                    item.setField('journalAbbreviation', metaInspire.journalAbbreviation);
+                } else if (metaInspire.document_type[0] === "book" && item.itemType === "book") {
+                    item.setField('series', metaInspire.journalAbbreviation)
+                } else {
+                    item.setField('publicationTitle', metaInspire.journalAbbreviation)
+                }
+            }
             // to avoid setting undefined to zotero items
-            metaInspire.volume && item.setField('volume', metaInspire.volume);
-            metaInspire.pages && item.setField('pages', metaInspire.pages);
+            if (metaInspire.volume) {
+                (metaInspire.document_type[0] == "book") ? item.setField('seriesNumber', metaInspire.volume) : item.setField('volume', metaInspire.volume);
+            }
+            if (metaInspire.pages && (metaInspire.document_type[0] !== "book")) item.setField('pages', metaInspire.pages);
             metaInspire.date && item.setField('date', metaInspire.date);
             metaInspire.issue && item.setField('issue', metaInspire.issue);
-            metaInspire.DOI && item.setField('DOI', metaInspire.DOI);
+            if (metaInspire.DOI) {
+                // if (metaInspire.document_type[0] === "book") {
+                if (item.itemType === 'journalArticle' || item.itemType === 'preprint') {
+                    item.setField('DOI', metaInspire.DOI);
+                } else {
+                    item.setField('url', "https://doi.org/" + metaInspire.DOI)
+                }
+            }
 
+            if (metaInspire.isbns && !item.getField('ISBN')) item.setField('ISBN', metaInspire.isbns);
+            if (metaInspire.publisher && !item.getField('publisher') && item.itemType == 'book') item.setField('publisher', metaInspire.publisher);
+
+            /* set the title and creators if there are none */
+            !item.getField('title') && item.setField('title', metaInspire.title)
+            if (!item.getCreator(0) || !item.getCreator(0).firstName) item.setCreators(metaInspire.creators)
+
+            // The current arXiv.org Zotero translator put all cross-listed categories after the ID, and the primary category is not the first. Here we replace that list by only the primary one.
+            // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
+            if (metaInspire.arxiv) {
+                const arxivId = metaInspire.arxiv.value
+                let arxivPrimeryCategory = metaInspire.arxiv.categories[0]
+                let _arxivReg = new RegExp(/^.*(arXiv|_eprint).*$/mgi)
+                if (/^\d/.test(arxivId)) {
+                    // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
+                    const numberOfArxiv = (extra.match(/^.*arXiv:.*$/mg) || '').length
+                    numberOfArxiv === 2 && (extra = extra.replace(/^arXiv:.*$\n/m, ''))
+                    const arXivInfo = `arXiv: ${arxivId} [${arxivPrimeryCategory}]`
+                    _arxivReg.test(extra) ? extra = extra.replace(_arxivReg, arXivInfo) : extra += '\n' + arXivInfo;
+                    // set journalAbbr. to the arXiv ID prior to journal publication
+                    if (!metaInspire.journalAbbreviation) {
+                        item.itemType == 'journalArticle' && item.setField('journalAbbreviation', arXivInfo);
+                        publication.startsWith('arXiv:') && item.setField('publicationTitle', "")
+                    }
+                } else {
+                    // extra = extra.replace(_arxivReg, `arXiv: ${arxivId}`);
+                    const oldArxiv = "arXiv: " + arxivId;
+                    _arxivReg.test(extra) ? extra = extra.replace(_arxivReg, oldArxiv) : extra += "\n" + oldArxiv;
+                }
+                const url = item.getField('url');
+                (metaInspire.urlArxiv && !url) && item.setField('url', metaInspire.urlArxiv)
+            }
+
+            extra = extra.replace(/^.*type: article.*$\n/mg, '')
+
+            const initialCiteKey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
+            if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
+
+            if (metaInspire.collaborations && !extra.includes('tex.collaboration')) {
+                extra = extra + "\n" + "tex.collaboration: " + metaInspire.collaborations.join(", ");
+            }
+
+            // Zotero.debug('setInspire-4')
             // remove old citation counts 
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
-            item.setField('extra', extra)
         };
 
         if (operation === "full" && metaInspire.abstractNote) {
@@ -194,32 +356,11 @@ function setInspireMeta(item, metaInspire, operation) {
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
         }
 
-        // The current arXiv.org Zotero translator put all cross-listed categories after the ID, and the primary category is not the first. Here we replace that list by only the primary one.
-        // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
-        if (metaInspire.arxiv) {
-            const arxivId = metaInspire.arxiv.value
-            let arxivPrimeryCategory = metaInspire.arxiv.categories[0] 
-            if (/^\d/.test(arxivId)) {
-                // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
-                const numberOfArxiv = (extra.match(/^.*arXiv:.*$/mg) || '').length
-                numberOfArxiv === 2 && (extra = extra.replace(/^arXiv:.*$\n/m,''))
-                const arXivInfo = `arXiv: ${arxivId} [${arxivPrimeryCategory}]`
-                extra = extra.replace(/^.*(arXiv|_eprint).*$/mg, arXivInfo);
-                publication.startsWith('arXiv:') && item.setField('publicationTitle', arXivInfo)
-            } else {
-                extra = extra.replace(/^.*(arXiv|_eprint).*$/mg, `arXiv: ${arxivId}`);
-            }
-            metaInspire.urlArxiv && item.setField('url', metaInspire.urlArxiv)
-        }
-
-        if (extra.includes('zotero-undef')) {
-            extra = extra.replace(/^.*type: article.*$\n/mg, '')
-            extra = extra.replace(/^.*zotero-undef.*$/mg, `Citation Key: ${metaInspire.citekey}`);
-        }
         item.setField('extra', extra)
 
     }
 }
+
 
 
 // Preference managers
@@ -446,17 +587,21 @@ Zotero.Inspire.updateNextItem = function (operation) {
 Zotero.Inspire.updateItem = async function (item, operation) {
     if (operation === "full" || operation === "noabstract" || operation === "citations") {
 
-        const metaInspire = await getInspireMeta(item);
+        const metaInspire = await getInspireMeta(item, operation);
         // if (metaInspire !== {}) {
         if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
             if (item.hasTag(Zotero.Inspire.getPref("tag_norecid"))) {
                 item.removeTag(Zotero.Inspire.getPref("tag_norecid"));
                 item.saveTx();
             }
-            if (metaInspire.journalAbbreviation && item.itemType !== 'journalArticle') {
+            // if (metaInspire.journalAbbreviation && (item.itemType === 'report' || item.itemType === 'preprint')) {
+            if (item.itemType === 'report' || item.itemType === 'preprint') {
                 item.setType(Zotero.ItemTypes.getID('journalArticle'));
             }
-            setInspireMeta(item, metaInspire, operation);
+
+            if (item.itemType !== 'book' && metaInspire.document_type == 'book') item.setType(Zotero.ItemTypes.getID('book'));
+
+            await setInspireMeta(item, metaInspire, operation);
             item.saveTx();
             Zotero.Inspire.counter++;
         } else {
