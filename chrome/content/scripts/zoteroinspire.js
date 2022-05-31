@@ -241,7 +241,7 @@ async function getInspireMeta(item, operation) {
             }
 
             metaInspire.creators = creators
-            
+
             const t2 = performance.now();
             Zotero.debug(`Assigning meta took ${t2 - t1} milliseconds.`)
         }
@@ -333,9 +333,6 @@ async function setInspireMeta(item, metaInspire, operation) {
 
             extra = extra.replace(/^.*type: article.*$\n/mg, '')
 
-            const initialCiteKey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
-            if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
-
             if (metaInspire.collaborations && !extra.includes('tex.collaboration')) {
                 extra = extra + "\n" + "tex.collaboration: " + metaInspire.collaborations.join(", ");
             }
@@ -344,6 +341,11 @@ async function setInspireMeta(item, metaInspire, operation) {
             // remove old citation counts 
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
+
+            if (extra.includes('Citation key')) {
+                const initialCiteKey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
+                if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
+            }
         };
 
         if (operation === "full" && metaInspire.abstractNote) {
