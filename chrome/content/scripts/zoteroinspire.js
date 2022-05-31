@@ -342,7 +342,7 @@ async function setInspireMeta(item, metaInspire, operation) {
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
 
-            if (extra.includes('Citation key')) {
+            if (extra.includes('Citation Key')) {
                 const initialCiteKey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
                 if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
             }
