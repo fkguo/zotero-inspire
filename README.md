@@ -35,13 +35,14 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 		}
 		```
 		
-	- `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors` ($\leq10$, otherwise keeping only the first 3), `title`, `abstract`, etc. 
+	- `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors` ($\leq10$, otherwise keeping only the first 3; the author list will be updated if no author is given or the first name of the first author is empty), `title`, `abstract`, etc. 
 	- Set the arXiv number of articles that are not published to the `Journal Abbr` field. Items of type `report` or `preprint` are set to `journalArticle`.
 	- It will also get the citation counts with and without self-citations for each selected item. One can also choose to update only the citation counts using `Citation counts only` in the right-click menu. 
-	(The current INSPIRE system does not display the citation count without self citations for a given paper. However, this number is in the medadata, and can be extracted with this add-on.)
+		- The current INSPIRE system does not display the citation count without self citations for a given paper. However, this number is in the metadata, and can be extracted with this add-on.
+		- Citation counts are changed only when they are different from those of the last fetching.
 	- The [Better BibTeX (BBT)](https://retorque.re/zotero-better-bibtex) plugin can pin the citation key from INSPIRE. When we add new arXiv articles, sometimes BBT fails to get the INSPIRE record. In that case, this plugin writes the INSPIRE citation key to the `Extra` field so that it is pinned correctly (the BBT plugin needs to be installed).
 	- Work with the [INSPIRE Zotero translator](https://github.com/zotero/translators/blob/master/INSPIRE.js), and change `"_eprint"` in `Extra` to `arXiv`.
-- By default, those items that could not be found using either DOI or arXiv ID in INSPIRE will be automatically tagged as `⛔ No INSPIRE recid found`. The automatic tagging can be turned off in `Tools` → `INSPIRE Metadata Updater Preferences...`.
+- By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Tools` → `INSPIRE Metadata Updater Preferences...`.
 
 
 

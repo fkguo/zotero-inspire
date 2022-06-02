@@ -118,6 +118,9 @@ async function getInspireMeta(item, operation) {
     if (status === null) {
         return -1;
     }
+        
+        const t1 = performance.now();
+        Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`)
 
     try {
         const meta = (() => {
@@ -129,9 +132,6 @@ async function getInspireMeta(item, operation) {
             }
         })()
 
-
-        const t1 = performance.now();
-        Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`)
 
         metaInspire.recid = meta['control_number']
 
@@ -246,8 +246,8 @@ async function getInspireMeta(item, operation) {
             Zotero.debug(`Assigning meta took ${t2 - t1} milliseconds.`)
         }
     } catch (err) {
-        Zotero.debug('getInspireMeta-err: ')
-        Zotero.debug(metaInspire)
+        Zotero.debug('getInspireMeta-err: Not found in INSPIRE')
+        Zotero.debug(`metaInspire: ${metaInspire}`)
         return -1;
     }
 
@@ -338,9 +338,7 @@ async function setInspireMeta(item, metaInspire, operation) {
             }
 
             // Zotero.debug('setInspire-4')
-            // remove old citation counts 
-            extra = extra.replace(/^.*citations.*$\n/mg, "");
-            extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
+            extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
 
             if (extra.includes('Citation Key')) {
                 const initialCiteKey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
@@ -353,9 +351,7 @@ async function setInspireMeta(item, metaInspire, operation) {
         };
 
         if (operation === "citations") {
-            // remove old citation counts
-            extra = extra.replace(/^.*citations.*$\n/mg, "");
-            extra = `${metaInspire.citation_count} citations (INSPIRE ${today})\n` + `${metaInspire.citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
+            extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
         }
 
         item.setField('extra', extra)
@@ -363,6 +359,22 @@ async function setInspireMeta(item, metaInspire, operation) {
     }
 }
 
+
+function setCitations(extra, citation_count,  citation_count_wo_self_citations) {
+    const today = new Date(Date.now()).toLocaleDateString('zh-CN');
+    // judge whether extra has the two lines of citations
+    if (/(|.*?\n)\d+\scitations[\s\S]*?\n\d+[\s\S]*?w\/o\sself[\s\S]*?/.test(extra)) {
+        const existingCitations = extra.match(/^\d+\scitations/mg).map(e => Number(e.replace(" citations", "")))
+        // if the citations are different, replace the old ones 
+        if (citation_count + citation_count_wo_self_citations !== existingCitations.reduce((a, b) => a + b)) {
+            extra = extra.replace(/^.*citations.*$\n/mg, "");
+            extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
+        } 
+    } else {
+        extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
+    }
+    return extra
+}
 
 
 // Preference managers
