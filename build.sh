@@ -1,6 +1,6 @@
 #!/bin/sh
 
-version='0.2.6'
+version='0.2.7'
 
 rm -f zotero-inspire-${version}.xpi
 zip -r zotero-inspire-${version}.xpi chrome/* defaults/* chrome.manifest install.rdf

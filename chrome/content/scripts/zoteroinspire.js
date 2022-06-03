@@ -96,7 +96,7 @@ async function getInspireMeta(item, operation) {
         urlInspire = "https://inspirehep.net/api/" + idtype + "/" + edoi;
     } else if (searchOrNot === 1) {
         const citekey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
-        urlInspire = "https://inspirehep.net/api/literature?q=" + encodeURIComponent(citekey);
+        urlInspire = "https://inspirehep.net/api/literature?q=texkey%20" + encodeURIComponent(citekey);
     }
 
     if (!urlInspire) return -1;
@@ -126,7 +126,7 @@ async function getInspireMeta(item, operation) {
         const meta = (() => {
             if (searchOrNot === 0) {
                 return response['metadata']
-            } else { // If the citekey starts with Du:, then it will return nonunique hits
+            } else { 
                 const hits = response['hits'].hits
                 if (hits.length === 1) return hits[0].metadata
             }
