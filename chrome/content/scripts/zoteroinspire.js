@@ -310,13 +310,14 @@ async function setInspireMeta(item, metaInspire, operation) {
             if (metaInspire.arxiv) {
                 const arxivId = metaInspire.arxiv.value
                 let arxivPrimeryCategory = metaInspire.arxiv.categories[0]
-                let _arxivReg = new RegExp(/^.*(arXiv|_eprint).*$/mgi)
+                let _arxivReg = new RegExp(/^.*(arXiv|_eprint).*$(\n|)/mgi)
                 if (/^\d/.test(arxivId)) {
                     // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
-                    const numberOfArxiv = (extra.match(/^.*arXiv:.*$/mg) || '').length
-                    numberOfArxiv === 2 && (extra = extra.replace(/^arXiv:.*$\n/m, ''))
+                    // const numberOfArxiv = (extra.match(/^.*arXiv:.*$/mg) || '').length
+                    // numberOfArxiv === 2 && (extra = extra.replace(/^arXiv:.*$\n/m, ''))
                     const arXivInfo = `arXiv: ${arxivId} [${arxivPrimeryCategory}]`
-                    _arxivReg.test(extra) ? extra = extra.replace(_arxivReg, arXivInfo) : extra += '\n' + arXivInfo;
+                    extra = _arxivReg.test(extra) && extra.replace(_arxivReg, '') 
+                    extra += arXivInfo;
                     // set journalAbbr. to the arXiv ID prior to journal publication
                     if (!metaInspire.journalAbbreviation) {
                         item.itemType == 'journalArticle' && item.setField('journalAbbreviation', arXivInfo);
@@ -325,7 +326,8 @@ async function setInspireMeta(item, metaInspire, operation) {
                 } else {
                     // extra = extra.replace(_arxivReg, `arXiv: ${arxivId}`);
                     const oldArxiv = "arXiv: " + arxivId;
-                    _arxivReg.test(extra) ? extra = extra.replace(_arxivReg, oldArxiv) : extra += "\n" + oldArxiv;
+                    extra = _arxivReg.test(extra) && extra.replace(_arxivReg, '') 
+                    extra += oldArxiv;
                 }
                 const url = item.getField('url');
                 (metaInspire.urlArxiv && !url) && item.setField('url', metaInspire.urlArxiv)
@@ -343,6 +345,8 @@ async function setInspireMeta(item, metaInspire, operation) {
             if (extra.includes('Citation Key')) {
                 const initialCiteKey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
                 if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
+            } else {
+                extra += "\nCitation Key: " + metaInspire.citekey
             }
         };
 

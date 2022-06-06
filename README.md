@@ -3,6 +3,12 @@
 This is an add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero). It is useful as most papers from [arXiv](https://arxiv.org) will get published in journals later on. This add-on can be used to update the metadata of the selected item(s) in your Zotero library from the [INSPIRE](https://inspirehep.net) database. 
 
 
+## Installation
+
+- Download the latest `.xpi` file of this add-on from https://github.com/fkguo/zotero-inspire/releases
+- In Zotero, the add-on can be installed by going to `Tools` → `Add-ons`, then click the top-right button and choose `Install Add-ons From File...`.
+- It can be updated in `Add-ons Manager` → `Check for Updates`.
+
 
 ## Usage
 
@@ -45,12 +51,6 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 - By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Tools` → `INSPIRE Metadata Updater Preferences...`.
 
 
-
-## Installation
-
-- Download the latest `.xpi` file of this add-on from https://github.com/fkguo/zotero-inspire/releases
-- In Zotero, the add-on can be installed by going to `Tools` → `Add-ons`, then click the top-right button and choose `Install Add-ons From File...`.
-- It can be updated in `Add-ons Manager` → `Check for Updates`.
 
 ## References
 
