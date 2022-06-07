@@ -47,8 +47,10 @@ async function getInspireMeta(item, operation) {
             New and old types of arXiv number; 
             whether or not the arXiv line is at the end of extra
             */
-            let arxiv_split = extra.match(regexArxivId)[2].split(' ')
-            arxiv_split[0] === '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
+            if (extra.match(regexArxivId)) {
+                let arxiv_split = extra.match(regexArxivId)[2].split(' ')
+                arxiv_split[0] === '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
+            }     
         } else if (/(doi|arxiv|\/literature\/)/i.test(url)) {
             // patt taken from the Citations Count plugin
             const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
@@ -78,15 +80,13 @@ async function getInspireMeta(item, operation) {
             if (_recid.match(/^\d+/)) {
                 idtype = 'literature';
                 doi = _recid
-            } else if (extra.includes('Citation Key:')) { // no DOI or arxiv or recid, try with the citekey
-                searchOrNot = 1;
-            } else {
-                return -1
-            }
+            } 
         }
     } else if (/doi/i.test(doi)) { //doi.includes("doi")
         doi = doi.replace(/^.+doi.org\//, '') //doi.replace('https://doi.org/', '')
     }
+
+    if (!doi && extra.includes('Citation Key:')) searchOrNot = 1
 
     const t0 = performance.now();
 
@@ -310,14 +310,18 @@ async function setInspireMeta(item, metaInspire, operation) {
             if (metaInspire.arxiv) {
                 const arxivId = metaInspire.arxiv.value
                 let arxivPrimeryCategory = metaInspire.arxiv.categories[0]
-                let _arxivReg = new RegExp(/^.*(arXiv|_eprint).*$(\n|)/mgi)
+                let _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/mgi)
                 if (/^\d/.test(arxivId)) {
                     // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
-                    // const numberOfArxiv = (extra.match(/^.*arXiv:.*$/mg) || '').length
-                    // numberOfArxiv === 2 && (extra = extra.replace(/^arXiv:.*$\n/m, ''))
                     const arXivInfo = `arXiv: ${arxivId} [${arxivPrimeryCategory}]`
-                    extra = _arxivReg.test(extra) && extra.replace(_arxivReg, '') 
-                    extra += arXivInfo;
+                    const numberOfArxiv = (extra.match(_arxivReg) || '').length
+                    if (numberOfArxiv !== 1) {
+                        extra = extra.replace(_arxivReg, '')
+                        extra.endsWith('\n') ? extra += arXivInfo : extra += '\n' + arXivInfo;
+                    } else {
+                        extra = extra.replace(/^.*(arXiv:|_eprint:).*$/mgi, arXivInfo);
+                    }
+
                     // set journalAbbr. to the arXiv ID prior to journal publication
                     if (!metaInspire.journalAbbreviation) {
                         item.itemType == 'journalArticle' && item.setField('journalAbbreviation', arXivInfo);
@@ -326,8 +330,8 @@ async function setInspireMeta(item, metaInspire, operation) {
                 } else {
                     // extra = extra.replace(_arxivReg, `arXiv: ${arxivId}`);
                     const oldArxiv = "arXiv: " + arxivId;
-                    extra = _arxivReg.test(extra) && extra.replace(_arxivReg, '') 
-                    extra += oldArxiv;
+                    _arxivReg.test(extra) && (extra = extra.replace(_arxivReg, ''));
+                    extra.endsWith('\n') ? extra += oldArxiv : extra += '\n' + oldArxiv
                 }
                 const url = item.getField('url');
                 (metaInspire.urlArxiv && !url) && item.setField('url', metaInspire.urlArxiv)
