@@ -315,11 +315,15 @@ async function setInspireMeta(item, metaInspire, operation) {
                     // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
                     const arXivInfo = `arXiv: ${arxivId} [${arxivPrimeryCategory}]`
                     const numberOfArxiv = (extra.match(_arxivReg) || '').length
+                    // Zotero.debug(`number of arXiv lines: ${numberOfArxiv}`)
                     if (numberOfArxiv !== 1) {
                         extra = extra.replace(_arxivReg, '')
+                        // Zotero.debug(`extra w/o arxiv: ${extra}`)
                         extra.endsWith('\n') ? extra += arXivInfo : extra += '\n' + arXivInfo;
+                        // Zotero.debug(`extra w/ arxiv: ${extra}`)
                     } else {
                         extra = extra.replace(/^.*(arXiv:|_eprint:).*$/mgi, arXivInfo);
+                        // Zotero.debug(`extra w arxiv-2: ${extra}`)
                     }
 
                     // set journalAbbr. to the arXiv ID prior to journal publication
@@ -361,7 +365,7 @@ async function setInspireMeta(item, metaInspire, operation) {
         if (operation === "citations") {
             extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
         }
-
+        extra = extra.replace(/\n\n/mg, '\n')
         item.setField('extra', extra)
 
     }
