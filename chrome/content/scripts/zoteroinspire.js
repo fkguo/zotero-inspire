@@ -50,7 +50,7 @@ async function getInspireMeta(item, operation) {
             if (extra.match(regexArxivId)) {
                 let arxiv_split = extra.match(regexArxivId)[2].split(' ')
                 arxiv_split[0] === '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
-            }     
+            }
         } else if (/(doi|arxiv|\/literature\/)/i.test(url)) {
             // patt taken from the Citations Count plugin
             const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
@@ -80,7 +80,7 @@ async function getInspireMeta(item, operation) {
             if (_recid.match(/^\d+/)) {
                 idtype = 'literature';
                 doi = _recid
-            } 
+            }
         }
     } else if (/doi/i.test(doi)) { //doi.includes("doi")
         doi = doi.replace(/^.+doi.org\//, '') //doi.replace('https://doi.org/', '')
@@ -118,15 +118,15 @@ async function getInspireMeta(item, operation) {
     if (status === null) {
         return -1;
     }
-        
-        const t1 = performance.now();
-        Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`)
+
+    const t1 = performance.now();
+    Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`)
 
     try {
         const meta = (() => {
             if (searchOrNot === 0) {
                 return response['metadata']
-            } else { 
+            } else {
                 const hits = response['hits'].hits
                 if (hits.length === 1) return hits[0].metadata
             }
@@ -311,31 +311,29 @@ async function setInspireMeta(item, metaInspire, operation) {
                 const arxivId = metaInspire.arxiv.value
                 let arxivPrimeryCategory = metaInspire.arxiv.categories[0]
                 let _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/mgi)
+                let arXivInfo = ""
                 if (/^\d/.test(arxivId)) {
-                    // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
-                    const arXivInfo = `arXiv: ${arxivId} [${arxivPrimeryCategory}]`
-                    const numberOfArxiv = (extra.match(_arxivReg) || '').length
-                    // Zotero.debug(`number of arXiv lines: ${numberOfArxiv}`)
-                    if (numberOfArxiv !== 1) {
-                        extra = extra.replace(_arxivReg, '')
-                        // Zotero.debug(`extra w/o arxiv: ${extra}`)
-                        extra.endsWith('\n') ? extra += arXivInfo : extra += '\n' + arXivInfo;
-                        // Zotero.debug(`extra w/ arxiv: ${extra}`)
-                    } else {
-                        extra = extra.replace(/^.*(arXiv:|_eprint:).*$/mgi, arXivInfo);
-                        // Zotero.debug(`extra w arxiv-2: ${extra}`)
-                    }
-
-                    // set journalAbbr. to the arXiv ID prior to journal publication
-                    if (!metaInspire.journalAbbreviation) {
-                        item.itemType == 'journalArticle' && item.setField('journalAbbreviation', arXivInfo);
-                        publication.startsWith('arXiv:') && item.setField('publicationTitle', "")
-                    }
+                    arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`
                 } else {
-                    // extra = extra.replace(_arxivReg, `arXiv: ${arxivId}`);
-                    const oldArxiv = "arXiv: " + arxivId;
-                    _arxivReg.test(extra) && (extra = extra.replace(_arxivReg, ''));
-                    extra.endsWith('\n') ? extra += oldArxiv : extra += '\n' + oldArxiv
+                    arXivInfo = "arXiv:" + arxivId;
+                }
+                const numberOfArxiv = (extra.match(_arxivReg) || '').length
+                // Zotero.debug(`number of arXiv lines: ${numberOfArxiv}`)
+                if (numberOfArxiv !== 1) {
+                    // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
+                    extra = extra.replace(_arxivReg, '')
+                    // Zotero.debug(`extra w/o arxiv: ${extra}`)
+                    extra.endsWith('\n') ? extra += arXivInfo : extra += '\n' + arXivInfo;
+                    // Zotero.debug(`extra w/ arxiv: ${extra}`)
+                } else {
+                    extra = extra.replace(/^.*(arXiv:|_eprint:).*$/mgi, arXivInfo);
+                    // Zotero.debug(`extra w arxiv-2: ${extra}`)
+                }
+
+                // set journalAbbr. to the arXiv ID prior to journal publication
+                if (!metaInspire.journalAbbreviation) {
+                    item.itemType == 'journalArticle' && item.setField('journalAbbreviation', arXivInfo);
+                    publication.startsWith('arXiv:') && item.setField('publicationTitle', "")
                 }
                 const url = item.getField('url');
                 (metaInspire.urlArxiv && !url) && item.setField('url', metaInspire.urlArxiv)
@@ -372,7 +370,7 @@ async function setInspireMeta(item, metaInspire, operation) {
 }
 
 
-function setCitations(extra, citation_count,  citation_count_wo_self_citations) {
+function setCitations(extra, citation_count, citation_count_wo_self_citations) {
     const today = new Date(Date.now()).toLocaleDateString('zh-CN');
     // judge whether extra has the two lines of citations
     if (/(|.*?\n)\d+\scitations[\s\S]*?\n\d+[\s\S]*?w\/o\sself[\s\S]*?/.test(extra)) {
@@ -381,12 +379,26 @@ function setCitations(extra, citation_count,  citation_count_wo_self_citations) 
         if (citation_count + citation_count_wo_self_citations !== existingCitations.reduce((a, b) => a + b)) {
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
-        } 
+        }
     } else {
         extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
     }
     return extra
 }
+
+
+// /**
+//  * remove the note from adding the paper from arXiv, which normally contains only the numbers of pages and figures
+//  * @param {*} item 
+//  */
+// async function removeArxivNote(item) {
+//     let noteIDs = item.getNotes();
+//     for (let id of noteIDs) {
+//         let note = Zotero.Items.get(id);
+//         let noteHTML = note.getNote();
+//         Zotero.debug(`note content: ${noteHTML}`)
+//     } 
+// } 
 
 
 // Preference managers
@@ -612,6 +624,8 @@ Zotero.Inspire.updateNextItem = function (operation) {
 
 Zotero.Inspire.updateItem = async function (item, operation) {
     if (operation === "full" || operation === "noabstract" || operation === "citations") {
+
+        // await removeArxivNote(item)
 
         const metaInspire = await getInspireMeta(item, operation);
         // if (metaInspire !== {}) {
