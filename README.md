@@ -1,6 +1,6 @@
 # Zotero INSPIRE Metadata Updater
 
-This is an add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero). It is useful as most papers from [arXiv](https://arxiv.org) will get published in journals later on. This add-on can be used to update the metadata of the selected item(s) in your Zotero library from the [INSPIRE](https://inspirehep.net) database. 
+This is an add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero). It is useful as most papers from [arXiv](https://arxiv.org) will get published in journals later on. This add-on can be used to update the metadata of the selected item(s) in your Zotero library from [INSPIRE-HEP](https://inspirehep.net), which is a community maintained database for **high energy physics and related fields**. 
 
 
 ## Installation
@@ -26,19 +26,30 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 - The add-on will update the following fields:
 	- INSPIRE uses a unique `recid` for each publication in the database (called `control_number` in the `.json` file obtained via the [INSPIRE API](https://github.com/inspirehep/rest-api-doc)). The INSPIRE `recid` is set to the field of `Loc. in Archive` (and `INSPIRE` to `Archive`) for the selected Zotero item.
-		- This also enables to write a look-up engine using this `recid` to exactly reach the INSPIRE page of that publication. The look-up engine can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.json` file, and put the path to the INSPIRE icon file after `"_icon":`:
+		- This also enables to write look-up engines using this `recid` to exactly reach the INSPIRE page of that publication and its citations. The look-up engines can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.json` file:
 		```json
 		{
 			"_name": "INSPIRE",
 			"_alias": "INSPIRE",
 			"_description": "INSPIRE",
-			"_icon": ,  // path to the INSPIRE icon,
+			"_icon": "https://inspirehep.net/favicon.ico",  // or local path to the INSPIRE icon,
 			"_hidden": false,
 			"_urlTemplate": "https://inspirehep.net/literature/{z:archiveLocation}",
 			"_urlNamespaces": {
 				"z": "http://www.zotero.org/namespaces/openSearch#"
 			}
-		}
+		},
+		{
+			"_name": "INSPIRE Citations",
+			"_alias": "INSPIRE Citations",
+			"_description": "INSPIRE citing papers",
+			"_icon": "https://inspirehep.net/favicon.ico", 
+			"_hidden": false,
+			"_urlTemplate": "https://inspirehep.net/literature?q=refersto%3Arecid%3A{z:archiveLocation}",
+			"_urlNamespaces": {
+				"z": "http://www.zotero.org/namespaces/openSearch#"
+			}
+		},
 		```
 		
 	- `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors` ($\leq10$, otherwise keeping only the first 3; the author list will be updated if no author is given or the first name of the first author is empty), `title`, `abstract`, etc. 
