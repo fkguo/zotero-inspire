@@ -5,6 +5,7 @@
 <!ENTITY inspire-autoretrieve-noabstract-label "Without abstracts">
 <!ENTITY inspire-autoretrieve-citations-label "Citation counts only">
 <!ENTITY inspire-autoretrieve-no-label "No">
+
 <!ENTITY inspire-menu-label "Update INSPIRE Metadata">
 <!ENTITY inspire-menu-full-label "With abstracts">
 <!ENTITY inspire-menu-noabstract-label "Without abstracts">

@@ -14,6 +14,7 @@
   <prefpane label="&inspire-preferences;" id="inspire-prefpane">
     <preferences>
       <preference id="pref-inspire-autoretrieve" name="extensions.inspire.autoretrieve" type="string"/>
+      <preference id="pref-inspire-citekey" name="extensions.inspire.citekey" type="string"/>
       <preference id="pref-inspire-tag-norecid" name="extensions.inspire.tag_norecid" type="string"/>
     </preferences>
       
@@ -24,6 +25,15 @@
         <radio label="&autoretrieve-noabstract-label;" value='noabstract'/>
         <radio label="&autoretrieve-citations-label;" value='citations'/>
         <radio label="&autoretrieve-no-label;" value='none'/>
+      </radiogroup>
+    </groupbox>
+    <separator class="thin"/>
+
+    <groupbox>
+      <caption label="&citekey-label;"/>
+      <radiogroup id="id-inspire-citekey" preference="pref-inspire-citekey">
+        <radio label="&citekey-inspire-label;" value='inspire'/>
+        <radio label="&citekey-no-label;" value='no'/>
       </radiogroup>
     </groupbox>
     <separator class="thin"/>

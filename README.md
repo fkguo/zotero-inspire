@@ -16,12 +16,13 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 - Right click a selected collection, then click one of the three options.
 
-- Automatically retrieve the metadata from INSPIRE when adding a new item to the Zotero library. Options with or without getting abstracts can be set through the `Tools` menu → `INSPIRE Metadata`…
+- Automatically retrieve the metadata from INSPIRE when adding a new item to the Zotero library. Options with or without getting abstracts can be set through the `Tools` menu → `INSPIRE Metadata Updater Preferences`…
 
 - Metadata can be fetched as long as one of the following is provided:
 	- DOI in the field of `DOI` or `Extra`; if it is only in `Extra`, then it should contain `DOI:` or `doi.org/` followed by the DOI.
 	- arXiv link in `URL` or arXiv ID in `Extra` in the form of `arXiv:`.
-	- INSPIRE Citation key in `Extra` in the form of `Citation Key: `.
+	- INSPIRE Citation key in `Extra` in the form of `Citation Key: `. 
+		- If one does not want to set the citation keys to the INSPIRE ones, then set `Set citekeys in Extra` in `INSPIRE Metadata Updater Preferences` under `Tools` menu to `No`.
 	- INSPIRE `recid` in `Loc. in Archive` or the url containing `/literature/recid` in `URL`.
 
 - The add-on will update the following fields:

@@ -266,6 +266,7 @@ async function setInspireMeta(item, metaInspire, operation) {
     const today = new Date(Date.now()).toLocaleDateString('zh-CN');
     let extra = item.getField('extra')
     let publication = item.getField('publicationTitle')
+    const citekey_pref = Zotero.Inspire.getPref("citekey")
 
     // item.setField('archiveLocation', metaInspire);
     if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
@@ -348,12 +349,15 @@ async function setInspireMeta(item, metaInspire, operation) {
             // Zotero.debug('setInspire-4')
             extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
 
-            if (extra.includes('Citation Key')) {
-                const initialCiteKey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
-                if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
-            } else {
-                extra += "\nCitation Key: " + metaInspire.citekey
+            if (citekey_pref === "inspire") {
+                if (extra.includes('Citation Key')) {
+                    const initialCiteKey = extra.match(/^.*Citation\sKey:.*$/mg)[0].split(': ')[1]
+                    if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
+                } else {
+                    extra += "\nCitation Key: " + metaInspire.citekey
+                }
             }
+            
         };
 
         if (operation === "full" && metaInspire.abstractNote) {
@@ -463,11 +467,20 @@ Zotero.Inspire.setCheck = function () {
     tools_noabstract.setAttribute("checked", Boolean(pref === "noabstract"));
     tools_citations.setAttribute("checked", Boolean(pref === "citations"));
     tools_none.setAttribute("checked", Boolean(pref === "none"));
+
+    let tools_citekey_inspire = document.getElementById(
+        "menu_Tools-inspire-menu-popup-inspirecitekey");
+    let tools_citekey_no = document.getElementById(
+        "menu_Tools-inspire-menu-popup-nocitekey");
+    const pref_citekey = Zotero.Inspire.getPref("citekey");
+    tools_citekey_inspire.setAttribute("checked", Boolean(pref_citekey === "inspire"));
+    tools_citekey_no.setAttribute("checked", Boolean(pref_citekey !== "inspire"));
 };
 
 // *********** Change the checkbox, topref
 Zotero.Inspire.changePref = function changePref(option) {
     Zotero.Inspire.setPref("autoretrieve", option);
+    Zotero.Inspire.setPref("citekey", option);
 };
 
 /**
