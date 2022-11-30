@@ -379,9 +379,10 @@ function setCitations(extra, citation_count, citation_count_wo_self_citations) {
     // judge whether extra has the two lines of citations
     if (/(|.*?\n)\d+\scitations[\s\S]*?\n\d+[\s\S]*?w\/o\sself[\s\S]*?/.test(extra)) {
         const existingCitations = extra.match(/^\d+\scitations/mg).map(e => Number(e.replace(" citations", "")))
+        // Zotero.debug(`existing citations:  ${existingCitations}`)
         // if the citations are different, replace the old ones 
         // if (citation_count + citation_count_wo_self_citations !== existingCitations.reduce((a, b) => a + b)) {
-        if (citation_count !== existingCitations[1] || citation_count_wo_self_citations !== existingCitations[2]) {
+        if (citation_count !== existingCitations[0] || citation_count_wo_self_citations !== existingCitations[1]) {
             extra = extra.replace(/^.*citations.*$\n/mg, "");
             extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
         }
