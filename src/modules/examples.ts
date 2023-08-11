@@ -75,7 +75,6 @@ export class BasicExampleFactory {
     const prefOptions = {
       pluginID: config.addonID,
       src: rootURI + "chrome/content/preferences.xhtml",
-      label: getString("prefs-title"),
       image: `chrome://${config.addonRef}/content/icons/favicon.png`,
       defaultXUL: true,
     };

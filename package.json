@@ -1,14 +1,14 @@
 {
-  "name": "zotero-addon-template",
+  "name": "zotero-inspire",
   "version": "1.0.0",
   "description": "Zotero Addon Template",
   "config": {
-    "addonName": "Zotero Addon Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate",
-    "releasepage": "https://github.com/windingwind/zotero-addon-template/releases/latest/download/zotero-addon-template.xpi",
+    "addonName": "zotero-inspire",
+    "addonID": "zoteroinspire@itp.ac.cn",
+    "addonRef": "zoteroinspire",
+    "addonInstance": "ZoteroInspire",
+    "prefsPrefix": "extensions.zotero.inspiremeta",
+    "releasepage": "https://github.com/fkguo/zotero-inspire",
     "updaterdf": "https://raw.githubusercontent.com/windingwind/zotero-addon-template/main/update.json"
   },
   "main": "src/index.ts",
@@ -34,8 +34,8 @@
     "type": "git",
     "url": "git+https://github.com/windingwind/zotero-addon-template.git"
   },
-  "author": "windingwind",
-  "license": "AGPL-3.0-or-later",
+  "author": "Feng-Kun Guo",
+  "license": "MPL-2.0-or-later",
   "bugs": {
     "url": "https://github.com/windingwind/zotero-addon-template/issues"
   },

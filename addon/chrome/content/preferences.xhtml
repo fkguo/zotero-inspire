@@ -6,26 +6,28 @@
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', {window})"
 >
   <groupbox>
-    <label><html:h2 data-l10n-id="pref-title"></html:h2></label>
-    <checkbox
-      id="zotero-prefpane-__addonRef__-enable"
-      preference="extensions.zotero.__addonRef__.enable"
-      data-l10n-id="pref-enable"
-    />
-    <hbox>
-      <html:label
-        for="zotero-prefpane-__addonRef__-input"
-        data-l10n-id="pref-input"
-      ></html:label>
-      <html:input
-        type="text"
-        id="zotero-prefpane-__addonRef__-input"
-        preference="extensions.zotero.__addonRef__.input"
-      ></html:input>
-    </hbox>
-    <hbox class="virtualized-table-container" flex="1" height="300px">
-      <html:div id="__addonRef__-table-container" />
-    </hbox>
+    <label><html:h2 data-l10n-id="pref-meta"></html:h2></label>
+    <radiogroup id="zotero-prefpane-__addonRef__-meta" preference="extensions.zotero.__addonRef__.meta" orient="vertical">
+        <radio data-l10n-id="pref-a" value="a" />
+        <radio data-l10n-id="pref-b" value="b" />
+        <radio data-l10n-id="pref-c" value="c" />
+        <radio data-l10n-id="pref-d" value="d" />
+    </radiogroup>
+    <label><html:h2 data-l10n-id="pref-citekey"></html:h2></label>
+    <radiogroup id="zotero-prefpane-__addonRef__-citekey" preference="__prefsPrefix__.enable" orient="vertical">
+        <radio data-l10n-id="pref-e" value="a" />
+        <radio data-l10n-id="pref-f" value="b" />
+    </radiogroup>
+    <label><html:h2 data-l10n-id="pref-nofound"></html:h2></label>
+    <vbox>
+      <label><html:h2 data-l10n-id="pref-nofound1"></html:h2></label>
+      <label><html:h2 data-l10n-id="pref-nofound2"></html:h2></label>
+    </vbox>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-input"
+      preference="__prefsPrefix__.input"
+    ></html:input>
   </groupbox>
 </vbox>
 <vbox>

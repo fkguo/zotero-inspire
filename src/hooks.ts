@@ -1,14 +1,13 @@
 import {
   BasicExampleFactory,
   HelperExampleFactory,
-  KeyExampleFactory,
-  PromptExampleFactory,
   UIExampleFactory,
 } from "./modules/examples";
 import { config } from "../package.json";
-import { getString, initLocale } from "./utils/locale";
+import { initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
+import { ZInsMenu, ZInsprefs } from "./modules/zinspire";
 
 async function onStartup() {
   await Promise.all([
@@ -18,9 +17,9 @@ async function onStartup() {
   ]);
   initLocale();
 
-  BasicExampleFactory.registerPrefs();
+  ZInsprefs.registerPrefs();
 
-  BasicExampleFactory.registerNotifier();
+  ZInsprefs.registerNotifier();
 
   await onMainWindowLoad(window);
 }
@@ -29,60 +28,12 @@ async function onMainWindowLoad(win: Window): Promise<void> {
   // Create ztoolkit for every window
   addon.data.ztoolkit = createZToolkit();
 
-  const popupWin = new ztoolkit.ProgressWindow(config.addonName, {
-    closeOnClick: true,
-    closeTime: -1,
-  })
-    .createLine({
-      text: getString("startup-begin"),
-      type: "default",
-      progress: 0,
-    })
-    .show();
-
-  KeyExampleFactory.registerShortcuts();
-
-  await Zotero.Promise.delay(1000);
-  popupWin.changeLine({
-    progress: 30,
-    text: `[30%] ${getString("startup-begin")}`,
-  });
-
-  UIExampleFactory.registerStyleSheet();
-
   UIExampleFactory.registerRightClickMenuItem();
 
-  UIExampleFactory.registerRightClickMenuPopup();
-
-  UIExampleFactory.registerWindowMenuWithSeparator();
-
-  await UIExampleFactory.registerExtraColumn();
-
-  await UIExampleFactory.registerExtraColumnWithCustomCell();
-
-  await UIExampleFactory.registerCustomCellRenderer();
-
-  await UIExampleFactory.registerCustomItemBoxRow();
+  ZInsMenu.registerRightClickMenuPopup();
 
   UIExampleFactory.registerLibraryTabPanel();
 
-  await UIExampleFactory.registerReaderTabPanel();
-
-  PromptExampleFactory.registerNormalCommandExample();
-
-  PromptExampleFactory.registerAnonymousCommandExample();
-
-  PromptExampleFactory.registerConditionalCommandExample();
-
-  await Zotero.Promise.delay(1000);
-
-  popupWin.changeLine({
-    progress: 100,
-    text: `[100%] ${getString("startup-finish")}`,
-  });
-  popupWin.startCloseTimer(5000);
-
-  addon.hooks.onDialogEvents("dialogExample");
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
@@ -138,19 +89,6 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
 }
 
 function onShortcuts(type: string) {
-  switch (type) {
-    case "larger":
-      KeyExampleFactory.exampleShortcutLargerCallback();
-      break;
-    case "smaller":
-      KeyExampleFactory.exampleShortcutSmallerCallback();
-      break;
-    case "confliction":
-      KeyExampleFactory.exampleShortcutConflictingCallback();
-      break;
-    default:
-      break;
-  }
 }
 
 function onDialogEvents(type: string) {
