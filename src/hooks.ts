@@ -28,11 +28,9 @@ async function onMainWindowLoad(win: Window): Promise<void> {
   // Create ztoolkit for every window
   addon.data.ztoolkit = createZToolkit();
 
-  UIExampleFactory.registerRightClickMenuItem();
+  // UIExampleFactory.registerRightClickMenuItem();
 
   ZInsMenu.registerRightClickMenuPopup();
-
-  UIExampleFactory.registerLibraryTabPanel();
 
 }
 
