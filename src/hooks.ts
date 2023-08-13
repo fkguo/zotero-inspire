@@ -7,7 +7,7 @@ import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
-import { ZInsMenu, ZInsprefs } from "./modules/zinspire";
+import { ZInsMenu, ZInspire, ZInsprefs } from "./modules/zinspire";
 
 async function onStartup() {
   await Promise.all([
@@ -59,15 +59,7 @@ async function onNotify(
 ) {
   // You can add your code to the corresponding notify type
   ztoolkit.log("notify", event, type, ids, extraData);
-  if (
-    event == "select" &&
-    type == "tab" &&
-    extraData[ids[0]].type == "reader"
-  ) {
-    BasicExampleFactory.exampleNotifierCallback();
-  } else {
-    return;
-  }
+  return
 }
 
 /**

@@ -2,6 +2,7 @@ import ZoteroToolkit from "zotero-plugin-toolkit";
 import { config } from "../../package.json"
 import { getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
+import { ProgressWindowHelper } from "zotero-plugin-toolkit/dist/helpers/progressWindow";
 export class ZInsprefs {
   static registerPrefs() {
     const prefOptions = {
@@ -26,10 +27,29 @@ export class ZInsprefs {
           return;
         }
         addon.hooks.onNotify(event, type, ids, extraData);
+        // if (event === 'add') {
+        //   switch (getPref("meta")) {
+        //     case "full":
+        //       Zotero.Inspire.updateItems(Zotero.Items.get(ids), "full");
+        //       break;
+        //     case "noabstract":
+        //       Zotero.Inspire.updateItems(Zotero.Items.get(ids), "noabstract");
+        //       break;
+        //     case "citations":
+        //       Zotero.Inspire.updateItems(Zotero.Items.get(ids), "citations");
+        //       break;
+        //     default:
+        //       break;
+        //   }
+        // }
       },
     };
 
-    const notifierID = Zotero.Notifier.registerObserver(callback, ["item",]);
+    const notifierID = Zotero.Notifier.registerObserver(callback, [
+      "tab",
+      "item",
+      "file",
+    ]);
 
     window.addEventListener(
       "unload",
@@ -42,6 +62,16 @@ export class ZInsprefs {
 
   private static unregisterNotifier(notifierID: string) {
     Zotero.Notifier.unregisterObserver(notifierID);
+  }
+
+  static NotifierCallback() {
+    new ztoolkit.ProgressWindow(config.addonName)
+      .createLine({
+        text: "",
+        type: "success",
+        progress: 100,
+      })
+      .show();
   }
 }
 
@@ -56,17 +86,18 @@ export class ZInsMenu {
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel0"),
-            commandListener: (ev) => alert("hello?"),
+            oncommand: `new ztoolkit.ProgressWindow(${config.addonName}).createLine({text: "fuck", type: "default"})`,
+            commandListener: (ev) => alert(ev)
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel1"),
-            commandListener: (ev) => alert("hello?"),
+            oncommand: `new ztoolkit.ProgressWindow(${config.addonName}).createLine({text: "fuck", type: "default"})`,
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel2"),
-            commandListener: (ev) => alert("hello?"),
+            oncommand: `new ztoolkit.ProgressWindow(${config.addonName}).createLine({text: "fuck", type: "default"})`,
           },
         ],
         icon: menuIcon,
@@ -94,6 +125,7 @@ export class ZInspire {
   error_norecid: boolean | null;
   error_norecid_shown: boolean;
   final_count_shown: boolean;
+  progressWindow: ProgressWindowHelper;
   constructor(current: number = -1, toUpdate: number = 0, itemsToUpdate: Zotero.Item[] | null = null, numberOfUpdatedItems: number = 0, counter: number = 0, error_norecid: boolean | null = null, error_norecid_shown: boolean = false, final_count_shown: boolean = false) {
     this.current = current
     this.toUpdate = toUpdate
@@ -103,68 +135,72 @@ export class ZInspire {
     this.error_norecid = error_norecid
     this.error_norecid_shown = error_norecid_shown
     this.final_count_shown = final_count_shown
+    this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+      closeOnClick: false,
+      closeTime: -1,
+    })
   }
 
   resetState(operation: string) {
     if (operation === "initial") {
-        if (Zotero.Inspire.progressWindow) {
-            Zotero.Inspire.progressWindow.close();
-        }
-        this.current = -1;
-        this.toUpdate = 0;
-        this.itemsToUpdate = null;
-        this.numberOfUpdatedItems = 0;
-        this.counter = 0;
-        this.error_norecid = null;
-        this.error_norecid_shown = false;
-        this.final_count_shown = false;
-        return;
+      if (this.progressWindow) {
+        this.progressWindow.close();
+      }
+      this.current = -1;
+      this.toUpdate = 0;
+      this.itemsToUpdate = null;
+      this.numberOfUpdatedItems = 0;
+      this.counter = 0;
+      this.error_norecid = null;
+      this.error_norecid_shown = false;
+      this.final_count_shown = false;
+      return;
     } else {
-        if (this.error_norecid) {
-            Zotero.Inspire.progressWindow.close();
-            const icon = "chrome://zotero/skin/cross.png";
-            if (this.error_norecid && !this.error_norecid_shown) {
-                let progressWindowNoRecid = new Zotero.ProgressWindow({
-                    closeOnClick: true
-                });
-                progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
-                if (Zotero.Inspire.getPref("tag_norecid") !== "") {
-                    progressWindowNoRecid.progress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items. These have been tagged with '" + Zotero.Inspire.getPref("tag_norecid") + "'.");
-                } else {
-                    progressWindowNoRecid.progress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items.");
-                }
-                progressWindowNoRecid.progress.setError();
-                progressWindowNoRecid.show();
-                progressWindowNoRecid.startCloseTimer(8000);
-                error_norecid_shown = true;
-            }
-        } else {
-            if (!final_count_shown) {
-                const icon = "chrome://zotero/skin/tick.png";
-                Zotero.Inspire.progressWindow = new Zotero.ProgressWindow({
-                    closeOnClick: true
-                });
-                Zotero.Inspire.progressWindow.changeHeadline("Finished");
-                Zotero.Inspire.progressWindow.progress = new Zotero.Inspire.progressWindow.ItemProgress(icon);
-                Zotero.Inspire.progressWindow.progress.setProgress(100);
-                if (operation === "full" || operation === "noabstract") {
-                    Zotero.Inspire.progressWindow.progress.setText(
-                        "INSPIRE metadata updated for " +
-                        Zotero.Inspire.counter + " items.");
-                }
-                if (operation === "citations") {
-                    Zotero.Inspire.progressWindow.progress.setText(
-                        "INSPIRE citation counts updated for " +
-                        Zotero.Inspire.counter + " items.");
-                }
-                Zotero.Inspire.progressWindow.show();
-                Zotero.Inspire.progressWindow.startCloseTimer(4000);
-                final_count_shown = true;
-            }
+      if (this.error_norecid) {
+        this.progressWindow.close();
+        const icon = "chrome://zotero/skin/cross.png";
+        if (this.error_norecid && !this.error_norecid_shown) {
+          let progressWindowNoRecid = new Zotero.ProgressWindow({
+            closeOnClick: true
+          });
+          progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
+          if (getPref("tag_norecid") !== "") {
+            progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.");
+          } else {
+            progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items.");
+          }
+          progressWindowNoRecid.ItemProgress.setError();
+          progressWindowNoRecid.show();
+          progressWindowNoRecid.startCloseTimer(8000);
+          this.error_norecid_shown = true;
         }
-        return;
+      } else {
+        if (!this.final_count_shown) {
+          const icon = "chrome://zotero/skin/tick.png";
+          this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+            closeOnClick: true
+          });
+          this.progressWindow.changeHeadline("Finished");
+          this.progressWindow.ItemProgress = new ztoolkit.ProgressWindow.ItemProgress(icon, "");
+          this.progressWindow.ItemProgress.setProgress(100);
+          if (operation === "full" || operation === "noabstract") {
+            this.progressWindow.ItemProgress.setText(
+              "INSPIRE metadata updated for " +
+              this.counter + " items.");
+          }
+          if (operation === "citations") {
+            this.progressWindow.ItemProgress.setText(
+              "INSPIRE citation counts updated for " +
+              this.counter + " items.");
+          }
+          this.progressWindow.show();
+          this.progressWindow.startCloseTimer(4000);
+          this.final_count_shown = true;
+        }
+      }
+      return;
     }
-}
+  }
   updateItems(items0: Zotero.Item[], operation: string) {
 
 
@@ -177,32 +213,32 @@ export class ZInspire {
       return;
     }
 
-    Zotero.Inspire.resetState("initial");
+    this.resetState("initial");
     this.toUpdate = items.length;
     this.itemsToUpdate = items;
 
     // Progress Windows
-    Zotero.Inspire.progressWindow =
-      new Zotero.ProgressWindow({
+    this.progressWindow =
+      new ztoolkit.ProgressWindow(config.addonName, {
         closeOnClick: false
       });
     const icon = 'chrome://zotero/skin/toolbar-advanced-search' +
       (Zotero.hiDPI ? "@2x" : "") + '.png';
     if (operation === "full" || operation === "noabstract") {
-      Zotero.Inspire.progressWindow.changeHeadline(
+      this.progressWindow.changeHeadline(
         "Getting INSPIRE metadata", icon);
     }
     if (operation === "citations") {
-      Zotero.Inspire.progressWindow.changeHeadline(
+      this.progressWindow.changeHeadline(
         "Getting INSPIRE citation counts", icon);
     }
     const inspireIcon =
       'chrome://zoteroinspire/skin/inspire' +
       (Zotero.hiDPI ? "@2x" : "") + '.png';
-    Zotero.Inspire.progressWindow.progress =
-      new Zotero.Inspire.progressWindow.ItemProgress(
+    this.progressWindow.ItemProgress =
+      new this.progressWindow.ItemProgress(
         inspireIcon, "Retrieving INSPIRE metadata.");
-    Zotero.Inspire.updateNextItem(operation);
+    // this.updateNextItem(operation);
   }
 }
 
