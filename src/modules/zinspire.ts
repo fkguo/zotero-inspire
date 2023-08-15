@@ -50,6 +50,9 @@ export class ZInsprefs {
 
 export class ZInsMenu {
   static registerRightClickMenuPopup() {
+    ztoolkit.Menu.register("item", {
+      tag: "menuseparator",
+    });
     const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
     ztoolkit.Menu.register("item",
       {
@@ -91,6 +94,9 @@ export class ZInsMenu {
   }
 
   static registerRightClickCollectionMenu() {
+    ztoolkit.Menu.register("item", {
+      tag: "menuseparator",
+    });
     const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
     ztoolkit.Menu.register("collection",
       {
