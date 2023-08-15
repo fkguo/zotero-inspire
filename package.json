@@ -1,7 +1,7 @@
 {
   "name": "zotero-inspire",
-  "version": "1.0.0",
-  "description": "Inspire Metadata Update",
+  "version": "0.2.14",
+  "description": "Inspire Metadata Updater",
   "config": {
     "addonName": "zotero-inspire",
     "addonID": "zoteroinspire@itp.ac.cn",
@@ -9,7 +9,7 @@
     "addonInstance": "ZoteroInspire",
     "prefsPrefix": "extensions.zotero.inspiremeta",
     "releasepage": "https://github.com/fkguo/zotero-inspire",
-    "updaterdf": "https://raw.githubusercontent.com/windingwind/zotero-addon-template/main/update.json"
+    "updaterdf": "https://raw.githubusercontent.com/fkguo/zotero-inspire/main/update.json"
   },
   "main": "src/index.ts",
   "scripts": {
@@ -32,19 +32,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-addon-template.git"
+    "url": "git+https://github.com/fkguo/zotero-inspire.git"
   },
   "author": "Feng-Kun Guo",
   "license": "MPL-2.0-or-later",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-addon-template/issues"
+    "url": "https://github.com/fkguo/zotero-inspire/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-addon-template#readme",
+  "homepage": "https://github.com/fkguo/zotero-inspire#readme",
   "dependencies": {
-    "events": "^3.3.0",
-    "pako": "^2.1.0",
-    "timers": "^0.1.1",
-    "xml2js": "^0.6.2",
     "zotero-plugin-toolkit": "^2.2.2"
   },
   "devDependencies": {
