@@ -1,7 +1,7 @@
 {
   "name": "zotero-inspire",
   "version": "1.0.0",
-  "description": "Zotero Addon Template",
+  "description": "Inspire Metadata Update",
   "config": {
     "addonName": "zotero-inspire",
     "addonID": "zoteroinspire@itp.ac.cn",

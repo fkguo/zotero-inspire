@@ -1,13 +1,9 @@
-import {
-  BasicExampleFactory,
-  HelperExampleFactory,
-  UIExampleFactory,
-} from "./modules/examples";
 import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
-import { ZInsMenu, ZInspire, ZInsprefs } from "./modules/zinspire";
+import { ZInsMenu, ZInsprefs } from "./modules/zinspire";
+import { getPref } from "./utils/prefs";
 
 async function onStartup() {
   await Promise.all([
@@ -31,6 +27,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
   // UIExampleFactory.registerRightClickMenuItem();
 
   ZInsMenu.registerRightClickMenuPopup();
+  ZInsMenu.registerRightClickCollectionMenu();
 
 }
 
@@ -54,11 +51,26 @@ function onShutdown(): void {
 async function onNotify(
   event: string,
   type: string,
-  ids: Array<string | number>,
+  ids: Array<any>,
   extraData: { [key: string]: any },
 ) {
   // You can add your code to the corresponding notify type
   ztoolkit.log("notify", event, type, ids, extraData);
+  if (event === 'add') {
+    switch (getPref("meta")) {
+      case "full":
+        _globalThis.inspire.updateItems(Zotero.Items.get(ids), "full");
+        break;
+      case "noabstract":
+        _globalThis.inspire.updateItems(Zotero.Items.get(ids), "noabstract");
+        break;
+      case "citations":
+        _globalThis.inspire.updateItems(Zotero.Items.get(ids), "citations");
+        break;
+      default:
+        break;
+    }
+  }
   return
 }
 
@@ -78,30 +90,30 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
   }
 }
 
-function onShortcuts(type: string) {
-}
+// function onShortcuts(type: string) {
+// }
 
-function onDialogEvents(type: string) {
-  switch (type) {
-    case "dialogExample":
-      HelperExampleFactory.dialogExample();
-      break;
-    case "clipboardExample":
-      HelperExampleFactory.clipboardExample();
-      break;
-    case "filePickerExample":
-      HelperExampleFactory.filePickerExample();
-      break;
-    case "progressWindowExample":
-      HelperExampleFactory.progressWindowExample();
-      break;
-    case "vtableExample":
-      HelperExampleFactory.vtableExample();
-      break;
-    default:
-      break;
-  }
-}
+// function onDialogEvents(type: string) {
+//   switch (type) {
+//     case "dialogExample":
+//       HelperExampleFactory.dialogExample();
+//       break;
+//     case "clipboardExample":
+//       HelperExampleFactory.clipboardExample();
+//       break;
+//     case "filePickerExample":
+//       HelperExampleFactory.filePickerExample();
+//       break;
+//     case "progressWindowExample":
+//       HelperExampleFactory.progressWindowExample();
+//       break;
+//     case "vtableExample":
+//       HelperExampleFactory.vtableExample();
+//       break;
+//     default:
+//       break;
+//   }
+// }
 
 // Add your hooks here. For element click, etc.
 // Keep in mind hooks only do dispatch. Don't add code that does real jobs in hooks.
@@ -114,6 +126,4 @@ export default {
   onMainWindowUnload,
   onNotify,
   onPrefsEvent,
-  onShortcuts,
-  onDialogEvents,
 };

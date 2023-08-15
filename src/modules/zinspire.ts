@@ -8,7 +8,7 @@ export class ZInsprefs {
     const prefOptions = {
       pluginID: config.addonID,
       src: rootURI + "chrome/content/preferences.xhtml",
-      image: `chrome://${config.addonRef}/content/icons/favicon.png`,
+      image: `chrome://${config.addonRef}/content/icons/inspire@2x.png`,
       defaultXUL: true,
     };
     ztoolkit.PreferencePane.register(prefOptions);
@@ -27,28 +27,11 @@ export class ZInsprefs {
           return;
         }
         addon.hooks.onNotify(event, type, ids, extraData);
-        // if (event === 'add') {
-        //   switch (getPref("meta")) {
-        //     case "full":
-        //       Zotero.Inspire.updateItems(Zotero.Items.get(ids), "full");
-        //       break;
-        //     case "noabstract":
-        //       Zotero.Inspire.updateItems(Zotero.Items.get(ids), "noabstract");
-        //       break;
-        //     case "citations":
-        //       Zotero.Inspire.updateItems(Zotero.Items.get(ids), "citations");
-        //       break;
-        //     default:
-        //       break;
-        //   }
-        // }
       },
     };
 
     const notifierID = Zotero.Notifier.registerObserver(callback, [
-      "tab",
       "item",
-      "file",
     ]);
 
     window.addEventListener(
@@ -64,20 +47,11 @@ export class ZInsprefs {
     Zotero.Notifier.unregisterObserver(notifierID);
   }
 
-  static NotifierCallback() {
-    new ztoolkit.ProgressWindow(config.addonName)
-      .createLine({
-        text: "",
-        type: "success",
-        progress: 100,
-      })
-      .show();
-  }
 }
 
 export class ZInsMenu {
   static registerRightClickMenuPopup() {
-    const menuIcon = `chrome://${config.addonRef}/content/icons/favicon@0.5x.png`;
+    const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
     ztoolkit.Menu.register("item",
       {
         tag: "menu",
@@ -86,18 +60,23 @@ export class ZInsMenu {
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel0"),
-            oncommand: `new ztoolkit.ProgressWindow(${config.addonName}).createLine({text: "fuck", type: "default"})`,
-            commandListener: (ev) => alert(ev)
+            commandListener: (ev) => {
+              _globalThis.inspire.updateSelectedItems("full")
+            }
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel1"),
-            oncommand: `new ztoolkit.ProgressWindow(${config.addonName}).createLine({text: "fuck", type: "default"})`,
+            commandListener: (ev) => {
+              _globalThis.inspire.updateSelectedItems("noabstract")
+            }
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel2"),
-            oncommand: `new ztoolkit.ProgressWindow(${config.addonName}).createLine({text: "fuck", type: "default"})`,
+            commandListener: (ev) => {
+              _globalThis.inspire.updateSelectedItems("citations")
+            }
           },
         ],
         icon: menuIcon,
@@ -111,6 +90,44 @@ export class ZInsMenu {
     //   tag: "menuseparator",
     // });
   }
+
+  static registerRightClickCollectionMenu() {
+    const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
+    ztoolkit.Menu.register("collection",
+      {
+        tag: "menu",
+        label: getString("menupopup-label"),
+        children: [
+          {
+            tag: "menuitem",
+            label: getString("menuitem-submenulabel0"),
+            commandListener: (ev) => {
+              _globalThis.inspire.updateSelectedCollection("full")
+            }
+          },
+          {
+            tag: "menuitem",
+            label: getString("menuitem-submenulabel1"),
+            commandListener: (ev) => {
+              _globalThis.inspire.updateSelectedCollection("noabstract")
+            }
+          },
+          {
+            tag: "menuitem",
+            label: getString("menuitem-submenulabel2"),
+            commandListener: (ev) => {
+              _globalThis.inspire.updateSelectedCollection("citations")
+            }
+          },
+        ],
+        icon: menuIcon,
+      },
+      // "before",
+      // document.querySelector(
+      //   "#zotero-itemmenu-addontemplate-test",
+      // ) as XUL.MenuItem,
+    );
+  }
 }
 
 type jsobject = {
@@ -119,14 +136,14 @@ type jsobject = {
 export class ZInspire {
   current: number;
   toUpdate: number;
-  itemsToUpdate: Zotero.Item[] | null;
+  itemsToUpdate: Zotero.Item[];
   numberOfUpdatedItems: number;
   counter: number;
-  error_norecid: boolean | null;
+  error_norecid: boolean;
   error_norecid_shown: boolean;
   final_count_shown: boolean;
   progressWindow: ProgressWindowHelper;
-  constructor(current: number = -1, toUpdate: number = 0, itemsToUpdate: Zotero.Item[] | null = null, numberOfUpdatedItems: number = 0, counter: number = 0, error_norecid: boolean | null = null, error_norecid_shown: boolean = false, final_count_shown: boolean = false) {
+  constructor(current: number = -1, toUpdate: number = 0, itemsToUpdate: Zotero.Item[] = [], numberOfUpdatedItems: number = 0, counter: number = 0, error_norecid: boolean = false, error_norecid_shown: boolean = false, final_count_shown: boolean = false) {
     this.current = current
     this.toUpdate = toUpdate
     this.itemsToUpdate = itemsToUpdate
@@ -148,13 +165,12 @@ export class ZInspire {
       }
       this.current = -1;
       this.toUpdate = 0;
-      this.itemsToUpdate = null;
+      this.itemsToUpdate = [];
       this.numberOfUpdatedItems = 0;
       this.counter = 0;
-      this.error_norecid = null;
+      this.error_norecid = false;
       this.error_norecid_shown = false;
       this.final_count_shown = false;
-      return;
     } else {
       if (this.error_norecid) {
         this.progressWindow.close();
@@ -165,9 +181,11 @@ export class ZInspire {
           });
           progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
           if (getPref("tag_norecid") !== "") {
-            progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.");
+            progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.")
+            // progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.");
           } else {
-            progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items.");
+            progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items.")
+            // progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items.");
           }
           progressWindowNoRecid.ItemProgress.setError();
           progressWindowNoRecid.show();
@@ -177,11 +195,14 @@ export class ZInspire {
       } else {
         if (!this.final_count_shown) {
           const icon = "chrome://zotero/skin/tick.png";
-          this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-            closeOnClick: true
-          });
+          // this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+          //   closeOnClick: true,
+          //   closeTime: -1,
+          // });
           this.progressWindow.changeHeadline("Finished");
-          this.progressWindow.ItemProgress = new ztoolkit.ProgressWindow.ItemProgress(icon, "");
+          // this.progressWindow.ItemProgress = new ztoolkit.ProgressWindow.ItemProgress(icon, "");
+          ztoolkit.log("why?")
+          // ztoolkit.log(this.progressWindow.ItemProgress)
           this.progressWindow.ItemProgress.setProgress(100);
           if (operation === "full" || operation === "noabstract") {
             this.progressWindow.ItemProgress.setText(
@@ -198,9 +219,21 @@ export class ZInspire {
           this.final_count_shown = true;
         }
       }
-      return;
     }
   }
+
+  updateSelectedCollection(operation: string) {
+    const collection = ZoteroPane.getSelectedCollection();
+    if (collection) {
+      const items = collection.getChildItems(false, false);
+      this.updateItems(items, operation);
+    }
+  }
+
+  updateSelectedItems(operation: string) {
+    this.updateItems(ZoteroPane.getSelectedItems(), operation);
+  };
+
   updateItems(items0: Zotero.Item[], operation: string) {
 
 
@@ -212,6 +245,7 @@ export class ZInspire {
       this.toUpdate) {
       return;
     }
+
 
     this.resetState("initial");
     this.toUpdate = items.length;
@@ -233,22 +267,80 @@ export class ZInspire {
         "Getting INSPIRE citation counts", icon);
     }
     const inspireIcon =
-      'chrome://zoteroinspire/skin/inspire' +
+      `chrome://${config.addonRef}/content/icons/inspire` +
       (Zotero.hiDPI ? "@2x" : "") + '.png';
     this.progressWindow.ItemProgress =
       new this.progressWindow.ItemProgress(
         inspireIcon, "Retrieving INSPIRE metadata.");
-    // this.updateNextItem(operation);
+    this.updateNextItem(operation);
   }
+
+  updateNextItem(operation: string) {
+    this.numberOfUpdatedItems++;
+
+    if (this.current === this.toUpdate - 1) {
+      this.progressWindow.close();
+      this.resetState(operation);
+      return;
+    }
+
+    this.current++;
+
+    // Progress Windows
+    const percent = Math.round((this.numberOfUpdatedItems / this.toUpdate) * 100);
+    this.progressWindow.ItemProgress.setProgress(percent);
+    this.progressWindow.ItemProgress.setText(
+      "Item " + this.current + " of " +
+      this.toUpdate);
+    this.progressWindow.show();
+
+    this.updateItem(
+      this.itemsToUpdate[this.current],
+      operation);
+  };
+
+  async updateItem(item: Zotero.Item, operation: string) {
+    if (operation === "full" || operation === "noabstract" || operation === "citations") {
+
+      // await removeArxivNote(item)
+
+      const metaInspire = await getInspireMeta(item, operation);
+      // if (metaInspire !== {}) {
+      if (metaInspire !== -1 && metaInspire !== undefined) {
+        if (item.hasTag(getPref("tag_norecid") as string)) {
+          item.removeTag(getPref("tag_norecid") as string);
+          item.saveTx();
+        }
+        // if (metaInspire.journalAbbreviation && (item.itemType === 'report' || item.itemType === 'preprint')) {
+        if (item.itemType === 'report' || item.itemType === 'preprint') {
+          item.setType(Zotero.ItemTypes.getID('journalArticle') as number);
+        }
+
+        if (item.itemType !== 'book' && metaInspire.document_type == 'book') item.setType(Zotero.ItemTypes.getID('book') as number);
+
+        await setInspireMeta(item, metaInspire, operation);
+        item.saveTx();
+        this.counter++;
+      } else {
+        if (getPref("tag_norecid") !== "" && !item.hasTag(getPref("tag_norecid") as string)) {
+          item.addTag(getPref("tag_norecid") as string, 1);
+          item.saveTx();
+        }
+      }
+      this.updateNextItem(operation);
+
+    } else {
+      this.updateNextItem(operation);
+    }
+  };
 }
 
-async function getInspireMeta(operation: any) {
-  let item = ZoteroPane.getSelectedItems()[0];
+async function getInspireMeta(item: Zotero.Item, operation: string) {
 
   let metaInspire: jsobject = {};
 
-  const doi0 = item.getField('DOI');
-  let doi = doi0 as string;
+  const doi0 = item.getField('DOI') as string;
+  let doi = doi0;
   const url = item.getField('url') as string;
   let extra = item.getField('extra') as string;
   let searchOrNot = 0;
@@ -265,7 +357,7 @@ async function getInspireMeta(operation: any) {
       whether or not the arXiv line is at the end of extra
       */
       if (extra.match(regexArxivId)) {
-        let arxiv_split = (extra.match(regexArxivId) || " ")[2].split(' ')
+        let arxiv_split = (extra.match(regexArxivId) || "   ")[2].split(' ')
         arxiv_split[0] === '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
       }
     } else if (/(doi|arxiv|\/literature\/)/i.test(url)) {
@@ -276,7 +368,7 @@ async function getInspireMeta(operation: any) {
         if (/doi/i.test(url)) {
           doi = url.replace(/^.+doi.org\//, '')
         } else if (url.includes('/literature/')) {
-          let _recid = /[^/]*$/.exec(url) || " "
+          let _recid = /[^/]*$/.exec(url) || "    "
           if (_recid[0].match(/^\d+/)) {
             idtype = 'literature';
             doi = _recid[0]
@@ -288,10 +380,10 @@ async function getInspireMeta(operation: any) {
       }
     } else if (/DOI:/i.test(extra)) { // DOI in extra
       const regexDOIinExtra = /DOI:(.+)/i
-      doi = (extra.match(regexDOIinExtra) || " ")[1].trim()
+      doi = (extra.match(regexDOIinExtra) || "")[1].trim()
     } else if (/doi\.org\//i.test(extra)) {
       const regexDOIinExtra = /doi\.org\/(.+)/i
-      doi = (extra.match(regexDOIinExtra) || " ")[1]
+      doi = (extra.match(regexDOIinExtra) || "")[1]
     } else { // INSPIRE recid in archiveLocation or Citation Key in Extra
       let _recid = item.getField('archiveLocation') as string;
       if (_recid.match(/^\d+/)) {
@@ -304,7 +396,6 @@ async function getInspireMeta(operation: any) {
   }
 
   if (!doi && extra.includes('Citation Key:')) searchOrNot = 1
-
   const t0 = performance.now();
 
   let urlInspire = "";
@@ -312,7 +403,7 @@ async function getInspireMeta(operation: any) {
     const edoi = encodeURIComponent(doi);
     urlInspire = "https://inspirehep.net/api/" + idtype + "/" + edoi;
   } else if (searchOrNot === 1) {
-    const citekey = (extra.match(/^.*Citation\sKey:.*$/mg) || " ")[0].split(': ')[1]
+    const citekey = (extra.match(/^.*Citation\sKey:.*$/mg) || "")[0].split(': ')[1]
     urlInspire = "https://inspirehep.net/api/literature?q=texkey%20" + encodeURIComponent(citekey);
   }
 
@@ -473,14 +564,12 @@ async function getInspireMeta(operation: any) {
   return metaInspire;
 }
 
-async function setInspireMeta(metaInspire: jsobject, operation: string) {
+async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operation: string) {
 
-  let item = ZoteroPane.getSelectedItems()[0];
   const today = new Date(Date.now()).toLocaleDateString('zh-CN');
-  let extra = item.getField('extra') as string
+  let extra = item.getField('extra') as string;
   let publication = item.getField('publicationTitle') as string
   const citekey_pref = getPref("citekey")
-
   // item.setField('archiveLocation', metaInspire);
   if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
     if (operation === 'full' || operation === 'noabstract') {
@@ -564,7 +653,7 @@ async function setInspireMeta(metaInspire: jsobject, operation: string) {
 
       if (citekey_pref === "inspire") {
         if (extra.includes('Citation Key')) {
-          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/mg) || " ")[0].split(': ')[1]
+          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/mg) || "")[0].split(': ')[1]
           if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
         } else {
           extra += "\nCitation Key: " + metaInspire.citekey
