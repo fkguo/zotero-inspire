@@ -19,7 +19,7 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 - Right click a selected collection, then click one of the three options.
 
-- Automatically retrieve the metadata from INSPIRE when adding a new item to the Zotero library. Options with or without getting abstracts can be set through the `Tools` menu → `INSPIRE Metadata Updater Preferences`…
+- Automatically retrieve the metadata from INSPIRE when adding a new item to the Zotero library. Options with or without getting abstracts can be set through the `Preferences` panel
 
 - Metadata can be fetched as long as one of the following is provided:
 	- DOI in the field of `DOI` or `Extra`; if it is only in `Extra`, then it should contain `DOI:` or `doi.org/` followed by the DOI.
