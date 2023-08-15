@@ -1,4 +1,3 @@
-import ZoteroToolkit from "zotero-plugin-toolkit";
 import { config } from "../../package.json"
 import { getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
@@ -36,7 +35,7 @@ export class ZInsprefs {
 
     window.addEventListener(
       "unload",
-      (e: Event) => {
+      (_e: Event) => {
         this.unregisterNotifier(notifierID);
       },
       false,
@@ -60,21 +59,21 @@ export class ZInsMenu {
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel0"),
-            commandListener: (ev) => {
+            commandListener: (_ev) => {
               _globalThis.inspire.updateSelectedItems("full")
             }
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel1"),
-            commandListener: (ev) => {
+            commandListener: (_ev) => {
               _globalThis.inspire.updateSelectedItems("noabstract")
             }
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel2"),
-            commandListener: (ev) => {
+            commandListener: (_ev) => {
               _globalThis.inspire.updateSelectedItems("citations")
             }
           },
@@ -101,21 +100,21 @@ export class ZInsMenu {
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel0"),
-            commandListener: (ev) => {
+            commandListener: (_ev) => {
               _globalThis.inspire.updateSelectedCollection("full")
             }
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel1"),
-            commandListener: (ev) => {
+            commandListener: (_ev) => {
               _globalThis.inspire.updateSelectedCollection("noabstract")
             }
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel2"),
-            commandListener: (ev) => {
+            commandListener: (_ev) => {
               _globalThis.inspire.updateSelectedCollection("citations")
             }
           },
@@ -153,7 +152,7 @@ export class ZInspire {
     this.error_norecid_shown = error_norecid_shown
     this.final_count_shown = final_count_shown
     this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-      closeOnClick: false,
+      closeOnClick: true,
       closeTime: -1,
     })
   }
@@ -181,11 +180,11 @@ export class ZInspire {
           });
           progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
           if (getPref("tag_norecid") !== "") {
-            progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.")
-            // progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.");
+            // progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.")
+            progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.");
           } else {
-            progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items.")
-            // progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items.");
+            // progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items.")
+            progressWindowNoRecid.ItemProgress = new progressWindowNoRecid.ItemProgress(icon, "No INSPIRE recid was found for some items.");
           }
           progressWindowNoRecid.ItemProgress.setError();
           progressWindowNoRecid.show();
@@ -195,21 +194,18 @@ export class ZInspire {
       } else {
         if (!this.final_count_shown) {
           const icon = "chrome://zotero/skin/tick.png";
-          // this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-          //   closeOnClick: true,
-          //   closeTime: -1,
-          // });
+          this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+            closeOnClick: true,
+          });
           this.progressWindow.changeHeadline("Finished");
-          // this.progressWindow.ItemProgress = new ztoolkit.ProgressWindow.ItemProgress(icon, "");
-          ztoolkit.log("why?")
+          this.progressWindow.ItemProgress = new this.progressWindow.ItemProgress(icon, "");
           // ztoolkit.log(this.progressWindow.ItemProgress)
           this.progressWindow.ItemProgress.setProgress(100);
           if (operation === "full" || operation === "noabstract") {
             this.progressWindow.ItemProgress.setText(
               "INSPIRE metadata updated for " +
               this.counter + " items.");
-          }
-          if (operation === "citations") {
+          } else if (operation === "citations") {
             this.progressWindow.ItemProgress.setText(
               "INSPIRE citation counts updated for " +
               this.counter + " items.");
@@ -420,7 +416,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
         return response.json()
       }
     })
-    .catch(err => null);
+    .catch(_err => null);
 
   // Zotero.debug('getInspireMeta response: ', response, 'status: ', status)
   if (status === null) {
@@ -566,7 +562,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
 
 async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operation: string) {
 
-  const today = new Date(Date.now()).toLocaleDateString('zh-CN');
+  // const today = new Date(Date.now()).toLocaleDateString('zh-CN');
   let extra = item.getField('extra') as string;
   let publication = item.getField('publicationTitle') as string
   const citekey_pref = getPref("citekey")

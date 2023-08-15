@@ -1,6 +1,5 @@
 import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
-import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
 import { ZInsMenu, ZInsprefs } from "./modules/zinspire";
 import { getPref } from "./utils/prefs";
@@ -80,15 +79,15 @@ async function onNotify(
  * @param type event type
  * @param data event data
  */
-async function onPrefsEvent(type: string, data: { [key: string]: any }) {
-  switch (type) {
-    case "load":
-      registerPrefsScripts(data.window);
-      break;
-    default:
-      return;
-  }
-}
+// async function onPrefsEvent(type: string, data: { [key: string]: any }) {
+//   switch (type) {
+//     case "load":
+//       registerPrefsScripts(data.window);
+//       break;
+//     default:
+//       return;
+//   }
+// }
 
 // function onShortcuts(type: string) {
 // }
@@ -125,5 +124,5 @@ export default {
   onMainWindowLoad,
   onMainWindowUnload,
   onNotify,
-  onPrefsEvent,
+  // onPrefsEvent,
 };

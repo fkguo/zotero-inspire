@@ -41,6 +41,10 @@
   },
   "homepage": "https://github.com/windingwind/zotero-addon-template#readme",
   "dependencies": {
+    "events": "^3.3.0",
+    "pako": "^2.1.0",
+    "timers": "^0.1.1",
+    "xml2js": "^0.6.2",
     "zotero-plugin-toolkit": "^2.2.2"
   },
   "devDependencies": {
