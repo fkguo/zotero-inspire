@@ -19,7 +19,7 @@ async function onStartup() {
   await onMainWindowLoad(window);
 }
 
-async function onMainWindowLoad(win: Window): Promise<void> {
+async function onMainWindowLoad(_win: Window): Promise<void> {
   // Create ztoolkit for every window
   addon.data.ztoolkit = createZToolkit();
 
@@ -30,7 +30,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
 }
 
-async function onMainWindowUnload(win: Window): Promise<void> {
+async function onMainWindowUnload(_win: Window): Promise<void> {
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
 }
