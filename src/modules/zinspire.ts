@@ -308,7 +308,7 @@ export class ZInspire {
 
       const metaInspire = await getInspireMeta(item, operation);
       // if (metaInspire !== {}) {
-      if (metaInspire !== -1 && metaInspire !== undefined) {
+      if (metaInspire !== -1 && metaInspire.recid !== undefined) {
         if (item.hasTag(getPref("tag_norecid") as string)) {
           item.removeTag(getPref("tag_norecid") as string);
           item.saveTx();
