@@ -1,0 +1,37 @@
+<linkset>
+  <html:link rel="localization" href="__addonRef__-preferences.ftl" />
+</linkset>
+<vbox
+  id="zotero-prefpane-__addonRef__"
+>
+  <groupbox>
+    <label><html:h2 data-l10n-id="pref-meta"></html:h2></label>
+    <radiogroup id="zotero-prefpane-__addonRef__-meta" preference="extensions.zotero.__addonRef__.meta" orient="vertical">
+        <radio data-l10n-id="meta-full" value="full" />
+        <radio data-l10n-id="meta-noabstract" value="noabstract" />
+        <radio data-l10n-id="meta-citations" value="citations" />
+        <radio data-l10n-id="meta-no" value="no" />
+    </radiogroup>
+    <label><html:h2 data-l10n-id="pref-citekey"></html:h2></label>
+    <radiogroup id="zotero-prefpane-__addonRef__-citekey" preference="__prefsPrefix__.citekey" orient="vertical">
+        <radio data-l10n-id="citekey-inspire" value="inspire" />
+        <radio data-l10n-id="citekey-no" value="no" />
+    </radiogroup>
+    <label><html:h2 data-l10n-id="pref-nofound"></html:h2></label>
+    <vbox>
+      <label><html:p data-l10n-id="pref-nofound1"></html:p></label>
+      <label><html:p data-l10n-id="pref-nofound2"></html:p></label>
+    </vbox>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-tag_norecid"
+      preference="__prefsPrefix__.tag_norecid"
+    ></html:input>
+  </groupbox>
+</vbox>
+<vbox>
+  <html:label
+    data-l10n-id="pref-help"
+    data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'
+  ></html:label>
+</vbox>

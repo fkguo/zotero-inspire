@@ -1,5 +1,8 @@
 # Zotero INSPIRE Metadata Updater
 
+[![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
+[![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
+
 This is an add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero). It is useful as most papers from [arXiv](https://arxiv.org) will get published in journals later on. This add-on can be used to update the metadata and citation counts (with and without self citations) of the selected item(s) in your Zotero library from [INSPIRE-HEP](https://inspirehep.net), which is a community maintained database for **high energy physics and related fields**. 
 
 
@@ -16,7 +19,7 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 - Right click a selected collection, then click one of the three options.
 
-- Automatically retrieve the metadata from INSPIRE when adding a new item to the Zotero library. Options with or without getting abstracts can be set through the `Tools` menu → `INSPIRE Metadata Updater Preferences`…
+- Automatically retrieve the metadata from INSPIRE when adding a new item to the Zotero library. Options with or without getting abstracts can be set through the `Preferences` panel
 
 - Metadata can be fetched as long as one of the following is provided:
 	- DOI in the field of `DOI` or `Extra`; if it is only in `Extra`, then it should contain `DOI:` or `doi.org/` followed by the DOI.
@@ -60,17 +63,19 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 		- Citation counts are changed only when they are different from those of the last fetching.
 	- The [Better BibTeX (BBT)](https://retorque.re/zotero-better-bibtex) plugin can pin the citation key from INSPIRE. When we add new arXiv articles, sometimes BBT fails to get the INSPIRE record. In that case, this plugin writes the INSPIRE citation key to the `Extra` field so that it is pinned correctly (the BBT plugin needs to be installed).
 	- Work with the [INSPIRE Zotero translator](https://github.com/zotero/translators/blob/master/INSPIRE.js), and change `"_eprint"` in `Extra` to `arXiv`.
-- By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Tools` → `INSPIRE Metadata Updater Preferences...`.
+- By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Settings` → `INSPIRE Metadata Updater Preferences`.
 
 
 
 ## References
 
-I knew basically nothing about javascript. The first version of this add-on was developed by modifying the codes of the following two add-ons:
+I knew basically nothing about javascript or typescript. The first version of this add-on was developed by modifying the codes of the following two add-ons:
 
 - https://github.com/bwiernik/zotero-shortdoi
 
 - https://github.com/eschnett/zotero-citationcounts
+
+- https://github.com/windingwind/zotero-plugin-template
 
 ## License
 
