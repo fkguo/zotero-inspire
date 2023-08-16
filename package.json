@@ -1,15 +1,15 @@
 {
-  "name": "zotero-inspire",
-  "version": "0.2.14",
+  "name": "zotero-inspire-dev",
+  "version": "0.3.0",
   "description": "Inspire Metadata Updater",
   "config": {
-    "addonName": "zotero-inspire",
+    "addonName": "zotero-inspire-dev",
     "addonID": "zoteroinspire@itp.ac.cn",
     "addonRef": "zoteroinspire",
     "addonInstance": "ZoteroInspire",
     "prefsPrefix": "extensions.zotero.inspiremeta",
     "releasepage": "https://github.com/fkguo/zotero-inspire",
-    "updaterdf": "https://raw.githubusercontent.com/fkguo/zotero-inspire/main/update.json"
+    "updaterdf": "https://raw.githubusercontent.com/fkguo/zotero-inspire/dev/update.json"
   },
   "main": "src/index.ts",
   "scripts": {
@@ -34,7 +34,7 @@
     "type": "git",
     "url": "git+https://github.com/fkguo/zotero-inspire.git"
   },
-  "author": "Feng-Kun Guo",
+  "author": "Feng-Kun Guo, Yu Zhang",
   "license": "MPL-2.0-or-later",
   "bugs": {
     "url": "https://github.com/fkguo/zotero-inspire/issues"

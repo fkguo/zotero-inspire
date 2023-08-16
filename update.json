@@ -3,7 +3,7 @@
     "zoteroinspire@itp.ac.cn": {
       "updates": [
         {
-          "version": "0.2.14",
+          "version": "0.3.0",
           "update_link": "https://github.com/fkguo/zotero-inspire",
           "applications": {
             "zotero": {
