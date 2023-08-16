@@ -1,2 +1,4 @@
-.project
-*.xpi
+**/build
+node_modules
+package-lock.json
+zotero-cmd.json
