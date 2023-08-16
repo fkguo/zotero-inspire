@@ -8,9 +8,14 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 ## Installation
 
+### Pre-built binaries
 - Download the latest `.xpi` file of this add-on from https://github.com/fkguo/zotero-inspire/releases
 - In Zotero, the add-on can be installed by going to `Tools` → `Add-ons`, then click the top-right button and choose `Install Add-ons From File...`.
 - It can be updated in `Add-ons Manager` → `Check for Updates`.
+
+### Building from source
+- Clone this repo
+- Run `npm install` and `npm run build-prod`
 
 
 ## Usage
