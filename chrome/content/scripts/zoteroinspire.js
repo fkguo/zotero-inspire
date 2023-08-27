@@ -178,11 +178,13 @@ async function getInspireMeta(item, operation) {
                                 pagesErr = pubinfo_next.page_start
                                 pubinfo_next.page_end && (pagesErr = pagesErr + "-" + pubinfo_next.page_end)
                             }       
-                    errNotes[i-1] = `Erratum: ${jAbbrev} ${pubinfo_next.journal_volume}, ${pagesErr} (${pubinfo_next.year})`
-                };
+                            errNotes[i-1] = `Erratum: ${jAbbrev} ${pubinfo_next.journal_volume}, ${pagesErr} (${pubinfo_next.year})`
+                        };
+                    }
+                    if (errNotes.length > 0) {
+                        metaInspire.note = `[${errNotes.join(', ')}]`
+                    }
                 }
-                metaInspire.note = `[${errNotes.join(', ')}]`
-            }
             }
 
             const metaArxiv = meta['arxiv_eprints']
