@@ -380,7 +380,7 @@ async function setInspireMeta(item, metaInspire, operation) {
                 let errTag = false
                 for (let id of noteIDs) {
                     let note = Zotero.Items.get(id);
-                    let noteHTML = note.getNote();
+                    let noteHTML = note.getNote().replace('–', '-').replace('--', '-');
                     if (noteHTML.includes(metaInspire.note)) {
                         errTag = true
                     }
