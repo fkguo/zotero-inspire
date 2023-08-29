@@ -9,14 +9,15 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 ## Installation
 
 ### Pre-built binaries
-- Download the latest `.xpi` file of this add-on from https://github.com/fkguo/zotero-inspire/releases
-- In Zotero, the add-on can be installed by going to `Tools` → `Add-ons`, then click the top-right button and choose `Install Add-ons From File...`.
-- It can be updated in `Add-ons Manager` → `Check for Updates`.
+- This version is compatible only with Zotero 7 and is still under development.
+- The pre-release version of the pre-built `.xpi` file can be downloaded from https://github.com/fkguo/zotero-inspire/releases/ 
 
 ### Building from source
 - Clone this repo
 - Run `npm install` and `npm run build-prod`
 
+- In Zotero, the add-on can be installed by going to `Tools` → `Add-ons`, then click the top-right button and choose `Install Add-ons From File...`.
+- It can be updated in `Add-ons Manager` → `Check for Updates`.
 
 ## Usage
 
@@ -80,6 +81,8 @@ I knew basically nothing about javascript or typescript. The first version of th
 - https://github.com/bwiernik/zotero-shortdoi
 
 - https://github.com/eschnett/zotero-citationcounts
+
+The version from 0.3.0 on (for Zotero 7) was developed based on:
 
 - https://github.com/windingwind/zotero-plugin-template
 

@@ -1,6 +1,6 @@
 {
-  "name": "zotero-inspire",
-  "version": "0.3.01",
+  "name": "zotero-inspire-dev",
+  "version": "0.3.1",
   "description": "Inspire Metadata Updater",
   "config": {
     "addonName": "zotero-inspire-dev",
