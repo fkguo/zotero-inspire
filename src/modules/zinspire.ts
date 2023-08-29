@@ -473,6 +473,30 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
           metaInspire.issue = pubinfo_first.journal_issue
         };
       }
+      // for erratum, added by FK Guo, date: 2023-08-27
+      // Consider at most two errata
+      let pubinfoLength = publication_info.length
+      if (pubinfoLength > 1) {
+        let errNotes = []
+        for (let i = 1; i < pubinfoLength; i++) {
+          let pubinfo_next = publication_info[i];
+          if (pubinfo_next.material == "erratum") {
+            let jAbbrev = pubinfo_next.journal_title;
+            let pagesErr = ""
+            if (pubinfo_next.artid) {
+              pagesErr = pubinfo_next.artid;
+            } else if (pubinfo_next.page_start) {
+              pagesErr = pubinfo_next.page_start
+              pubinfo_next.page_end && (pagesErr = pagesErr + "-" + pubinfo_next.page_end)
+            }
+            errNotes[i - 1] = `Erratum: ${jAbbrev} ${pubinfo_next.journal_volume}, ${pagesErr} (${pubinfo_next.year})`
+          };
+        }
+        if (errNotes.length > 0) {
+          metaInspire.note = `[${errNotes.join(', ')}]`
+        }
+        metaInspire.note = `[${errNotes.join(', ')}]`
+      }
 
       const metaArxiv = meta['arxiv_eprints']
 
@@ -556,13 +580,13 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
       Zotero.debug(`Assigning meta took ${t2 - t1} milliseconds.`)
     }
   } catch (err) {
-    Zotero.debug('getInspireMeta-err: Not found in INSPIRE')
-    Zotero.debug(`metaInspire: ${metaInspire}`)
+    // Zotero.debug('getInspireMeta-err: Not found in INSPIRE')
+    // Zotero.debug(`metaInspire: ${metaInspire}`)
     return -1;
   }
 
-  // Zotero.debug("getInspireMeta final: ");
-  // Zotero.debug(metaInspire)
+  Zotero.debug("getInspireMeta final: ");
+  Zotero.debug(metaInspire)
   return metaInspire;
 }
 
@@ -653,6 +677,30 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
       // Zotero.debug('setInspire-4')
       extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
 
+      // for erratum, added by FK Guo, date: 2023-08-27
+      // Zotero.debug(`++++metaInspire.note: ${metaInspire.note}`)
+      if (metaInspire.note) {
+        let noteIDs = item.getNotes()
+        // check whether the same erratum note is already there
+        let errTag = false
+        for (let id of noteIDs) {
+          let note = Zotero.Items.get(id);
+          let noteHTML = note.getNote().replace('–', '-').replace('--', '-');
+          if (noteHTML.includes(metaInspire.note)) {
+            errTag = true
+          }
+          // Zotero.debug(`=======+++++++ ${id} : ${errTag}`)
+        }
+        if (!errTag) {
+          let newNote = new Zotero.Item('note')
+          newNote.setNote(metaInspire.note);
+          newNote.parentID = item.id;
+          await newNote.saveTx();
+          newNote
+        }
+      }
+
+      // for citekey preference
       if (citekey_pref === "inspire") {
         if (extra.includes('Citation Key')) {
           const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/mg) || "")[0].split(': ')[1]
