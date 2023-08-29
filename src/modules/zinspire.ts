@@ -492,6 +492,9 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
             errNotes[i - 1] = `Erratum: ${jAbbrev} ${pubinfo_next.journal_volume}, ${pagesErr} (${pubinfo_next.year})`
           };
         }
+        if (errNotes.length > 0) {
+          metaInspire.note = `[${errNotes.join(', ')}]`
+        }
         metaInspire.note = `[${errNotes.join(', ')}]`
       }
 
@@ -682,7 +685,7 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
         let errTag = false
         for (let id of noteIDs) {
           let note = Zotero.Items.get(id);
-          let noteHTML = note.getNote();
+          let noteHTML = note.getNote().replace('–', '-').replace('--', '-');
           if (noteHTML.includes(metaInspire.note)) {
             errTag = true
           }
