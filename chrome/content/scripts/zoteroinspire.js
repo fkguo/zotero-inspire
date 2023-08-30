@@ -163,7 +163,7 @@ async function getInspireMeta(item, operation) {
                     metaInspire.issue = pubinfo_first.journal_issue
                 };
                 // for erratum, added by FK Guo, date: 2023-08-27
-                // Consider at most two errata
+                // support multiple errata 
                 pubinfoLength = publication_info.length 
                 if (pubinfoLength > 1) { 
                     let errNotes = []
