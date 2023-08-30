@@ -474,7 +474,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
         };
       }
       // for erratum, added by FK Guo, date: 2023-08-27
-      // Consider at most two errata
+      // support multiple errata
       let pubinfoLength = publication_info.length
       if (pubinfoLength > 1) {
         let errNotes = []
