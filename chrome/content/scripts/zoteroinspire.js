@@ -279,6 +279,59 @@ async function getInspireMeta(item, operation) {
     return metaInspire;
 }
 
+
+/*
+copied from https://github.com/eschnett/zotero-citationcounts/blob/master/chrome/content/zotero-citationcounts.js
+*/
+async function getCrossrefCount(item) {
+    const doi = item.getField('DOI');
+    if (!doi) {
+        // There is no DOI; skip item
+        return -1;
+    }
+    const edoi = encodeURIComponent(doi);
+
+    let response = null;
+
+    if (response === null) {
+        const style = "vnd.citationstyles.csl+json";
+        const xform = "transform/application/" + style;
+        const url = "https://api.crossref.org/works/" + edoi + "/" + xform;
+        response = await fetch(url)
+            .then(response => response.json())
+            .catch(err => null);
+    }
+
+    if (response === null) {
+        const url = "https://doi.org/" + edoi;
+        const style = "vnd.citationstyles.csl+json";
+        response = await fetch(url, {
+            headers: {
+                "Accept": "application/" + style
+            }
+        })
+            .then(response => response.json())
+            .catch(err => null);
+        }
+
+    if (response === null) {
+        // Something went wrong
+        return -1;
+    }
+
+    let str = null;
+    try {
+        str = response['is-referenced-by-count'];
+    } catch (err) {
+        // There are no citation counts
+        return -1;
+    }
+
+    const count = parseInt(str);
+    return count;
+}
+
+
 /*
   set the metadata to Zotero items.
   The zotero item fields are listed at 
@@ -323,7 +376,7 @@ async function setInspireMeta(item, metaInspire, operation) {
             }
 
             if (metaInspire.isbns && !item.getField('ISBN')) item.setField('ISBN', metaInspire.isbns);
-            if (metaInspire.publisher && !item.getField('publisher') && item.itemType == 'book') item.setField('publisher', metaInspire.publisher);
+            if (metaInspire.publisher && !item.getField('publisher') && (item.itemType == 'book' || item.itemType == 'bookSection')) item.setField('publisher', metaInspire.publisher);
 
             /* set the title and creators if there are none */
             !item.getField('title') && item.setField('title', metaInspire.title)
@@ -384,7 +437,7 @@ async function setInspireMeta(item, metaInspire, operation) {
                     if (noteHTML.includes(metaInspire.note)) {
                         errTag = true
                     }
-                    // Zotero.debug(`=======+++++++ ${id} : ${errTag}`)
+                    // Zotero.debug(`=======+++++++ ${id} : ${noteHTML}`)
                 } 
                 if (!errTag) {
                     let newNote = new Zotero.Item('note')
@@ -416,7 +469,7 @@ async function setInspireMeta(item, metaInspire, operation) {
         }
         extra = extra.replace(/\n\n/mg, '\n')
         item.setField('extra', extra)
-    }
+    } 
 }
 
 
@@ -436,6 +489,38 @@ function setCitations(extra, citation_count, citation_count_wo_self_citations) {
         extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
     }
     return extra
+}
+
+
+
+function setExtraCitations(extra, source, citation_count) {
+    const today = new Date(Date.now()).toLocaleDateString('zh-CN');
+    // Zotero.debug(`setExtraCitations citation count: ${citation_count}`)
+    // judge whether extra has the citation record
+    if (/(|.*?\n)\d+\scitations[\s\S]*?/.test(extra)) {
+        const existingCitations = extra.match(/^\d+\scitations/mg).map(e => Number(e.replace(" citations", "")))
+        // if the citations are different, replace the old one 
+        if (citation_count !== existingCitations[0]) {
+            extra = extra.replace(/^.*citations.*$\n/mg, "");
+            extra = `${citation_count} citations (${source} ${today})\n` + extra
+        }
+    } else {
+        extra = `${citation_count} citations (${source} ${today})\n` + extra
+    }
+    return extra
+}
+
+async function setCrossRefCitations(item) {
+    let extra = item.getField('extra')
+    const count_crossref = await getCrossrefCount(item)
+    if (count_crossref >=0) {
+        extra = setExtraCitations(extra, 'CrossRef', count_crossref)
+        extra = extra.replace(/\n\n/mg, '\n')
+        item.setField('extra', extra)
+    } else {    
+        count_crossref = -1
+    }
+    return count_crossref 
 }
 
 
@@ -558,6 +643,7 @@ Zotero.Inspire.resetState = function (operation) {
         Zotero.Inspire.itemsToUpdate = null;
         Zotero.Inspire.numberOfUpdatedItems = 0;
         Zotero.Inspire.counter = 0;
+        Zotero.Inspire.CrossRefcounter = 0;
         error_norecid = null;
         error_norecid_shown = false;
         final_count_shown = false;
@@ -597,8 +683,10 @@ Zotero.Inspire.resetState = function (operation) {
                 }
                 if (operation === "citations") {
                     Zotero.Inspire.progressWindow.progress.setText(
-                        "INSPIRE citation counts updated for " +
-                        Zotero.Inspire.counter + " items.");
+                        "INSPIRE citations updated for " +
+                        Zotero.Inspire.counter + " items;\n" + 
+                        "CrossRef citations updated for " +
+                        Zotero.Inspire.CrossRefcounter + " items.");
                 }
                 Zotero.Inspire.progressWindow.show();
                 Zotero.Inspire.progressWindow.startCloseTimer(4000);
@@ -709,6 +797,13 @@ Zotero.Inspire.updateItem = async function (item, operation) {
             if (Zotero.Inspire.getPref("tag_norecid") !== "" && !item.hasTag(Zotero.Inspire.getPref("tag_norecid"))) {
                 item.addTag(Zotero.Inspire.getPref("tag_norecid"), 1);
                 item.saveTx();
+            }
+            if (operation === "citations") {
+                crossref_count = await setCrossRefCitations(item);
+                item.saveTx();
+                if (crossref_count >= 0) {
+                    Zotero.Inspire.CrossRefcounter++; 
+                }
             }
         }
         Zotero.Inspire.updateNextItem(operation);
