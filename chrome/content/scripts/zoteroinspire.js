@@ -512,7 +512,7 @@ function setExtraCitations(extra, source, citation_count) {
 
 async function setCrossRefCitations(item) {
     let extra = item.getField('extra')
-    const count_crossref = await getCrossrefCount(item)
+    count_crossref = await getCrossrefCount(item)
     if (count_crossref >=0) {
         extra = setExtraCitations(extra, 'CrossRef', count_crossref)
         extra = extra.replace(/\n\n/mg, '\n')
