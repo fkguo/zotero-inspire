@@ -12,7 +12,7 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 ## Usage
 
-- Right click a selected item or multiple selected items, click `Update INSPIRE Metadata`, then choose one of the three options: fetch the metadata with or without abstracts, or update only the citations with and w/o self citations.
+- Right click a selected item or multiple selected items, click `Update INSPIRE Metadata`, then choose one of the three options: fetch the metadata with or without abstracts, or update only the citations with and w/o self citations (if the paper is not in the INSPIRE database, then update the CrossRef citation counts).
 
 - Right click a selected collection, then click one of the three options.
 
