@@ -144,16 +144,18 @@ export class ZInspire {
   itemsToUpdate: Zotero.Item[];
   numberOfUpdatedItems: number;
   counter: number;
+  CrossRefcounter: number;
   error_norecid: boolean;
   error_norecid_shown: boolean;
   final_count_shown: boolean;
   progressWindow: ProgressWindowHelper;
-  constructor(current: number = -1, toUpdate: number = 0, itemsToUpdate: Zotero.Item[] = [], numberOfUpdatedItems: number = 0, counter: number = 0, error_norecid: boolean = false, error_norecid_shown: boolean = false, final_count_shown: boolean = false) {
+  constructor(current: number = -1, toUpdate: number = 0, itemsToUpdate: Zotero.Item[] = [], numberOfUpdatedItems: number = 0, counter: number = 0, CrossRefcounter: number = 0, error_norecid: boolean = false, error_norecid_shown: boolean = false, final_count_shown: boolean = false) {
     this.current = current
     this.toUpdate = toUpdate
     this.itemsToUpdate = itemsToUpdate
     this.numberOfUpdatedItems = numberOfUpdatedItems
     this.counter = counter
+    this.CrossRefcounter = CrossRefcounter
     this.error_norecid = error_norecid
     this.error_norecid_shown = error_norecid_shown
     this.final_count_shown = final_count_shown
@@ -173,6 +175,7 @@ export class ZInspire {
       this.itemsToUpdate = [];
       this.numberOfUpdatedItems = 0;
       this.counter = 0;
+      this.CrossRefcounter = 0;
       this.error_norecid = false;
       this.error_norecid_shown = false;
       this.final_count_shown = false;
@@ -213,8 +216,10 @@ export class ZInspire {
               this.counter + " items.");
           } else if (operation === "citations") {
             this.progressWindow.ItemProgress.setText(
-              "INSPIRE citation counts updated for " +
-              this.counter + " items.");
+               "INSPIRE citations updated for " +
+                        this.counter + " items;\n" + 
+                        "CrossRef citations updated for " +
+                        this.CrossRefcounter + " items.");
           }
           this.progressWindow.show();
           this.progressWindow.startCloseTimer(4000);
@@ -327,6 +332,13 @@ export class ZInspire {
         if (getPref("tag_norecid") !== "" && !item.hasTag(getPref("tag_norecid") as string)) {
           item.addTag(getPref("tag_norecid") as string, 1);
           item.saveTx();
+        }
+        if (operation == "citations") {
+          let crossref_count = await setCrossRefCitations(item);
+          item.saveTx();
+          if (crossref_count >= 0) {
+            this.CrossRefcounter++
+          }
         }
       }
       this.updateNextItem(operation);
@@ -590,6 +602,57 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
   return metaInspire;
 }
 
+/*
+copied from https://github.com/eschnett/zotero-citationcounts/blob/master/chrome/content/zotero-citationcounts.js
+*/
+async function getCrossrefCount(item: Zotero.Item) {
+  const doi = item.getField('DOI');
+  if (!doi) {
+    // There is no DOI; skip item
+    return -1;
+  }
+  const edoi = encodeURIComponent(doi);
+
+  let response = null;
+
+  if (response === null) {
+    const style = "vnd.citationstyles.csl+json";
+    const xform = "transform/application/" + style;
+    const url = "https://api.crossref.org/works/" + edoi + "/" + xform;
+    response = await fetch(url)
+      .then(response => response.json())
+      .catch(_err => null);
+  }
+
+  if (response === null) {
+    const url = "https://doi.org/" + edoi;
+    const style = "vnd.citationstyles.csl+json";
+    response = await fetch(url, {
+      headers: {
+        "Accept": "application/" + style
+      }
+    })
+      .then(response => response.json())
+      .catch(_err => null);
+  }
+
+  if (response === null) {
+    // Something went wrong
+    return -1;
+  }
+
+  let str = null;
+  try {
+    str = response['is-referenced-by-count'];
+  } catch (err) {
+    // There are no citation counts
+    return -1;
+  }
+
+  const count = parseInt(str);
+  return count;
+}
+
 async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operation: string) {
 
   // const today = new Date(Date.now()).toLocaleDateString('zh-CN');
@@ -628,7 +691,7 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
       }
 
       if (metaInspire.isbns && !item.getField('ISBN')) item.setField('ISBN', metaInspire.isbns);
-      if (metaInspire.publisher && !item.getField('publisher') && item.itemType == 'book') item.setField('publisher', metaInspire.publisher);
+      if (metaInspire.publisher && !item.getField('publisher') && (item.itemType == 'book' || item.itemType == "bookSection")) item.setField('publisher', metaInspire.publisher);
 
       /* set the title and creators if there are none */
       !item.getField('title') && item.setField('title', metaInspire.title)
@@ -723,6 +786,36 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
     item.setField('extra', extra)
 
   }
+}
+
+function setExtraCitations(extra: any, source: string, citation_count: any) {
+  const today = new Date(Date.now()).toLocaleDateString('zh-CN');
+  // Zotero.debug(`setExtraCitations citation count: ${citation_count}`)
+  // judge whether extra has the citation record
+  if (/(|.*?\n)\d+\scitations[\s\S]*?/.test(extra)) {
+    const existingCitations = extra.match(/^\d+\scitations/mg).map((e: any) => Number(e.replace(" citations", "")))
+    // if the citations are different, replace the old one 
+    if (citation_count !== existingCitations[0]) {
+      extra = extra.replace(/^.*citations.*$\n/mg, "");
+      extra = `${citation_count} citations (${source} ${today})\n` + extra
+    }
+  } else {
+    extra = `${citation_count} citations (${source} ${today})\n` + extra
+  }
+  return extra
+}
+
+async function setCrossRefCitations(item: Zotero.Item) {
+  let extra = item.getField('extra')
+  let count_crossref = await getCrossrefCount(item)
+  if (count_crossref >= 0) {
+    extra = setExtraCitations(extra, 'CrossRef', count_crossref) as string
+    extra = extra.replace(/\n\n/mg, '\n')
+    item.setField('extra', extra)
+  } else {
+    count_crossref = -1
+  }
+  return count_crossref
 }
 
 function setCitations(extra: string, citation_count: number, citation_count_wo_self_citations: number) {
