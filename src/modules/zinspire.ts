@@ -184,7 +184,7 @@ export class ZInspire {
         this.progressWindow.close();
         const icon = "chrome://zotero/skin/cross.png";
         if (this.error_norecid && !this.error_norecid_shown) {
-          let progressWindowNoRecid = new Zotero.ProgressWindow({
+          const progressWindowNoRecid = new Zotero.ProgressWindow({
             closeOnClick: true
           });
           progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
@@ -312,7 +312,7 @@ export class ZInspire {
       // await removeArxivNote(item)
 
       const metaInspire = await getInspireMeta(item, operation);
-      // if (metaInspire !== {}) {
+        // Zotero.debug(`updateItem metaInspire: ${metaInspire}`);
       if (metaInspire !== -1 && metaInspire.recid !== undefined) {
         if (item.hasTag(getPref("tag_norecid") as string)) {
           item.removeTag(getPref("tag_norecid") as string);
@@ -334,7 +334,7 @@ export class ZInspire {
           item.saveTx();
         }
         if (operation == "citations") {
-          let crossref_count = await setCrossRefCitations(item);
+          const crossref_count = await setCrossRefCitations(item);
           item.saveTx();
           if (crossref_count >= 0) {
             this.CrossRefcounter++
@@ -351,16 +351,16 @@ export class ZInspire {
 
 async function getInspireMeta(item: Zotero.Item, operation: string) {
 
-  let metaInspire: jsobject = {};
+  const metaInspire: jsobject = {};
 
   const doi0 = item.getField('DOI') as string;
   let doi = doi0;
   const url = item.getField('url') as string;
-  let extra = item.getField('extra') as string;
+  const extra = item.getField('extra') as string;
   let searchOrNot = 0;
 
   let idtype = 'doi';
-  var arxivReg = new RegExp(/arxiv/i)
+  const arxivReg = new RegExp(/arxiv/i)
   if (!doi || arxivReg.test(doi)) {
 
     if (extra.includes('arXiv:') || extra.includes('_eprint:')) { // arXiv number from Extra
@@ -371,7 +371,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
       whether or not the arXiv line is at the end of extra
       */
       if (extra.match(regexArxivId)) {
-        let arxiv_split = (extra.match(regexArxivId) || "   ")[2].split(' ')
+        const arxiv_split = (extra.match(regexArxivId) || "   ")[2].split(' ')
         arxiv_split[0] === '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
       }
     } else if (/(doi|arxiv|\/literature\/)/i.test(url)) {
@@ -382,7 +382,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
         if (/doi/i.test(url)) {
           doi = url.replace(/^.+doi.org\//, '')
         } else if (url.includes('/literature/')) {
-          let _recid = /[^/]*$/.exec(url) || "    "
+          const _recid = /[^/]*$/.exec(url) || "    "
           if (_recid[0].match(/^\d+/)) {
             idtype = 'literature';
             doi = _recid[0]
@@ -399,7 +399,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
       const regexDOIinExtra = /doi\.org\/(.+)/i
       doi = (extra.match(regexDOIinExtra) || "")[1]
     } else { // INSPIRE recid in archiveLocation or Citation Key in Extra
-      let _recid = item.getField('archiveLocation') as string;
+      const _recid = item.getField('archiveLocation') as string;
       if (_recid.match(/^\d+/)) {
         idtype = 'literature';
         doi = _recid
@@ -422,10 +422,10 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
   }
 
   if (!urlInspire) return -1;
-  // Zotero.debug("urlInspire: ");
-  // Zotero.debug(urlInspire)
 
-  let status = null;
+  // Zotero.debug(`urlInspire: ${urlInspire}`);
+
+  let status: number | null = null;
   const response = await fetch(urlInspire)
     //   .then(response => response.json())
     .then(response => {
@@ -436,7 +436,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
     })
     .catch(_err => null);
 
-  // Zotero.debug('getInspireMeta response: ', response, 'status: ', status)
+  // Zotero.debug(`getInspireMeta response: ${response}, status: ${status}`)
   if (status === null) {
     return -1;
   }
@@ -454,11 +454,12 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
       }
     })()
 
-
     metaInspire.recid = meta['control_number']
 
     metaInspire.citation_count = meta['citation_count']
     metaInspire.citation_count_wo_self_citations = meta['citation_count_without_self_citations']
+
+    // Zotero.debug(`metaInspire.recid: ${metaInspire.recid}`)
 
     if (operation !== 'citation') {
 
@@ -467,9 +468,12 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
         metaInspire.DOI = meta['dois'][0].value
       }
 
-      const publication_info = meta['publication_info']
-      if (publication_info) {
-        let pubinfo_first = publication_info[0]
+      // Zotero.debug(`meta['dois']: ${meta['dois']}, meta['arxiv_eprints']: ${meta['arxiv_eprints'][0].value}`)
+
+      if (meta['publication_info']) {
+        const publication_info = meta['publication_info']
+        // Zotero.debug(`publication_info: ${publication_info[0]}`)
+        const pubinfo_first = publication_info[0]
         if (pubinfo_first.journal_title) {
           let jAbbrev = ""
           jAbbrev = pubinfo_first.journal_title;
@@ -484,33 +488,36 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
           metaInspire.date = pubinfo_first.year;
           metaInspire.issue = pubinfo_first.journal_issue
         };
-      }
-      // for erratum, added by FK Guo, date: 2023-08-27
-      // support multiple errata
-      let pubinfoLength = publication_info.length
-      if (pubinfoLength > 1) {
-        let errNotes = []
-        for (let i = 1; i < pubinfoLength; i++) {
-          let pubinfo_next = publication_info[i];
-          if (pubinfo_next.material == "erratum") {
-            let jAbbrev = pubinfo_next.journal_title;
-            let pagesErr = ""
-            if (pubinfo_next.artid) {
-              pagesErr = pubinfo_next.artid;
-            } else if (pubinfo_next.page_start) {
-              pagesErr = pubinfo_next.page_start
-              pubinfo_next.page_end && (pagesErr = pagesErr + "-" + pubinfo_next.page_end)
-            }
-            errNotes[i - 1] = `Erratum: ${jAbbrev} ${pubinfo_next.journal_volume}, ${pagesErr} (${pubinfo_next.year})`
-          };
-        }
-        if (errNotes.length > 0) {
+      
+        // for erratum, added by FK Guo, date: 2023-08-27
+        // support multiple errata
+        const pubinfoLength = publication_info.length
+        if (pubinfoLength > 1) {
+          const errNotes: string[] = [];
+          for (let i = 1; i < pubinfoLength; i++) {
+            const pubinfo_next = publication_info[i];
+            if (pubinfo_next.material == "erratum") {
+              const jAbbrev = pubinfo_next.journal_title;
+              let pagesErr = ""
+              if (pubinfo_next.artid) {
+                pagesErr = pubinfo_next.artid;
+              } else if (pubinfo_next.page_start) {
+                pagesErr = pubinfo_next.page_start
+                pubinfo_next.page_end && (pagesErr = pagesErr + "-" + pubinfo_next.page_end)
+              }
+              errNotes[i - 1] = `Erratum: ${jAbbrev} ${pubinfo_next.journal_volume}, ${pagesErr} (${pubinfo_next.year})`
+            };
+          }
+          if (errNotes.length > 0) {
+            metaInspire.note = `[${errNotes.join(', ')}]`
+          }
           metaInspire.note = `[${errNotes.join(', ')}]`
         }
-        metaInspire.note = `[${errNotes.join(', ')}]`
       }
 
       const metaArxiv = meta['arxiv_eprints']
+
+      // Zotero.debug(`metaArxiv: ${metaArxiv}`)
 
       if (metaArxiv) {
         metaInspire.arxiv = metaArxiv[0]
@@ -520,7 +527,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
       const metaAbstract = meta['abstracts']
 
       if (metaAbstract) {
-        let abstractInspire = metaAbstract
+        const abstractInspire = metaAbstract
         metaInspire.abstractNote = abstractInspire[0].value
         if (abstractInspire.length > 0) for (let i = 0; i < abstractInspire.length; i++) {
           if (abstractInspire[i].source === "arXiv") {
@@ -544,7 +551,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
 
       metaInspire.title = meta['titles'][0].title
 
-      var creators = [];
+      const creators: any[] = [];
       /* INSPIRE tricky points:
       Not all items have 'author_count' in the metadata;
       some authors have only full_name, instead of last_name and first_name;
@@ -560,15 +567,17 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
         // keep only 3 authors if there are more than 10
         if (authorCount > 10) (maxAuthorCount = 3);
 
-        let authorName = [, ""]
-        for (let j = 0; j < maxAuthorCount; j++) {
-          authorName = metaAuthors[j].full_name.split(', ')
-          creators[j] = {
-            firstName: authorName[1],
-            lastName: authorName[0],
-            creatorType: 'author'
+        const authorName = ["", ""]
+        if (metaAuthors) {
+          for (let j = 0; j < maxAuthorCount; j++) {
+            const authorName = metaAuthors[j].full_name.split(', ')
+            creators[j] = {
+              firstName: authorName[1],
+              lastName: authorName[0],
+              creatorType: 'author'
+            }
+            metaAuthors[j].inspire_roles && (creators[j].creatorType = metaAuthors[j].inspire_roles[0])
           }
-          metaAuthors[j].inspire_roles && (creators[j].creatorType = metaAuthors[j].inspire_roles[0])
         }
 
         if (authorCount > 10) {
@@ -597,8 +606,8 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
     return -1;
   }
 
-  Zotero.debug("getInspireMeta final: ");
-  Zotero.debug(metaInspire)
+  // Zotero.debug("getInspireMeta final: ");
+  // Zotero.debug(metaInspire)
   return metaInspire;
 }
 
@@ -649,7 +658,7 @@ async function getCrossrefCount(item: Zotero.Item) {
     return -1;
   }
 
-  const count = parseInt(str);
+  const count = str ? parseInt(str) : -1;
   return count;
 }
 
@@ -657,7 +666,7 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
 
   // const today = new Date(Date.now()).toLocaleDateString('zh-CN');
   let extra = item.getField('extra') as string;
-  let publication = item.getField('publicationTitle') as string
+  const publication = item.getField('publicationTitle') as string
   const citekey_pref = getPref("citekey")
   // item.setField('archiveLocation', metaInspire);
   if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
@@ -701,8 +710,8 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
       // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
       if (metaInspire.arxiv) {
         const arxivId = metaInspire.arxiv.value
-        let arxivPrimeryCategory = metaInspire.arxiv.categories[0]
-        let _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/mgi)
+        const arxivPrimeryCategory = metaInspire.arxiv.categories[0]
+        const _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/mgi)
         let arXivInfo = ""
         if (/^\d/.test(arxivId)) {
           arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`
@@ -743,19 +752,19 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
       // for erratum, added by FK Guo, date: 2023-08-27
       // Zotero.debug(`++++metaInspire.note: ${metaInspire.note}`)
       if (metaInspire.note) {
-        let noteIDs = item.getNotes()
+        const noteIDs = item.getNotes()
         // check whether the same erratum note is already there
         let errTag = false
-        for (let id of noteIDs) {
-          let note = Zotero.Items.get(id);
-          let noteHTML = note.getNote().replace('–', '-').replace('--', '-');
+        for (const id of noteIDs) {
+          const note = Zotero.Items.get(id);
+          const noteHTML = note.getNote().replace('–', '-').replace('--', '-');
           if (noteHTML.includes(metaInspire.note)) {
             errTag = true
           }
           // Zotero.debug(`=======+++++++ ${id} : ${errTag}`)
         }
         if (!errTag) {
-          let newNote = new Zotero.Item('note')
+          const newNote = new Zotero.Item('note')
           newNote.setNote(metaInspire.note);
           newNote.parentID = item.id;
           await newNote.saveTx();
@@ -822,7 +831,7 @@ function setCitations(extra: string, citation_count: number, citation_count_wo_s
   const today = new Date(Date.now()).toLocaleDateString('zh-CN');
   // judge whether extra has the two lines of citations
   if (/(|.*?\n)\d+\scitations[\s\S]*?\n\d+[\s\S]*?w\/o\sself[\s\S]*?/.test(extra)) {
-    let temp = extra.match(/^\d+\scitations/mg)
+    const temp = extra.match(/^\d+\scitations/mg)
     let existingCitations;
     if (temp !== null) {
       existingCitations = temp.map((e: any) => Number(e.replace(" citations", "")));
