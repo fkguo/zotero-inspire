@@ -506,7 +506,21 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
                 pubinfo_next.page_end && (pagesErr = pagesErr + "-" + pubinfo_next.page_end)
               }
               errNotes[i - 1] = `Erratum: ${jAbbrev} ${pubinfo_next.journal_volume}, ${pagesErr} (${pubinfo_next.year})`
-            };
+            }
+            // add additional publication information in LaTeX-EU format, if any, as a note; FKG, date: 2023-10-20
+            else if (pubinfo_next.journal_title && (pubinfo_next.page_start || pubinfo_next.artid) ) {
+              let pages_next = ""
+              if (pubinfo_next.page_start) {
+                pages_next = pubinfo_next.page_start 
+              } else if (pubinfo_next.artid) {
+                pages_next = pubinfo_next.artid
+              }
+              errNotes[i - 1] = `${pubinfo_next.journal_title}  ${pubinfo_next.journal_volume} (${pubinfo_next.year}) ${pages_next}`
+            } 
+            if (pubinfo_next.pubinfo_freetext) {
+              errNotes[i - 1] = pubinfo_next.pubinfo_freetext 
+            }
+            //
           }
           if (errNotes.length > 0) {
             metaInspire.note = `[${errNotes.join(', ')}]`
