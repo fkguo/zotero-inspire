@@ -183,12 +183,15 @@ async function getInspireMeta(item, operation) {
                         // add additional publication information in LaTeX-EU format, if any, as a note; FKG, date: 2023-10-20
                         else if (pubinfo_next.journal_title && (pubinfo_next.page_start || pubinfo_next.artid) ) {
                             let pages_next = ""
-                            if (pubinfo_next.page_start) {
+                        if (pubinfo_next.page_start) {
                             pages_next = pubinfo_next.page_start 
-                            } else if (pubinfo_next.artid) {
+                            if (pubinfo_next.page_end) {
+                                pages_next = pages_next + "-" + pubinfo_next.page_end
+                              }
+                        } else if (pubinfo_next.artid) {
                             pages_next = pubinfo_next.artid
-                            }
-                            errNotes[i - 1] = `${pubinfo_next.journal_title}  ${pubinfo_next.journal_volume} (${pubinfo_next.year}) ${pages_next}`
+                        }
+                        errNotes[i - 1] = `${pubinfo_next.journal_title}  ${pubinfo_next.journal_volume} (${pubinfo_next.year}) ${pages_next}`
                         } 
                         if (pubinfo_next.pubinfo_freetext) {
                             errNotes[i - 1] = pubinfo_next.pubinfo_freetext 
@@ -234,6 +237,12 @@ async function getInspireMeta(item, operation) {
             }
 
             metaInspire.title = meta['titles'][0].title
+
+            // 2023-09-04 unfinished
+            // For book chapter, the parent book information is contained in "parent_record"["$ref"]
+            // if (mataInspire.document_type[0] == "book chapter") {
+            //     // metaInspire.bookTitle =
+            // }
 
             var creators = [];
             /* INSPIRE tricky points:
@@ -391,6 +400,10 @@ async function setInspireMeta(item, metaInspire, operation) {
 
             if (metaInspire.isbns && !item.getField('ISBN')) item.setField('ISBN', metaInspire.isbns);
             if (metaInspire.publisher && !item.getField('publisher') && (item.itemType == 'book' || item.itemType == 'bookSection')) item.setField('publisher', metaInspire.publisher);
+
+            // 2023-09-04 unfinished
+            // For book chapter
+            // if (metaInspire.bookTitle && !item.getField('bookTitle') && item.itemType == 'bookSection') item.setField('bookTitle', metaInspire.bookTitle);
 
             /* set the title and creators if there are none */
             !item.getField('title') && item.setField('title', metaInspire.title)
