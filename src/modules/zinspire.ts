@@ -511,7 +511,10 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
             else if (pubinfo_next.journal_title && (pubinfo_next.page_start || pubinfo_next.artid) ) {
               let pages_next = ""
               if (pubinfo_next.page_start) {
-                pages_next = pubinfo_next.page_start 
+                pages_next = pubinfo_next.page_start
+                if (pubinfo_next.page_end) {
+                  pages_next = pages_next + "-" + pubinfo_next.page_end
+                }
               } else if (pubinfo_next.artid) {
                 pages_next = pubinfo_next.artid
               }
@@ -636,6 +639,7 @@ async function getCrossrefCount(item: Zotero.Item) {
   }
   const edoi = encodeURIComponent(doi);
 
+  const t0 = performance.now();
   let response = null;
 
   if (response === null) {
@@ -663,6 +667,10 @@ async function getCrossrefCount(item: Zotero.Item) {
     // Something went wrong
     return -1;
   }
+
+
+  const t1 = performance.now();
+  Zotero.debug(`Fetching CrossRef meta took ${t1 - t0} milliseconds.`)
 
   let str = null;
   try {
