@@ -138,7 +138,7 @@ async function getInspireMeta(item, operation) {
         metaInspire.citation_count = meta['citation_count']
         metaInspire.citation_count_wo_self_citations = meta['citation_count_without_self_citations']
 
-        if (operation !== 'citation') {
+        if (operation !== "citations") {
 
             // get only the first doi
             if (meta['dois']) {
