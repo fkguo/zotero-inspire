@@ -461,7 +461,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
 
     // Zotero.debug(`metaInspire.recid: ${metaInspire.recid}`)
 
-    if (operation !== 'citation') {
+    if (operation !== "citations") {
 
       // get only the first doi
       if (meta['dois']) {
