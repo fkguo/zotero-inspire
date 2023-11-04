@@ -772,8 +772,8 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
       extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
 
       // for erratum, added by FK Guo, date: 2023-08-27
-      // Zotero.debug(`++++metaInspire.note: ${metaInspire.note}`)
-      if (metaInspire.note) {
+      // Zotero.debug(`++++metaInspire.note: ${metaInspire.note}`)      
+      if (metaInspire.note && metaInspire.note !== "[]") {
         const noteIDs = item.getNotes()
         // check whether the same erratum note is already there
         let errTag = false
