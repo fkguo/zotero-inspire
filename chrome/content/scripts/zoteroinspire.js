@@ -454,7 +454,7 @@ async function setInspireMeta(item, metaInspire, operation) {
 
             // for erratum, added by FK Guo, date: 2023-08-27
             // Zotero.debug(`++++metaInspire.note: ${metaInspire.note}`)
-            if (metaInspire.note) {
+            if (metaInspire.note && metaInspire.note !== "[]") {
                 noteIDs = item.getNotes()
                 // check whether the same erratum note is already there
                 let errTag = false
