@@ -5,7 +5,7 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 ## Installation
 
-- Download the latest `.xpi` file of this add-on from https://github.com/fkguo/zotero-inspire/releases
+- Download the latest (for Zotero 6) `.xpi` file of this add-on from https://github.com/fkguo/zotero-inspire/releases (download the pre-release version if you ar using Zotero 7)
 - In Zotero, the add-on can be installed by going to `Tools` → `Add-ons`, then click the top-right button and choose `Install Add-ons From File...`.
 - It can be updated in `Add-ons Manager` → `Check for Updates`.
 
@@ -28,31 +28,65 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 - The add-on will update the following fields:
 	- INSPIRE uses a unique `recid` for each publication in the database (called `control_number` in the `.json` file obtained via the [INSPIRE API](https://github.com/inspirehep/rest-api-doc)). The INSPIRE `recid` is set to the field of `Loc. in Archive` (and `INSPIRE` to `Archive`) for the selected Zotero item.
 		- This also enables to write look-up engines using this `recid` to exactly reach the INSPIRE page of that publication and its citations. The look-up engines can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.json` file:
-		```json
-		{
-			"_name": "INSPIRE",
-			"_alias": "INSPIRE",
-			"_description": "INSPIRE",
-			"_icon": "https://inspirehep.net/favicon.ico",  // or local path to the INSPIRE icon,
-			"_hidden": false,
-			"_urlTemplate": "https://inspirehep.net/literature/{z:archiveLocation}",
-			"_urlNamespaces": {
-				"z": "http://www.zotero.org/namespaces/openSearch#"
+			```json
+			{
+				"_name": "INSPIRE",
+				"_alias": "INSPIRE",
+				"_description": "INSPIRE",
+				"_icon": "https://inspirehep.net/favicon.ico",  // or local path to the INSPIRE icon,
+				"_hidden": false,
+				"_urlTemplate": "https://inspirehep.net/literature/{z:archiveLocation}",
+				"_urlNamespaces": {
+					"z": "http://www.zotero.org/namespaces/openSearch#"
+				}
+			},
+			{
+				"_name": "INSPIRE Citations",
+				"_alias": "INSPIRE Citations",
+				"_description": "INSPIRE citing papers",
+				"_icon": "https://inspirehep.net/favicon.ico", 
+				"_hidden": false,
+				"_urlTemplate": "https://inspirehep.net/literature?q=refersto%3Arecid%3A{z:archiveLocation}",
+				"_urlNamespaces": {
+					"z": "http://www.zotero.org/namespaces/openSearch#"
+				}
+			},
+			```
+		- If the [Actions & Tags](https://github.com/windingwind/zotero-actions-tags) addon is installed, one may also setup the following action to copy the INSPIRE link of the selected item with right click or assigned shortcut keys 
+			```js
+			if (!item) {
+				return "[Copy INSPIRE Link] not an item";
 			}
-		},
-		{
-			"_name": "INSPIRE Citations",
-			"_alias": "INSPIRE Citations",
-			"_description": "INSPIRE citing papers",
-			"_icon": "https://inspirehep.net/favicon.ico", 
-			"_hidden": false,
-			"_urlTemplate": "https://inspirehep.net/literature?q=refersto%3Arecid%3A{z:archiveLocation}",
-			"_urlNamespaces": {
-				"z": "http://www.zotero.org/namespaces/openSearch#"
+			else {
+			if (item.getField("archive") != "INSPIRE") {
+				return "[Copy INSPIRE Link] item not in INSPIRE-HEP"
 			}
-		},
-		```
-		
+
+			// get INSPIRE recid
+			let recid
+			recid = item.getField("archiveLocation")
+
+			const clipboard = new Zotero.ActionsTags.api.utils.ClipboardHelper();
+
+			let linkText;
+			// Use title
+			// linkText = item.getField("title");
+			// Use citation key
+			linkText = item.getField("citationKey");
+
+			let link;
+			// Use plain-text
+			// link = `https://inspirehep.net/literature/${recid}`;
+			// Use MarkDown
+			link = `[${linkText}](https://inspirehep.net/literature/${recid})`
+			clipboard
+				.addText(link, "text/unicode")
+				.addText(`<a href="https://inspirehep.net/literature/${recid}">${linkText}</a>`, "text/html")
+				.copy();
+
+			return `[Copy INSPIRE Link] link to ${linkText} copied.`
+			}
+			```	
 	- `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors` ($\leq10$, otherwise keeping only the first 3; the author list will be updated if no author is given or the first name of the first author is empty), `title`, `abstract`, etc. 
 	- Set the arXiv number of articles that are not published to the `Journal Abbr` field. Items of type `report` or `preprint` are set to `journalArticle`.
 	- It will also get the citation counts with and without self-citations for each selected item. One can also choose to update only the citation counts using `Citation counts only` in the right-click menu. 

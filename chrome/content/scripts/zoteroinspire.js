@@ -413,10 +413,10 @@ async function setInspireMeta(item, metaInspire, operation) {
             // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
             if (metaInspire.arxiv) {
                 const arxivId = metaInspire.arxiv.value
-                let arxivPrimeryCategory = metaInspire.arxiv.categories[0]
                 let _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/mgi)
                 let arXivInfo = ""
                 if (/^\d/.test(arxivId)) {
+                    let arxivPrimeryCategory = metaInspire.arxiv.categories[0]
                     arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`
                 } else {
                     arXivInfo = "arXiv:" + arxivId;
