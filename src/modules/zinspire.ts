@@ -732,10 +732,10 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
       // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
       if (metaInspire.arxiv) {
         const arxivId = metaInspire.arxiv.value
-        const arxivPrimeryCategory = metaInspire.arxiv.categories[0]
         const _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/mgi)
         let arXivInfo = ""
         if (/^\d/.test(arxivId)) {
+          const arxivPrimeryCategory = metaInspire.arxiv.categories[0]
           arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`
         } else {
           arXivInfo = "arXiv:" + arxivId;
@@ -772,7 +772,7 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
       extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
 
       // for erratum, added by FK Guo, date: 2023-08-27
-      // Zotero.debug(`++++metaInspire.note: ${metaInspire.note}`)      
+      // Zotero.debug(`++++metaInspire.note: ${metaInspire.note}`)
       if (metaInspire.note && metaInspire.note !== "[]") {
         const noteIDs = item.getNotes()
         // check whether the same erratum note is already there
