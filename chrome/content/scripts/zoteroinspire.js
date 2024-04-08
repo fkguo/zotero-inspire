@@ -376,6 +376,9 @@ async function setInspireMeta(item, metaInspire, operation) {
             if (metaInspire.journalAbbreviation) {
                 if (item.itemType === "journalArticle") { //metaInspire.document_type[0]  === "article"
                     item.setField('journalAbbreviation', metaInspire.journalAbbreviation);
+                    // no matter whether there is journal title, always set journalAbbreviation to publicationTitle
+                    // (!item.getField("publicationTitle")) && 
+                    item.setField("publicationTitle", metaInspire.journalAbbreviation);
                 } else if (metaInspire.document_type[0] === "book" && item.itemType === "book") {
                     item.setField('series', metaInspire.journalAbbreviation)
                 } else {
