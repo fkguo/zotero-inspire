@@ -110,6 +110,16 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 - By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Settings` → `INSPIRE Metadata Updater Preferences`.
 
 
+## Additional tip for citing as you writing LaTeX
+
+After building our own Zotero library, we can make the LaTeX writing process much more enjoyable in VS code (with the [LaTeX Workshop](https://github.com/James-Yu/LaTeX-Workshop) extension) with the [Zotero-cite](https://gitee.com/rusterx/zotero-cite) VS code extension. 
+The version in the VS code extension market does not work for the INSPIRE citekey convention. You can download a version that I modified [here](https://gitee.com/fkguo/zotero-cite/raw/master/zotero-cite-0.8.3.vsix).
+
+- installation: press `Ctrl+Shift+P` or `Cmd+Shift+P`, choose `Extensions: install from VSIX...`.
+- usage:
+	- press `Ctrl+Shift+P` or `Cmd+Shift+P`, choose `Zotero Cite: Cite and Create Bibliography for Pandoc/LaTeX` and bind a hotkey, e.g., `Alt+z`.
+	- in `Settings` of VS code, set `Zotero-cite: Default Bib Name` to `./refs.bib`, which allows the extension update or create the `refs.bib` file under the same directory of the `.tex` file.
+	- now when you're writing, press the hotkey, a Zotero reference picker window will pop up, select the references you want to cite, then they are cited with the `\cite{}` command and the `refs.bib` file gets automatically updated if the cited references do not yet exist in the `bib` file. 
 
 ## References
 
