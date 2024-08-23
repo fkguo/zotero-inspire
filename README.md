@@ -9,8 +9,8 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 ## Installation
 
 ### Pre-built binaries
-- This version is compatible only with Zotero 7 and is still under development.
-- The pre-release version of the pre-built `.xpi` file can be downloaded from https://github.com/fkguo/zotero-inspire/releases/ 
+- This version is compatible only with Zotero 7, whose stable version has been released. 
+- The pre-built `.xpi` file can be downloaded from https://github.com/fkguo/zotero-inspire/releases/. If you want a version compatible with Zotero 6, download the version 0.2.20 from the releases. 
 
 ### Building from source
 - Clone this repo
@@ -37,6 +37,7 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 	- INSPIRE `recid` in `Loc. in Archive` or the url containing `/literature/recid` in `URL`.
 
 - The add-on will update the following fields:
+	- **Notice**: the INSPIRE standard journal abbreviations (instead of the fill journal name) will be put into the `Publication` field.
 	- INSPIRE uses a unique `recid` for each publication in the database (called `control_number` in the `.json` file obtained via the [INSPIRE API](https://github.com/inspirehep/rest-api-doc)). The INSPIRE `recid` is set to the field of `Loc. in Archive` (and `INSPIRE` to `Archive`) for the selected Zotero item.
 		- This also enables to write look-up engines using this `recid` to exactly reach the INSPIRE page of that publication and its citations. The look-up engines can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.json` file:
 			```json
@@ -109,17 +110,13 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 	- Erratum information and additional publication information added as notes.
 - By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Settings` → `INSPIRE Metadata Updater Preferences`.
 
-
 ## Additional tip for citing as you writing LaTeX
 
 After building our own Zotero library, we can make the LaTeX writing process much more enjoyable in VS code (with the [LaTeX Workshop](https://github.com/James-Yu/LaTeX-Workshop) extension) with the [Zotero-cite](https://gitee.com/rusterx/zotero-cite) VS code extension. 
-The version in the VS code extension market does not work for the INSPIRE citekey convention. You can download a version that I modified [here](https://gitee.com/fkguo/zotero-cite/raw/master/zotero-cite-0.8.3.vsix).
-
-- installation: press `Ctrl+Shift+P` or `Cmd+Shift+P`, choose `Extensions: install from VSIX...`.
 - usage:
 	- press `Ctrl+Shift+P` or `Cmd+Shift+P`, choose `Zotero Cite: Cite and Create Bibliography for Pandoc/LaTeX` and bind a hotkey, e.g., `Alt+z`.
 	- in `Settings` of VS code, set `Zotero-cite: Default Bib Name` to `./refs.bib`, which allows the extension update or create the `refs.bib` file under the same directory of the `.tex` file.
-	- now when you're writing, press the hotkey, a Zotero reference picker window will pop up, select the references you want to cite, then they are cited with the `\cite{}` command and the `refs.bib` file gets automatically updated if the cited references do not yet exist in the `bib` file. 
+	- now when you're writing, press the hotkey, a Zotero reference picker window will pop up, select the references you want to cite, then it is cited with the `\cite{}` command and the `refs.bib` file gets automatically updated if the cited reference does not exist in the `bib` file. 
 
 ## References
 
