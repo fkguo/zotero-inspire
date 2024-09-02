@@ -41,7 +41,7 @@
   },
   "homepage": "https://github.com/fkguo/zotero-inspire#readme",
   "dependencies": {
-    "zotero-plugin-toolkit": "^2.2.2"
+    "zotero-plugin-toolkit": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
