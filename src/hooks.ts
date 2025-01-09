@@ -1,8 +1,9 @@
 import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
-import { ZInsMenu, ZInsprefs } from "./modules/zinspire";
+import { ZInsMenu, ZInsUtils } from "./modules/zinspire";
 import { getPref } from "./utils/prefs";
+import { registerPrefsScripts } from "./modules/prefScript";
 
 async function onStartup() {
   await Promise.all([
@@ -12,9 +13,8 @@ async function onStartup() {
   ]);
   initLocale();
 
-  ZInsprefs.registerPrefs();
-
-  ZInsprefs.registerNotifier();
+  ZInsUtils.registerPrefs();
+  ZInsUtils.registerNotifier();
 
   await onMainWindowLoad(window);
 }
@@ -40,7 +40,8 @@ function onShutdown(): void {
   addon.data.dialog?.window?.close();
   // Remove addon object
   addon.data.alive = false;
-  delete Zotero[config.addonInstance];
+  // @ts-ignore - Plugin instance is not typed
+  delete Zotero[addon.data.config.addonInstance];
 }
 
 /**
@@ -54,7 +55,7 @@ async function onNotify(
   extraData: { [key: string]: any },
 ) {
   // You can add your code to the corresponding notify type
-  ztoolkit.log("notify", event, type, ids, extraData);
+  // ztoolkit.log("notify", event, type, ids, extraData);
   if (event === 'add') {
     switch (getPref("meta")) {
       case "full":
@@ -80,13 +81,13 @@ async function onNotify(
  * @param data event data
  */
 async function onPrefsEvent(type: string, data: { [key: string]: any }) {
-  // switch (type) {
-  //   case "load":
-  //     registerPrefsScripts(data.window);
-  //     break;
-  //   default:
-  //     return;
-  // }
+  switch (type) {
+    case "load":
+      registerPrefsScripts(data.window);
+      break;
+    default:
+      return;
+  }
 }
 
 // function onShortcuts(type: string) {
@@ -124,5 +125,5 @@ export default {
   onMainWindowLoad,
   onMainWindowUnload,
   onNotify,
-  // onPrefsEvent,
+  onPrefsEvent,
 };

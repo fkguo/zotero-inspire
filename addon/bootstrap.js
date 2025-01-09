@@ -1,3 +1,5 @@
+/* eslint-disable no-undef */
+
 /**
  * Most of this code is from Zotero team's official Make It Red example[1]
  * or the Zotero 7 documentation[2].
@@ -22,7 +24,7 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
   ].getService(Components.interfaces.amIAddonManagerStartup);
   var manifestURI = Services.io.newURI(rootURI + "manifest.json");
   chromeHandle = aomStartup.registerChrome(manifestURI, [
-    ["content", "__addonRef__", rootURI + "chrome/content/"],
+    ["content", "__addonRef__", rootURI + "content/"],
   ]);
 
   /**
@@ -37,9 +39,10 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
   ctx._globalThis = ctx;
 
   Services.scriptloader.loadSubScript(
-    `${rootURI}/chrome/content/scripts/__addonRef__.js`,
+    `${rootURI}/content/scripts/__addonRef__.js`,
     ctx,
   );
+  Zotero.__addonInstance__.hooks.onStartup();
 }
 
 async function onMainWindowLoad({ window }, reason) {
@@ -66,7 +69,7 @@ function shutdown({ id, version, resourceURI, rootURI }, reason) {
     .getService(Components.interfaces.nsIStringBundleService)
     .flushBundles();
 
-  Cu.unload(`${rootURI}/chrome/content/scripts/__addonRef__.js`);
+  Cu.unload(`${rootURI}/content/scripts/__addonRef__.js`);
 
   if (chromeHandle) {
     chromeHandle.destruct();
