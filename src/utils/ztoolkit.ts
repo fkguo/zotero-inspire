@@ -1,4 +1,4 @@
-import ZoteroToolkit from "zotero-plugin-toolkit";
+import { ZoteroToolkit } from "zotero-plugin-toolkit";
 import { config } from "../../package.json";
 
 export { createZToolkit };
@@ -20,27 +20,26 @@ function initZToolkit(_ztoolkit: ReturnType<typeof createZToolkit>) {
   _ztoolkit.basicOptions.log.disableConsole = env === "production";
   _ztoolkit.UI.basicOptions.ui.enableElementJSONLog = __env__ === "development";
   _ztoolkit.UI.basicOptions.ui.enableElementDOMLog = __env__ === "development";
-  _ztoolkit.basicOptions.debug.disableDebugBridgePassword =
-    __env__ === "development";
+  // Getting basicOptions.debug will load global modules like the debug bridge.
+  // since we want to deprecate it, should avoid using it unless necessary.
+  // _ztoolkit.basicOptions.debug.disableDebugBridgePassword =
+  //   __env__ === "development";
   _ztoolkit.basicOptions.api.pluginID = config.addonID;
   _ztoolkit.ProgressWindow.setIconURI(
     "default",
-    `chrome://${config.addonRef}/content/icons/inspire.png`,
+    `chrome://${config.addonRef}/content/icons/favicon.png`,
   );
 }
 
-import { BasicTool, unregister } from "zotero-plugin-toolkit/dist/basic";
-import { UITool } from "zotero-plugin-toolkit/dist/tools/ui";
-import { PreferencePaneManager } from "zotero-plugin-toolkit/dist/managers/preferencePane";
+import { BasicTool, unregister } from "zotero-plugin-toolkit";
+import { UITool } from "zotero-plugin-toolkit";
 
 class MyToolkit extends BasicTool {
   UI: UITool;
-  PreferencePane: PreferencePaneManager;
 
   constructor() {
     super();
     this.UI = new UITool(this);
-    this.PreferencePane = new PreferencePaneManager(this);
   }
 
   unregisterAll() {

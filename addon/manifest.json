@@ -6,13 +6,13 @@
   "homepage_url": "__homepage__",
   "author": "__author__",
   "icons": {
-    "48": "chrome/content/icons/inspire.png",
-    "96": "chrome/content/icons/inspire@2x.png"
+    "48": "content/icons/inspire.png",
+    "96": "content/icons/inspire@2x.png"
   },
   "applications": {
     "zotero": {
       "id": "__addonID__",
-      "update_url": "__updaterdf__",
+      "update_url": "__updateURL__",
       "strict_min_version": "6.999",
       "strict_max_version": "7.0.*"
     }
