@@ -9,7 +9,7 @@
     "addonInstance": "ZoteroInspire",
     "prefsPrefix": "extensions.zotero.inspiremeta",
     "releasepage": "https://github.com/fkguo/zotero-inspire",
-    "updaterdf": "https://raw.githubusercontent.com/fkguo/zotero-inspire/dev/update.json"
+    "updaterdf": "https://raw.githubusercontent.com/fkguo/zotero-inspire/main/update.json"
   },
   "repository": {
     "type": "git",
