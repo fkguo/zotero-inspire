@@ -79,17 +79,34 @@ export class ZInsMenu {
               _globalThis.inspire.updateSelectedItems("citations")
             }
           },
+          {
+            tag: "menuseparator"
+          },
+          {
+            tag: "menuitem",
+            label: "Copy INSPIRE-HEP bibtex",
+            commandListener: (_ev) => {
+              const items = ZoteroPane.getSelectedItems();
+              if (items.length === 1) {
+                _globalThis.inspire.copyInspireBibtex(items[0]);
+              } else {
+                const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+                  closeOnClick: true,
+                });
+                progressWindow.changeHeadline("Error");
+                progressWindow.createLine({
+                  icon: "chrome://zotero/skin/cross.png",
+                  text: "Please select exactly one item"
+                });
+                progressWindow.show();
+                progressWindow.startCloseTimer(4000);
+              }
+            }
+          }
         ],
         icon: menuIcon,
-      },
-      // "before",
-      // document.querySelector(
-      //   "#zotero-itemmenu-addontemplate-test",
-      // ) as XUL.MenuItem,
+      },    
     );
-    // ztoolkit.Menu.register("menuFile", {
-    //   tag: "menuseparator",
-    // });
   }
 
   static registerRightClickCollectionMenu() {
@@ -126,10 +143,6 @@ export class ZInsMenu {
         ],
         icon: menuIcon,
       },
-      // "before",
-      // document.querySelector(
-      //   "#zotero-itemmenu-addontemplate-test",
-      // ) as XUL.MenuItem,
     );
   }
 }
@@ -351,6 +364,75 @@ export class ZInspire {
       this.updateNextItem(operation);
     }
   };
+
+  async copyInspireBibtex(item: Zotero.Item) {
+    const archive = item.getField('archive') as string;
+    // make sure archive type is INSPIRE
+    if (!archive.includes('INSPIRE')) {
+      const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+        closeOnClick: true,
+      });
+      progressWindow.changeHeadline("Error");
+      progressWindow.createLine({
+        icon: "chrome://zotero/skin/cross.png",
+        text: "This item has no INSPIRE archive information!"
+      });
+      progressWindow.show();
+      progressWindow.startCloseTimer(4000);
+      return;
+    }
+    
+    const recid = item.getField('archiveLocation') as string;
+    if (!recid) {
+      const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+        closeOnClick: true,
+      });
+      progressWindow.changeHeadline("Error");
+      progressWindow.createLine({
+        icon: "chrome://zotero/skin/cross.png",
+        text: "No INSPIRE recid found for this item"
+      });
+      progressWindow.show();
+      progressWindow.startCloseTimer(4000);
+      return;
+    }
+
+    try {
+      const response = await Zotero.HTTP.request(
+        'GET',
+        `https://inspirehep.net/api/literature/${recid}?format=bibtex`
+      );
+      
+      if (response.status === 200) {
+        const bibtex = response.responseText;
+        Zotero.Utilities.Internal.copyTextToClipboard(bibtex);
+        
+        const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+          closeOnClick: true,
+        });
+        progressWindow.changeHeadline("Success");
+        progressWindow.createLine({
+          icon: "chrome://zotero/skin/tick.png",
+          text: "BibTeX copied to clipboard"
+        });
+        progressWindow.show();
+        progressWindow.startCloseTimer(4000);
+      } else {
+        throw new Error('Failed to fetch bibtex');
+      }
+    } catch (error) {
+      const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+        closeOnClick: true,
+      });
+      progressWindow.changeHeadline("Error");
+      progressWindow.createLine({
+        icon: "chrome://zotero/skin/cross.png",
+        text: "Failed to fetch bibtex from INSPIRE-HEP"
+      });
+      progressWindow.show();
+      progressWindow.startCloseTimer(4000);
+    }
+  }
 }
 
 async function getInspireMeta(item: Zotero.Item, operation: string) {
