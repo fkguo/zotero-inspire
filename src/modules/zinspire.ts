@@ -78,34 +78,35 @@ export class ZInsMenu {
             commandListener: (_ev) => {
               _globalThis.inspire.updateSelectedItems("citations")
             }
-          },
-          {
-            tag: "menuseparator"
-          },
-          {
-            tag: "menuitem",
-            label: "Copy INSPIRE-HEP bibtex",
-            commandListener: (_ev) => {
-              const items = ZoteroPane.getSelectedItems();
-              if (items.length === 1) {
-                _globalThis.inspire.copyInspireBibtex(items[0]);
-              } else {
-                const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-                  closeOnClick: true,
-                });
-                progressWindow.changeHeadline("Error");
-                progressWindow.createLine({
-                  icon: "chrome://zotero/skin/cross.png",
-                  text: "Please select exactly one item"
-                });
-                progressWindow.show();
-                progressWindow.startCloseTimer(4000);
-              }
-            }
           }
         ],
         icon: menuIcon,
       },    
+    );
+
+    ztoolkit.Menu.register("item",
+      {
+        tag: "menuitem",
+        label: "Copy Inspire BibTex Information",
+        commandListener: (_ev) => {
+          const items = ZoteroPane.getSelectedItems();
+          if (items.length === 1) {
+            _globalThis.inspire.copyInspireBibtex(items[0]);
+          } else {
+            const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+              closeOnClick: true,
+            });
+            progressWindow.changeHeadline("Error");
+            progressWindow.createLine({
+              icon: "chrome://zotero/skin/cross.png",
+              text: "Please select exactly one item"
+            });
+            progressWindow.show();
+            progressWindow.startCloseTimer(4000);
+          }
+        },
+        icon: menuIcon
+      }
     );
   }
 
