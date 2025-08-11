@@ -3,8 +3,8 @@
     "zoteroinspire@itp.ac.cn": {
       "updates": [
         {
-          "version": "0.3.11",
-          "update_link": "https://github.com/fkguo/zotero-inspire",
+          "version": "0.3.12",
+          "update_link": "https://github.com/fkguo/zotero-inspire/releases/latest/download/zotero-inspire.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "6.999"
