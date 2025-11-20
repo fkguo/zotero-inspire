@@ -183,7 +183,7 @@ export class ZInspire {
         this.progressWindow.close();
         const icon = "chrome://zotero/skin/cross.png";
         if (this.error_norecid && !this.error_norecid_shown) {
-            //ztoolkit.log("hello");
+          //ztoolkit.log("hello");
           const progressWindowNoRecid = new ztoolkit.ProgressWindow(config.addonName, { closeOnClick: true });
           progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
           if (getPref("tag_enable") && getPref("tag_norecid") !== "") {
@@ -191,7 +191,7 @@ export class ZInspire {
             progressWindowNoRecid.createLine({ icon: icon, text: "No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'." });
           } else {
             // progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items.")
-            progressWindowNoRecid.createLine({icon: icon, text: "No INSPIRE recid was found for some items."});
+            progressWindowNoRecid.createLine({ icon: icon, text: "No INSPIRE recid was found for some items." });
           }
           progressWindowNoRecid.show();
           progressWindowNoRecid.startCloseTimer(8000);
@@ -818,26 +818,90 @@ async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operatio
       extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
     }
     extra = extra.replace(/\n\n/mg, '\n')
+    extra = reorderExtraFields(extra)
     item.setField('extra', extra)
 
+    // Set arXiv category tag if enabled
+    setArxivCategoryTag(item)
+
+  }
+}
+
+function setArxivCategoryTag(item: Zotero.Item) {
+  const arxiv_tag_pref = getPref("arxiv_tag_enable");
+
+  if (!arxiv_tag_pref) {
+    return;
+  }
+
+  const extra = item.getField('extra') as string;
+
+  // Extract arXiv primary category from extra field
+  let primaryCategory = "";
+
+  // Pattern 1: New format arXiv:2503.05295 [nucl-th]
+  const newFormatMatch = extra.match(/arXiv:\d{4}\.\d{4,5}\s*\[([^\]]+)\]/i);
+  if (newFormatMatch) {
+    primaryCategory = newFormatMatch[1];
+  } else {
+    // Pattern 2: Old format arXiv:hep-ph/0703062
+    const oldFormatMatch = extra.match(/arXiv:([a-z-]+)\/\d{7}/i);
+    if (oldFormatMatch) {
+      primaryCategory = oldFormatMatch[1];
+    }
+  }
+
+  if (primaryCategory) {
+    // Check if tag already exists
+    if (!item.hasTag(primaryCategory)) {
+      item.addTag(primaryCategory);
+      item.saveTx();
+    }
   }
 }
 
 function setExtraCitations(extra: any, source: string, citation_count: any) {
   const today = new Date(Date.now()).toLocaleDateString('zh-CN');
-  // Zotero.debug(`setExtraCitations citation count: ${citation_count}`)
-  // judge whether extra has the citation record
-  if (/(|.*?\n)\d+\scitations[\s\S]*?/.test(extra)) {
-    const existingCitations = extra.match(/^\d+\scitations/mg).map((e: any) => Number(e.replace(" citations", "")))
-    // if the citations are different, replace the old one 
-    if (citation_count !== existingCitations[0]) {
-      extra = extra.replace(/^.*citations.*$\n/mg, "");
-      extra = `${citation_count} citations (${source} ${today})\n` + extra
+
+  // Check if citation is already at the top with correct value
+  const topLineMatch = extra.match(/^(\d+)\scitations\s\([\w\s]+[\d/-]+\)\n/);
+
+  if (topLineMatch) {
+    const topCitation = Number(topLineMatch[1]);
+
+    // Citation is at top and value unchanged - no update needed
+    if (citation_count === topCitation) {
+      return extra;
     }
-  } else {
-    extra = `${citation_count} citations (${source} ${today})\n` + extra
   }
-  return extra
+
+  // Extract existing citation count and date from anywhere in extra (before removing)
+  const temp = extra.match(/^\d+\scitations/mg);
+  let existingCitation = 0;
+  if (temp !== null && temp.length > 0) {
+    existingCitation = Number(temp[0].replace(" citations", ""));
+  }
+
+  // Extract existing date before removing
+  const dateMatch = extra.match(new RegExp(`${source}\\s([\\d/-]+)`));
+  const existingDate = dateMatch ? dateMatch[1] : today;
+
+  // Remove all existing citation lines (with or without trailing newline)
+  extra = extra.replace(/^.*citations.*$\n?/mg, "");
+
+  // Remove leading empty lines
+  extra = extra.replace(/^\n+/, "");
+
+  // Check if only position changed (value unchanged) - reuse existing date
+  if (citation_count === existingCitation) {
+    // Value unchanged, keep the existing date
+    extra = `${citation_count} citations (${source} ${existingDate})\n` + extra;
+  } else {
+    // Value changed, use today's date
+    extra = `${citation_count} citations (${source} ${today})\n` + extra;
+  }
+
+  return extra;
 }
 
 async function setCrossRefCitations(item: Zotero.Item) {
@@ -846,33 +910,90 @@ async function setCrossRefCitations(item: Zotero.Item) {
   if (count_crossref >= 0) {
     extra = setExtraCitations(extra, 'CrossRef', count_crossref) as string
     extra = extra.replace(/\n\n/mg, '\n')
+    extra = reorderExtraFields(extra)
     item.setField('extra', extra)
+
+    // Set arXiv category tag if enabled
+    setArxivCategoryTag(item)
   } else {
     count_crossref = -1
   }
   return count_crossref
 }
 
+function reorderExtraFields(extra: string) {
+  const order_pref = getPref("extra_order");
+
+  if (order_pref === "citations_first") {
+    // For citations_first mode, setCitations has already placed citations at the top
+    // Just return without reordering to avoid duplication
+    return extra;
+  }
+
+  // For arxiv_first mode, we need to reorder
+  // Extract different parts
+  const citationLines: string[] = [];
+  const arxivLines: string[] = [];
+  const otherLines: string[] = [];
+
+  const lines = extra.split('\n');
+
+  for (const line of lines) {
+    if (line.match(/^\d+\scitations/)) {
+      citationLines.push(line);
+    } else if (line.match(/^(arXiv:|_eprint:)/i)) {
+      arxivLines.push(line);
+    } else if (line.trim() !== '') {
+      otherLines.push(line);
+    }
+  }
+
+  // Reorder: arXiv first, then others, then citations
+  const reordered = [...arxivLines, ...otherLines, ...citationLines];
+  return reordered.join('\n');
+}
+
 function setCitations(extra: string, citation_count: number, citation_count_wo_self_citations: number) {
   const today = new Date(Date.now()).toLocaleDateString('zh-CN');
-  // judge whether extra has the two lines of citations
-  if (/(|.*?\n)\d+\scitations[\s\S]*?\n\d+[\s\S]*?w\/o\sself[\s\S]*?/.test(extra)) {
-    const temp = extra.match(/^\d+\scitations/mg)
-    let existingCitations;
-    if (temp !== null) {
-      existingCitations = temp.map((e: any) => Number(e.replace(" citations", "")));
-    } else {
-      existingCitations = [0]
+
+  // Check if citations are already at the top with correct values
+  const topLinesMatch = extra.match(/^(\d+)\scitations\s\(INSPIRE\s[\d/-]+\)\n(\d+)\scitations\sw\/o\sself\s\(INSPIRE\s[\d/-]+\)\n/);
+
+  if (topLinesMatch) {
+    const topCitation = Number(topLinesMatch[1]);
+    const topCitationWoSelf = Number(topLinesMatch[2]);
+
+    // Citations are at top and values unchanged - no update needed
+    if (citation_count === topCitation && citation_count_wo_self_citations === topCitationWoSelf) {
+      return extra;
     }
-    // Zotero.debug(`existing citations:  ${existingCitations}`)
-    // if the citations are different, replace the old ones 
-    // if (citation_count + citation_count_wo_self_citations !== existingCitations.reduce((a, b) => a + b)) {
-    if (citation_count !== existingCitations[0] || citation_count_wo_self_citations !== existingCitations[1]) {
-      extra = extra.replace(/^.*citations.*$\n/mg, "");
-      extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
-    }
-  } else {
-    extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra
   }
-  return extra
+
+  // Extract existing citation counts and date from anywhere in extra (before removing)
+  const temp = extra.match(/^\d+\scitations/mg);
+  let existingCitations: number[] = [0, 0];
+  if (temp !== null && temp.length >= 2) {
+    existingCitations = temp.map((e: any) => Number(e.replace(" citations", "")));
+  }
+
+  // Extract existing date before removing
+  const dateMatch = extra.match(/INSPIRE\s([\d/-]+)/);
+  const existingDate = dateMatch ? dateMatch[1] : today;
+
+  // Remove all existing citation lines (with or without trailing newline)
+  extra = extra.replace(/^.*citations.*$\n?/mg, "");
+
+  // Remove leading empty lines
+  extra = extra.replace(/^\n+/, "");
+
+  // Check if only position changed (values unchanged) - reuse existing date
+  if (citation_count === existingCitations[0] && citation_count_wo_self_citations === existingCitations[1]) {
+    // Values unchanged, keep the existing date
+    extra = `${citation_count} citations (INSPIRE ${existingDate})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${existingDate})\n` + extra;
+  } else {
+    // Values changed, use today's date
+    extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra;
+  }
+
+  return extra;
 }

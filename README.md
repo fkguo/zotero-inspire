@@ -110,6 +110,20 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 	- Erratum information and additional publication information added as notes.
 - By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Settings` → `INSPIRE Metadata Updater Preferences`.
 
+## Settings
+
+The add-on provides several customization options in `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences`:
+
+### Field Order in Extra
+Choose the order of fields in the `Extra` field:
+- **Citations first** (default): Citation counts appear at the top, followed by arXiv ID and other fields
+- **arXiv first**: arXiv ID appears at the top, followed by other fields, with citations at the bottom
+
+### arXiv Primary Category Tag
+Automatically add the arXiv primary category as a tag to items with arXiv IDs:
+- When enabled, the add-on extracts the primary category from the arXiv ID and adds it as a tag
+- Disabled by default
+
 ## Additional tip for citing as you writing LaTeX
 
 After building our own Zotero library, we can make the LaTeX writing process much more enjoyable in VS code (with the [LaTeX Workshop](https://github.com/James-Yu/LaTeX-Workshop) extension) with the [Zotero-cite](https://gitee.com/rusterx/zotero-cite) VS code extension. 
