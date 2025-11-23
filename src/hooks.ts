@@ -1,7 +1,7 @@
 import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
-import { ZInsMenu, ZInsUtils } from "./modules/zinspire";
+import { ZInsMenu, ZInsUtils, ZInspireReferencePane } from "./modules/zinspire";
 import { getPref } from "./utils/prefs";
 import { registerPrefsScripts } from "./modules/prefScript";
 
@@ -16,18 +16,19 @@ async function onStartup() {
   ZInsUtils.registerPrefs();
   ZInsUtils.registerNotifier();
 
-  await onMainWindowLoad(window);
+  await onMainWindowLoad(Zotero.getMainWindow());
 }
 
 async function onMainWindowLoad(_win: Window): Promise<void> {
   // Create ztoolkit for every window
   addon.data.ztoolkit = createZToolkit();
 
+  ZInspireReferencePane.registerPanel();
+
   // UIExampleFactory.registerRightClickMenuItem();
 
   ZInsMenu.registerRightClickMenuPopup();
   ZInsMenu.registerRightClickCollectionMenu();
-
 }
 
 async function onMainWindowUnload(_win: Window): Promise<void> {
@@ -38,6 +39,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 function onShutdown(): void {
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
+  ZInspireReferencePane.unregisterPanel();
   // Remove addon object
   addon.data.alive = false;
   // @ts-ignore - Plugin instance is not typed
@@ -56,7 +58,7 @@ async function onNotify(
 ) {
   // You can add your code to the corresponding notify type
   // ztoolkit.log("notify", event, type, ids, extraData);
-  if (event === 'add') {
+  if (event === "add") {
     switch (getPref("meta")) {
       case "full":
         _globalThis.inspire.updateItems(Zotero.Items.get(ids), "full");
@@ -71,7 +73,7 @@ async function onNotify(
         break;
     }
   }
-  return
+  return;
 }
 
 /**

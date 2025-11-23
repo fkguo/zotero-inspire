@@ -1,5 +1,5 @@
-import { config } from "../../package.json"
-import { getString } from "../utils/locale";
+import { config } from "../../package.json";
+import { getLocaleID, getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit/dist/helpers/progressWindow";
 export class ZInsUtils {
@@ -29,9 +29,7 @@ export class ZInsUtils {
       },
     };
 
-    const notifierID = Zotero.Notifier.registerObserver(callback, [
-      "item",
-    ]);
+    const notifierID = Zotero.Notifier.registerObserver(callback, ["item"]);
 
     Zotero.Plugins.addObserver({
       shutdown: ({ id }) => {
@@ -44,7 +42,6 @@ export class ZInsUtils {
   private static unregisterNotifier(notifierID: string) {
     Zotero.Notifier.unregisterObserver(notifierID);
   }
-
 }
 
 export class ZInsMenu {
@@ -53,7 +50,8 @@ export class ZInsMenu {
       tag: "menuseparator",
     });
     const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
-    ztoolkit.Menu.register("item",
+    ztoolkit.Menu.register(
+      "item",
       {
         tag: "menu",
         label: getString("menupopup-label"),
@@ -62,22 +60,22 @@ export class ZInsMenu {
             tag: "menuitem",
             label: getString("menuitem-submenulabel0"),
             commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("full")
-            }
+              _globalThis.inspire.updateSelectedItems("full");
+            },
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel1"),
             commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("noabstract")
-            }
+              _globalThis.inspire.updateSelectedItems("noabstract");
+            },
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel2"),
             commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("citations")
-            }
+              _globalThis.inspire.updateSelectedItems("citations");
+            },
           },
         ],
         icon: menuIcon,
@@ -97,7 +95,8 @@ export class ZInsMenu {
       tag: "menuseparator",
     });
     const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
-    ztoolkit.Menu.register("collection",
+    ztoolkit.Menu.register(
+      "collection",
       {
         tag: "menu",
         label: getString("menupopup-label"),
@@ -106,22 +105,22 @@ export class ZInsMenu {
             tag: "menuitem",
             label: getString("menuitem-submenulabel0"),
             commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("full")
-            }
+              _globalThis.inspire.updateSelectedCollection("full");
+            },
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel1"),
             commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("noabstract")
-            }
+              _globalThis.inspire.updateSelectedCollection("noabstract");
+            },
           },
           {
             tag: "menuitem",
             label: getString("menuitem-submenulabel2"),
             commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("citations")
-            }
+              _globalThis.inspire.updateSelectedCollection("citations");
+            },
           },
         ],
         icon: menuIcon,
@@ -132,6 +131,1572 @@ export class ZInsMenu {
       // ) as XUL.MenuItem,
     );
   }
+}
+
+interface InspireReferenceEntry {
+  id: string;
+  label?: string;
+  recid?: string;
+  inspireUrl?: string;
+  fallbackUrl?: string;
+  title: string;
+  summary?: string;
+  year: string;
+  authors: string[];
+  authorText: string;
+  displayText: string;
+  searchText: string;
+  localItemID?: number;
+  isRelated?: boolean;
+}
+
+interface SaveTargetRow {
+  id: string;
+  name: string;
+  level: number;
+  type: "library" | "collection";
+  libraryID: number;
+  collectionID?: number;
+  filesEditable: boolean;
+  parentID?: string;
+  recent?: boolean;
+}
+
+interface SaveTargetSelection {
+  libraryID: number;
+  primaryRowID: string;
+  collectionIDs: number[];
+}
+
+export class ZInspireReferencePane {
+  private static controllers = new WeakMap<
+    HTMLDivElement,
+    InspireReferencePanelController
+  >();
+  private static registrationKey?: string | false;
+
+  static registerPanel() {
+    if (!("ItemPaneManager" in Zotero)) {
+      Zotero.debug(
+        `[${config.addonName}] ItemPaneManager not available, skip references pane.`,
+      );
+      return;
+    }
+    if (this.registrationKey) {
+      return;
+    }
+    // Zotero.debug(`[${config.addonName}] Registering INSPIRE reference pane`);
+    ztoolkit.log(`[${config.addonName}] Registering INSPIRE reference pane`);
+
+    Zotero.debug(`+++[${getLocaleID('references-panel-header')}]`);
+    Zotero.debug(`+++[${config.addonName}] addonRef = ${config.addonRef}`);
+    // 🔍 检查 document.l10n 是否可用
+    // Zotero.debug(`+++[${config.addonName}] document.l10n available: ${!!document.l10n}`);
+
+    const paneIcon = `chrome://${config.addonRef}/content/icons/inspire@0.5x.png`;
+    const paneIcon2x = `chrome://${config.addonRef}/content/icons/inspire.png`;
+
+    this.registrationKey = Zotero.ItemPaneManager.registerSection({
+      // paneID: `${config.addonRef}-references`,
+      paneID: 'zoteroinspire-references',
+      pluginID: config.addonID,
+      header: {
+        // l10nID: getLocaleID("references-panel-header"),
+        l10nID: 'zoteroinspire-references-panel-header',
+        icon: paneIcon,
+        darkIcon: paneIcon,
+      },
+      sidenav: {
+        // l10nID: getLocaleID("references-panel-header"),
+        l10nID: 'zoteroinspire-referencesSection',
+        icon: paneIcon2x,
+        darkIcon: paneIcon2x,
+      },
+      onInit: (args) => {
+        // 🔍 检查生成的 DOM
+        Zotero.debug(`+++[${config.addonName}] Panel initialized`);
+        // Zotero.debug(`@@@[${config.addonName}] Body element: ${args.body?.outerHTML}`);
+        try {
+          args.setEnabled(true);
+        } catch (err) {
+          Zotero.debug(
+            `[${config.addonName}] Failed to enable INSPIRE pane: ${err}`,
+          );
+        }
+        const controller = new InspireReferencePanelController(args.body);
+        this.controllers.set(args.body, controller);
+      },
+      onRender: () => {
+        // Required by Zotero 7 ItemPaneSection API even if we render manually
+      },
+      onDestroy: (args) => {
+        const controller = this.controllers.get(args.body);
+        controller?.destroy();
+        this.controllers.delete(args.body);
+      },
+      onItemChange: (args) => {
+        const controller = this.controllers.get(args.body);
+        controller?.handleItemChange(args);
+      },
+      // sectionButtons: [
+      //   {
+      //     type: 'refresh',
+      //     icon: 'chrome://zotero/skin/16/universal/refresh.svg',
+      //     l10nID: 'references-panel-refresh',
+      //     onClick: this._handleRefresh.bind(this)
+      //   }
+      // ]
+    });
+  }
+
+  // For sectionButtons
+  // static _handleRefresh() {
+  //   //
+  // }
+
+  static unregisterPanel() {
+    if (typeof this.registrationKey === "string") {
+      Zotero.ItemPaneManager.unregisterSection(this.registrationKey);
+      this.registrationKey = undefined;
+    }
+  }
+}
+
+class InspireReferencePanelController {
+  private body: HTMLDivElement;
+  private statusEl: HTMLSpanElement;
+  private listEl: HTMLDivElement;
+  private refreshButton: HTMLButtonElement;
+  private filterInput: HTMLInputElement;
+  private filterText = "";
+  private currentItemID?: number;
+  private currentRecid?: string;
+  private allEntries: InspireReferenceEntry[] = [];
+  private referencesCache = new Map<string, InspireReferenceEntry[]>();
+  private metadataCache = new Map<string, jsobject>();
+  private activeAbort?: AbortController;
+  private pendingToken?: string;
+  private notifierID?: string;
+
+  constructor(body: HTMLDivElement) {
+    this.body = body;
+    this.body.classList.add("zinspire-ref-panel");
+
+    const toolbar = ztoolkit.UI.appendElement(
+      {
+        tag: "div",
+        classList: ["zinspire-ref-panel__toolbar"],
+      },
+      this.body,
+    ) as HTMLDivElement;
+
+    this.statusEl = ztoolkit.UI.appendElement(
+      {
+        tag: "span",
+        classList: ["zinspire-ref-panel__status"],
+        properties: { textContent: getString("references-panel-status-empty") },
+      },
+      toolbar,
+    ) as HTMLSpanElement;
+
+    this.refreshButton = ztoolkit.UI.appendElement(
+      {
+        tag: "button",
+        classList: ["zinspire-ref-panel__button"],
+        attributes: { title: getString("references-panel-refresh") },
+        properties: { textContent: getString("references-panel-refresh") },
+        listeners: [
+          {
+            type: "click",
+            listener: () => {
+              if (this.currentRecid) {
+                this.loadReferences(this.currentRecid, { force: true }).catch(
+                  () => void 0,
+                );
+              }
+            },
+          },
+        ],
+      },
+      toolbar,
+    ) as HTMLButtonElement;
+
+    this.filterInput = ztoolkit.UI.appendElement(
+      {
+        tag: "input",
+        classList: ["zinspire-ref-panel__filter"],
+        attributes: {
+          type: "search",
+          placeholder: getString("references-panel-filter-placeholder"),
+        },
+        listeners: [
+          {
+            type: "input",
+            listener: (event: Event) => {
+              const target = event.target as HTMLInputElement;
+              this.filterText = target.value.trim().toLowerCase();
+              this.renderReferenceList();
+            },
+          },
+        ],
+      },
+      toolbar,
+    ) as HTMLInputElement;
+
+    this.listEl = ztoolkit.UI.appendElement(
+      {
+        tag: "div",
+        classList: ["zinspire-ref-panel__list"],
+      },
+      this.body,
+    ) as HTMLDivElement;
+
+    this.renderMessage(getString("references-panel-status-empty"));
+    this.registerNotifier();
+  }
+
+  destroy() {
+    this.unregisterNotifier();
+    this.cancelActiveRequest();
+    this.allEntries = [];
+    this.referencesCache.clear();
+    this.metadataCache.clear();
+  }
+
+  private registerNotifier() {
+    const callback = {
+      notify: async (
+        event: string,
+        type: string,
+        ids: number[] | string[],
+        extraData: { [key: string]: any },
+      ) => {
+        if (!addon?.data.alive) {
+          this.unregisterNotifier();
+          return;
+        }
+        // Listen for item additions
+        if (event === "add" && type === "item") {
+          await this.handleItemAdded(ids as number[]);
+        }
+        // Listen for item deletions
+        if (event === "delete" && type === "item") {
+          await this.handleItemDeleted(ids as number[]);
+        }
+      },
+    };
+    this.notifierID = Zotero.Notifier.registerObserver(callback, ["item"]);
+  }
+
+  private unregisterNotifier() {
+    if (this.notifierID) {
+      Zotero.Notifier.unregisterObserver(this.notifierID);
+      this.notifierID = undefined;
+    }
+  }
+
+  private async handleItemAdded(itemIDs: number[]) {
+    // Check if any newly added items match any reference entries
+    let hasUpdate = false;
+    for (const itemID of itemIDs) {
+      const item = Zotero.Items.get(itemID);
+      if (!item || !item.isRegularItem()) {
+        continue;
+      }
+      // Get recid from the new item
+      const recid = deriveRecidFromItem(item);
+      if (!recid) {
+        continue;
+      }
+      // Check if this recid matches any entry in the current reference list
+      for (const entry of this.allEntries) {
+        if (entry.recid === recid && !entry.localItemID) {
+          entry.localItemID = itemID;
+          entry.isRelated = this.isCurrentItemRelated(item);
+          hasUpdate = true;
+        }
+      }
+    }
+    // Re-render if any entries were updated
+    if (hasUpdate) {
+      this.renderReferenceList();
+    }
+  }
+
+  private async handleItemDeleted(itemIDs: number[]) {
+    // Check if any deleted items match any reference entries
+    let hasUpdate = false;
+    const deletedIDs = new Set(itemIDs);
+    for (const entry of this.allEntries) {
+      if (entry.localItemID && deletedIDs.has(entry.localItemID)) {
+        // Clear the localItemID and isRelated status
+        entry.localItemID = undefined;
+        entry.isRelated = false;
+        hasUpdate = true;
+      }
+    }
+    // Re-render if any entries were updated
+    if (hasUpdate) {
+      this.renderReferenceList();
+    }
+  }
+
+  async handleItemChange(
+    args: _ZoteroTypes.ItemPaneManagerSection.SectionHookArgs,
+  ) {
+    if (args.tabType !== "library" && args.tabType !== "reader") {
+      this.renderMessage(getString("references-panel-reader-mode"));
+      return;
+    }
+    const item = args.item;
+    if (!item || !item.isRegularItem()) {
+      this.currentItemID = undefined;
+      this.currentRecid = undefined;
+      this.renderMessage(getString("references-panel-select-item"));
+      return;
+    }
+    this.currentItemID = item.id;
+    const recid =
+      deriveRecidFromItem(item) ?? (await fetchRecidFromInspire(item));
+    if (!recid) {
+      this.currentRecid = undefined;
+      this.renderMessage(getString("references-panel-no-recid"));
+      return;
+    }
+    if (this.currentRecid !== recid) {
+      this.currentRecid = recid;
+      await this.loadReferences(recid).catch((err) => {
+        if ((err as any)?.name !== "AbortError") {
+          Zotero.debug(
+            `[${config.addonName}] Failed to load references: ${err}`,
+          );
+          this.renderMessage(getString("references-panel-status-error"));
+        }
+      });
+    } else {
+      this.renderReferenceList();
+    }
+  }
+
+  private async loadReferences(
+    recid: string,
+    options: { force?: boolean } = {},
+  ) {
+    this.cancelActiveRequest();
+    this.setStatus(getString("references-panel-status-loading"));
+    this.renderMessage(getString("references-panel-status-loading"));
+    this.refreshButton.disabled = true;
+
+    const cached = this.referencesCache.get(recid);
+    if (cached && !options.force) {
+      this.allEntries = cached;
+      this.renderReferenceList();
+      this.refreshButton.disabled = false;
+      return;
+    }
+
+    const supportsAbort =
+      typeof AbortController !== "undefined" &&
+      typeof AbortController === "function";
+    const controller = supportsAbort ? new AbortController() : null;
+    this.activeAbort = controller ?? undefined;
+    const token = `${recid}-${performance.now()}`;
+    this.pendingToken = token;
+
+    try {
+      const entries = await this.fetchReferences(recid, controller?.signal);
+      this.allEntries = entries;
+      this.referencesCache.set(recid, entries);
+      await this.enrichEntries(entries, controller?.signal);
+      if (this.pendingToken === token) {
+        this.renderReferenceList();
+      }
+    } finally {
+      if (this.pendingToken === token) {
+        this.activeAbort = undefined;
+        this.refreshButton.disabled = false;
+      }
+    }
+  }
+
+  private async fetchReferences(recid: string, signal?: AbortSignal) {
+    Zotero.debug(
+      `[${config.addonName}] Fetching references for recid ${recid}`,
+    );
+    const response = await fetch(
+      `https://inspirehep.net/api/literature/${encodeURIComponent(recid)}`,
+      signal ? { signal } : undefined,
+    ).catch(() => null);
+    if (!response || response.status === 404) {
+      throw new Error("Reference list not found");
+    }
+    const payload: any = await response.json();
+    const references = payload?.metadata?.references ?? [];
+    Zotero.debug(
+      `[${config.addonName}] Retrieved ${references.length} references for ${recid}`,
+    );
+    const entries = await Promise.all(
+      references.map((ref: any, index: number) => this.buildEntry(ref, index)),
+    );
+    return entries;
+  }
+
+  private async enrichEntries(
+    entries: InspireReferenceEntry[],
+    signal?: AbortSignal,
+  ) {
+    const needsDetails = entries.filter(
+      (entry) =>
+        !entry.title || entry.title === getString("references-panel-no-title"),
+    );
+    if (!needsDetails.length) {
+      return;
+    }
+    const concurrency = Math.min(4, needsDetails.length);
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < concurrency; i++) {
+      workers.push(
+        this.runMetadataWorker(needsDetails, i, concurrency, signal),
+      );
+    }
+    await Promise.all(workers);
+    this.renderReferenceList();
+  }
+
+  private async runMetadataWorker(
+    entries: InspireReferenceEntry[],
+    offset: number,
+    step: number,
+    signal?: AbortSignal,
+  ) {
+    for (let i = offset; i < entries.length; i += step) {
+      if (signal?.aborted) {
+        return;
+      }
+      const entry = entries[i];
+      if (!entry.recid || this.metadataCache.has(entry.recid)) {
+        const cached = entry.recid
+          ? this.metadataCache.get(entry.recid)
+          : undefined;
+        if (cached) {
+          this.applyMetadataToEntry(entry, cached);
+        }
+        continue;
+      }
+      const meta = await fetchInspireMetaByRecid(entry.recid).catch(() => -1);
+      if (meta !== -1 && entry.recid) {
+        this.metadataCache.set(entry.recid, meta as jsobject);
+        this.applyMetadataToEntry(entry, meta as jsobject);
+      }
+    }
+  }
+
+  private applyMetadataToEntry(entry: InspireReferenceEntry, meta: jsobject) {
+    if (!entry.title && meta.title) {
+      entry.title = meta.title as string;
+    }
+    if (entry.title === getString("references-panel-no-title") && meta.title) {
+      entry.title = meta.title as string;
+    }
+    if (!entry.authors.length && Array.isArray(meta.creators)) {
+      entry.authors = (meta.creators as any[])
+        .map((creator) => {
+          if (creator.name) {
+            return creator.name as string;
+          }
+          const first = creator.firstName ?? "";
+          const last = creator.lastName ?? "";
+          return `${first} ${last}`.trim();
+        })
+        .filter(Boolean);
+      entry.authorText = formatAuthors(entry.authors);
+    }
+    if (
+      (!entry.year ||
+        entry.year === getString("references-panel-year-unknown")) &&
+      meta.date
+    ) {
+      entry.year = `${meta.date}`.slice(0, 4);
+    }
+    entry.displayText = buildDisplayText(entry);
+    entry.searchText = entry.displayText.toLowerCase();
+  }
+
+  private async buildEntry(
+    referenceWrapper: any,
+    index: number,
+  ): Promise<InspireReferenceEntry> {
+    const reference = referenceWrapper?.reference ?? {};
+    const recid =
+      extractRecidFromRecordRef(referenceWrapper?.record?.["$ref"]) ||
+      extractRecidFromUrls(reference?.urls);
+    const authors = extractAuthorNames(reference);
+    const summary = buildPublicationSummary(reference?.publication_info);
+    const entry: InspireReferenceEntry = {
+      id: `${index}-${recid ?? reference?.label ?? Date.now()}`,
+      label: reference?.label,
+      recid: recid ?? undefined,
+      inspireUrl: buildReferenceUrl(reference, recid),
+      fallbackUrl: buildFallbackUrl(reference),
+      title:
+        reference?.title?.title?.trim() ||
+        getString("references-panel-no-title"),
+      summary,
+      year:
+        reference?.publication_info?.year?.toString() ??
+        getString("references-panel-year-unknown"),
+      authors,
+      authorText: formatAuthors(authors),
+      displayText: "",
+      searchText: "",
+    };
+    entry.displayText = buildDisplayText(entry);
+    entry.searchText = entry.displayText.toLowerCase();
+    if (entry.recid) {
+      const localItem = await findItemByRecid(entry.recid);
+      if (localItem) {
+        entry.localItemID = localItem.id;
+        entry.isRelated = this.isCurrentItemRelated(localItem);
+      }
+    }
+    return entry;
+  }
+
+  private renderReferenceList() {
+    this.listEl.textContent = "";
+    if (!this.allEntries.length) {
+      this.renderMessage(getString("references-panel-empty-list"));
+      return;
+    }
+    const filtered = this.filterText
+      ? this.allEntries.filter((entry) =>
+        entry.searchText.includes(this.filterText),
+      )
+      : this.allEntries;
+    if (!filtered.length) {
+      this.renderMessage(getString("references-panel-no-match"));
+    } else {
+      const fragment = this.listEl.ownerDocument.createDocumentFragment();
+      for (const entry of filtered) {
+        fragment.appendChild(this.createReferenceRow(entry));
+      }
+      this.listEl.appendChild(fragment);
+    }
+    if (this.filterText) {
+      this.setStatus(
+        getString("references-panel-filter-count", {
+          args: {
+            visible: filtered.length,
+            total: this.allEntries.length,
+          },
+        }),
+      );
+    } else {
+      this.setStatus(
+        getString("references-panel-count", {
+          args: { count: this.allEntries.length },
+        }),
+      );
+    }
+  }
+
+  private createReferenceRow(entry: InspireReferenceEntry) {
+    const row = this.listEl.ownerDocument.createElement("div");
+    row.classList.add("zinspire-ref-entry");
+
+    const marker = this.listEl.ownerDocument.createElement("span");
+    marker.classList.add("zinspire-ref-entry__dot");
+    marker.textContent = entry.localItemID ? "●" : "○";
+    marker.dataset.state = entry.localItemID ? "local" : "missing";
+    const applyMarkerStyle = (hasLocalItem: boolean) => {
+      if (hasLocalItem) {
+        marker.style.color = "#1a8f4d";
+        marker.style.opacity = "1";
+      } else {
+        marker.style.color = "#d93025";
+        marker.style.opacity = "1";
+      }
+    };
+    applyMarkerStyle(Boolean(entry.localItemID));
+    marker.setAttribute(
+      "title",
+      entry.localItemID
+        ? getString("references-panel-dot-local")
+        : getString("references-panel-dot-add"),
+    );
+    if (!entry.localItemID) {
+      marker.classList.add("is-clickable");
+      marker.style.cursor = "pointer";
+      marker.addEventListener("click", (event) => {
+        event.preventDefault();
+        this.handleAddAction(entry).catch(() => void 0);
+      });
+    }
+
+    const linkButton = this.listEl.ownerDocument.createElement("button");
+    linkButton.classList.add("zinspire-ref-entry__link");
+    linkButton.dataset.state = entry.isRelated ? "linked" : "unlinked";
+    linkButton.style.cursor = entry.isRelated ? "default" : "pointer";
+    let linkedIcon: HTMLImageElement | null = null;
+    linkButton.setAttribute(
+      "title",
+      entry.isRelated
+        ? getString("references-panel-link-existing")
+        : getString("references-panel-link-missing"),
+    );
+    if (entry.isRelated) {
+      linkedIcon = this.listEl.ownerDocument.createElement("img");
+      linkedIcon.src = "chrome://zotero/skin/itempane/16/related.svg";
+      linkedIcon.width = 14;
+      linkedIcon.height = 14;
+      linkedIcon.setAttribute("draggable", "false");
+      linkedIcon.style.margin = "0";
+      linkedIcon.style.padding = "0";
+      linkedIcon.style.display = "block";
+      linkButton.appendChild(linkedIcon);
+    } else {
+      linkButton.textContent = "⊘";
+    }
+    const applyLinkStyle = (isLinked: boolean) => {
+      if (isLinked) {
+        linkButton.style.color = "#1a56db";
+        linkButton.style.opacity = "1";
+        if (linkedIcon) {
+          linkedIcon.style.filter =
+            "brightness(0) saturate(100%) invert(28%) sepia(72%) saturate(1235%) hue-rotate(199deg) brightness(90%) contrast(94%)";
+        }
+      } else {
+        linkButton.style.color = "#ff8c00";
+        linkButton.style.opacity = "1";
+      }
+    };
+    applyLinkStyle(Boolean(entry.isRelated));
+    linkButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.handleLinkAction(entry).catch((err) => {
+        if ((err as any)?.name !== "AbortError") {
+          Zotero.debug(
+            `[${config.addonName}] Unable to link reference: ${err}`,
+          );
+        }
+      });
+    });
+
+    const content = this.listEl.ownerDocument.createElement("div");
+    content.classList.add("zinspire-ref-entry__content");
+
+    const titleLink = this.listEl.ownerDocument.createElement("a");
+    titleLink.classList.add("zinspire-ref-entry__title");
+    titleLink.textContent = entry.displayText;
+    titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
+    titleLink.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.handleTitleClick(entry);
+    });
+
+    content.appendChild(titleLink);
+    if (entry.summary) {
+      const meta = this.listEl.ownerDocument.createElement("div");
+      meta.classList.add("zinspire-ref-entry__meta");
+      meta.textContent = entry.summary;
+      content.appendChild(meta);
+    }
+
+    const textContainer = this.listEl.ownerDocument.createElement("div");
+    textContainer.classList.add("zinspire-ref-entry__text");
+    textContainer.append(marker, linkButton, content);
+    row.appendChild(textContainer);
+    return row;
+  }
+
+  private async handleLinkAction(entry: InspireReferenceEntry) {
+    if (!this.currentItemID) {
+      return;
+    }
+    if (!entry.localItemID) {
+      this.showToast(getString("references-panel-toast-add-first"));
+      return;
+    }
+    if (entry.isRelated) {
+      this.showToast(getString("references-panel-toast-already-linked"));
+      return;
+    }
+    await this.linkExistingReference(entry.localItemID);
+    entry.isRelated = true;
+    this.renderReferenceList();
+  }
+
+  private async handleTitleClick(entry: InspireReferenceEntry) {
+    if (entry.localItemID) {
+      const pane = Zotero.getActiveZoteroPane();
+      pane?.selectItems([entry.localItemID]);
+      return;
+    }
+    if (entry.inspireUrl || entry.fallbackUrl) {
+      Zotero.launchURL(entry.inspireUrl || entry.fallbackUrl!);
+      return;
+    }
+    this.showToast(getString("references-panel-toast-missing"));
+  }
+
+  private isCurrentItemRelated(localItem: Zotero.Item) {
+    if (!this.currentItemID) {
+      return false;
+    }
+    const currentItem = Zotero.Items.get(this.currentItemID);
+    if (!currentItem) {
+      return false;
+    }
+    const relatedKeys = currentItem.relatedItems || [];
+    const compositeKey = `${localItem.libraryID}/${localItem.key}`;
+    return (
+      relatedKeys.includes(localItem.key) || relatedKeys.includes(compositeKey)
+    );
+  }
+
+  private async linkExistingReference(localItemID: number) {
+    if (!this.currentItemID || localItemID === this.currentItemID) {
+      return;
+    }
+    const currentItem = Zotero.Items.get(this.currentItemID);
+    const targetItem = Zotero.Items.get(localItemID);
+    if (!currentItem || !targetItem) {
+      return;
+    }
+    const updated = currentItem.addRelatedItem(targetItem);
+    if (targetItem.addRelatedItem(currentItem)) {
+      await targetItem.saveTx();
+    }
+    if (updated) {
+      await currentItem.saveTx();
+      this.showToast(getString("references-panel-toast-linked"));
+    }
+  }
+
+  private async handleAddAction(entry: InspireReferenceEntry) {
+    if (entry.localItemID) {
+      return;
+    }
+    if (!entry.recid) {
+      this.showToast(getString("references-panel-toast-missing"));
+      return;
+    }
+    const selection = await this.promptForSaveTarget();
+    if (!selection) {
+      return;
+    }
+    const newItem = await this.importReference(entry.recid, selection);
+    if (newItem) {
+      entry.localItemID = newItem.id;
+      entry.displayText = buildDisplayText(entry);
+      entry.searchText = entry.displayText.toLowerCase();
+      entry.isRelated = false;
+      this.renderReferenceList();
+    }
+  }
+
+  private async importReference(
+    recid: string,
+    target: SaveTargetSelection,
+  ) {
+    const currentItem = this.currentItemID
+      ? Zotero.Items.get(this.currentItemID)
+      : null;
+    if (!currentItem) {
+      return null;
+    }
+    const meta = await fetchInspireMetaByRecid(recid);
+    if (meta === -1) {
+      this.showToast(getString("references-panel-toast-missing"));
+      return null;
+    }
+    const pane = Zotero.getActiveZoteroPane();
+    const originalItemID = this.currentItemID;
+    const newItem = new Zotero.Item("journalArticle");
+    newItem.libraryID = target.libraryID ?? currentItem.libraryID;
+    const targetCollectionIDs = Array.from(
+      new Set(target.collectionIDs),
+    ).filter((id): id is number => typeof id === "number");
+    newItem.setField("extra", "");
+    if (targetCollectionIDs.length) {
+      newItem.setCollections(targetCollectionIDs);
+    } else {
+      newItem.setCollections([]);
+    }
+    await setInspireMeta(newItem, meta as jsobject, "full");
+    await newItem.saveTx();
+    this.rememberRecentTarget(target.primaryRowID);
+
+    // Check if new item is added to current collection
+    const selectedCollection = pane?.getSelectedCollection();
+    const isAddedToCurrentCollection = selectedCollection &&
+      targetCollectionIDs.includes(selectedCollection.id);
+
+    // Only jump back if not added to current collection
+    if (originalItemID && pane && !isAddedToCurrentCollection) {
+      try {
+        pane.selectItems([originalItemID]);
+      } catch (_err) {
+        // Ignore focus restoration errors
+      }
+    }
+    this.showToast(getString("references-panel-toast-added"));
+    return newItem;
+  }
+
+  private renderMessage(message: string) {
+    this.listEl.textContent = "";
+    const empty = this.listEl.ownerDocument.createElement("div");
+    empty.classList.add("zinspire-ref-panel__empty");
+    empty.textContent = message;
+    this.listEl.appendChild(empty);
+    this.setStatus(message);
+  }
+
+  private setStatus(text: string) {
+    this.statusEl.textContent = text;
+  }
+
+  private cancelActiveRequest() {
+    try {
+      this.activeAbort?.abort();
+    } catch (_err) {
+      // Ignore abort errors for environments without AbortController
+    }
+    this.activeAbort = undefined;
+  }
+
+  private async promptForSaveTarget(): Promise<SaveTargetSelection | null> {
+    const recentTargets = this.getRecentTargets();
+    const targets = this.buildSaveTargets(recentTargets.ids);
+    if (!targets.length) {
+      this.showToast(getString("references-panel-picker-empty"));
+      return null;
+    }
+    let defaultID = this.getDefaultTargetID();
+    if (!defaultID) {
+      defaultID = recentTargets.ordered[0] || targets[0]?.id || null;
+    }
+    return this.showTargetPicker(targets, defaultID);
+  }
+
+  private buildSaveTargets(recentIDs: Set<string>): SaveTargetRow[] {
+    const targets: SaveTargetRow[] = [];
+    for (const library of Zotero.Libraries.getAll()) {
+      if (!library?.editable) {
+        continue;
+      }
+      const libraryID = library.libraryID;
+      const libraryRow: SaveTargetRow = {
+        id: `L${libraryID}`,
+        name: library.name,
+        level: 0,
+        type: "library",
+        libraryID,
+        filesEditable: library.filesEditable,
+        recent: recentIDs.has(`L${libraryID}`),
+      };
+      targets.push(libraryRow);
+      const collections =
+        Zotero.Collections.getByLibrary(libraryID, true) || [];
+      for (const collection of collections) {
+        const rawLevel = (collection as any)?.level;
+        const level = typeof rawLevel === "number" ? rawLevel + 1 : 1;
+        const row: SaveTargetRow = {
+          id: collection.treeViewID,
+          name: collection.name,
+          level,
+          type: "collection",
+          libraryID,
+          collectionID: collection.id,
+          filesEditable: library.filesEditable,
+          parentID: collection.parentID
+            ? `C${collection.parentID}`
+            : `L${libraryID}`,
+          recent: recentIDs.has(collection.treeViewID),
+        };
+        targets.push(row);
+      }
+    }
+    return targets;
+  }
+
+  private getDefaultTargetID(): string | null {
+    const pane = Zotero.getActiveZoteroPane();
+    if (pane?.getSelectedCollection()) {
+      const selected = pane.getSelectedCollection();
+      if (selected) {
+        return `C${selected.id}`;
+      }
+    }
+    const libraryID =
+      pane?.getSelectedLibraryID() ?? Zotero.Libraries.userLibrary?.libraryID;
+    return libraryID ? `L${libraryID}` : null;
+  }
+
+  private getRecentTargets() {
+    const ids = new Set<string>();
+    const ordered: string[] = [];
+    try {
+      const raw = Zotero.Prefs.get("recentSaveTargets") as string | undefined;
+      if (!raw) {
+        return { ids, ordered };
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const entry of parsed) {
+          if (entry?.id && typeof entry.id === "string") {
+            ids.add(entry.id);
+            ordered.push(entry.id);
+          }
+        }
+      }
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] Failed to parse recentSaveTargets: ${err}`,
+      );
+      Zotero.Prefs.clear("recentSaveTargets");
+    }
+    return { ids, ordered };
+  }
+
+  private rememberRecentTarget(targetID: string) {
+    try {
+      const raw = Zotero.Prefs.get("recentSaveTargets") as string | undefined;
+      let entries: Array<{ id: string }> = [];
+      if (raw) {
+        entries = JSON.parse(raw);
+      }
+      if (!Array.isArray(entries)) {
+        entries = [];
+      }
+      entries = entries.filter((entry) => entry?.id !== targetID);
+      entries.unshift({ id: targetID });
+      Zotero.Prefs.set(
+        "recentSaveTargets",
+        JSON.stringify(entries.slice(0, 5)),
+      );
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] Failed to update recentSaveTargets: ${err}`,
+      );
+      Zotero.Prefs.clear("recentSaveTargets");
+    }
+  }
+
+  private showTargetPicker(
+    targets: SaveTargetRow[],
+    defaultID: string | null,
+  ): Promise<SaveTargetSelection | null> {
+    return new Promise((resolve) => {
+      const doc = this.body.ownerDocument;
+      const previousScrollTop = this.listEl.scrollTop;
+      const previousScrollLeft = this.listEl.scrollLeft;
+      const previousActiveElement = doc.activeElement as Element | null;
+      const isElementNode = (value: any): value is Element =>
+        Boolean(value && typeof value === "object" && value.nodeType === 1);
+
+      type ScrollSnapshot = { element: Element; top: number; left: number };
+      const captureScrollSnapshots = () => {
+        const snapshots: ScrollSnapshot[] = [];
+        let current: Element | null = this.body;
+        while (current) {
+          const node = current as any;
+          if (
+            typeof node.scrollTop === "number" &&
+            typeof node.scrollHeight === "number" &&
+            typeof node.clientHeight === "number" &&
+            node.scrollHeight > node.clientHeight
+          ) {
+            snapshots.push({
+              element: current,
+              top: node.scrollTop ?? 0,
+              left: node.scrollLeft ?? 0,
+            });
+          }
+          current = current.parentElement;
+        }
+        const docElement =
+          doc.scrollingElement ||
+          (doc as any).documentElement ||
+          (doc as any).body ||
+          null;
+        if (isElementNode(docElement)) {
+          const node = docElement as any;
+          snapshots.push({
+            element: docElement,
+            top: node.scrollTop ?? 0,
+            left: node.scrollLeft ?? 0,
+          });
+        }
+        return snapshots;
+      };
+      const scrollSnapshots = captureScrollSnapshots();
+
+      const restoreViewState = () => {
+        this.listEl.scrollTop = previousScrollTop;
+        this.listEl.scrollLeft = previousScrollLeft;
+        for (const snapshot of scrollSnapshots) {
+          const target = snapshot.element as any;
+          if (typeof target.scrollTo === "function") {
+            target.scrollTo(snapshot.left, snapshot.top);
+          } else {
+            if (typeof target.scrollTop === "number") {
+              target.scrollTop = snapshot.top;
+            }
+            if (typeof target.scrollLeft === "number") {
+              target.scrollLeft = snapshot.left;
+            }
+          }
+        }
+        if (
+          previousActiveElement &&
+          typeof (previousActiveElement as any).focus === "function"
+        ) {
+          try {
+            (previousActiveElement as any).focus();
+          } catch (_err) {
+            // Ignore focus restoration issues
+          }
+        }
+      };
+      const overlay = doc.createElement("div");
+      overlay.classList.add("zinspire-collection-picker__overlay");
+      const panel = doc.createElement("div");
+      panel.classList.add("zinspire-collection-picker");
+      overlay.appendChild(panel);
+
+      const header = doc.createElement("div");
+      header.classList.add("zinspire-collection-picker__header");
+      header.textContent = getString("references-panel-picker-title");
+      panel.appendChild(header);
+
+      const hint = doc.createElement("div");
+      hint.classList.add("zinspire-collection-picker__hint");
+      hint.textContent = getString("references-panel-picker-hint");
+      panel.appendChild(hint);
+
+      const filterInput = doc.createElement("input");
+      filterInput.classList.add("zinspire-collection-picker__filter");
+      filterInput.placeholder = getString("references-panel-picker-filter");
+      panel.appendChild(filterInput);
+
+      const list = doc.createElement("div");
+      list.classList.add("zinspire-collection-picker__list");
+      panel.appendChild(list);
+
+      const actions = doc.createElement("div");
+      actions.classList.add("zinspire-collection-picker__actions");
+      const cancelBtn = doc.createElement("button");
+      cancelBtn.classList.add("zinspire-collection-picker__button");
+      cancelBtn.textContent = getString("references-panel-picker-cancel");
+      const okBtn = doc.createElement("button");
+      okBtn.classList.add(
+        "zinspire-collection-picker__button",
+        "zinspire-collection-picker__button--primary",
+      );
+      okBtn.textContent = getString("references-panel-picker-confirm");
+      actions.append(cancelBtn, okBtn);
+      panel.appendChild(actions);
+
+      const rowMap = new Map<string, SaveTargetRow>();
+      const buttonMap = new Map<string, HTMLButtonElement>();
+      for (const row of targets) {
+        rowMap.set(row.id, row);
+        const button = doc.createElement("button");
+        button.type = "button";
+        button.dataset.id = row.id;
+        button.dataset.type = row.type;
+        button.classList.add("zinspire-collection-picker__row");
+        button.style.setProperty(
+          "--zinspire-collection-level",
+          row.level.toString(),
+        );
+        button.textContent = row.name;
+        if (row.recent) {
+          button.dataset.recent = "1";
+        }
+        list.appendChild(button);
+        buttonMap.set(row.id, button);
+      }
+
+      if (!targets.length) {
+        const empty = doc.createElement("div");
+        empty.classList.add("zinspire-collection-picker__empty");
+        empty.textContent = getString("references-panel-picker-empty");
+        list.appendChild(empty);
+      }
+
+      const deriveLibraryRowID = (rowID: string | null) => {
+        if (!rowID) {
+          return null;
+        }
+        const row = rowMap.get(rowID);
+        if (!row) {
+          return null;
+        }
+        return row.type === "library" ? row.id : `L${row.libraryID}`;
+      };
+
+      let focusedID: string | null =
+        (defaultID && rowMap.has(defaultID) ? defaultID : null) ||
+        targets[0]?.id ||
+        null;
+      let selectedLibraryRowID: string | null =
+        deriveLibraryRowID(focusedID) ||
+        targets.find((row) => row.type === "library")?.id ||
+        null;
+      let selectedLibraryID: number | null = selectedLibraryRowID
+        ? rowMap.get(selectedLibraryRowID)?.libraryID ?? null
+        : null;
+      const selectedCollectionRowIDs = new Set<string>();
+      if (focusedID) {
+        const initialRow = rowMap.get(focusedID);
+        if (initialRow?.type === "collection") {
+          selectedCollectionRowIDs.add(initialRow.id);
+        }
+      }
+      if (!selectedLibraryRowID && targets[0]) {
+        selectedLibraryRowID =
+          targets[0].type === "library"
+            ? targets[0].id
+            : `L${targets[0].libraryID}`;
+        selectedLibraryID =
+          rowMap.get(selectedLibraryRowID!)?.libraryID ?? targets[0].libraryID;
+      }
+
+      const applyCollectionHighlight = (
+        button: HTMLButtonElement,
+        checked: boolean,
+      ) => {
+        if (checked) {
+          button.style.backgroundColor = "#e6f2ff";
+          button.style.color = "#0b2d66";
+          button.style.fontWeight = "600";
+        } else {
+          button.style.backgroundColor = "";
+          button.style.color = "";
+          button.style.fontWeight = "";
+        }
+      };
+
+      const updateVisualState = () => {
+        for (const [id, button] of buttonMap.entries()) {
+          button.classList.toggle("is-focused", id === focusedID);
+          if (button.dataset.type === "library") {
+            button.classList.toggle(
+              "is-library-active",
+              id === selectedLibraryRowID,
+            );
+          } else {
+            const isChecked = selectedCollectionRowIDs.has(id);
+            button.classList.toggle("is-checked", isChecked);
+            button.classList.toggle("is-library-active", false);
+            applyCollectionHighlight(button, isChecked);
+          }
+        }
+      };
+
+      const focusRow = (id: string | null, scroll = true) => {
+        focusedID = id;
+        updateVisualState();
+        if (scroll && id) {
+          buttonMap.get(id)?.scrollIntoView({ block: "nearest" });
+        }
+      };
+
+      focusRow(focusedID, false);
+
+      const visibleButtons = () =>
+        Array.from(buttonMap.values()).filter((btn) => !btn.hidden);
+
+      const moveFocus = (delta: number) => {
+        const buttons = visibleButtons();
+        if (!buttons.length) {
+          return;
+        }
+        let index = buttons.findIndex((btn) => btn.dataset.id === focusedID);
+        if (index === -1) {
+          index = 0;
+        } else {
+          index = Math.min(Math.max(index + delta, 0), buttons.length - 1);
+        }
+        const nextButton = buttons[index];
+        focusRow(nextButton?.dataset.id ?? null);
+      };
+
+      const selectLibraryRow = (id: string | null) => {
+        if (!id) {
+          return;
+        }
+        const row = rowMap.get(id);
+        if (!row || row.type !== "library") {
+          return;
+        }
+        selectedLibraryRowID = row.id;
+        selectedLibraryID = row.libraryID;
+        for (const rowID of Array.from(selectedCollectionRowIDs)) {
+          const candidate = rowMap.get(rowID);
+          if (!candidate || candidate.libraryID !== row.libraryID) {
+            selectedCollectionRowIDs.delete(rowID);
+          }
+        }
+        focusRow(row.id, false);
+        updateVisualState();
+      };
+
+      const toggleCollectionRow = (id: string | null) => {
+        if (!id) {
+          return;
+        }
+        const row = rowMap.get(id);
+        if (!row || row.type !== "collection") {
+          return;
+        }
+        if (!selectedLibraryID || selectedLibraryID !== row.libraryID) {
+          selectLibraryRow(`L${row.libraryID}`);
+        }
+        if (selectedCollectionRowIDs.has(id)) {
+          selectedCollectionRowIDs.delete(id);
+        } else {
+          selectedCollectionRowIDs.add(id);
+        }
+        focusRow(id);
+        updateVisualState();
+      };
+
+      const applyFilter = () => {
+        const query = filterInput.value.trim().toLowerCase();
+        if (!query) {
+          buttonMap.forEach((btn) => (btn.hidden = false));
+          return;
+        }
+        const visible = new Set<string>();
+        for (const row of targets) {
+          const matches = row.name.toLowerCase().includes(query);
+          if (matches) {
+            visible.add(row.id);
+            let parentID = row.parentID;
+            while (parentID) {
+              visible.add(parentID);
+              parentID = rowMap.get(parentID)?.parentID;
+            }
+          }
+        }
+        buttonMap.forEach((btn, id) => {
+          btn.hidden = !visible.has(id);
+        });
+        if (!focusedID || buttonMap.get(focusedID)?.hidden) {
+          const firstVisible = visibleButtons()[0];
+          focusRow(firstVisible?.dataset.id ?? null);
+        }
+      };
+
+      const buildSelection = (): SaveTargetSelection | null => {
+        const libraryRowID =
+          selectedLibraryRowID ||
+          targets.find((row) => row.type === "library")?.id ||
+          null;
+        if (!libraryRowID) {
+          return null;
+        }
+        const libraryRow = rowMap.get(libraryRowID);
+        if (!libraryRow) {
+          return null;
+        }
+        const collectionIDs = Array.from(selectedCollectionRowIDs)
+          .map((id) => rowMap.get(id)?.collectionID)
+          .filter((id): id is number => typeof id === "number");
+        const primaryRowID =
+          selectedCollectionRowIDs.values().next().value || libraryRowID;
+        return {
+          libraryID: libraryRow.libraryID,
+          primaryRowID,
+          collectionIDs,
+        };
+      };
+
+      let isFinished = false;
+
+      const finish = (selection: SaveTargetSelection | null) => {
+        if (isFinished) {
+          return;
+        }
+        isFinished = true;
+        overlay.remove();
+        filterInput.removeEventListener("input", applyFilter);
+        list.removeEventListener("click", onListClick);
+        list.removeEventListener("dblclick", onListDoubleClick);
+        panel.removeEventListener("keydown", onKeyDown);
+        cancelBtn.removeEventListener("click", onCancel);
+        okBtn.removeEventListener("click", onConfirm);
+        overlay.removeEventListener("click", onOverlayClick);
+        doc.removeEventListener("keydown", onGlobalKeyDown, true);
+        restoreViewState();
+        resolve(selection);
+      };
+
+      const onConfirm = () => {
+        finish(buildSelection());
+      };
+
+      const onCancel = () => finish(null);
+
+      const onOverlayClick = (event: MouseEvent) => {
+        if (event.target === overlay) {
+          finish(null);
+        }
+      };
+
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          finish(null);
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          moveFocus(1);
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          moveFocus(-1);
+          return;
+        }
+        if (event.key === " " && event.target !== filterInput) {
+          event.preventDefault();
+          const row = focusedID ? rowMap.get(focusedID) : null;
+          if (!row) {
+            return;
+          }
+          if (row.type === "library") {
+            selectLibraryRow(row.id);
+          } else {
+            toggleCollectionRow(row.id);
+          }
+          return;
+        }
+        if (event.key === "Enter" && event.target !== filterInput) {
+          event.preventDefault();
+          onConfirm();
+        }
+      };
+
+      const onListClick = (event: MouseEvent) => {
+        const target = (event.target as HTMLElement)?.closest("button");
+        if (!target) {
+          return;
+        }
+        const id = target.getAttribute("data-id");
+        const row = id ? rowMap.get(id) : null;
+        if (!row) {
+          return;
+        }
+        if (row.type === "library") {
+          selectLibraryRow(row.id);
+        } else {
+          toggleCollectionRow(row.id);
+        }
+      };
+
+      const onListDoubleClick = (event: MouseEvent) => {
+        const target = (event.target as HTMLElement)?.closest("button");
+        if (!target) {
+          return;
+        }
+        const id = target.getAttribute("data-id");
+        const row = id ? rowMap.get(id) : null;
+        if (!row) {
+          return;
+        }
+        if (row.type === "library") {
+          selectLibraryRow(row.id);
+        } else {
+          toggleCollectionRow(row.id);
+        }
+        onConfirm();
+      };
+
+      const onGlobalKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          finish(null);
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onConfirm();
+        }
+      };
+
+      filterInput.addEventListener("input", applyFilter);
+      cancelBtn.addEventListener("click", onCancel);
+      okBtn.addEventListener("click", onConfirm);
+      list.addEventListener("click", onListClick);
+      list.addEventListener("dblclick", onListDoubleClick);
+      panel.addEventListener("keydown", onKeyDown);
+      overlay.addEventListener("click", onOverlayClick);
+      doc.addEventListener("keydown", onGlobalKeyDown, true);
+
+      this.body.appendChild(overlay);
+      filterInput.focus();
+    });
+  }
+
+  private showToast(message: string) {
+    const toast = new ztoolkit.ProgressWindow(config.addonName, {
+      closeOnClick: true,
+    });
+    toast.createLine({ text: message });
+    toast.show();
+    toast.startCloseTimer(3000);
+  }
+}
+
+function deriveRecidFromItem(item: Zotero.Item) {
+  const archiveLocation = (
+    item.getField("archiveLocation") as string | undefined
+  )?.trim();
+  if (archiveLocation && /^\d+$/.test(archiveLocation)) {
+    return archiveLocation;
+  }
+  const url = item.getField("url") as string | undefined;
+  const recidFromUrl = extractRecidFromUrl(url);
+  if (recidFromUrl) {
+    return recidFromUrl;
+  }
+  const extra = item.getField("extra") as string | undefined;
+  if (extra) {
+    const match = extra.match(/inspirehep\.net\/(?:record|literature)\/(\d+)/i);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+function extractRecidFromRecordRef(ref?: string) {
+  if (!ref) {
+    return null;
+  }
+  const match = ref.match(/\/(\d+)(?:\?.*)?$/);
+  return match ? match[1] : null;
+}
+
+function extractRecidFromUrls(urls?: Array<{ value: string }>) {
+  if (!Array.isArray(urls)) {
+    return null;
+  }
+  for (const entry of urls) {
+    const candidate = extractRecidFromUrl(entry?.value);
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function extractRecidFromUrl(url?: string | null) {
+  if (!url) {
+    return null;
+  }
+  const match = url.match(/(?:literature|record)\/(\d+)/);
+  return match ? match[1] : null;
+}
+
+function extractAuthorNames(reference: any): string[] {
+  if (Array.isArray(reference?.authors) && reference.authors.length) {
+    return reference.authors
+      .map((author: any) => author?.full_name)
+      .filter(Boolean);
+  }
+  if (
+    Array.isArray(reference?.collaborations) &&
+    reference.collaborations.length
+  ) {
+    return reference.collaborations.filter(Boolean);
+  }
+  return [];
+}
+
+function buildPublicationSummary(info?: any) {
+  if (!info) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  if (info.journal_title) {
+    parts.push(info.journal_title);
+  }
+  if (info.journal_volume) {
+    parts.push(info.journal_volume);
+  }
+  if (info.year) {
+    parts.push(`(${info.year})`);
+  }
+  if (info.artid) {
+    parts.push(info.artid);
+  } else if (info.page_start) {
+    parts.push(
+      info.page_end ? `${info.page_start}-${info.page_end}` : info.page_start,
+    );
+  }
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+function buildReferenceUrl(reference: any, recid?: string | null) {
+  if (recid) {
+    return `https://inspirehep.net/literature/${recid}`;
+  }
+  if (Array.isArray(reference?.urls) && reference.urls.length) {
+    return reference.urls[0].value;
+  }
+  return buildFallbackUrl(reference);
+}
+
+function buildFallbackUrl(reference: any) {
+  if (Array.isArray(reference?.dois) && reference.dois.length) {
+    return `https://doi.org/${reference.dois[0]}`;
+  }
+  if (reference?.arxiv_eprint) {
+    return `https://arxiv.org/abs/${reference.arxiv_eprint}`;
+  }
+  return undefined;
+}
+
+function formatAuthors(authors: string[]) {
+  if (!authors.length) {
+    return getString("references-panel-unknown-author");
+  }
+  const maxAuthors = getPref("max_authors") as number || 3;
+  if (authors.length > maxAuthors) {
+    return `${authors[0]} et al.`;
+  }
+  return authors.join(", ");
+}
+
+function buildDisplayText(entry: InspireReferenceEntry) {
+  const label = entry.label ? `[${entry.label}] ` : "";
+  return `${label}${entry.authorText} (${entry.year}): ${entry.title};`;
+}
+
+async function findItemByRecid(recid: string) {
+  const fieldID = Zotero.ItemFields.getID("archiveLocation");
+  if (!fieldID) {
+    return null;
+  }
+  const sql = `
+    SELECT itemID
+    FROM itemData
+      JOIN itemDataValues USING(valueID)
+    WHERE fieldID = ?
+      AND value = ?
+    LIMIT 1
+  `;
+  const itemID = await Zotero.DB.valueQueryAsync(sql, [fieldID, recid]);
+  if (!itemID) {
+    return null;
+  }
+  return Zotero.Items.get(Number(itemID));
 }
 
 type jsobject = {
@@ -148,20 +1713,30 @@ export class ZInspire {
   error_norecid_shown: boolean;
   final_count_shown: boolean;
   progressWindow: ProgressWindowHelper;
-  constructor(current: number = -1, toUpdate: number = 0, itemsToUpdate: Zotero.Item[] = [], numberOfUpdatedItems: number = 0, counter: number = 0, CrossRefcounter: number = 0, error_norecid: boolean = false, error_norecid_shown: boolean = false, final_count_shown: boolean = false) {
-    this.current = current
-    this.toUpdate = toUpdate
-    this.itemsToUpdate = itemsToUpdate
-    this.numberOfUpdatedItems = numberOfUpdatedItems
-    this.counter = counter
-    this.CrossRefcounter = CrossRefcounter
-    this.error_norecid = error_norecid
-    this.error_norecid_shown = error_norecid_shown
-    this.final_count_shown = final_count_shown
+  constructor(
+    current: number = -1,
+    toUpdate: number = 0,
+    itemsToUpdate: Zotero.Item[] = [],
+    numberOfUpdatedItems: number = 0,
+    counter: number = 0,
+    CrossRefcounter: number = 0,
+    error_norecid: boolean = false,
+    error_norecid_shown: boolean = false,
+    final_count_shown: boolean = false,
+  ) {
+    this.current = current;
+    this.toUpdate = toUpdate;
+    this.itemsToUpdate = itemsToUpdate;
+    this.numberOfUpdatedItems = numberOfUpdatedItems;
+    this.counter = counter;
+    this.CrossRefcounter = CrossRefcounter;
+    this.error_norecid = error_norecid;
+    this.error_norecid_shown = error_norecid_shown;
+    this.final_count_shown = final_count_shown;
     this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
       closeOnClick: true,
       closeTime: -1,
-    })
+    });
   }
 
   resetState(operation: string) {
@@ -184,14 +1759,26 @@ export class ZInspire {
         const icon = "chrome://zotero/skin/cross.png";
         if (this.error_norecid && !this.error_norecid_shown) {
           //ztoolkit.log("hello");
-          const progressWindowNoRecid = new ztoolkit.ProgressWindow(config.addonName, { closeOnClick: true });
+          const progressWindowNoRecid = new ztoolkit.ProgressWindow(
+            config.addonName,
+            { closeOnClick: true },
+          );
           progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
           if (getPref("tag_enable") && getPref("tag_norecid") !== "") {
             // progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'.")
-            progressWindowNoRecid.createLine({ icon: icon, text: "No INSPIRE recid was found for some items. These have been tagged with '" + getPref("tag_norecid") + "'." });
+            progressWindowNoRecid.createLine({
+              icon: icon,
+              text:
+                "No INSPIRE recid was found for some items. These have been tagged with '" +
+                getPref("tag_norecid") +
+                "'.",
+            });
           } else {
             // progressWindowNoRecid.ItemProgress.setText("No INSPIRE recid was found for some items.")
-            progressWindowNoRecid.createLine({ icon: icon, text: "No INSPIRE recid was found for some items." });
+            progressWindowNoRecid.createLine({
+              icon: icon,
+              text: "No INSPIRE recid was found for some items.",
+            });
           }
           progressWindowNoRecid.show();
           progressWindowNoRecid.startCloseTimer(8000);
@@ -207,16 +1794,19 @@ export class ZInspire {
           // ztoolkit.log(this.progressWindow.ItemProgress)
           if (operation === "full" || operation === "noabstract") {
             this.progressWindow.createLine({
-              text: "INSPIRE metadata updated for " +
-                this.counter + " items.", progress: 100
+              text: "INSPIRE metadata updated for " + this.counter + " items.",
+              progress: 100,
             });
           } else if (operation === "citations") {
             this.progressWindow.createLine({
-              text: "INSPIRE citations updated for " +
-                this.counter + " items;\n" +
+              text:
+                "INSPIRE citations updated for " +
+                this.counter +
+                " items;\n" +
                 "CrossRef citations updated for " +
-                this.CrossRefcounter + " items.",
-              progress: 100
+                this.CrossRefcounter +
+                " items.",
+              progress: 100,
             });
           }
           this.progressWindow.show();
@@ -228,7 +1818,8 @@ export class ZInspire {
   }
 
   updateSelectedCollection(operation: string) {
-    const collection = ZoteroPane.getSelectedCollection();
+    const pane = Zotero.getActiveZoteroPane();
+    const collection = pane?.getSelectedCollection();
     if (collection) {
       const items = collection.getChildItems(false, false);
       this.updateItems(items, operation);
@@ -236,47 +1827,50 @@ export class ZInspire {
   }
 
   updateSelectedItems(operation: string) {
-    this.updateItems(ZoteroPane.getSelectedItems(), operation);
-  };
+    const pane = Zotero.getActiveZoteroPane();
+    const items = pane ? pane.getSelectedItems() : [];
+    this.updateItems(items, operation);
+  }
 
   updateItems(items0: Zotero.Item[], operation: string) {
-
-
     // don't update note items
-    const items = items0.filter(item => item.isRegularItem());
+    const items = items0.filter((item) => item.isRegularItem());
 
-    if (items.length === 0 ||
-      this.numberOfUpdatedItems <
-      this.toUpdate) {
+    if (items.length === 0 || this.numberOfUpdatedItems < this.toUpdate) {
       return;
     }
-
 
     this.resetState("initial");
     this.toUpdate = items.length;
     this.itemsToUpdate = items;
 
     // Progress Windows
-    this.progressWindow =
-      new ztoolkit.ProgressWindow(config.addonName, {
-        closeOnClick: false
-      });
-    const icon = 'chrome://zotero/skin/toolbar-advanced-search' +
+    this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+      closeOnClick: false,
+    });
+    const icon =
+      "chrome://zotero/skin/toolbar-advanced-search" +
       // @ts-ignore - Plugin instance is not typed
-      (Zotero.hiDPI ? "@2x" : "") + '.png';
+      (Zotero.hiDPI ? "@2x" : "") +
+      ".png";
     if (operation === "full" || operation === "noabstract") {
-      this.progressWindow.changeHeadline(
-        "Getting INSPIRE metadata", icon);
+      this.progressWindow.changeHeadline("Getting INSPIRE metadata", icon);
     }
     if (operation === "citations") {
       this.progressWindow.changeHeadline(
-        "Getting INSPIRE citation counts", icon);
+        "Getting INSPIRE citation counts",
+        icon,
+      );
     }
     const inspireIcon =
       `chrome://${config.addonRef}/content/icons/inspire` +
       // @ts-ignore - Plugin instance is not typed
-      (Zotero.hiDPI ? "@2x" : "") + '.png';
-    this.progressWindow.createLine({ text: "Retrieving INSPIRE metadata.", icon: inspireIcon });
+      (Zotero.hiDPI ? "@2x" : "") +
+      ".png";
+    this.progressWindow.createLine({
+      text: "Retrieving INSPIRE metadata.",
+      icon: inspireIcon,
+    });
     this.updateNextItem(operation);
   }
 
@@ -292,23 +1886,24 @@ export class ZInspire {
     this.current++;
 
     // Progress Windows
-    const percent = Math.round((this.numberOfUpdatedItems / this.toUpdate) * 100);
+    const percent = Math.round(
+      (this.numberOfUpdatedItems / this.toUpdate) * 100,
+    );
     this.progressWindow.changeLine({ progress: percent });
     this.progressWindow.changeLine({
-      text:
-        "Item " + this.current + " of " +
-        this.toUpdate
+      text: "Item " + this.current + " of " + this.toUpdate,
     });
     this.progressWindow.show();
 
-    this.updateItem(
-      this.itemsToUpdate[this.current],
-      operation);
-  };
+    this.updateItem(this.itemsToUpdate[this.current], operation);
+  }
 
   async updateItem(item: Zotero.Item, operation: string) {
-    if (operation === "full" || operation === "noabstract" || operation === "citations") {
-
+    if (
+      operation === "full" ||
+      operation === "noabstract" ||
+      operation === "citations"
+    ) {
       // await removeArxivNote(item)
 
       const metaInspire = await getInspireMeta(item, operation);
@@ -319,20 +1914,28 @@ export class ZInspire {
           item.saveTx();
         }
         // if (metaInspire.journalAbbreviation && (item.itemType === 'report' || item.itemType === 'preprint')) {
-        if (item.itemType === 'report' || item.itemType === 'preprint') {
-          item.setType(Zotero.ItemTypes.getID('journalArticle') as number);
+        if (item.itemType === "report" || item.itemType === "preprint") {
+          item.setType(Zotero.ItemTypes.getID("journalArticle") as number);
         }
 
-        if (item.itemType !== 'book' && metaInspire.document_type == 'book') item.setType(Zotero.ItemTypes.getID('book') as number);
+        if (item.itemType !== "book" && metaInspire.document_type == "book")
+          item.setType(Zotero.ItemTypes.getID("book") as number);
 
         await setInspireMeta(item, metaInspire, operation);
         item.saveTx();
         this.counter++;
       } else {
-        if (getPref("tag_enable") && getPref("tag_norecid") !== "" && !item.hasTag(getPref("tag_norecid") as string)) {
+        if (
+          getPref("tag_enable") &&
+          getPref("tag_norecid") !== "" &&
+          !item.hasTag(getPref("tag_norecid") as string)
+        ) {
           item.addTag(getPref("tag_norecid") as string, 1);
           item.saveTx();
-        } else if (!getPref("tag_enable") && item.hasTag(getPref("tag_norecid") as string)) {
+        } else if (
+          !getPref("tag_enable") &&
+          item.hasTag(getPref("tag_norecid") as string)
+        ) {
           item.removeTag(getPref("tag_norecid") as string);
           item.saveTx();
         }
@@ -341,79 +1944,84 @@ export class ZInspire {
           const crossref_count = await setCrossRefCitations(item);
           item.saveTx();
           if (crossref_count >= 0) {
-            this.CrossRefcounter++
+            this.CrossRefcounter++;
           }
         }
       }
       this.updateNextItem(operation);
-
     } else {
       this.updateNextItem(operation);
     }
-  };
+  }
 }
 
 async function getInspireMeta(item: Zotero.Item, operation: string) {
-
-  const metaInspire: jsobject = {};
-
-  const doi0 = item.getField('DOI') as string;
+  const doi0 = item.getField("DOI") as string;
   let doi = doi0;
-  const url = item.getField('url') as string;
-  const extra = item.getField('extra') as string;
+  const url = item.getField("url") as string;
+  const extra = item.getField("extra") as string;
   let searchOrNot = 0;
 
-  let idtype = 'doi';
-  const arxivReg = new RegExp(/arxiv/i)
+  let idtype = "doi";
+  const arxivReg = new RegExp(/arxiv/i);
   if (!doi || arxivReg.test(doi)) {
-
-    if (extra.includes('arXiv:') || extra.includes('_eprint:')) { // arXiv number from Extra
-      idtype = 'arxiv';
-      const regexArxivId = /(arXiv:|_eprint:)(.+)/ //'arXiv:(.+)'
+    if (extra.includes("arXiv:") || extra.includes("_eprint:")) {
+      // arXiv number from Extra
+      idtype = "arxiv";
+      const regexArxivId = /(arXiv:|_eprint:)(.+)/; //'arXiv:(.+)'
       /* in this way, different situations are included:
       New and old types of arXiv number; 
       whether or not the arXiv line is at the end of extra
       */
       if (extra.match(regexArxivId)) {
-        const arxiv_split = (extra.match(regexArxivId) || "   ")[2].split(' ')
-        arxiv_split[0] === '' ? doi = arxiv_split[1] : doi = arxiv_split[0]
+        const arxiv_split = (extra.match(regexArxivId) || "   ")[2].split(" ");
+        if (arxiv_split[0] === "") {
+          doi = arxiv_split[1];
+        } else {
+          doi = arxiv_split[0];
+        }
       }
     } else if (/(doi|arxiv|\/literature\/)/i.test(url)) {
       // patt taken from the Citations Count plugin
       const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
       const m = patt.exec(url);
-      if (!m) { // DOI from url
+      if (!m) {
+        // DOI from url
         if (/doi/i.test(url)) {
-          doi = url.replace(/^.+doi.org\//, '')
-        } else if (url.includes('/literature/')) {
-          const _recid = /[^/]*$/.exec(url) || "    "
+          doi = url.replace(/^.+doi.org\//, "");
+        } else if (url.includes("/literature/")) {
+          const _recid = /[^/]*$/.exec(url) || "    ";
           if (_recid[0].match(/^\d+/)) {
-            idtype = 'literature';
-            doi = _recid[0]
+            idtype = "literature";
+            doi = _recid[0];
           }
         }
-      } else { // arxiv number from from url
-        idtype = 'arxiv';
+      } else {
+        // arxiv number from from url
+        idtype = "arxiv";
         doi = m[1];
       }
-    } else if (/DOI:/i.test(extra)) { // DOI in extra
-      const regexDOIinExtra = /DOI:(.+)/i
-      doi = (extra.match(regexDOIinExtra) || "")[1].trim()
+    } else if (/DOI:/i.test(extra)) {
+      // DOI in extra
+      const regexDOIinExtra = /DOI:(.+)/i;
+      doi = (extra.match(regexDOIinExtra) || "")[1].trim();
     } else if (/doi\.org\//i.test(extra)) {
-      const regexDOIinExtra = /doi\.org\/(.+)/i
-      doi = (extra.match(regexDOIinExtra) || "")[1]
-    } else { // INSPIRE recid in archiveLocation or Citation Key in Extra
-      const _recid = item.getField('archiveLocation') as string;
+      const regexDOIinExtra = /doi\.org\/(.+)/i;
+      doi = (extra.match(regexDOIinExtra) || "")[1];
+    } else {
+      // INSPIRE recid in archiveLocation or Citation Key in Extra
+      const _recid = item.getField("archiveLocation") as string;
       if (_recid.match(/^\d+/)) {
-        idtype = 'literature';
-        doi = _recid
+        idtype = "literature";
+        doi = _recid;
       }
     }
-  } else if (/doi/i.test(doi)) { //doi.includes("doi")
-    doi = doi.replace(/^.+doi.org\//, '') //doi.replace('https://doi.org/', '')
+  } else if (/doi/i.test(doi)) {
+    //doi.includes("doi")
+    doi = doi.replace(/^.+doi.org\//, ""); //doi.replace('https://doi.org/', '')
   }
 
-  if (!doi && extra.includes('Citation Key:')) searchOrNot = 1
+  if (!doi && extra.includes("Citation Key:")) searchOrNot = 1;
   const t0 = performance.now();
 
   let urlInspire = "";
@@ -421,24 +2029,30 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
     const edoi = encodeURIComponent(doi);
     urlInspire = "https://inspirehep.net/api/" + idtype + "/" + edoi;
   } else if (searchOrNot === 1) {
-    const citekey = (extra.match(/^.*Citation\sKey:.*$/mg) || "")[0].split(': ')[1]
-    urlInspire = "https://inspirehep.net/api/literature?q=texkey%20" + encodeURIComponent(citekey);
+    const citekey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0].split(
+      ": ",
+    )[1];
+    urlInspire =
+      "https://inspirehep.net/api/literature?q=texkey%20" +
+      encodeURIComponent(citekey);
   }
 
-  if (!urlInspire) return -1;
+  if (!urlInspire) {
+    return -1;
+  }
 
   // Zotero.debug(`urlInspire: ${urlInspire}`);
 
   let status: number | null = null;
-  const response = await fetch(urlInspire)
+  const response = (await fetch(urlInspire)
     //   .then(response => response.json())
-    .then(response => {
+    .then((response) => {
       if (response.status !== 404) {
         status = 1;
-        return response.json()
+        return response.json();
       }
     })
-    .catch(_err => null) as any;
+    .catch((_err) => null)) as any;
 
   // Zotero.debug(`getInspireMeta response: ${response}, status: ${status}`)
   if (status === null) {
@@ -446,189 +2060,217 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
   }
 
   const t1 = performance.now();
-  Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`)
+  Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`);
 
   try {
     const meta = (() => {
       if (searchOrNot === 0) {
-        return response['metadata']
+        return response["metadata"];
       } else {
-        const hits = response['hits'].hits
-        if (hits.length === 1) return hits[0].metadata
+        const hits = response["hits"].hits;
+        if (hits.length === 1) return hits[0].metadata;
       }
-    })()
-
-    metaInspire.recid = meta['control_number']
-
-    metaInspire.citation_count = meta['citation_count']
-    metaInspire.citation_count_wo_self_citations = meta['citation_count_without_self_citations']
-
-    // Zotero.debug(`metaInspire.recid: ${metaInspire.recid}`)
-
-    if (operation !== "citations") {
-
-      // get only the first doi
-      if (meta['dois']) {
-        metaInspire.DOI = meta['dois'][0].value
-      }
-
-      // Zotero.debug(`meta['dois']: ${meta['dois']}, meta['arxiv_eprints']: ${meta['arxiv_eprints'][0].value}`)
-
-      if (meta['publication_info']) {
-        const publication_info = meta['publication_info']
-        // Zotero.debug(`publication_info: ${publication_info[0]}`)
-        const pubinfo_first = publication_info[0]
-        if (pubinfo_first.journal_title) {
-          let jAbbrev = ""
-          jAbbrev = pubinfo_first.journal_title;
-          metaInspire.journalAbbreviation = jAbbrev.replace(/\.\s|\./g, ". ");
-          pubinfo_first.journal_volume && (metaInspire.volume = pubinfo_first.journal_volume);
-          if (pubinfo_first.artid) {
-            metaInspire.pages = pubinfo_first.artid;
-          } else if (pubinfo_first.page_start) {
-            metaInspire.pages = pubinfo_first.page_start
-            pubinfo_first.page_end && (metaInspire.pages = metaInspire.pages + "-" + pubinfo_first.page_end)
-          }
-          metaInspire.date = pubinfo_first.year;
-          metaInspire.issue = pubinfo_first.journal_issue
-        };
-
-        // for erratum, added by FK Guo, date: 2023-08-27
-        // support multiple errata
-        const pubinfoLength = publication_info.length
-        if (pubinfoLength > 1) {
-          const errNotes: string[] = [];
-          for (let i = 1; i < pubinfoLength; i++) {
-            const pubinfo_next = publication_info[i];
-            if (pubinfo_next.material == "erratum") {
-              const jAbbrev = pubinfo_next.journal_title;
-              let pagesErr = ""
-              if (pubinfo_next.artid) {
-                pagesErr = pubinfo_next.artid;
-              } else if (pubinfo_next.page_start) {
-                pagesErr = pubinfo_next.page_start
-                pubinfo_next.page_end && (pagesErr = pagesErr + "-" + pubinfo_next.page_end)
-              }
-              errNotes[i - 1] = `Erratum: ${jAbbrev} ${pubinfo_next.journal_volume}, ${pagesErr} (${pubinfo_next.year})`
-            }
-            // add additional publication information in LaTeX-EU format, if any, as a note; FKG, date: 2023-10-20
-            else if (pubinfo_next.journal_title && (pubinfo_next.page_start || pubinfo_next.artid)) {
-              let pages_next = ""
-              if (pubinfo_next.page_start) {
-                pages_next = pubinfo_next.page_start
-                if (pubinfo_next.page_end) {
-                  pages_next = pages_next + "-" + pubinfo_next.page_end
-                }
-              } else if (pubinfo_next.artid) {
-                pages_next = pubinfo_next.artid
-              }
-              errNotes[i - 1] = `${pubinfo_next.journal_title}  ${pubinfo_next.journal_volume} (${pubinfo_next.year}) ${pages_next}`
-            }
-            if (pubinfo_next.pubinfo_freetext) {
-              errNotes[i - 1] = pubinfo_next.pubinfo_freetext
-            }
-            //
-          }
-          if (errNotes.length > 0) {
-            metaInspire.note = `[${errNotes.join(', ')}]`
-          }
-          metaInspire.note = `[${errNotes.join(', ')}]`
-        }
-      }
-
-      const metaArxiv = meta['arxiv_eprints']
-
-      // Zotero.debug(`metaArxiv: ${metaArxiv}`)
-
-      if (metaArxiv) {
-        metaInspire.arxiv = metaArxiv[0]
-        metaInspire.urlArxiv = 'https://arxiv.org/abs/' + metaInspire.arxiv.value
-      }
-
-      const metaAbstract = meta['abstracts']
-
-      if (metaAbstract) {
-        const abstractInspire = metaAbstract
-        metaInspire.abstractNote = abstractInspire[0].value
-        if (abstractInspire.length > 0) for (let i = 0; i < abstractInspire.length; i++) {
-          if (abstractInspire[i].source === "arXiv") {
-            (metaInspire.abstractNote = abstractInspire[i].value);
-            break;
-          }
-        }
-      }
-
-      metaInspire.title = meta['titles'][0].title
-      // metaInspire.authors = meta['authors']
-      //document_type examples: ["book"], ["article"], ["article", "conference paper"], ["proceedings"], ["book chapter"]
-      metaInspire.document_type = meta['document_type']
-      // there are more than one citkeys for some items. take the first one
-      metaInspire.citekey = meta['texkeys'][0]
-      meta['isbns'] && (metaInspire.isbns = meta['isbns'].map((e: any) => e.value))
-      if (meta['imprints']) {
-        meta['imprints'][0].publisher && (metaInspire.publisher = meta['imprints'][0].publisher);
-        meta['imprints'][0].date && (metaInspire.date = meta['imprints'][0].date)
-      }
-
-      metaInspire.title = meta['titles'][0].title
-
-      const creators: any[] = [];
-      /* INSPIRE tricky points:
-      Not all items have 'author_count' in the metadata;
-      some authors have only full_name, instead of last_name and first_name;
-      some items even do not have `authors`
-      */
-      const metaCol = meta['collaborations']
-      metaCol && (metaInspire.collaborations = metaCol.map((e: any) => e.value))
-
-      const metaAuthors = meta['authors']
-      if (metaAuthors) {
-        const authorCount = meta['author_count'] || metaAuthors.length;
-        let maxAuthorCount = authorCount;
-        // keep only 3 authors if there are more than 10
-        if (authorCount > 10) (maxAuthorCount = 3);
-
-        const authorName = ["", ""]
-        if (metaAuthors) {
-          for (let j = 0; j < maxAuthorCount; j++) {
-            const authorName = metaAuthors[j].full_name.split(', ')
-            creators[j] = {
-              firstName: authorName[1],
-              lastName: authorName[0],
-              creatorType: 'author'
-            }
-            metaAuthors[j].inspire_roles && (creators[j].creatorType = metaAuthors[j].inspire_roles[0])
-          }
-        }
-
-        if (authorCount > 10) {
-          creators.push({
-            name: 'others',
-            creatorType: 'author'
-          })
-        }
-      } else if (metaCol) {
-        for (let i = 0; i < metaCol.length; i++) {
-          creators[i] = {
-            name: metaInspire.collaborations[i],
-            creatorType: "author"
-          }
-        }
-      }
-
-      metaInspire.creators = creators
-
-      const t2 = performance.now();
-      Zotero.debug(`Assigning meta took ${t2 - t1} milliseconds.`)
+    })();
+    if (!meta) {
+      return -1;
     }
+    const assignStart = performance.now();
+    const metaInspire = buildMetaFromMetadata(meta, operation);
+    if (operation !== "citations") {
+      const assignEnd = performance.now();
+      Zotero.debug(
+        `Assigning meta took ${assignEnd - assignStart} milliseconds.`,
+      );
+    }
+    return metaInspire;
   } catch (err) {
-    // Zotero.debug('getInspireMeta-err: Not found in INSPIRE')
-    // Zotero.debug(`metaInspire: ${metaInspire}`)
     return -1;
   }
+}
 
-  // Zotero.debug("getInspireMeta final: ");
-  // Zotero.debug(metaInspire)
+async function fetchRecidFromInspire(item: Zotero.Item) {
+  const meta = (await getInspireMeta(item, "literatureLookup")) as
+    | jsobject
+    | -1;
+  if (meta === -1 || typeof meta !== "object") {
+    return null;
+  }
+  return meta.recid as string | undefined | null;
+}
+
+async function fetchInspireMetaByRecid(
+  recid: string,
+  signal?: AbortSignal,
+  operation: string = "full",
+) {
+  const response = await fetch(
+    `https://inspirehep.net/api/literature/${encodeURIComponent(recid)}`,
+    { signal },
+  ).catch(() => null);
+  if (!response || response.status === 404) {
+    return -1;
+  }
+  const payload: any = await response.json();
+  const meta = payload?.metadata;
+  if (!meta) {
+    return -1;
+  }
+  try {
+    return buildMetaFromMetadata(meta, operation);
+  } catch (_err) {
+    return -1;
+  }
+}
+
+function buildMetaFromMetadata(meta: any, operation: string) {
+  if (!meta) {
+    throw new Error("Missing metadata");
+  }
+  const metaInspire: jsobject = {};
+  metaInspire.recid = meta["control_number"];
+  metaInspire.citation_count = meta["citation_count"];
+  metaInspire.citation_count_wo_self_citations =
+    meta["citation_count_without_self_citations"];
+
+  if (operation !== "citations") {
+    if (meta["dois"]) {
+      metaInspire.DOI = meta["dois"][0].value;
+    }
+
+    if (meta["publication_info"]) {
+      const publicationInfo = meta["publication_info"];
+      const first = publicationInfo[0];
+      if (first?.journal_title) {
+        const jAbbrev = first.journal_title as string;
+        metaInspire.journalAbbreviation = jAbbrev.replace(/\.\s|\./g, ". ");
+        if (first.journal_volume) {
+          metaInspire.volume = first.journal_volume;
+        }
+        if (first.artid) {
+          metaInspire.pages = first.artid;
+        } else if (first.page_start) {
+          metaInspire.pages = first.page_start;
+          if (first.page_end) {
+            metaInspire.pages = metaInspire.pages + "-" + first.page_end;
+          }
+        }
+        metaInspire.date = first.year;
+        metaInspire.issue = first.journal_issue;
+      }
+
+      if (publicationInfo.length > 1) {
+        const errNotes: string[] = [];
+        for (let i = 1; i < publicationInfo.length; i++) {
+          const next = publicationInfo[i];
+          if (next.material === "erratum") {
+            const jAbbrev = next.journal_title;
+            let pagesErr = "";
+            if (next.artid) {
+              pagesErr = next.artid;
+            } else if (next.page_start) {
+              pagesErr = next.page_start;
+              if (next.page_end) {
+                pagesErr = pagesErr + "-" + next.page_end;
+              }
+            }
+            errNotes[i - 1] =
+              `Erratum: ${jAbbrev} ${next.journal_volume}, ${pagesErr} (${next.year})`;
+          } else if (next.journal_title && (next.page_start || next.artid)) {
+            let pagesNext = "";
+            if (next.page_start) {
+              pagesNext = next.page_start;
+              if (next.page_end) {
+                pagesNext = pagesNext + "-" + next.page_end;
+              }
+            } else if (next.artid) {
+              pagesNext = next.artid;
+            }
+            errNotes[i - 1] =
+              `${next.journal_title}  ${next.journal_volume} (${next.year}) ${pagesNext}`;
+          }
+          if (next.pubinfo_freetext) {
+            errNotes[i - 1] = next.pubinfo_freetext;
+          }
+        }
+        if (errNotes.length > 0) {
+          metaInspire.note = `[${errNotes.join(", ")}]`;
+        }
+      }
+    }
+
+    const metaArxiv = meta["arxiv_eprints"];
+    if (metaArxiv) {
+      metaInspire.arxiv = metaArxiv[0];
+      metaInspire.urlArxiv = "https://arxiv.org/abs/" + metaInspire.arxiv.value;
+    }
+
+    const metaAbstract = meta["abstracts"];
+    if (metaAbstract) {
+      metaInspire.abstractNote = metaAbstract[0].value;
+      for (let i = 0; i < metaAbstract.length; i++) {
+        if (metaAbstract[i].source === "arXiv") {
+          metaInspire.abstractNote = metaAbstract[i].value;
+          break;
+        }
+      }
+    }
+
+    metaInspire.title = meta["titles"]?.[0]?.title;
+    metaInspire.document_type = meta["document_type"];
+    metaInspire.citekey = meta["texkeys"]?.[0];
+    if (meta["isbns"]) {
+      metaInspire.isbns = meta["isbns"].map((e: any) => e.value);
+    }
+    if (meta["imprints"]) {
+      const imprint = meta["imprints"][0];
+      if (imprint.publisher) {
+        metaInspire.publisher = imprint.publisher;
+      }
+      if (imprint.date) {
+        metaInspire.date = imprint.date;
+      }
+    }
+
+    const creators: any[] = [];
+    const metaCol = meta["collaborations"];
+    if (metaCol) {
+      metaInspire.collaborations = metaCol.map((e: any) => e.value);
+    }
+
+    const metaAuthors = meta["authors"];
+    if (metaAuthors?.length) {
+      const authorCount = meta["author_count"] || metaAuthors.length;
+      let maxAuthorCount = authorCount;
+      if (authorCount > 10) {
+        maxAuthorCount = 3;
+      }
+      for (let j = 0; j < maxAuthorCount; j++) {
+        const [lastName, firstName] = metaAuthors[j].full_name.split(", ");
+        creators[j] = {
+          firstName,
+          lastName,
+          creatorType: metaAuthors[j].inspire_roles
+            ? metaAuthors[j].inspire_roles[0]
+            : "author",
+        };
+      }
+      if (authorCount > 10) {
+        creators.push({
+          name: "others",
+          creatorType: "author",
+        });
+      }
+    } else if (metaCol) {
+      for (let i = 0; i < metaCol.length; i++) {
+        creators[i] = {
+          name: metaInspire.collaborations[i],
+          creatorType: "author",
+        };
+      }
+    }
+    metaInspire.creators = creators;
+  }
+
   return metaInspire;
 }
 
@@ -636,7 +2278,7 @@ async function getInspireMeta(item: Zotero.Item, operation: string) {
 copied from https://github.com/eschnett/zotero-citationcounts/blob/master/chrome/content/zotero-citationcounts.js
 */
 async function getCrossrefCount(item: Zotero.Item) {
-  const doi = item.getField('DOI');
+  const doi = item.getField("DOI");
   if (!doi) {
     // There is no DOI; skip item
     return -1;
@@ -651,8 +2293,8 @@ async function getCrossrefCount(item: Zotero.Item) {
     const xform = "transform/application/" + style;
     const url = "https://api.crossref.org/works/" + edoi + "/" + xform;
     response = await fetch(url)
-      .then(response => response.json())
-      .catch(_err => null);
+      .then((response) => response.json())
+      .catch((_err) => null);
   }
 
   if (response === null) {
@@ -660,11 +2302,11 @@ async function getCrossrefCount(item: Zotero.Item) {
     const style = "vnd.citationstyles.csl+json";
     response = await fetch(url, {
       headers: {
-        "Accept": "application/" + style
-      }
+        Accept: "application/" + style,
+      },
     })
-      .then(response => response.json())
-      .catch(_err => null);
+      .then((response) => response.json())
+      .catch((_err) => null);
   }
 
   if (response === null) {
@@ -672,13 +2314,12 @@ async function getCrossrefCount(item: Zotero.Item) {
     return -1;
   }
 
-
   const t1 = performance.now();
-  Zotero.debug(`Fetching CrossRef meta took ${t1 - t0} milliseconds.`)
+  Zotero.debug(`Fetching CrossRef meta took ${t1 - t0} milliseconds.`);
 
   let str = null;
   try {
-    str = response['is-referenced-by-count'];
+    str = response["is-referenced-by-count"];
   } catch (err) {
     // There are no citation counts
     return -1;
@@ -688,142 +2329,201 @@ async function getCrossrefCount(item: Zotero.Item) {
   return count;
 }
 
-async function setInspireMeta(item: Zotero.Item, metaInspire: jsobject, operation: string) {
-
+async function setInspireMeta(
+  item: Zotero.Item,
+  metaInspire: jsobject,
+  operation: string,
+) {
   // const today = new Date(Date.now()).toLocaleDateString('zh-CN');
-  let extra = item.getField('extra') as string;
-  const publication = item.getField('publicationTitle') as string
-  const citekey_pref = getPref("citekey")
+  let extra = item.getField("extra") as string;
+  const publication = item.getField("publicationTitle") as string;
+  const citekey_pref = getPref("citekey");
   // item.setField('archiveLocation', metaInspire);
   if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
-    if (operation === 'full' || operation === 'noabstract') {
-      item.setField('archive', "INSPIRE");
-      item.setField('archiveLocation', metaInspire.recid);
+    if (operation === "full" || operation === "noabstract") {
+      item.setField("archive", "INSPIRE");
+      item.setField("archiveLocation", metaInspire.recid);
 
       if (metaInspire.journalAbbreviation) {
-        if (item.itemType === "journalArticle") { //metaInspire.document_type[0]  === "article"
-          item.setField('journalAbbreviation', metaInspire.journalAbbreviation);
-        } else if (metaInspire.document_type[0] === "book" && item.itemType === "book") {
-          item.setField('series', metaInspire.journalAbbreviation)
+        if (item.itemType === "journalArticle") {
+          //metaInspire.document_type[0]  === "article"
+          item.setField("journalAbbreviation", metaInspire.journalAbbreviation);
+        } else if (
+          metaInspire.document_type[0] === "book" &&
+          item.itemType === "book"
+        ) {
+          item.setField("series", metaInspire.journalAbbreviation);
         } else {
-          item.setField('publicationTitle', metaInspire.journalAbbreviation)
+          item.setField("publicationTitle", metaInspire.journalAbbreviation);
         }
       }
       // to avoid setting undefined to zotero items
       if (metaInspire.volume) {
-        (metaInspire.document_type[0] == "book") ? item.setField('seriesNumber', metaInspire.volume) : item.setField('volume', metaInspire.volume);
+        if (metaInspire.document_type[0] == "book") {
+          item.setField("seriesNumber", metaInspire.volume);
+        } else {
+          item.setField("volume", metaInspire.volume);
+        }
       }
-      if (metaInspire.pages && (metaInspire.document_type[0] !== "book")) item.setField('pages', metaInspire.pages);
-      metaInspire.date && item.setField('date', metaInspire.date);
-      metaInspire.issue && item.setField('issue', metaInspire.issue);
+      if (metaInspire.pages && metaInspire.document_type[0] !== "book") {
+        item.setField("pages", metaInspire.pages);
+      }
+      if (metaInspire.date) {
+        item.setField("date", metaInspire.date);
+      }
+      if (metaInspire.issue) {
+        item.setField("issue", metaInspire.issue);
+      }
       if (metaInspire.DOI) {
         // if (metaInspire.document_type[0] === "book") {
-        if (item.itemType === 'journalArticle' || item.itemType === 'preprint') {
-          item.setField('DOI', metaInspire.DOI);
+        if (
+          item.itemType === "journalArticle" ||
+          item.itemType === "preprint"
+        ) {
+          item.setField("DOI", metaInspire.DOI);
         } else {
-          item.setField('url', "https://doi.org/" + metaInspire.DOI)
+          item.setField("url", "https://doi.org/" + metaInspire.DOI);
         }
       }
 
-      if (metaInspire.isbns && !item.getField('ISBN')) item.setField('ISBN', metaInspire.isbns);
-      if (metaInspire.publisher && !item.getField('publisher') && (item.itemType == 'book' || item.itemType == "bookSection")) item.setField('publisher', metaInspire.publisher);
+      if (metaInspire.isbns && !item.getField("ISBN")) {
+        item.setField("ISBN", metaInspire.isbns);
+      }
+      if (
+        metaInspire.publisher &&
+        !item.getField("publisher") &&
+        (item.itemType == "book" || item.itemType == "bookSection")
+      )
+        item.setField("publisher", metaInspire.publisher);
 
       /* set the title and creators if there are none */
-      !item.getField('title') && item.setField('title', metaInspire.title)
-      if (!item.getCreator(0) || !(item.getCreator(0) as _ZoteroTypes.Item.Creator).firstName) item.setCreators(metaInspire.creators)
+      if (!item.getField("title")) {
+        item.setField("title", metaInspire.title);
+      }
+      if (
+        !item.getCreator(0) ||
+        !(item.getCreator(0) as _ZoteroTypes.Item.Creator).firstName
+      )
+        item.setCreators(metaInspire.creators);
 
       // The current arXiv.org Zotero translator put all cross-listed categories after the ID, and the primary category is not the first. Here we replace that list by only the primary one.
       // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
       if (metaInspire.arxiv) {
-        const arxivId = metaInspire.arxiv.value
-        const _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/mgi)
-        let arXivInfo = ""
+        const arxivId = metaInspire.arxiv.value;
+        const _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/gim);
+        let arXivInfo = "";
         if (/^\d/.test(arxivId)) {
-          const arxivPrimeryCategory = metaInspire.arxiv.categories[0]
-          arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`
+          const arxivPrimeryCategory = metaInspire.arxiv.categories[0];
+          arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`;
         } else {
           arXivInfo = "arXiv:" + arxivId;
         }
-        const numberOfArxiv = (extra.match(_arxivReg) || '').length
+        const numberOfArxiv = (extra.match(_arxivReg) || "").length;
         // Zotero.debug(`number of arXiv lines: ${numberOfArxiv}`)
         if (numberOfArxiv !== 1) {
           // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
-          extra = extra.replace(_arxivReg, '')
-          // Zotero.debug(`extra w/o arxiv: ${extra}`)
-          extra.endsWith('\n') ? extra += arXivInfo : extra += '\n' + arXivInfo;
-          // Zotero.debug(`extra w/ arxiv: ${extra}`)
+          extra = extra.replace(_arxivReg, "");
+          if (extra.endsWith("\n")) {
+            extra += arXivInfo;
+          } else {
+            extra += "\n" + arXivInfo;
+          }
         } else {
-          extra = extra.replace(/^.*(arXiv:|_eprint:).*$/mgi, arXivInfo);
+          extra = extra.replace(/^.*(arXiv:|_eprint:).*$/gim, arXivInfo);
           // Zotero.debug(`extra w arxiv-2: ${extra}`)
         }
 
         // set journalAbbr. to the arXiv ID prior to journal publication
         if (!metaInspire.journalAbbreviation) {
-          item.itemType == 'journalArticle' && item.setField('journalAbbreviation', arXivInfo);
-          publication.startsWith('arXiv:') && item.setField('publicationTitle', "")
+          if (item.itemType == "journalArticle") {
+            item.setField("journalAbbreviation", arXivInfo);
+          }
+          if (publication.startsWith("arXiv:")) {
+            item.setField("publicationTitle", "");
+          }
         }
-        const url = item.getField('url');
-        (metaInspire.urlArxiv && !url) && item.setField('url', metaInspire.urlArxiv)
+        const url = item.getField("url");
+        if (metaInspire.urlArxiv && !url) {
+          item.setField("url", metaInspire.urlArxiv);
+        }
       }
 
-      extra = extra.replace(/^.*type: article.*$\n/mg, '')
+      extra = extra.replace(/^.*type: article.*$\n/gm, "");
 
-      if (metaInspire.collaborations && !extra.includes('tex.collaboration')) {
-        extra = extra + "\n" + "tex.collaboration: " + metaInspire.collaborations.join(", ");
+      if (metaInspire.collaborations && !extra.includes("tex.collaboration")) {
+        extra =
+          extra +
+          "\n" +
+          "tex.collaboration: " +
+          metaInspire.collaborations.join(", ");
       }
 
       // Zotero.debug('setInspire-4')
-      extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
+      extra = setCitations(
+        extra,
+        metaInspire.citation_count,
+        metaInspire.citation_count_wo_self_citations,
+      );
 
       // for erratum, added by FK Guo, date: 2023-08-27
       // Zotero.debug(`++++metaInspire.note: ${metaInspire.note}`)
       if (metaInspire.note && metaInspire.note !== "[]") {
-        const noteIDs = item.getNotes()
-        // check whether the same erratum note is already there
-        let errTag = false
-        for (const id of noteIDs) {
-          const note = Zotero.Items.get(id);
-          const noteHTML = note.getNote().replace('–', '-').replace('--', '-');
-          if (noteHTML.includes(metaInspire.note)) {
-            errTag = true
+        // Only create note if item is already saved (has an ID)
+        // For new items, note creation should be handled after item.saveTx()
+        if (item.id) {
+          const noteIDs = item.getNotes();
+          // check whether the same erratum note is already there
+          let errTag = false;
+          for (const id of noteIDs) {
+            const note = Zotero.Items.get(id);
+            const noteHTML = note.getNote().replace("–", "-").replace("--", "-");
+            if (noteHTML.includes(metaInspire.note)) {
+              errTag = true;
+            }
+            // Zotero.debug(`=======+++++++ ${id} : ${errTag}`)
           }
-          // Zotero.debug(`=======+++++++ ${id} : ${errTag}`)
-        }
-        if (!errTag) {
-          const newNote = new Zotero.Item('note')
-          newNote.setNote(metaInspire.note);
-          newNote.parentID = item.id;
-          await newNote.saveTx();
-          newNote
+          if (!errTag) {
+            const newNote = new Zotero.Item("note");
+            newNote.setNote(metaInspire.note);
+            newNote.parentID = item.id;
+            await newNote.saveTx();
+          }
         }
       }
 
       // for citekey preference
       if (citekey_pref === "inspire") {
-        if (extra.includes('Citation Key')) {
-          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/mg) || "")[0].split(': ')[1]
-          if (initialCiteKey !== metaInspire.citekey) extra = extra.replace(/^.*Citation\sKey.*$/mg, `Citation Key: ${metaInspire.citekey}`);
+        if (extra.includes("Citation Key")) {
+          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
+            "")[0].split(": ")[1];
+          if (initialCiteKey !== metaInspire.citekey)
+            extra = extra.replace(
+              /^.*Citation\sKey.*$/gm,
+              `Citation Key: ${metaInspire.citekey}`,
+            );
         } else {
-          extra += "\nCitation Key: " + metaInspire.citekey
+          extra += "\nCitation Key: " + metaInspire.citekey;
         }
       }
-
-    };
+    }
 
     if (operation === "full" && metaInspire.abstractNote) {
-      item.setField('abstractNote', metaInspire.abstractNote)
-    };
+      item.setField("abstractNote", metaInspire.abstractNote);
+    }
 
     if (operation === "citations") {
-      extra = setCitations(extra, metaInspire.citation_count, metaInspire.citation_count_wo_self_citations)
+      extra = setCitations(
+        extra,
+        metaInspire.citation_count,
+        metaInspire.citation_count_wo_self_citations,
+      );
     }
-    extra = extra.replace(/\n\n/mg, '\n')
-    extra = reorderExtraFields(extra)
-    item.setField('extra', extra)
+    extra = extra.replace(/\n\n/gm, "\n");
+    extra = reorderExtraFields(extra);
+    item.setField("extra", extra);
 
     // Set arXiv category tag if enabled
-    setArxivCategoryTag(item)
-
+    setArxivCategoryTag(item);
   }
 }
 
@@ -834,7 +2534,7 @@ function setArxivCategoryTag(item: Zotero.Item) {
     return;
   }
 
-  const extra = item.getField('extra') as string;
+  const extra = item.getField("extra") as string;
 
   // Extract arXiv primary category from extra field
   let primaryCategory = "";
@@ -861,7 +2561,7 @@ function setArxivCategoryTag(item: Zotero.Item) {
 }
 
 function setExtraCitations(extra: any, source: string, citation_count: any) {
-  const today = new Date(Date.now()).toLocaleDateString('zh-CN');
+  const today = new Date(Date.now()).toLocaleDateString("zh-CN");
 
   // Check if citation is already at the top with correct value
   const topLineMatch = extra.match(/^(\d+)\scitations\s\([\w\s]+[\d/-]+\)\n/);
@@ -876,7 +2576,7 @@ function setExtraCitations(extra: any, source: string, citation_count: any) {
   }
 
   // Extract existing citation count and date from anywhere in extra (before removing)
-  const temp = extra.match(/^\d+\scitations/mg);
+  const temp = extra.match(/^\d+\scitations/gm);
   let existingCitation = 0;
   if (temp !== null && temp.length > 0) {
     existingCitation = Number(temp[0].replace(" citations", ""));
@@ -887,7 +2587,7 @@ function setExtraCitations(extra: any, source: string, citation_count: any) {
   const existingDate = dateMatch ? dateMatch[1] : today;
 
   // Remove all existing citation lines (with or without trailing newline)
-  extra = extra.replace(/^.*citations.*$\n?/mg, "");
+  extra = extra.replace(/^.*citations.*$\n?/gm, "");
 
   // Remove leading empty lines
   extra = extra.replace(/^\n+/, "");
@@ -905,20 +2605,20 @@ function setExtraCitations(extra: any, source: string, citation_count: any) {
 }
 
 async function setCrossRefCitations(item: Zotero.Item) {
-  let extra = item.getField('extra')
-  let count_crossref = await getCrossrefCount(item)
+  let extra = item.getField("extra");
+  let count_crossref = await getCrossrefCount(item);
   if (count_crossref >= 0) {
-    extra = setExtraCitations(extra, 'CrossRef', count_crossref) as string
-    extra = extra.replace(/\n\n/mg, '\n')
-    extra = reorderExtraFields(extra)
-    item.setField('extra', extra)
+    extra = setExtraCitations(extra, "CrossRef", count_crossref) as string;
+    extra = extra.replace(/\n\n/gm, "\n");
+    extra = reorderExtraFields(extra);
+    item.setField("extra", extra);
 
     // Set arXiv category tag if enabled
-    setArxivCategoryTag(item)
+    setArxivCategoryTag(item);
   } else {
-    count_crossref = -1
+    count_crossref = -1;
   }
-  return count_crossref
+  return count_crossref;
 }
 
 function reorderExtraFields(extra: string) {
@@ -936,44 +2636,55 @@ function reorderExtraFields(extra: string) {
   const arxivLines: string[] = [];
   const otherLines: string[] = [];
 
-  const lines = extra.split('\n');
+  const lines = extra.split("\n");
 
   for (const line of lines) {
     if (line.match(/^\d+\scitations/)) {
       citationLines.push(line);
     } else if (line.match(/^(arXiv:|_eprint:)/i)) {
       arxivLines.push(line);
-    } else if (line.trim() !== '') {
+    } else if (line.trim() !== "") {
       otherLines.push(line);
     }
   }
 
   // Reorder: arXiv first, then others, then citations
   const reordered = [...arxivLines, ...otherLines, ...citationLines];
-  return reordered.join('\n');
+  return reordered.join("\n");
 }
 
-function setCitations(extra: string, citation_count: number, citation_count_wo_self_citations: number) {
-  const today = new Date(Date.now()).toLocaleDateString('zh-CN');
+function setCitations(
+  extra: string,
+  citation_count: number,
+  citation_count_wo_self_citations: number,
+) {
+  const today = new Date(Date.now()).toLocaleDateString("zh-CN");
 
   // Check if citations are already at the top with correct values
-  const topLinesMatch = extra.match(/^(\d+)\scitations\s\(INSPIRE\s[\d/-]+\)\n(\d+)\scitations\sw\/o\sself\s\(INSPIRE\s[\d/-]+\)\n/);
+  const topLinesMatch = extra.match(
+    /^(\d+)\scitations\s\(INSPIRE\s[\d/-]+\)\n(\d+)\scitations\sw\/o\sself\s\(INSPIRE\s[\d/-]+\)\n/,
+  );
 
   if (topLinesMatch) {
     const topCitation = Number(topLinesMatch[1]);
     const topCitationWoSelf = Number(topLinesMatch[2]);
 
     // Citations are at top and values unchanged - no update needed
-    if (citation_count === topCitation && citation_count_wo_self_citations === topCitationWoSelf) {
+    if (
+      citation_count === topCitation &&
+      citation_count_wo_self_citations === topCitationWoSelf
+    ) {
       return extra;
     }
   }
 
   // Extract existing citation counts and date from anywhere in extra (before removing)
-  const temp = extra.match(/^\d+\scitations/mg);
+  const temp = extra.match(/^\d+\scitations/gm);
   let existingCitations: number[] = [0, 0];
   if (temp !== null && temp.length >= 2) {
-    existingCitations = temp.map((e: any) => Number(e.replace(" citations", "")));
+    existingCitations = temp.map((e: any) =>
+      Number(e.replace(" citations", "")),
+    );
   }
 
   // Extract existing date before removing
@@ -981,19 +2692,29 @@ function setCitations(extra: string, citation_count: number, citation_count_wo_s
   const existingDate = dateMatch ? dateMatch[1] : today;
 
   // Remove all existing citation lines (with or without trailing newline)
-  extra = extra.replace(/^.*citations.*$\n?/mg, "");
+  extra = extra.replace(/^.*citations.*$\n?/gm, "");
 
   // Remove leading empty lines
   extra = extra.replace(/^\n+/, "");
 
   // Check if only position changed (values unchanged) - reuse existing date
-  if (citation_count === existingCitations[0] && citation_count_wo_self_citations === existingCitations[1]) {
+  if (
+    citation_count === existingCitations[0] &&
+    citation_count_wo_self_citations === existingCitations[1]
+  ) {
     // Values unchanged, keep the existing date
-    extra = `${citation_count} citations (INSPIRE ${existingDate})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${existingDate})\n` + extra;
+    extra =
+      `${citation_count} citations (INSPIRE ${existingDate})\n` +
+      `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${existingDate})\n` +
+      extra;
   } else {
     // Values changed, use today's date
-    extra = `${citation_count} citations (INSPIRE ${today})\n` + `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` + extra;
+    extra =
+      `${citation_count} citations (INSPIRE ${today})\n` +
+      `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` +
+      extra;
   }
 
   return extra;
 }
+

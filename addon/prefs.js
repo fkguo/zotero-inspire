@@ -5,3 +5,4 @@ pref("__prefsPrefix__.tag_norecid", "\u26D4 No INSPIRE recid found");
 pref("__prefsPrefix__.tag_enable", false);
 pref("__prefsPrefix__.extra_order", "citations_first");
 pref("__prefsPrefix__.arxiv_tag_enable", false);
+pref("__prefsPrefix__.max_authors", 3);
