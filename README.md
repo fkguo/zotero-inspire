@@ -3,8 +3,19 @@
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-This is an add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero). It is useful as most papers from [arXiv](https://arxiv.org) will get published in journals later on. This add-on can be used to update the metadata and citation counts (with and without self citations) of the selected item(s) in your Zotero library from [INSPIRE-HEP](https://inspirehep.net), which is a community maintained database for **high energy physics and related fields**. 
+This is an add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero). It connects your Zotero library to the [INSPIRE-HEP](https://inspirehep.net), which is a community maintained database for **high energy physics and related fields**. This add-on updates the metadata and citation counts (with and without self citations), and **lists references** of the selected item(s) in your Zotero library from [INSPIRE-HEP](https://inspirehep.net). 
 
+
+## **VERY USEFUL NEW FEATURE**: INSPIRE References Section in the Item Pane 
+
+When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE References** section into Zotero’s item pane (can be pinned by right-clicking the INSPIRE logo on the right side). The pane section fetches the item’s reference list from INSPIRE-HEP, displaying each entry with:
+
+- a filled or hollow circle indicating whether the reference already exists in your local library;
+- a link/“not linked” icon showing whether the reference is linked as a related item.
+
+Clicking the hollow circle opens the collection picker so you can import the reference into one or more collections; clicking the link icon links or unlinks the reference as a related item. This makes it easy to review INSPIRE references and pull missing ones into your library without leaving Zotero.
+
+![screenshot](images/screenshot1.png)
 
 ## Installation
 
@@ -14,10 +25,11 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 
 ### Building from source
 - Clone this repo
-- Run `npm install` and `npm run build-prod`
+- Run `npm install` and `npm run build`
 
 - In Zotero, the add-on can be installed by going to `Tools` → `Add-ons`, then click the top-right button and choose `Install Add-ons From File...`.
 - It can be updated in `Add-ons Manager` → `Check for Updates`.
+
 
 ## Usage
 
@@ -110,6 +122,7 @@ This is an add-on for the excellent open-source reference manager [Zotero](https
 	- Erratum information and additional publication information added as notes.
 - By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Settings` → `INSPIRE Metadata Updater Preferences`.
 
+
 ## Settings
 
 The add-on provides several customization options in `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences`:
@@ -123,6 +136,9 @@ Choose the order of fields in the `Extra` field:
 Automatically add the arXiv primary category as a tag to items with arXiv IDs:
 - When enabled, the add-on extracts the primary category from the arXiv ID and adds it as a tag
 - Disabled by default
+
+### Maximum Authors Display in Refs.
+Maximum number of authors in reference list to display before using "et al." (default: 3)
 
 ## Additional tip for citing as you writing LaTeX
 
