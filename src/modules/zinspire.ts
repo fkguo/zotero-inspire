@@ -2,6 +2,11 @@ import { config } from "../../package.json";
 import { getLocaleID, getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit/dist/helpers/progressWindow";
+import {
+  showTargetPickerUI,
+  SaveTargetRow,
+  SaveTargetSelection,
+} from "./pickerUI";
 export class ZInsUtils {
   static registerPrefs() {
     const prefOptions = {
@@ -150,24 +155,6 @@ interface InspireReferenceEntry {
   isRelated?: boolean;
 }
 
-interface SaveTargetRow {
-  id: string;
-  name: string;
-  level: number;
-  type: "library" | "collection";
-  libraryID: number;
-  collectionID?: number;
-  filesEditable: boolean;
-  parentID?: string;
-  recent?: boolean;
-}
-
-interface SaveTargetSelection {
-  libraryID: number;
-  primaryRowID: string;
-  collectionIDs: number[];
-}
-
 export class ZInspireReferencePane {
   private static controllers = new WeakMap<
     HTMLDivElement,
@@ -274,9 +261,17 @@ class InspireReferencePanelController {
   private allEntries: InspireReferenceEntry[] = [];
   private referencesCache = new Map<string, InspireReferenceEntry[]>();
   private metadataCache = new Map<string, jsobject>();
+  private rowCache = new Map<string, HTMLElement>();
   private activeAbort?: AbortController;
   private pendingToken?: string;
   private notifierID?: string;
+  private pendingScrollRestore?: {
+    itemID: number;
+    scrollTop: number;
+    scrollLeft: number;
+    scrollSnapshots: Array<{ element: Element; top: number; left: number }>;
+    activeElement: Element | null;
+  };
 
   constructor(body: HTMLDivElement) {
     this.body = body;
@@ -361,6 +356,7 @@ class InspireReferencePanelController {
     this.allEntries = [];
     this.referencesCache.clear();
     this.metadataCache.clear();
+    this.rowCache.clear();
   }
 
   private registerNotifier() {
@@ -379,10 +375,6 @@ class InspireReferencePanelController {
         if (event === "add" && type === "item") {
           await this.handleItemAdded(ids as number[]);
         }
-        // Listen for item deletions
-        if (event === "delete" && type === "item") {
-          await this.handleItemDeleted(ids as number[]);
-        }
       },
     };
     this.notifierID = Zotero.Notifier.registerObserver(callback, ["item"]);
@@ -397,7 +389,6 @@ class InspireReferencePanelController {
 
   private async handleItemAdded(itemIDs: number[]) {
     // Check if any newly added items match any reference entries
-    let hasUpdate = false;
     for (const itemID of itemIDs) {
       const item = Zotero.Items.get(itemID);
       if (!item || !item.isRegularItem()) {
@@ -413,31 +404,22 @@ class InspireReferencePanelController {
         if (entry.recid === recid && !entry.localItemID) {
           entry.localItemID = itemID;
           entry.isRelated = this.isCurrentItemRelated(item);
-          hasUpdate = true;
+          this.updateRowStatus(entry);
         }
       }
-    }
-    // Re-render if any entries were updated
-    if (hasUpdate) {
-      this.renderReferenceList();
     }
   }
 
   private async handleItemDeleted(itemIDs: number[]) {
     // Check if any deleted items match any reference entries
-    let hasUpdate = false;
     const deletedIDs = new Set(itemIDs);
     for (const entry of this.allEntries) {
       if (entry.localItemID && deletedIDs.has(entry.localItemID)) {
         // Clear the localItemID and isRelated status
         entry.localItemID = undefined;
         entry.isRelated = false;
-        hasUpdate = true;
+        this.updateRowStatus(entry);
       }
-    }
-    // Re-render if any entries were updated
-    if (hasUpdate) {
-      this.renderReferenceList();
     }
   }
 
@@ -455,7 +437,20 @@ class InspireReferencePanelController {
       this.renderMessage(getString("references-panel-select-item"));
       return;
     }
+    const previousItemID = this.currentItemID;
+    const itemChanged = previousItemID !== item.id;
     this.currentItemID = item.id;
+
+    if (itemChanged) {
+      this.cancelActiveRequest();
+      this.allEntries = [];
+      this.renderMessage(getString("references-panel-status-loading"));
+    } else {
+      // Check if we need to restore scroll position when switching back to original item
+      // Only restore if we are not loading new content (item didn't change)
+      this.restoreScrollPositionIfNeeded();
+    }
+
     const recid =
       deriveRecidFromItem(item) ?? (await fetchRecidFromInspire(item));
     if (!recid) {
@@ -474,8 +469,57 @@ class InspireReferencePanelController {
         }
       });
     } else {
-      this.renderReferenceList();
+      this.renderReferenceList({ preserveScroll: true });
+      // Restore scroll position after rendering if needed
+      setTimeout(() => {
+        this.restoreScrollPositionIfNeeded();
+      }, 0);
     }
+  }
+
+  private restoreScrollPositionIfNeeded() {
+    if (!this.pendingScrollRestore) {
+      return;
+    }
+
+    // Only restore if itemPane is showing the original item
+    if (this.currentItemID !== this.pendingScrollRestore.itemID) {
+      return;
+    }
+
+    // Restore scroll position
+    this.listEl.scrollTop = this.pendingScrollRestore.scrollTop;
+    this.listEl.scrollLeft = this.pendingScrollRestore.scrollLeft;
+
+    // Restore parent scroll positions
+    for (const snapshot of this.pendingScrollRestore.scrollSnapshots) {
+      const target = snapshot.element as any;
+      if (typeof target.scrollTo === "function") {
+        target.scrollTo(snapshot.left, snapshot.top);
+      } else {
+        if (typeof target.scrollTop === "number") {
+          target.scrollTop = snapshot.top;
+        }
+        if (typeof target.scrollLeft === "number") {
+          target.scrollLeft = snapshot.left;
+        }
+      }
+    }
+
+    // Restore focus if possible
+    if (
+      this.pendingScrollRestore.activeElement &&
+      typeof (this.pendingScrollRestore.activeElement as any).focus === "function"
+    ) {
+      try {
+        (this.pendingScrollRestore.activeElement as any).focus();
+      } catch (_err) {
+        // Ignore focus restoration issues
+      }
+    }
+
+    // Clear the pending restore
+    this.pendingScrollRestore = undefined;
   }
 
   private async loadReferences(
@@ -492,6 +536,10 @@ class InspireReferencePanelController {
       this.allEntries = cached;
       this.renderReferenceList();
       this.refreshButton.disabled = false;
+      // Restore scroll position after rendering if needed
+      setTimeout(() => {
+        this.restoreScrollPositionIfNeeded();
+      }, 0);
       return;
     }
 
@@ -507,10 +555,19 @@ class InspireReferencePanelController {
       const entries = await this.fetchReferences(recid, controller?.signal);
       this.allEntries = entries;
       this.referencesCache.set(recid, entries);
-      await this.enrichEntries(entries, controller?.signal);
+
       if (this.pendingToken === token) {
         this.renderReferenceList();
+        // Restore scroll position after rendering if needed
+        setTimeout(() => {
+          this.restoreScrollPositionIfNeeded();
+        }, 0);
       }
+
+      await Promise.allSettled([
+        this.enrichLocalStatus(entries, controller?.signal),
+        this.enrichEntries(entries, controller?.signal),
+      ]);
     } finally {
       if (this.pendingToken === token) {
         this.activeAbort = undefined;
@@ -524,7 +581,7 @@ class InspireReferencePanelController {
       `[${config.addonName}] Fetching references for recid ${recid}`,
     );
     const response = await fetch(
-      `https://inspirehep.net/api/literature/${encodeURIComponent(recid)}`,
+      `https://inspirehep.net/api/literature/${encodeURIComponent(recid)}?fields=metadata.references`,
       signal ? { signal } : undefined,
     ).catch(() => null);
     if (!response || response.status === 404) {
@@ -560,7 +617,137 @@ class InspireReferencePanelController {
       );
     }
     await Promise.all(workers);
-    this.renderReferenceList();
+  }
+
+  private async enrichLocalStatus(
+    entries: InspireReferenceEntry[],
+    signal?: AbortSignal,
+  ) {
+    if (signal?.aborted) {
+      return;
+    }
+    const recids = entries
+      .map((e) => e.recid)
+      .filter((r): r is string => !!r);
+    if (!recids.length) {
+      return;
+    }
+    const fieldID = Zotero.ItemFields.getID("archiveLocation");
+    if (!fieldID) {
+      return;
+    }
+
+    const chunk_size = 100;
+    const recidMap = new Map<string, number>();
+
+    for (let i = 0; i < recids.length; i += chunk_size) {
+      if (signal?.aborted) {
+        return;
+      }
+      const chunk = recids.slice(i, i + chunk_size);
+      const placeholders = chunk.map(() => "?").join(",");
+      const sql = `SELECT itemID, value FROM itemData JOIN itemDataValues USING(valueID) WHERE fieldID = ? AND value IN (${placeholders})`;
+      try {
+        const rows = await Zotero.DB.queryAsync(sql, [fieldID, ...chunk]);
+        if (rows) {
+          for (const row of rows) {
+            recidMap.set(row.value, Number(row.itemID));
+          }
+        }
+      } catch (e) {
+        Zotero.debug(`[${config.addonName}] Error querying local items: ${e}`);
+      }
+    }
+
+    if (signal?.aborted) {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.recid && recidMap.has(entry.recid)) {
+        const itemID = recidMap.get(entry.recid)!;
+        if (entry.localItemID !== itemID) {
+          entry.localItemID = itemID;
+          const item = Zotero.Items.get(itemID);
+          if (item) {
+            entry.isRelated = this.isCurrentItemRelated(item);
+          }
+          this.updateRowStatus(entry);
+        }
+      }
+    }
+  }
+
+  private updateRowStatus(entry: InspireReferenceEntry) {
+    const row = this.rowCache.get(entry.id);
+    if (!row) return;
+
+    const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
+    if (marker) {
+      marker.textContent = entry.localItemID ? "●" : "○";
+      marker.dataset.state = entry.localItemID ? "local" : "missing";
+      if (entry.localItemID) {
+        marker.style.color = "#1a8f4d";
+        marker.classList.remove("is-clickable");
+        marker.style.cursor = "default";
+      } else {
+        marker.style.color = "#d93025";
+        marker.classList.add("is-clickable");
+        marker.style.cursor = "pointer";
+      }
+      marker.setAttribute(
+        "title",
+        entry.localItemID
+          ? getString("references-panel-dot-local")
+          : getString("references-panel-dot-add"),
+      );
+    }
+
+    const linkButton = row.querySelector(
+      ".zinspire-ref-entry__link",
+    ) as HTMLButtonElement;
+    if (linkButton) {
+      linkButton.dataset.state = entry.isRelated ? "linked" : "unlinked";
+      linkButton.style.cursor = entry.isRelated ? "default" : "pointer";
+      linkButton.innerHTML = "";
+      linkButton.setAttribute(
+        "title",
+        entry.isRelated
+          ? getString("references-panel-link-existing")
+          : getString("references-panel-link-missing"),
+      );
+
+      if (entry.isRelated) {
+        const linkedIcon = row.ownerDocument.createElement("img");
+        linkedIcon.src = "chrome://zotero/skin/itempane/16/related.svg";
+        linkedIcon.width = 14;
+        linkedIcon.height = 14;
+        linkedIcon.setAttribute("draggable", "false");
+        linkedIcon.style.margin = "0";
+        linkedIcon.style.padding = "0";
+        linkedIcon.style.display = "block";
+        linkedIcon.style.filter =
+          "brightness(0) saturate(100%) invert(28%) sepia(72%) saturate(1235%) hue-rotate(199deg) brightness(90%) contrast(94%)";
+        linkButton.appendChild(linkedIcon);
+        linkButton.style.color = "#1a56db";
+      } else {
+        linkButton.textContent = "⊘";
+        linkButton.style.color = "#ff8c00";
+      }
+      linkButton.style.opacity = "1";
+    }
+  }
+
+  private updateRowMetadata(entry: InspireReferenceEntry) {
+    const row = this.rowCache.get(entry.id);
+    if (!row) return;
+
+    const titleLink = row.querySelector(
+      ".zinspire-ref-entry__title",
+    ) as HTMLAnchorElement;
+    if (titleLink) {
+      titleLink.textContent = entry.displayText;
+    }
   }
 
   private async runMetadataWorker(
@@ -580,13 +767,20 @@ class InspireReferencePanelController {
           : undefined;
         if (cached) {
           this.applyMetadataToEntry(entry, cached);
+          this.updateRowMetadata(entry);
         }
         continue;
       }
-      const meta = await fetchInspireMetaByRecid(entry.recid).catch(() => -1);
+      const meta = await fetchInspireMetaByRecid(
+        entry.recid,
+        undefined,
+        "full",
+        true,
+      ).catch(() => -1);
       if (meta !== -1 && entry.recid) {
         this.metadataCache.set(entry.recid, meta as jsobject);
         this.applyMetadataToEntry(entry, meta as jsobject);
+        this.updateRowMetadata(entry);
       }
     }
   }
@@ -652,20 +846,28 @@ class InspireReferencePanelController {
     };
     entry.displayText = buildDisplayText(entry);
     entry.searchText = entry.displayText.toLowerCase();
-    if (entry.recid) {
-      const localItem = await findItemByRecid(entry.recid);
-      if (localItem) {
-        entry.localItemID = localItem.id;
-        entry.isRelated = this.isCurrentItemRelated(localItem);
-      }
-    }
+    // DB lookup moved to enrichLocalStatus
     return entry;
   }
 
-  private renderReferenceList() {
+  private renderReferenceList(options: { preserveScroll?: boolean } = {}) {
+    const { preserveScroll = false } = options;
+    const previousScrollTop = preserveScroll ? this.listEl.scrollTop : 0;
+    const previousScrollLeft = preserveScroll ? this.listEl.scrollLeft : 0;
+    const restoreScroll = () => {
+      if (preserveScroll) {
+        this.listEl.scrollTop = previousScrollTop;
+        this.listEl.scrollLeft = previousScrollLeft;
+      } else {
+        this.listEl.scrollTop = 0;
+        this.listEl.scrollLeft = 0;
+      }
+    };
     this.listEl.textContent = "";
+    this.rowCache.clear();
     if (!this.allEntries.length) {
       this.renderMessage(getString("references-panel-empty-list"));
+      restoreScroll();
       return;
     }
     const filtered = this.filterText
@@ -698,6 +900,7 @@ class InspireReferencePanelController {
         }),
       );
     }
+    restoreScroll();
   }
 
   private createReferenceRow(entry: InspireReferenceEntry) {
@@ -729,7 +932,10 @@ class InspireReferencePanelController {
       marker.style.cursor = "pointer";
       marker.addEventListener("click", (event) => {
         event.preventDefault();
-        this.handleAddAction(entry).catch(() => void 0);
+        const target = (event.target as HTMLElement).closest(
+          ".zinspire-ref-entry__dot",
+        ) as HTMLElement;
+        this.handleAddAction(entry, target).catch(() => void 0);
       });
     }
 
@@ -806,6 +1012,7 @@ class InspireReferencePanelController {
     textContainer.classList.add("zinspire-ref-entry__text");
     textContainer.append(marker, linkButton, content);
     row.appendChild(textContainer);
+    this.rowCache.set(entry.id, row);
     return row;
   }
 
@@ -873,7 +1080,10 @@ class InspireReferencePanelController {
     }
   }
 
-  private async handleAddAction(entry: InspireReferenceEntry) {
+  private async handleAddAction(
+    entry: InspireReferenceEntry,
+    anchor: HTMLElement,
+  ) {
     if (entry.localItemID) {
       return;
     }
@@ -881,7 +1091,7 @@ class InspireReferencePanelController {
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
-    const selection = await this.promptForSaveTarget();
+    const selection = await this.promptForSaveTarget(anchor);
     if (!selection) {
       return;
     }
@@ -891,7 +1101,11 @@ class InspireReferencePanelController {
       entry.displayText = buildDisplayText(entry);
       entry.searchText = entry.displayText.toLowerCase();
       entry.isRelated = false;
-      this.renderReferenceList();
+      this.renderReferenceList({ preserveScroll: true });
+      // Restore scroll position after rendering if needed
+      setTimeout(() => {
+        this.restoreScrollPositionIfNeeded();
+      }, 0);
     }
   }
 
@@ -912,6 +1126,52 @@ class InspireReferencePanelController {
     }
     const pane = Zotero.getActiveZoteroPane();
     const originalItemID = this.currentItemID;
+
+    // Save current scroll position and view state for itemPane restoration
+    const doc = this.body.ownerDocument;
+    const previousScrollTop = this.listEl.scrollTop;
+    const previousScrollLeft = this.listEl.scrollLeft;
+    const previousActiveElement = doc.activeElement as Element | null;
+    const isElementNode = (value: any): value is Element =>
+      Boolean(value && typeof value === "object" && value.nodeType === 1);
+
+    type ScrollSnapshot = { element: Element; top: number; left: number };
+    const captureScrollSnapshots = () => {
+      const snapshots: ScrollSnapshot[] = [];
+      let current: Element | null = this.body;
+      while (current) {
+        const node = current as any;
+        if (
+          typeof node.scrollTop === "number" &&
+          typeof node.scrollHeight === "number" &&
+          typeof node.clientHeight === "number" &&
+          node.scrollHeight > node.clientHeight
+        ) {
+          snapshots.push({
+            element: current,
+            top: node.scrollTop ?? 0,
+            left: node.scrollLeft ?? 0,
+          });
+        }
+        current = current.parentElement;
+      }
+      const docElement =
+        doc.scrollingElement ||
+        (doc as any).documentElement ||
+        (doc as any).body ||
+        null;
+      if (isElementNode(docElement)) {
+        const node = docElement as any;
+        snapshots.push({
+          element: docElement,
+          top: node.scrollTop ?? 0,
+          left: node.scrollLeft ?? 0,
+        });
+      }
+      return snapshots;
+    };
+    const scrollSnapshots = captureScrollSnapshots();
+
     const newItem = new Zotero.Item("journalArticle");
     newItem.libraryID = target.libraryID ?? currentItem.libraryID;
     const targetCollectionIDs = Array.from(
@@ -927,18 +1187,20 @@ class InspireReferencePanelController {
     await newItem.saveTx();
     this.rememberRecentTarget(target.primaryRowID);
 
-    // Check if new item is added to current collection
-    const selectedCollection = pane?.getSelectedCollection();
-    const isAddedToCurrentCollection = selectedCollection &&
-      targetCollectionIDs.includes(selectedCollection.id);
+    // Save scroll state so switching back to the original item restores the view
+    if (originalItemID) {
+      this.pendingScrollRestore = {
+        itemID: originalItemID,
+        scrollTop: previousScrollTop,
+        scrollLeft: previousScrollLeft,
+        scrollSnapshots,
+        activeElement: previousActiveElement,
+      };
 
-    // Only jump back if not added to current collection
-    if (originalItemID && pane && !isAddedToCurrentCollection) {
-      try {
-        pane.selectItems([originalItemID]);
-      } catch (_err) {
-        // Ignore focus restoration errors
-      }
+      // Try to restore immediately if itemPane is still showing the original item
+      setTimeout(() => {
+        this.restoreScrollPositionIfNeeded();
+      }, 0);
     }
     this.showToast(getString("references-panel-toast-added"));
     return newItem;
@@ -966,7 +1228,9 @@ class InspireReferencePanelController {
     this.activeAbort = undefined;
   }
 
-  private async promptForSaveTarget(): Promise<SaveTargetSelection | null> {
+  private async promptForSaveTarget(
+    anchor: HTMLElement,
+  ): Promise<SaveTargetSelection | null> {
     const recentTargets = this.getRecentTargets();
     const targets = this.buildSaveTargets(recentTargets.ids);
     if (!targets.length) {
@@ -977,7 +1241,7 @@ class InspireReferencePanelController {
     if (!defaultID) {
       defaultID = recentTargets.ordered[0] || targets[0]?.id || null;
     }
-    return this.showTargetPicker(targets, defaultID);
+    return this.showTargetPicker(targets, defaultID, anchor);
   }
 
   private buildSaveTargets(recentIDs: Set<string>): SaveTargetRow[] {
@@ -1084,463 +1348,19 @@ class InspireReferencePanelController {
     }
   }
 
+
   private showTargetPicker(
     targets: SaveTargetRow[],
     defaultID: string | null,
+    anchor: HTMLElement,
   ): Promise<SaveTargetSelection | null> {
-    return new Promise((resolve) => {
-      const doc = this.body.ownerDocument;
-      const previousScrollTop = this.listEl.scrollTop;
-      const previousScrollLeft = this.listEl.scrollLeft;
-      const previousActiveElement = doc.activeElement as Element | null;
-      const isElementNode = (value: any): value is Element =>
-        Boolean(value && typeof value === "object" && value.nodeType === 1);
-
-      type ScrollSnapshot = { element: Element; top: number; left: number };
-      const captureScrollSnapshots = () => {
-        const snapshots: ScrollSnapshot[] = [];
-        let current: Element | null = this.body;
-        while (current) {
-          const node = current as any;
-          if (
-            typeof node.scrollTop === "number" &&
-            typeof node.scrollHeight === "number" &&
-            typeof node.clientHeight === "number" &&
-            node.scrollHeight > node.clientHeight
-          ) {
-            snapshots.push({
-              element: current,
-              top: node.scrollTop ?? 0,
-              left: node.scrollLeft ?? 0,
-            });
-          }
-          current = current.parentElement;
-        }
-        const docElement =
-          doc.scrollingElement ||
-          (doc as any).documentElement ||
-          (doc as any).body ||
-          null;
-        if (isElementNode(docElement)) {
-          const node = docElement as any;
-          snapshots.push({
-            element: docElement,
-            top: node.scrollTop ?? 0,
-            left: node.scrollLeft ?? 0,
-          });
-        }
-        return snapshots;
-      };
-      const scrollSnapshots = captureScrollSnapshots();
-
-      const restoreViewState = () => {
-        this.listEl.scrollTop = previousScrollTop;
-        this.listEl.scrollLeft = previousScrollLeft;
-        for (const snapshot of scrollSnapshots) {
-          const target = snapshot.element as any;
-          if (typeof target.scrollTo === "function") {
-            target.scrollTo(snapshot.left, snapshot.top);
-          } else {
-            if (typeof target.scrollTop === "number") {
-              target.scrollTop = snapshot.top;
-            }
-            if (typeof target.scrollLeft === "number") {
-              target.scrollLeft = snapshot.left;
-            }
-          }
-        }
-        if (
-          previousActiveElement &&
-          typeof (previousActiveElement as any).focus === "function"
-        ) {
-          try {
-            (previousActiveElement as any).focus();
-          } catch (_err) {
-            // Ignore focus restoration issues
-          }
-        }
-      };
-      const overlay = doc.createElement("div");
-      overlay.classList.add("zinspire-collection-picker__overlay");
-      const panel = doc.createElement("div");
-      panel.classList.add("zinspire-collection-picker");
-      overlay.appendChild(panel);
-
-      const header = doc.createElement("div");
-      header.classList.add("zinspire-collection-picker__header");
-      header.textContent = getString("references-panel-picker-title");
-      panel.appendChild(header);
-
-      const hint = doc.createElement("div");
-      hint.classList.add("zinspire-collection-picker__hint");
-      hint.textContent = getString("references-panel-picker-hint");
-      panel.appendChild(hint);
-
-      const filterInput = doc.createElement("input");
-      filterInput.classList.add("zinspire-collection-picker__filter");
-      filterInput.placeholder = getString("references-panel-picker-filter");
-      panel.appendChild(filterInput);
-
-      const list = doc.createElement("div");
-      list.classList.add("zinspire-collection-picker__list");
-      panel.appendChild(list);
-
-      const actions = doc.createElement("div");
-      actions.classList.add("zinspire-collection-picker__actions");
-      const cancelBtn = doc.createElement("button");
-      cancelBtn.classList.add("zinspire-collection-picker__button");
-      cancelBtn.textContent = getString("references-panel-picker-cancel");
-      const okBtn = doc.createElement("button");
-      okBtn.classList.add(
-        "zinspire-collection-picker__button",
-        "zinspire-collection-picker__button--primary",
-      );
-      okBtn.textContent = getString("references-panel-picker-confirm");
-      actions.append(cancelBtn, okBtn);
-      panel.appendChild(actions);
-
-      const rowMap = new Map<string, SaveTargetRow>();
-      const buttonMap = new Map<string, HTMLButtonElement>();
-      for (const row of targets) {
-        rowMap.set(row.id, row);
-        const button = doc.createElement("button");
-        button.type = "button";
-        button.dataset.id = row.id;
-        button.dataset.type = row.type;
-        button.classList.add("zinspire-collection-picker__row");
-        button.style.setProperty(
-          "--zinspire-collection-level",
-          row.level.toString(),
-        );
-        button.textContent = row.name;
-        if (row.recent) {
-          button.dataset.recent = "1";
-        }
-        list.appendChild(button);
-        buttonMap.set(row.id, button);
-      }
-
-      if (!targets.length) {
-        const empty = doc.createElement("div");
-        empty.classList.add("zinspire-collection-picker__empty");
-        empty.textContent = getString("references-panel-picker-empty");
-        list.appendChild(empty);
-      }
-
-      const deriveLibraryRowID = (rowID: string | null) => {
-        if (!rowID) {
-          return null;
-        }
-        const row = rowMap.get(rowID);
-        if (!row) {
-          return null;
-        }
-        return row.type === "library" ? row.id : `L${row.libraryID}`;
-      };
-
-      let focusedID: string | null =
-        (defaultID && rowMap.has(defaultID) ? defaultID : null) ||
-        targets[0]?.id ||
-        null;
-      let selectedLibraryRowID: string | null =
-        deriveLibraryRowID(focusedID) ||
-        targets.find((row) => row.type === "library")?.id ||
-        null;
-      let selectedLibraryID: number | null = selectedLibraryRowID
-        ? rowMap.get(selectedLibraryRowID)?.libraryID ?? null
-        : null;
-      const selectedCollectionRowIDs = new Set<string>();
-      if (focusedID) {
-        const initialRow = rowMap.get(focusedID);
-        if (initialRow?.type === "collection") {
-          selectedCollectionRowIDs.add(initialRow.id);
-        }
-      }
-      if (!selectedLibraryRowID && targets[0]) {
-        selectedLibraryRowID =
-          targets[0].type === "library"
-            ? targets[0].id
-            : `L${targets[0].libraryID}`;
-        selectedLibraryID =
-          rowMap.get(selectedLibraryRowID!)?.libraryID ?? targets[0].libraryID;
-      }
-
-      const applyCollectionHighlight = (
-        button: HTMLButtonElement,
-        checked: boolean,
-      ) => {
-        if (checked) {
-          button.style.backgroundColor = "#e6f2ff";
-          button.style.color = "#0b2d66";
-          button.style.fontWeight = "600";
-        } else {
-          button.style.backgroundColor = "";
-          button.style.color = "";
-          button.style.fontWeight = "";
-        }
-      };
-
-      const updateVisualState = () => {
-        for (const [id, button] of buttonMap.entries()) {
-          button.classList.toggle("is-focused", id === focusedID);
-          if (button.dataset.type === "library") {
-            button.classList.toggle(
-              "is-library-active",
-              id === selectedLibraryRowID,
-            );
-          } else {
-            const isChecked = selectedCollectionRowIDs.has(id);
-            button.classList.toggle("is-checked", isChecked);
-            button.classList.toggle("is-library-active", false);
-            applyCollectionHighlight(button, isChecked);
-          }
-        }
-      };
-
-      const focusRow = (id: string | null, scroll = true) => {
-        focusedID = id;
-        updateVisualState();
-        if (scroll && id) {
-          buttonMap.get(id)?.scrollIntoView({ block: "nearest" });
-        }
-      };
-
-      focusRow(focusedID, false);
-
-      const visibleButtons = () =>
-        Array.from(buttonMap.values()).filter((btn) => !btn.hidden);
-
-      const moveFocus = (delta: number) => {
-        const buttons = visibleButtons();
-        if (!buttons.length) {
-          return;
-        }
-        let index = buttons.findIndex((btn) => btn.dataset.id === focusedID);
-        if (index === -1) {
-          index = 0;
-        } else {
-          index = Math.min(Math.max(index + delta, 0), buttons.length - 1);
-        }
-        const nextButton = buttons[index];
-        focusRow(nextButton?.dataset.id ?? null);
-      };
-
-      const selectLibraryRow = (id: string | null) => {
-        if (!id) {
-          return;
-        }
-        const row = rowMap.get(id);
-        if (!row || row.type !== "library") {
-          return;
-        }
-        selectedLibraryRowID = row.id;
-        selectedLibraryID = row.libraryID;
-        for (const rowID of Array.from(selectedCollectionRowIDs)) {
-          const candidate = rowMap.get(rowID);
-          if (!candidate || candidate.libraryID !== row.libraryID) {
-            selectedCollectionRowIDs.delete(rowID);
-          }
-        }
-        focusRow(row.id, false);
-        updateVisualState();
-      };
-
-      const toggleCollectionRow = (id: string | null) => {
-        if (!id) {
-          return;
-        }
-        const row = rowMap.get(id);
-        if (!row || row.type !== "collection") {
-          return;
-        }
-        if (!selectedLibraryID || selectedLibraryID !== row.libraryID) {
-          selectLibraryRow(`L${row.libraryID}`);
-        }
-        if (selectedCollectionRowIDs.has(id)) {
-          selectedCollectionRowIDs.delete(id);
-        } else {
-          selectedCollectionRowIDs.add(id);
-        }
-        focusRow(id);
-        updateVisualState();
-      };
-
-      const applyFilter = () => {
-        const query = filterInput.value.trim().toLowerCase();
-        if (!query) {
-          buttonMap.forEach((btn) => (btn.hidden = false));
-          return;
-        }
-        const visible = new Set<string>();
-        for (const row of targets) {
-          const matches = row.name.toLowerCase().includes(query);
-          if (matches) {
-            visible.add(row.id);
-            let parentID = row.parentID;
-            while (parentID) {
-              visible.add(parentID);
-              parentID = rowMap.get(parentID)?.parentID;
-            }
-          }
-        }
-        buttonMap.forEach((btn, id) => {
-          btn.hidden = !visible.has(id);
-        });
-        if (!focusedID || buttonMap.get(focusedID)?.hidden) {
-          const firstVisible = visibleButtons()[0];
-          focusRow(firstVisible?.dataset.id ?? null);
-        }
-      };
-
-      const buildSelection = (): SaveTargetSelection | null => {
-        const libraryRowID =
-          selectedLibraryRowID ||
-          targets.find((row) => row.type === "library")?.id ||
-          null;
-        if (!libraryRowID) {
-          return null;
-        }
-        const libraryRow = rowMap.get(libraryRowID);
-        if (!libraryRow) {
-          return null;
-        }
-        const collectionIDs = Array.from(selectedCollectionRowIDs)
-          .map((id) => rowMap.get(id)?.collectionID)
-          .filter((id): id is number => typeof id === "number");
-        const primaryRowID =
-          selectedCollectionRowIDs.values().next().value || libraryRowID;
-        return {
-          libraryID: libraryRow.libraryID,
-          primaryRowID,
-          collectionIDs,
-        };
-      };
-
-      let isFinished = false;
-
-      const finish = (selection: SaveTargetSelection | null) => {
-        if (isFinished) {
-          return;
-        }
-        isFinished = true;
-        overlay.remove();
-        filterInput.removeEventListener("input", applyFilter);
-        list.removeEventListener("click", onListClick);
-        list.removeEventListener("dblclick", onListDoubleClick);
-        panel.removeEventListener("keydown", onKeyDown);
-        cancelBtn.removeEventListener("click", onCancel);
-        okBtn.removeEventListener("click", onConfirm);
-        overlay.removeEventListener("click", onOverlayClick);
-        doc.removeEventListener("keydown", onGlobalKeyDown, true);
-        restoreViewState();
-        resolve(selection);
-      };
-
-      const onConfirm = () => {
-        finish(buildSelection());
-      };
-
-      const onCancel = () => finish(null);
-
-      const onOverlayClick = (event: MouseEvent) => {
-        if (event.target === overlay) {
-          finish(null);
-        }
-      };
-
-      const onKeyDown = (event: KeyboardEvent) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          finish(null);
-          return;
-        }
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          moveFocus(1);
-          return;
-        }
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          moveFocus(-1);
-          return;
-        }
-        if (event.key === " " && event.target !== filterInput) {
-          event.preventDefault();
-          const row = focusedID ? rowMap.get(focusedID) : null;
-          if (!row) {
-            return;
-          }
-          if (row.type === "library") {
-            selectLibraryRow(row.id);
-          } else {
-            toggleCollectionRow(row.id);
-          }
-          return;
-        }
-        if (event.key === "Enter" && event.target !== filterInput) {
-          event.preventDefault();
-          onConfirm();
-        }
-      };
-
-      const onListClick = (event: MouseEvent) => {
-        const target = (event.target as HTMLElement)?.closest("button");
-        if (!target) {
-          return;
-        }
-        const id = target.getAttribute("data-id");
-        const row = id ? rowMap.get(id) : null;
-        if (!row) {
-          return;
-        }
-        if (row.type === "library") {
-          selectLibraryRow(row.id);
-        } else {
-          toggleCollectionRow(row.id);
-        }
-      };
-
-      const onListDoubleClick = (event: MouseEvent) => {
-        const target = (event.target as HTMLElement)?.closest("button");
-        if (!target) {
-          return;
-        }
-        const id = target.getAttribute("data-id");
-        const row = id ? rowMap.get(id) : null;
-        if (!row) {
-          return;
-        }
-        if (row.type === "library") {
-          selectLibraryRow(row.id);
-        } else {
-          toggleCollectionRow(row.id);
-        }
-        onConfirm();
-      };
-
-      const onGlobalKeyDown = (event: KeyboardEvent) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          finish(null);
-        }
-        if (event.key === "Enter") {
-          event.preventDefault();
-          onConfirm();
-        }
-      };
-
-      filterInput.addEventListener("input", applyFilter);
-      cancelBtn.addEventListener("click", onCancel);
-      okBtn.addEventListener("click", onConfirm);
-      list.addEventListener("click", onListClick);
-      list.addEventListener("dblclick", onListDoubleClick);
-      panel.addEventListener("keydown", onKeyDown);
-      overlay.addEventListener("click", onOverlayClick);
-      doc.addEventListener("keydown", onGlobalKeyDown, true);
-
-      this.body.appendChild(overlay);
-      filterInput.focus();
-    });
+    return showTargetPickerUI(
+      targets,
+      defaultID,
+      anchor,
+      this.body,
+      this.listEl,
+    );
   }
 
   private showToast(message: string) {
@@ -2102,11 +1922,13 @@ async function fetchInspireMetaByRecid(
   recid: string,
   signal?: AbortSignal,
   operation: string = "full",
+  minimal: boolean = false,
 ) {
-  const response = await fetch(
-    `https://inspirehep.net/api/literature/${encodeURIComponent(recid)}`,
-    { signal },
-  ).catch(() => null);
+  let url = `https://inspirehep.net/api/literature/${encodeURIComponent(recid)}`;
+  if (minimal) {
+    url += "?fields=metadata.title,metadata.creators,metadata.date";
+  }
+  const response = await fetch(url, { signal }).catch(() => null);
   if (!response || response.status === 404) {
     return -1;
   }
