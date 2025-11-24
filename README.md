@@ -15,7 +15,8 @@ When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE Refe
 
 Clicking the hollow circle opens the collection picker so you can import the reference into one or more collections; clicking the link icon links or unlinks the reference as a related item. This makes it easy to review INSPIRE references and pull missing ones into your library without leaving Zotero.
 
-![screenshot](images/screenshot1.png)
+![showcase](images/screenshot1.png)
+![collectionwindow](images/screenshot2.png)
 
 ## Installation
 
