@@ -1,4 +1,5 @@
 import { config } from "../../package.json";
+import { cleanMathTitle } from "../utils/mathTitle";
 import { getLocaleID, getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit/dist/helpers/progressWindow";
@@ -7,6 +8,62 @@ import {
   SaveTargetRow,
   SaveTargetSelection,
 } from "./pickerUI";
+
+const SPECIAL_CHAR_REPLACEMENTS: Record<string, string> = {
+  "ß": "ss",
+  "æ": "ae",
+  "œ": "oe",
+  "ø": "o",
+  "đ": "d",
+  "ð": "d",
+  "þ": "th",
+  "ł": "l",
+};
+const SPECIAL_CHAR_REGEX = /[ßæœøđðþł]/g;
+const GERMAN_UMLAUT_REPLACEMENTS: Record<string, string> = {
+  "ä": "ae",
+  "ö": "oe",
+  "ü": "ue",
+};
+const GERMAN_UMLAUT_REGEX = /[äöü]/g;
+const COMBINING_MARKS_REGEX = /[\u0300-\u036f]/g;
+
+const normalizeSearchText = (value: string): string => {
+  if (!value) {
+    return "";
+  }
+  const lower = value.toLowerCase();
+  const replaced = lower.replace(
+    SPECIAL_CHAR_REGEX,
+    (char) => SPECIAL_CHAR_REPLACEMENTS[char] ?? char,
+  );
+  return replaced.normalize("NFD").replace(COMBINING_MARKS_REGEX, "");
+};
+
+const buildVariantSet = (value: string): string[] => {
+  if (!value) {
+    return [];
+  }
+  const normalized = normalizeSearchText(value);
+  const umlautExpanded = normalizeSearchText(
+    value
+      .toLowerCase()
+      .replace(
+        GERMAN_UMLAUT_REGEX,
+        (char) => GERMAN_UMLAUT_REPLACEMENTS[char] ?? char,
+      ),
+  );
+  const variants = [normalized, umlautExpanded].filter(
+    (token): token is string => Boolean(token),
+  );
+  return Array.from(new Set(variants));
+};
+
+const buildSearchIndexText = (value: string): string =>
+  buildVariantSet(value).join(" ");
+
+const buildFilterTokenVariants = (value: string): string[] =>
+  buildVariantSet(value);
 export class ZInsUtils {
   static registerPrefs() {
     const prefOptions = {
@@ -329,7 +386,7 @@ class InspireReferencePanelController {
             type: "input",
             listener: (event: Event) => {
               const target = event.target as HTMLInputElement;
-              this.filterText = target.value.trim().toLowerCase();
+              this.filterText = target.value.trim();
               this.renderReferenceList();
             },
           },
@@ -707,34 +764,13 @@ class InspireReferencePanelController {
       ".zinspire-ref-entry__link",
     ) as HTMLButtonElement;
     if (linkButton) {
-      linkButton.dataset.state = entry.isRelated ? "linked" : "unlinked";
-      linkButton.style.cursor = entry.isRelated ? "default" : "pointer";
-      linkButton.innerHTML = "";
       linkButton.setAttribute(
         "title",
         entry.isRelated
           ? getString("references-panel-link-existing")
           : getString("references-panel-link-missing"),
       );
-
-      if (entry.isRelated) {
-        const linkedIcon = row.ownerDocument.createElement("img");
-        linkedIcon.src = "chrome://zotero/skin/itempane/16/related.svg";
-        linkedIcon.width = 14;
-        linkedIcon.height = 14;
-        linkedIcon.setAttribute("draggable", "false");
-        linkedIcon.style.margin = "0";
-        linkedIcon.style.padding = "0";
-        linkedIcon.style.display = "block";
-        linkedIcon.style.filter =
-          "brightness(0) saturate(100%) invert(28%) sepia(72%) saturate(1235%) hue-rotate(199deg) brightness(90%) contrast(94%)";
-        linkButton.appendChild(linkedIcon);
-        linkButton.style.color = "#1a56db";
-      } else {
-        linkButton.textContent = "⊘";
-        linkButton.style.color = "#ff8c00";
-      }
-      linkButton.style.opacity = "1";
+      this.renderLinkButton(linkButton, Boolean(entry.isRelated));
     }
   }
 
@@ -747,6 +783,34 @@ class InspireReferencePanelController {
     ) as HTMLAnchorElement;
     if (titleLink) {
       titleLink.textContent = entry.displayText;
+    }
+  }
+
+  private renderLinkButton(
+    button: HTMLButtonElement,
+    isLinked: boolean,
+  ) {
+    const doc = button.ownerDocument;
+    button.innerHTML = "";
+    button.dataset.state = isLinked ? "linked" : "unlinked";
+    button.style.opacity = "1";
+    button.style.cursor = "pointer";
+    if (isLinked && doc) {
+      const linkedIcon = doc.createElement("img");
+      linkedIcon.src = "chrome://zotero/skin/itempane/16/related.svg";
+      linkedIcon.width = 15;
+      linkedIcon.height = 15;
+      linkedIcon.setAttribute("draggable", "false");
+      linkedIcon.style.margin = "0";
+      linkedIcon.style.padding = "0";
+      linkedIcon.style.display = "block";
+      linkedIcon.style.filter =
+        "brightness(0) saturate(100%) invert(35%) sepia(96%) saturate(435%) hue-rotate(96deg) brightness(92%) contrast(94%)";
+      button.appendChild(linkedIcon);
+      button.style.color = "#1a8f4d";
+    } else {
+      button.textContent = "⊘";
+      button.style.color = "#ff8c00";
     }
   }
 
@@ -813,7 +877,7 @@ class InspireReferencePanelController {
       entry.year = `${meta.date}`.slice(0, 4);
     }
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = entry.displayText.toLowerCase();
+    entry.searchText = buildSearchIndexText(entry.displayText);
   }
 
   private async buildEntry(
@@ -832,8 +896,7 @@ class InspireReferencePanelController {
       recid: recid ?? undefined,
       inspireUrl: buildReferenceUrl(reference, recid),
       fallbackUrl: buildFallbackUrl(reference),
-      title:
-        reference?.title?.title?.trim() ||
+      title: cleanMathTitle(reference?.title?.title) ||
         getString("references-panel-no-title"),
       summary,
       year:
@@ -845,7 +908,7 @@ class InspireReferencePanelController {
       searchText: "",
     };
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = entry.displayText.toLowerCase();
+    entry.searchText = buildSearchIndexText(entry.displayText);
     // DB lookup moved to enrichLocalStatus
     return entry;
   }
@@ -870,9 +933,17 @@ class InspireReferencePanelController {
       restoreScroll();
       return;
     }
-    const filtered = this.filterText
+    const filterGroups = this.filterText
+      ? this.filterText
+        .split(/\s+/)
+        .map((token) => buildFilterTokenVariants(token))
+        .filter((variants) => variants.length)
+      : [];
+    const filtered = filterGroups.length
       ? this.allEntries.filter((entry) =>
-        entry.searchText.includes(this.filterText),
+        filterGroups.every((variants) =>
+          variants.some((token) => entry.searchText.includes(token)),
+        ),
       )
       : this.allEntries;
     if (!filtered.length) {
@@ -884,7 +955,7 @@ class InspireReferencePanelController {
       }
       this.listEl.appendChild(fragment);
     }
-    if (this.filterText) {
+    if (filterGroups.length) {
       this.setStatus(
         getString("references-panel-filter-count", {
           args: {
@@ -941,42 +1012,13 @@ class InspireReferencePanelController {
 
     const linkButton = this.listEl.ownerDocument.createElement("button");
     linkButton.classList.add("zinspire-ref-entry__link");
-    linkButton.dataset.state = entry.isRelated ? "linked" : "unlinked";
-    linkButton.style.cursor = entry.isRelated ? "default" : "pointer";
-    let linkedIcon: HTMLImageElement | null = null;
     linkButton.setAttribute(
       "title",
       entry.isRelated
         ? getString("references-panel-link-existing")
         : getString("references-panel-link-missing"),
     );
-    if (entry.isRelated) {
-      linkedIcon = this.listEl.ownerDocument.createElement("img");
-      linkedIcon.src = "chrome://zotero/skin/itempane/16/related.svg";
-      linkedIcon.width = 14;
-      linkedIcon.height = 14;
-      linkedIcon.setAttribute("draggable", "false");
-      linkedIcon.style.margin = "0";
-      linkedIcon.style.padding = "0";
-      linkedIcon.style.display = "block";
-      linkButton.appendChild(linkedIcon);
-    } else {
-      linkButton.textContent = "⊘";
-    }
-    const applyLinkStyle = (isLinked: boolean) => {
-      if (isLinked) {
-        linkButton.style.color = "#1a56db";
-        linkButton.style.opacity = "1";
-        if (linkedIcon) {
-          linkedIcon.style.filter =
-            "brightness(0) saturate(100%) invert(28%) sepia(72%) saturate(1235%) hue-rotate(199deg) brightness(90%) contrast(94%)";
-        }
-      } else {
-        linkButton.style.color = "#ff8c00";
-        linkButton.style.opacity = "1";
-      }
-    };
-    applyLinkStyle(Boolean(entry.isRelated));
+    this.renderLinkButton(linkButton, Boolean(entry.isRelated));
     linkButton.addEventListener("click", (event) => {
       event.preventDefault();
       this.handleLinkAction(entry).catch((err) => {
@@ -1025,7 +1067,9 @@ class InspireReferencePanelController {
       return;
     }
     if (entry.isRelated) {
-      this.showToast(getString("references-panel-toast-already-linked"));
+      await this.unlinkReference(entry.localItemID);
+      entry.isRelated = false;
+      this.renderReferenceList();
       return;
     }
     await this.linkExistingReference(entry.localItemID);
@@ -1080,6 +1124,27 @@ class InspireReferencePanelController {
     }
   }
 
+  private async unlinkReference(localItemID: number) {
+    if (!this.currentItemID || localItemID === this.currentItemID) {
+      return;
+    }
+    const currentItem = Zotero.Items.get(this.currentItemID);
+    const targetItem = Zotero.Items.get(localItemID);
+    if (!currentItem || !targetItem) {
+      return;
+    }
+    const updated = await currentItem.removeRelatedItem(targetItem);
+    if (await targetItem.removeRelatedItem(currentItem)) {
+      await targetItem.saveTx();
+    }
+    if (updated) {
+      await currentItem.saveTx();
+      this.showToast(
+        getString("references-panel-toast-unlinked") || "Related item unlinked",
+      );
+    }
+  }
+
   private async handleAddAction(
     entry: InspireReferenceEntry,
     anchor: HTMLElement,
@@ -1099,7 +1164,7 @@ class InspireReferencePanelController {
     if (newItem) {
       entry.localItemID = newItem.id;
       entry.displayText = buildDisplayText(entry);
-      entry.searchText = entry.displayText.toLowerCase();
+      entry.searchText = buildSearchIndexText(entry.displayText);
       entry.isRelated = false;
       this.renderReferenceList({ preserveScroll: true });
       // Restore scroll position after rendering if needed
@@ -1183,8 +1248,24 @@ class InspireReferencePanelController {
     } else {
       newItem.setCollections([]);
     }
+
+    if (target.tags && target.tags.length) {
+      for (const tag of target.tags) {
+        newItem.addTag(tag);
+      }
+    }
+
     await setInspireMeta(newItem, meta as jsobject, "full");
     await newItem.saveTx();
+
+    if (target.note) {
+      const newNote = new Zotero.Item("note");
+      newNote.setNote(target.note);
+      newNote.parentID = newItem.id;
+      newNote.libraryID = newItem.libraryID;
+      await newNote.saveTx();
+    }
+
     this.rememberRecentTarget(target.primaryRowID);
 
     // Save scroll state so switching back to the original item restores the view
@@ -2037,7 +2118,8 @@ function buildMetaFromMetadata(meta: any, operation: string) {
       }
     }
 
-    metaInspire.title = meta["titles"]?.[0]?.title;
+    const rawTitle = meta["titles"]?.[0]?.title;
+    metaInspire.title = rawTitle ? cleanMathTitle(rawTitle) : rawTitle;
     metaInspire.document_type = meta["document_type"];
     metaInspire.citekey = meta["texkeys"]?.[0];
     if (meta["isbns"]) {

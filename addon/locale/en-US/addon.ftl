@@ -29,7 +29,7 @@ references-panel-filter-count =
   { $visible } / { $total } references
 references-panel-dot-local = Item exists in your library
 references-panel-dot-add = Add this reference to your library
-references-panel-link-existing = Related item linked
+references-panel-link-existing = Click to unlink the related item
 references-panel-link-missing = Link as related item
 references-panel-toast-linked = Related item linked successfully
 references-panel-toast-added = Reference added to your library
@@ -45,3 +45,8 @@ references-panel-picker-cancel = Cancel
 references-panel-picker-confirm = Done
 references-panel-picker-empty = No editable collections available
 references-panel-picker-hint = Choose a library, then toggle one or more collections.
+references-panel-toast-unlinked = Related item unlinked
+references-panel-picker-tags = Tags (comma separated)
+references-panel-picker-tags-title = Enter tags separated by comma or semicolon
+references-panel-picker-note = Note
+references-panel-picker-note-title = Enter a note to be added to the item
