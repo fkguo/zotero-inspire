@@ -4,10 +4,12 @@
       "updates": [
         {
           "version": "1.0.2",
-          "update_link": "https://github.com/fkguo/zotero-inspire/releases/latest/download/zotero-inspire.xpi",
+          "update_link": "https://github.com/fkguo/zotero-inspire/releases/download/v1.0.2/zotero-inspire.xpi",
+          "update_hash": "sha512:dc2910c7716cc3c686e9ab220db29ca85494cb90f114abcd3766d6168a08614d5a4f8850c6b70842b3bce1eb2783534cbcd2acdce0699719f3d0e901d8e12961",
           "applications": {
             "zotero": {
-              "strict_min_version": "6.999"
+              "strict_min_version": "6.999",
+              "strict_max_version": "8.*"
             }
           }
         }
