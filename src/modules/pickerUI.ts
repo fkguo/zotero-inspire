@@ -16,6 +16,8 @@ export interface SaveTargetSelection {
   libraryID: number;
   primaryRowID: string;
   collectionIDs: number[];
+  tags: string[];
+  note: string;
 }
 
 export function showTargetPickerUI(
@@ -124,11 +126,12 @@ export function showTargetPickerUI(
     panel.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.25)";
     panel.style.display = "flex";
     panel.style.flexDirection = "column";
-    panel.style.fontSize = "12px";
-    panel.style.width = "360px";
+    panel.style.fontSize = "14px";
+    panel.style.width = "400px";
     // Custom resize implementation instead of CSS resize
     // panel.style.resize = "both";
     // panel.style.overflow = "hidden";
+    panel.style.lineHeight = "1.25";
 
     overlay.appendChild(panel);
 
@@ -298,14 +301,6 @@ export function showTargetPickerUI(
 
     header.addEventListener("mousedown", onDragStart);
 
-    const hint = doc.createElement("div");
-    hint.classList.add("zinspire-collection-picker__hint");
-    hint.textContent = getString("references-panel-picker-hint");
-    hint.style.padding = "8px 12px";
-    hint.style.color = "GrayText";
-    hint.style.fontSize = "11px";
-    panel.appendChild(hint);
-
     const filterInput = doc.createElement("input");
     filterInput.classList.add("zinspire-collection-picker__filter");
     filterInput.placeholder = getString("references-panel-picker-filter");
@@ -325,10 +320,319 @@ export function showTargetPickerUI(
     list.style.display = "flex";
     list.style.flexWrap = "wrap";
     list.style.alignContent = "flex-start";
-    list.style.gap = "6px";
+    list.style.gap = "4px";
     list.style.padding = "8px";
 
     panel.appendChild(list);
+
+    const options = doc.createElement("div");
+    options.classList.add("zinspire-collection-picker__options");
+    options.style.padding = "8px 12px";
+    options.style.borderTop = "1px solid var(--material-border, #eee)";
+    options.style.backgroundColor = "var(--material-side-background, #f5f5f5)";
+    options.style.display = "flex";
+    options.style.flexDirection = "column";
+    options.style.gap = "8px";
+
+    const tagsWrapper = doc.createElement("div");
+    tagsWrapper.classList.add("zinspire-collection-picker__tags-wrapper");
+    tagsWrapper.style.position = "relative";
+    tagsWrapper.style.width = "100%";
+
+    const tagsInput = doc.createElement("input");
+    tagsInput.classList.add("zinspire-collection-picker__tags");
+    const tagsPlaceholder = getString("references-panel-picker-tags");
+    tagsInput.placeholder = tagsPlaceholder || "Tags (comma separated)";
+    tagsInput.title = getString("references-panel-picker-tags-title");
+    tagsInput.style.width = "100%";
+    tagsInput.style.padding = "4px 8px";
+    tagsInput.style.fontSize = "13px";
+    tagsInput.style.boxSizing = "border-box";
+    tagsInput.setAttribute("list", "zinspire-tags-datalist");
+    tagsWrapper.appendChild(tagsInput);
+
+    const tagsSuggestionPanel = doc.createElement("div");
+    tagsSuggestionPanel.classList.add("zinspire-collection-picker__tags-autocomplete");
+    tagsSuggestionPanel.style.position = "absolute";
+    tagsSuggestionPanel.style.left = "0";
+    tagsSuggestionPanel.style.right = "0";
+    tagsSuggestionPanel.style.top = "calc(100% + 2px)";
+    tagsSuggestionPanel.style.backgroundColor =
+      "var(--material-background, #fff)";
+    tagsSuggestionPanel.style.border = "1px solid var(--material-border, #ccc)";
+    tagsSuggestionPanel.style.borderRadius = "4px";
+    tagsSuggestionPanel.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
+    tagsSuggestionPanel.style.display = "none";
+    tagsSuggestionPanel.style.maxHeight = "180px";
+    tagsSuggestionPanel.style.overflowY = "auto";
+    tagsSuggestionPanel.style.zIndex = "100";
+    tagsSuggestionPanel.style.padding = "4px 0";
+    tagsWrapper.appendChild(tagsSuggestionPanel);
+
+    // Ensure placeholder is visible (might be white on white depending on theme)
+    // tagsInput.style.color = "inherit"; 
+    // tagsInput.style.backgroundColor = "inherit";
+
+    // Use HTML namespace for datalist to ensure it works in XHTML context (Zotero 7)
+    const HTML_NS = "http://www.w3.org/1999/xhtml";
+    const tagsDataList = doc.createElementNS(
+      HTML_NS,
+      "datalist",
+    ) as HTMLDataListElement;
+    tagsDataList.id = "zinspire-tags-datalist";
+
+    const MAX_TAG_SUGGESTIONS = 8;
+    const tagCandidates: string[] = [];
+    const lowerCaseTagNames = new Set<string>();
+    let visibleTagSuggestions: string[] = [];
+    let activeTagSuggestionIndex = -1;
+
+    const hideTagSuggestions = () => {
+      visibleTagSuggestions = [];
+      activeTagSuggestionIndex = -1;
+      tagsSuggestionPanel.style.display = "none";
+      tagsSuggestionPanel.textContent = "";
+    };
+
+    const refreshTagSuggestionHighlight = () => {
+      Array.from(tagsSuggestionPanel.children).forEach((child, index) => {
+        const button = child as HTMLButtonElement;
+        if (index === activeTagSuggestionIndex) {
+          button.style.backgroundColor = "var(--material-border, #e0e0e0)";
+        } else {
+          button.style.backgroundColor = "transparent";
+        }
+      });
+    };
+
+    const applyTagSuggestion = (value: string) => {
+      const tokens = tagsInput.value.split(/[,;]/);
+      if (!tokens.length) {
+        tagsInput.value = value;
+      } else {
+        tokens[tokens.length - 1] = value;
+        const normalized = tokens
+          .map((token) => token.trim())
+          .filter((token, index, arr) => token || index < arr.length - 1);
+        if (!normalized.length) {
+          normalized.push(value);
+        }
+        tagsInput.value = normalized.join(", ");
+      }
+      const caret = tagsInput.value.length;
+      if (typeof tagsInput.setSelectionRange === "function") {
+        tagsInput.setSelectionRange(caret, caret);
+      }
+      hideTagSuggestions();
+    };
+
+    const getExistingTagSet = () =>
+      new Set(
+        tagsInput.value
+          .split(/[,;]/)
+          .map((token) => token.trim().toLowerCase())
+          .filter(Boolean),
+      );
+
+    const getCurrentTagQuery = () => {
+      const parts = tagsInput.value.split(/[,;]/);
+      const last = parts[parts.length - 1] ?? "";
+      return last.trim().toLowerCase();
+    };
+
+    const renderTagSuggestions = (force = false) => {
+      if (!tagCandidates.length) {
+        hideTagSuggestions();
+        return;
+      }
+      const query = getCurrentTagQuery();
+      const allowEmptyQuery =
+        force || !!query || /[,;]\s*$/.test(tagsInput.value) || !tagsInput.value.trim();
+      if (!query && !allowEmptyQuery) {
+        hideTagSuggestions();
+        return;
+      }
+      const used = getExistingTagSet();
+      const matches: string[] = [];
+      for (const name of tagCandidates) {
+        const lower = name.toLowerCase();
+        if (used.has(lower)) {
+          continue;
+        }
+        if (query && !lower.includes(query)) {
+          continue;
+        }
+        matches.push(name);
+        if (matches.length >= MAX_TAG_SUGGESTIONS) {
+          break;
+        }
+      }
+      if (!matches.length) {
+        hideTagSuggestions();
+        return;
+      }
+      visibleTagSuggestions = matches;
+      activeTagSuggestionIndex = 0;
+      tagsSuggestionPanel.textContent = "";
+      matches.forEach((name, index) => {
+        const button = doc.createElement("button");
+        button.type = "button";
+        button.classList.add("zinspire-collection-picker__tags-autocomplete-item");
+        button.textContent = name;
+        button.style.display = "block";
+        button.style.width = "100%";
+        button.style.textAlign = "left";
+        button.style.padding = "4px 8px";
+        button.style.fontSize = "12px";
+        button.style.border = "none";
+        button.style.background = "transparent";
+        button.style.cursor = "pointer";
+        button.addEventListener("mousedown", (event) => event.preventDefault());
+        button.addEventListener("mouseenter", () => {
+          activeTagSuggestionIndex = index;
+          refreshTagSuggestionHighlight();
+        });
+        button.addEventListener("click", () => applyTagSuggestion(name));
+        tagsSuggestionPanel.appendChild(button);
+      });
+      tagsSuggestionPanel.style.display = "block";
+      refreshTagSuggestionHighlight();
+    };
+
+    const addTagCandidate = (rawName: unknown) => {
+      const normalized =
+        typeof rawName === "string" ? rawName.trim() : String(rawName ?? "").trim();
+      if (!normalized) {
+        return;
+      }
+      const key = normalized.toLowerCase();
+      if (lowerCaseTagNames.has(key)) {
+        return;
+      }
+      lowerCaseTagNames.add(key);
+      tagCandidates.push(normalized);
+      const option = doc.createElementNS(
+        HTML_NS,
+        "option",
+      ) as HTMLOptionElement;
+      option.value = normalized;
+      tagsDataList.appendChild(option);
+      if (doc.activeElement === tagsInput && tagsSuggestionPanel.style.display !== "none") {
+        renderTagSuggestions(true);
+      }
+    };
+
+    const moveTagSuggestionHighlight = (delta: number) => {
+      if (!visibleTagSuggestions.length) {
+        return;
+      }
+      activeTagSuggestionIndex =
+        (activeTagSuggestionIndex + delta + visibleTagSuggestions.length) %
+        visibleTagSuggestions.length;
+      refreshTagSuggestionHighlight();
+    };
+
+    tagsInput.addEventListener("input", () => renderTagSuggestions());
+    tagsInput.addEventListener("focus", () => renderTagSuggestions(true));
+    tagsInput.addEventListener("blur", () => {
+      setTimeout(() => {
+        hideTagSuggestions();
+      }, 120);
+    });
+    tagsInput.addEventListener("keydown", (event) => {
+      const suggestionsVisible = tagsSuggestionPanel.style.display !== "none";
+      if (event.key === "ArrowDown") {
+        event.stopPropagation();
+        if (suggestionsVisible) {
+          event.preventDefault();
+          moveTagSuggestionHighlight(1);
+        } else {
+          renderTagSuggestions(true);
+          event.preventDefault();
+        }
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.stopPropagation();
+        if (suggestionsVisible) {
+          event.preventDefault();
+          moveTagSuggestionHighlight(-1);
+        }
+        return;
+      }
+      if (
+        suggestionsVisible &&
+        (event.key === "Enter" || event.key === "Tab") &&
+        activeTagSuggestionIndex >= 0
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        applyTagSuggestion(visibleTagSuggestions[activeTagSuggestionIndex]);
+        return;
+      }
+      if (suggestionsVisible && event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        hideTagSuggestions();
+      }
+    });
+
+    tagsSuggestionPanel.addEventListener("mousedown", (event) =>
+      event.preventDefault(),
+    );
+
+    // Fetch all tags from Zotero libraries
+    const libraries = Zotero.Libraries.getAll();
+    for (const lib of libraries) {
+      if (!lib.editable) {
+        continue;
+      }
+      try {
+        const sql =
+          "SELECT name FROM tags JOIN itemTags ON tags.tagID=itemTags.tagID JOIN items ON itemTags.itemID=items.itemID WHERE items.libraryID=? GROUP BY tags.tagID ORDER BY COUNT(*) DESC LIMIT 100";
+        void Zotero.DB.queryAsync(sql, [lib.libraryID])
+          .then((rows: any) => {
+            if (!rows) {
+              return;
+            }
+            for (const row of rows) {
+              addTagCandidate(row.name);
+            }
+            if (doc.activeElement === tagsInput) {
+              renderTagSuggestions(true);
+            }
+          })
+          .catch((err: unknown) => {
+            Zotero.debug?.(
+              `[zoteroinspire] Failed to fetch tags for library ${lib.libraryID}: ${err}`,
+            );
+          });
+      } catch (e) {
+        Zotero.debug?.(
+          `[zoteroinspire] Unexpected error while preparing tag suggestions: ${e}`,
+        );
+      }
+    }
+    options.appendChild(tagsDataList);
+
+    const noteInput = doc.createElement("textarea");
+    noteInput.classList.add("zinspire-collection-picker__note");
+    const notePlaceholder = getString("references-panel-picker-note");
+    noteInput.placeholder = notePlaceholder || "Note";
+    noteInput.title = getString("references-panel-picker-note-title");
+    noteInput.style.width = "100%";
+    noteInput.style.padding = "4px 8px";
+    noteInput.style.fontSize = "13px";
+    noteInput.style.boxSizing = "border-box";
+    noteInput.style.resize = "vertical";
+    noteInput.rows = 2;
+    noteInput.style.fontFamily = "inherit";
+    noteInput.style.minHeight = "60px";
+    noteInput.style.lineHeight = "1.4";
+
+    options.appendChild(tagsWrapper);
+    options.appendChild(noteInput);
+    panel.appendChild(options);
 
     const actions = doc.createElement("div");
     actions.classList.add("zinspire-collection-picker__actions");
@@ -382,7 +686,7 @@ export function showTargetPickerUI(
       button.style.whiteSpace = "nowrap";
       button.style.overflow = "hidden";
       button.style.textOverflow = "ellipsis";
-      button.style.fontSize = "11px";
+      button.style.fontSize = "12px";
 
       button.addEventListener("mouseover", () => {
         if (!button.classList.contains("is-focused")) {
@@ -473,6 +777,16 @@ export function showTargetPickerUI(
             "is-library-active",
             id === selectedLibraryRowID,
           );
+          if (id === selectedLibraryRowID) {
+            button.style.backgroundColor = "#e6f2ff";
+            button.style.color = "#0b2d66";
+            button.style.fontWeight = "600";
+          } else if (id !== focusedID) {
+            // Reset styles for non-selected library rows (unless focused)
+            button.style.backgroundColor = "";
+            button.style.color = "";
+            button.style.fontWeight = "";
+          }
         } else {
           const isChecked = selectedCollectionRowIDs.has(id);
           button.classList.toggle("is-checked", isChecked);
@@ -605,6 +919,11 @@ export function showTargetPickerUI(
         libraryID: libraryRow.libraryID,
         primaryRowID,
         collectionIDs,
+        tags: tagsInput.value
+          .split(/[,;]/)
+          .map((t) => t.trim())
+          .filter(Boolean),
+        note: noteInput.value.trim(),
       };
     };
 
@@ -656,7 +975,12 @@ export function showTargetPickerUI(
         moveFocus(-1);
         return;
       }
-      if (event.key === " " && event.target !== filterInput) {
+      if (
+        event.key === " " &&
+        event.target !== filterInput &&
+        event.target !== tagsInput &&
+        event.target !== noteInput
+      ) {
         event.preventDefault();
         const row = focusedID ? rowMap.get(focusedID) : null;
         if (!row) {

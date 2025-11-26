@@ -1,3 +1,50 @@
 .makeItRed {
   background-color: tomato;
 }
+
+.zinspire-ref-entry__text {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.zinspire-ref-entry__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.zinspire-ref-entry__dot,
+.zinspire-ref-entry__link {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.zinspire-ref-entry__dot {
+  font-weight: 600;
+  cursor: default;
+}
+
+.zinspire-ref-entry__dot.is-clickable {
+  cursor: pointer;
+}
+
+.zinspire-ref-entry__link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: background-color 120ms ease-in-out;
+}
+
+.zinspire-ref-entry__link:hover,
+.zinspire-ref-entry__link:focus-visible {
+  background-color: color-mix(in srgb, currentColor 12%, transparent);
+}
