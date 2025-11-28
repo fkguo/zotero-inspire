@@ -9,20 +9,22 @@
 
 ### 1.1 Three View Modes
 
-| Mode | Description |
-|------|-------------|
-| **References** | Shows papers cited by the current item (from INSPIRE's references data) |
-| **Cited By** | Shows papers that cite the current item |
+| Mode                  | Description                                                              |
+| --------------------- | ------------------------------------------------------------------------ |
+| **References**  | Shows papers cited by the current item (from INSPIRE's references data)  |
+| **Cited By**    | Shows papers that cite the current item                                  |
 | **Entry Cited** | Shows papers citing a specific reference, or papers by a specific author |
 
 ### 1.2 Data Loading Features
 
 #### References Mode
+
 - **Progressive rendering**: Renders entries in batches of 100 while fetching
 - **Citation count enrichment**: Batch-fetches citation counts in background (50 recids per request)
 - **Sorting options**: Default order, by year (descending), by citation count (descending)
 
 #### Cited By / Author Papers Mode
+
 - **Progressive loading**: First page (250 records) loads immediately, subsequent pages load in parallel batches
 - **API pagination**: Uses consistent page size (250) to avoid offset bugs
 - **Max results**: Up to 10,000 records (40 pages × 250)
@@ -32,13 +34,20 @@
 ### 1.3 UI Features
 
 #### Filter (Search)
+
 - Real-time filtering across all loaded entries
 - **Auto-update during loading**: Filter results update automatically as new data loads
 - **No pagination when filtering**: Shows all matching results
+- **Phrase search**: Use double quotes `"..."` for exact phrase matching, ignoring spaces and punctuation
+  - Example: `"Phys Rev Lett"` matches "Physical Review Letters" or "Phys. Rev. Lett."
+- **Journal abbreviation support**: Filter using common journal abbreviations
+  - Example: `"PRL"` matches "Physical Review Letters"
+  - Supports common physics journal abbreviations: PRL, PRC,PRD, JHEP, NPA, NPB, PLB, EPJA, EPJC, CPC, CPL, etc.
 - Supports special characters (umlauts, accented characters) with normalization
 - Multi-token search (space-separated terms, all must match)
 
 #### Entry Display
+
 - Reference label (e.g., `[1]`, `[2]`)
 - **Clickable author names**: Click to view author's papers
 - Year display
@@ -52,37 +61,39 @@
 - **Author list**: Shows up to 10 authors; if more than 10, shows first 3 + "others"
 
 #### Navigation
+
 - **Back/Forward buttons**: Navigate through viewing history
 - **Tab switching**: Switch between References/Cited By/Entry Cited modes
 - **Scroll position preservation**: Remembers scroll position when navigating
 
 #### Section Header Buttons
+
 - **Refresh button**: Clear cache and reload current view from INSPIRE
 - **Copy all BibTeX button**: Batch copy all visible entries as BibTeX to clipboard (uses efficient batch queries, 50 recids per request)
 
 ### 1.4 Interaction Features
 
-| Action | Behavior |
-|--------|----------|
-| Click local status (●/⊕) | Open existing item in library, or add missing item |
-| Click link icon | Add/remove related item relationship |
-| Click author name | View all papers by that author |
-| Click title | Open in INSPIRE (or arXiv/DOI fallback) |
-| Click citation count | View papers citing this entry |
-| Click BibTeX button | Copy BibTeX to clipboard |
-| Hover over title | Show abstract tooltip |
-| Click refresh button | Reload current view (bypass cache) |
-| Click copy all BibTeX button | Copy all visible entries as BibTeX |
+| Action                       | Behavior                                           |
+| ---------------------------- | -------------------------------------------------- |
+| Click local status (●/⊕)   | Open existing item in library, or add missing item |
+| Click link icon              | Add/remove related item relationship               |
+| Click author name            | View all papers by that author                     |
+| Click title                  | Open in INSPIRE (or arXiv/DOI fallback)            |
+| Click citation count         | View papers citing this entry                      |
+| Click BibTeX button          | Copy BibTeX to clipboard                           |
+| Hover over title             | Show abstract tooltip                              |
+| Click refresh button         | Reload current view (bypass cache)                 |
+| Click copy all BibTeX button | Copy all visible entries as BibTeX                 |
 
 ### 1.5 Caching
 
-| Cache | Purpose |
-|-------|---------|
-| `referencesCache` | Caches fetched references by recid + sort |
-| `citedByCache` | Caches cited-by results by recid + sort |
-| `entryCitedCache` | Caches entry-cited/author-papers results |
-| `metadataCache` | Caches individual record metadata |
-| `rowCache` | Caches DOM elements for rendered rows |
+| Cache                | Purpose                                          |
+| -------------------- | ------------------------------------------------ |
+| `referencesCache`  | Caches fetched references by recid + sort        |
+| `citedByCache`     | Caches cited-by results by recid + sort          |
+| `entryCitedCache`  | Caches entry-cited/author-papers results         |
+| `metadataCache`    | Caches individual record metadata                |
+| `rowCache`         | Caches DOM elements for rendered rows            |
 | `recidLookupCache` | Caches recid lookups to avoid repeated API calls |
 
 ### 1.6 Performance Optimizations
@@ -98,17 +109,19 @@
 ## 2. Right-Click Menu Operations
 
 ### 2.1 Item Menu
-| Operation | Description |
-|-----------|-------------|
-| **Update from INSPIRE (with abstract)** | Full metadata update including abstract |
-| **Update from INSPIRE (without abstract)** | Metadata update excluding abstract |
-| **Update citation counts** | Only update citation counts |
+
+| Operation                                        | Description                             |
+| ------------------------------------------------ | --------------------------------------- |
+| **Update from INSPIRE (with abstract)**    | Full metadata update including abstract |
+| **Update from INSPIRE (without abstract)** | Metadata update excluding abstract      |
+| **Update citation counts**                 | Only update citation counts             |
 
 ### 2.2 Collection Menu
-| Operation | Description |
-|-----------|-------------|
-| **Update all from INSPIRE** | Update all items in collection |
-| **Update citation counts** | Update citation counts for all items |
+
+| Operation                         | Description                          |
+| --------------------------------- | ------------------------------------ |
+| **Update all from INSPIRE** | Update all items in collection       |
+| **Update citation counts**  | Update citation counts for all items |
 
 ---
 
@@ -171,4 +184,3 @@ updateRowStatus() / updateRowCitationCount()
 ---
 
 *Last updated: 2025*
-
