@@ -1,22 +1,88 @@
-# Zotero INSPIRE Metadata Updater
+# Zotero INSPIRE References
 
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-This is an add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero). It connects your Zotero library to the [INSPIRE-HEP](https://inspirehep.net), which is a community maintained database for **high energy physics and related fields**. This add-on updates the metadata and citation counts (with and without self citations), and **lists references** of the selected item(s) in your Zotero library from [INSPIRE-HEP](https://inspirehep.net). 
+This is an add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero). It connects your Zotero library to the [INSPIRE-HEP](https://inspirehep.net), which is a community maintained database for **high energy physics and related fields**. This add-on updates the metadata and citation counts (with and without self citations), and **lists references** of the selected item(s) in your Zotero library from [INSPIRE-HEP](https://inspirehep.net).
 
+> 📖 **[中文功能说明](docs/FEATURES_CN.md)** - 详细的中文功能介绍 
+
+## Table of Contents
+- [Zotero INSPIRE References](#zotero-inspire-references)
+	- [Table of Contents](#table-of-contents)
+	- [**VERY USEFUL NEW FEATURE**: INSPIRE References Section in the Item Pane](#very-useful-new-feature-inspire-references-section-in-the-item-pane)
+		- [Panel tabs](#panel-tabs)
+		- [Smart filtering and sorting](#smart-filtering-and-sorting)
+		- [Status indicators at a glance](#status-indicators-at-a-glance)
+		- [Interactions and importing](#interactions-and-importing)
+		- [Cached data and refresh controls](#cached-data-and-refresh-controls)
+		- [Back/Forward Navigation](#backforward-navigation)
+	- [What’s new in 1.1.0](#whats-new-in-110)
+	- [Installation](#installation)
+		- [Pre-built binaries](#pre-built-binaries)
+		- [Building from source](#building-from-source)
+	- [Usage](#usage)
+	- [Settings](#settings)
+		- [Field Order in Extra](#field-order-in-extra)
+		- [arXiv Primary Category Tag](#arxiv-primary-category-tag)
+		- [References Panel](#references-panel)
+		- [Reader View Navigation](#reader-view-navigation)
+		- [INSPIRE Record Not Found](#inspire-record-not-found)
+	- [Additional tip for citing as you writing LaTeX](#additional-tip-for-citing-as-you-writing-latex)
+	- [References](#references)
+	- [License](#license)
 
 ## **VERY USEFUL NEW FEATURE**: INSPIRE References Section in the Item Pane 
 
-When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE References** section into Zotero’s item pane (can be pinned by right-clicking the INSPIRE logo on the right side). The pane section fetches the item’s reference list from INSPIRE-HEP, displaying each entry with:
+When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE References** section into Zotero’s item pane (you can pin it by right-clicking the INSPIRE logo on the right). The pane pulls live data from INSPIRE-HEP so you can inspect, import, and link references without leaving Zotero.
 
-- a filled or hollow circle indicating whether the reference already exists in your local library;
-- a link/“not linked” icon showing whether the reference is linked as a related item.
+### Panel tabs
+- **References** lists the current item’s bibliography using INSPIRE’s canonical order.
+- **Cited by** (new in 1.1.0) runs the official `refersto:recid:<ID>` search to show every record that cites the current item.
+- **Entry Cited** appears when you click the citation count of a reference, letting you inspect who cites that specific entry.
+- **Author Papers** opens when you click an author name.
 
-Clicking the hollow circle opens the collection picker so you can import the reference into one or more collections; clicking the link icon links or unlinks the reference as a related item. This makes it easy to review INSPIRE references and pull missing ones into your library without leaving Zotero.
+### Smart filtering and sorting
+- Type multiple keywords to filter the visible entries; special characters are normalized automatically (e.g., `ä → ae`) so international names stay searchable.
+- Switch among INSPIRE order, newest-first, or most-cited-first sorting to focus on relevance or recency.
+- Filtering and sorting work consistently across all tabs, so you can stay inside the same pane for discovery.
+
+### Status indicators at a glance
+- `●` (green) means the entry already exists in your library, while `⊕` (red) signals it is missing and ready for import.
+- The link icon is orange when the entry is already a related item and gray when the relation is absent.
+- The clipboard icon (📋) fetches a BibTeX entry from INSPIRE and copies it directly to your clipboard.
+
+### Interactions and importing
+- Clicking `●` (green) jumps straight to the local item; clicking `⊕` (red) opens the import dialog where you can select the target library (personal or group), drop the item into one or more collections, resize the picker, and prefill tags or notes (the tag field supports auto-complete from existing tags).
+- Use the link icon to relate or unlink items, or the clipboard icon to copy curated BibTeX snippets.
+- Hover over a title to load its abstract tooltip; click the title to open the INSPIRE record in your browser.
+- Clicking any citation count opens the Entry Cited tab, and clicking an author name opens Author Papers, so you can continue exploring and importing without leaving the panel.
+
+### Cached data and toolbar controls
+- Reference lists, citing records, abstract tooltips, and BibTeX payloads are cached for the session to reduce API calls.
+- The panel toolbar provides two convenient buttons:
+  - **Refresh button**: Bypass the cache and fetch fresh data from INSPIRE for the current view.
+  - **Copy all BibTeX button**: Batch-copy BibTeX entries for all visible references to your clipboard using efficient batch queries.
+
+### Back/Forward Navigation
+
+When you click `●` (green) to jump to an existing item in your library, the add-on remembers your navigation history. Use the **Back** and **Forward** buttons in the panel toolbar to navigate between previously viewed items—just like browser history. This works seamlessly across both the library view and the PDF reader view:
+
+- Navigate from a reference in the reader's side panel to another item
+- Click **Back** to return directly to the original reader tab
+- If the reader tab was closed, you can optionally have it reopened automatically (configurable in Preferences)
 
 ![showcase](images/screenshot1.png)
 ![collectionwindow](images/screenshot2.png)
+
+## What's new in 1.1.0
+
+Compared with the [1.0.2 README](https://github.com/fkguo/zotero-inspire/tree/1.0.2), version 1.1.0 adds:
+
+- The multi-tab INSPIRE panel described above, including the new Cited by, Entry Cited, and Author Papers views with shared filtering/sorting controls.
+- A richer import dialog that lets you pick personal or group libraries, select multiple collections, and prefill tags or notes before fetching items.
+- Reader-friendly navigation with Back/Forward history that can reopen closed PDF reader tabs when desired.
+- Inline abstract tooltips, BibTeX clipboard actions, and toolbar buttons (Refresh and Copy all BibTeX) so you can inspect, copy, or update entries entirely inside Zotero.
 
 ## Installation
 
@@ -121,7 +187,6 @@ Clicking the hollow circle opens the collection picker so you can import the ref
 	- The [Better BibTeX (BBT)](https://retorque.re/zotero-better-bibtex) plugin can pin the citation key from INSPIRE. When we add new arXiv articles, sometimes BBT fails to get the INSPIRE record. In that case, this plugin writes the INSPIRE citation key to the `Extra` field so that it is pinned correctly (the BBT plugin needs to be installed).
 	- Work with the [INSPIRE Zotero translator](https://github.com/zotero/translators/blob/master/INSPIRE.js), and change `"_eprint"` in `Extra` to `arXiv`.
 	- Erratum information and additional publication information added as notes.
-- By default, those items that could not be found will be tagged as `⛔ No INSPIRE recid found`, which will be removed once it is in INSPIRE. The automatic tagging can be turned off in `Settings` → `INSPIRE Metadata Updater Preferences`.
 
 
 ## Settings
@@ -138,8 +203,14 @@ Automatically add the arXiv primary category as a tag to items with arXiv IDs:
 - When enabled, the add-on extracts the primary category from the arXiv ID and adds it as a tag
 - Disabled by default
 
-### Maximum Authors Display in Refs.
-Maximum number of authors in reference list to display before using "et al." (default: 3)
+### References Panel
+- **Maximum authors to display**: Number of authors shown before "et al." in the references panel (default: 3)
+
+### Reader View Navigation
+- **Reopen reader tab when navigating back/forward**: When enabled, if the reader tab was closed, it will be reopened automatically when using Back or Forward navigation (disabled by default)
+
+### INSPIRE Record Not Found
+- **Add tag to items without INSPIRE record**: Tag items that could not be found in INSPIRE (enabled by default, tag: `⛔ No INSPIRE recid found`)
 
 ## Additional tip for citing as you writing LaTeX
 

@@ -1,10 +1,14 @@
-pref-meta = Fetch INSPIRE Metadata for new items
-pref-citekey = Set citekeys in Extra
+pref-meta = Fetch INSPIRE Metadata for New Items
+pref-citekey = Set Citekey in Extra Field
 pref-extra-order = Field Order in Extra
 pref-arxiv-tag = arXiv Primary Category Tag
-pref-nofound = INSPIRE Recid Not Found
+pref-refs-panel = References Panel
+pref-reader-history = Reader View Navigation
+pref-nofound = INSPIRE Record Not Found
+
 pref-enable =
     .label = Enable
+
 meta-full =
     .label = With abstracts
 meta-noabstract =
@@ -12,19 +16,30 @@ meta-noabstract =
 meta-citations =
     .label = Citation counts only
 meta-no =
-    .label = No
+    .label = Disabled
+
 citekey-inspire =
     .label = INSPIRE citekey
 citekey-no =
-    .label = No
+    .label = Disabled
+
 extra-order-citations-first =
     .label = Citations first
 extra-order-arxiv-first =
-    .label = arXiv first
+    .label = arXiv ID first
+
 pref-arxiv-tag1 =
     .label = Add arXiv primary category as tag (e.g., hep-ph, nucl-th)
-pref-max-authors = Maximum Authors Display in Refs.
-pref-max-authors-desc = Maximum number of authors to display before using "et al." (default: 3)
-pref-nofound1 = 
-    .label = Add tags to items for which no INSPIRE recids were fond. Tag customization:
+
+pref-max-authors-label = Maximum authors to display:
+pref-max-authors-desc = Number of authors shown before "et al." in the references panel (default: 3)
+
+pref-reader-auto-reopen =
+    .label = Reopen reader tab when navigating back/forward
+pref-reader-auto-reopen-desc = When enabled, if the reader tab was closed, it will be reopened automatically when using Back or Forward navigation.
+
+pref-nofound-enable =
+    .label = Add tag to items without INSPIRE record
+pref-nofound-tag-label = Tag name:
+
 pref-help = { $name } Build { $version } { $time }

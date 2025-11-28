@@ -1,5 +1,152 @@
 import { getString } from "../utils/locale";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Style helper functions for reference panel UI elements
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Apply inline styles to the reference entry text container (horizontal layout)
+ */
+export function applyRefEntryTextContainerStyle(el: HTMLElement): void {
+  el.style.display = "flex";
+  el.style.flexDirection = "row";
+  el.style.alignItems = "flex-start";
+  el.style.gap = "4px";
+}
+
+/**
+ * Apply inline styles to the reference entry marker (dot indicator)
+ */
+export function applyRefEntryMarkerStyle(el: HTMLElement): void {
+  el.style.flexShrink = "0";
+  el.style.display = "inline-flex";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  el.style.width = "14px";
+  el.style.height = "14px";
+  el.style.fontSize = "12px";
+  el.style.lineHeight = "1";
+}
+
+/**
+ * Apply color to the marker based on local item presence
+ */
+export function applyRefEntryMarkerColor(
+  el: HTMLElement,
+  hasLocalItem: boolean,
+): void {
+  el.style.color = hasLocalItem ? "#1a8f4d" : "#d93025";
+  el.style.opacity = "1";
+}
+
+/**
+ * Apply inline styles to the reference entry link button
+ */
+export function applyRefEntryLinkButtonStyle(el: HTMLElement): void {
+  el.style.flexShrink = "0";
+  el.style.display = "inline-flex";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  el.style.width = "14px";
+  el.style.height = "14px";
+  el.style.border = "none";
+  el.style.background = "transparent";
+  el.style.padding = "0";
+  el.style.cursor = "pointer";
+}
+
+/**
+ * Apply inline styles to the reference entry content container
+ */
+export function applyRefEntryContentStyle(el: HTMLElement): void {
+  el.style.flex = "1";
+  el.style.minWidth = "0";
+}
+
+/**
+ * Apply inline styles to clickable author name links
+ */
+export function applyAuthorLinkStyle(el: HTMLElement): void {
+  el.style.cursor = "pointer";
+  el.style.textDecoration = "none";
+  el.style.color = "#0066cc";
+  // Add hover effect via CSS class in the main stylesheet
+}
+
+/**
+ * Apply styles to the tab button based on active state (highlight style)
+ */
+export function applyTabButtonStyle(
+  el: HTMLElement,
+  isActive: boolean,
+): void {
+  if (isActive) {
+    el.style.backgroundColor = "#e6f2ff";
+    el.style.color = "#0b2d66";
+    el.style.fontWeight = "600";
+    el.style.textDecoration = "none";
+  } else {
+    el.style.backgroundColor = "";
+    el.style.color = "";
+    el.style.fontWeight = "";
+    el.style.textDecoration = "";
+  }
+}
+
+/**
+ * Apply inline styles to the BibTeX copy button
+ */
+export function applyBibTeXButtonStyle(el: HTMLElement): void {
+  el.style.flexShrink = "0";
+  el.style.display = "inline-flex";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  el.style.width = "16px";
+  el.style.height = "16px";
+  el.style.border = "none";
+  el.style.background = "transparent";
+  el.style.padding = "0";
+  el.style.cursor = "pointer";
+  el.style.fontSize = "11px";
+  el.style.color = "#666";
+  el.style.opacity = "0.7";
+  el.style.transition = "opacity 0.15s ease";
+}
+
+/**
+ * Apply styles to the abstract tooltip container
+ * Uses a soft blue-gray background that is easy on the eyes
+ */
+export function applyAbstractTooltipStyle(el: HTMLElement): void {
+  el.style.position = "fixed";
+  el.style.zIndex = "99999";
+  el.style.maxWidth = "450px";
+  el.style.maxHeight = "350px";
+  el.style.overflowY = "auto";
+  el.style.scrollbarGutter = "stable both-edges";
+  el.style.padding = "12px 14px";
+  el.style.paddingRight = "18px";
+  // Soft blue-gray background - easy on the eyes, professional look
+  el.style.backgroundColor = "#f0f4f8";
+  el.style.color = "#1a2a3a";
+  el.style.border = "1px solid #c8d4e0";
+  el.style.borderRadius = "8px";
+  el.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.15)";
+  el.style.fontSize = "13px";
+  el.style.lineHeight = "1.6";
+  // Allow pointer events so user can scroll the tooltip
+  el.style.pointerEvents = "auto";
+  el.style.wordWrap = "break-word";
+  el.style.whiteSpace = "pre-wrap";
+  el.style.display = "none";
+  // Smooth scrollbar styling
+  el.style.scrollbarWidth = "thin";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Save target picker UI
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface SaveTargetRow {
   id: string;
   name: string;
