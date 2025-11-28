@@ -4820,7 +4820,9 @@ function buildPublicationSummary(
 ) {
   const mainSummary = formatPublicationInfo(info, fallbackYear);
   const arxivTag = formatArxivTag(arxiv);
-  const baseSummary = mainSummary || arxivTag;
+  // const baseSummary = mainSummary || arxivTag;
+  // Show both journal informaion and arXiv information when both are available
+  const baseSummary = [mainSummary, arxivTag].filter(Boolean).join(" ");
 
   const errataSummaries = (errata ?? [])
     .map((entry) => {
