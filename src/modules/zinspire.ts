@@ -4140,11 +4140,15 @@ class InspireReferencePanelController {
     // Fetch from INSPIRE API if not in library or no abstract locally
     if (entry.recid) {
       entry.abstractLoading = true;
-      this.abstractAbort = new AbortController();
+      const supportsAbort =
+        typeof AbortController !== "undefined" &&
+        typeof AbortController === "function";
+      const controller = supportsAbort ? new AbortController() : null;
+      this.abstractAbort = controller ?? undefined;
       try {
         const abstract = await fetchInspireAbstract(
           entry.recid,
-          this.abstractAbort.signal,
+          this.abstractAbort?.signal,
         );
         entry.abstract = abstract || "";
         entry.abstractLoading = false;
