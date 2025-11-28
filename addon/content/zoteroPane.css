@@ -2,15 +2,139 @@
   background-color: tomato;
 }
 
-.zinspire-ref-entry__text {
+.zinspire-ref-panel {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  height: 100%;
   gap: 6px;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+
+.zinspire-ref-panel,
+.zinspire-ref-panel * {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+
+.zinspire-ref-panel button,
+.zinspire-ref-panel input {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+}
+
+.zinspire-ref-panel__toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.zinspire-ref-panel__status {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--zotero-gray-6, #4a4a4f);
+}
+
+.zinspire-ref-panel__button {
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  padding: 2px 8px;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.zinspire-ref-panel__tabs {
+  display: inline-flex;
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.zinspire-ref-panel__tab {
+  border: none;
+  background: transparent;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--zotero-gray-7, #2b2b30);
+}
+
+.zinspire-ref-panel__filter {
+  flex: 0 0 180px;
+  min-width: 140px;
+  padding: 2px 6px;
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.zinspire-ref-panel__sort {
+  flex: 0 0 140px;
+  min-width: 120px;
+  padding: 2px 6px;
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--zotero-gray-1, #ffffff);
+}
+
+.zinspire-ref-panel__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.zinspire-ref-panel__empty {
+  font-size: 12px;
+  color: var(--zotero-gray-6, #4a4a4f);
+  padding: 12px;
+}
+
+.zinspire-ref-entry__text {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 6px;
 }
 
 .zinspire-ref-entry__content {
   flex: 1;
   min-width: 0;
+}
+
+.zinspire-ref-entry__meta,
+.zinspire-ref-entry__stats {
+  font-size: 11px;
+  color: var(--zotero-gray-6, #4a4a4f);
+}
+
+.zinspire-ref-entry__stats {
+  color: var(--zotero-gray-7, #2b2b30);
+}
+
+.zinspire-ref-entry__stats-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--zotero-blue-6, #2554c7);
+}
+
+.zinspire-ref-entry__stats-button:hover,
+.zinspire-ref-entry__stats-button:focus-visible {
+  text-decoration: underline;
+}
+
+.zinspire-ref-entry__stats-button[data-loading="true"] {
+  opacity: 0.75;
+  cursor: progress;
 }
 
 .zinspire-ref-entry__dot,
@@ -20,7 +144,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-right: 4px;
   font-size: 14px;
   line-height: 1;
   border-radius: 4px;
@@ -46,5 +169,43 @@
 
 .zinspire-ref-entry__link:hover,
 .zinspire-ref-entry__link:focus-visible {
-  background-color: color-mix(in srgb, currentColor 12%, transparent);
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Clickable author name links */
+.zinspire-ref-entry__author-link {
+  color: var(--zotero-blue-6, #2554c7);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 120ms ease-in-out;
+}
+
+.zinspire-ref-entry__author-link:hover,
+.zinspire-ref-entry__author-link:focus-visible {
+  color: var(--zotero-blue-8, #1a3d99);
+  text-decoration: underline;
+}
+
+/* Title link styling */
+.zinspire-ref-entry__title-link {
+  color: var(--zotero-blue-6, #2554c7);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 120ms ease-in-out;
+}
+
+.zinspire-ref-entry__title-link:hover,
+.zinspire-ref-entry__title-link:focus-visible {
+  color: var(--zotero-blue-8, #1a3d99);
+  text-decoration: underline;
+}
+
+/* Loading animation for section refresh button */
+@keyframes zinspire-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.zinspire-section-button-loading {
+  animation: zinspire-spin 1s linear infinite;
 }

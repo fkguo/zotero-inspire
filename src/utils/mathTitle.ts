@@ -18,7 +18,8 @@ export function cleanMathTitle(title?: string | null): string {
   });
   text = text.replace(/\\prime/g, "'");
 
-  text = text.replace(/\\(text|mathrm|bf|it)\{([^}]+)\}/g, "$2");
+  text = text.replace(/\\(text|mathrm|bf|it|mathcal|cal)\{([^}]+)\}/g, "$2");
+  text = text.replace(/\\(cal|mathcal)\s+([A-Za-z])/g, "$2");
 
   const superscriptMap: Record<string, string> = {
     0: "⁰",

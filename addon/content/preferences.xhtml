@@ -4,6 +4,7 @@
 <groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window });" />
 <vbox id="zotero-prefpane-__addonRef__">
   <groupbox>
+    <!-- Metadata Fetching -->
     <label>
       <html:h2 data-l10n-id="pref-meta"></html:h2>
     </label>
@@ -14,6 +15,8 @@
       <radio data-l10n-id="meta-citations" value="citations" />
       <radio data-l10n-id="meta-no" value="no" />
     </radiogroup>
+
+    <!-- Citekey -->
     <label>
       <html:h2 data-l10n-id="pref-citekey"></html:h2>
     </label>
@@ -21,6 +24,8 @@
       <radio data-l10n-id="citekey-inspire" value="inspire" />
       <radio data-l10n-id="citekey-no" value="no" />
     </radiogroup>
+
+    <!-- Extra Field Order -->
     <label>
       <html:h2 data-l10n-id="pref-extra-order"></html:h2>
     </label>
@@ -29,6 +34,8 @@
       <radio data-l10n-id="extra-order-citations-first" value="citations_first" />
       <radio data-l10n-id="extra-order-arxiv-first" value="arxiv_first" />
     </radiogroup>
+
+    <!-- arXiv Tag -->
     <label>
       <html:h2 data-l10n-id="pref-arxiv-tag"></html:h2>
     </label>
@@ -38,27 +45,51 @@
           data-l10n-id="pref-arxiv-tag1" />
       </label>
     </vbox>
+
+    <!-- References Panel Settings -->
     <label>
-      <html:h2 data-l10n-id="pref-max-authors"></html:h2>
+      <html:h2 data-l10n-id="pref-refs-panel"></html:h2>
+    </label>
+    <vbox>
+      <hbox align="center">
+        <label data-l10n-id="pref-max-authors-label" />
+        <html:input type="number" id="zotero-prefpane-__addonRef__-max_authors" preference="__prefsPrefix__.max_authors"
+          min="1" max="20" style="width: 60px; margin-left: 8px;" />
+      </hbox>
+      <label>
+        <html:span data-l10n-id="pref-max-authors-desc" class="description"></html:span>
+      </label>
+    </vbox>
+
+    <!-- Reader History -->
+    <label>
+      <html:h2 data-l10n-id="pref-reader-history"></html:h2>
     </label>
     <vbox>
       <label>
-        <html:span data-l10n-id="pref-max-authors-desc"></html:span>
+        <checkbox id="zotero-prefpane-__addonRef__-reader_auto_reopen" preference="__prefsPrefix__.reader_auto_reopen"
+          data-l10n-id="pref-reader-auto-reopen" />
       </label>
-      <html:input type="number" id="zotero-prefpane-__addonRef__-max_authors" preference="__prefsPrefix__.max_authors"
-        min="1" max="20" />
+      <label>
+        <html:span data-l10n-id="pref-reader-auto-reopen-desc" class="description"></html:span>
+      </label>
     </vbox>
+
+    <!-- INSPIRE Not Found (moved to last) -->
     <label>
       <html:h2 data-l10n-id="pref-nofound"></html:h2>
     </label>
     <vbox>
       <label>
         <checkbox id="zotero-prefpane-__addonRef__-tag_enable" preference="extensions.zotero.__addonRef__.tag_enable"
-          data-l10n-id="pref-nofound1" />
+          data-l10n-id="pref-nofound-enable" />
       </label>
+      <hbox align="center">
+        <label data-l10n-id="pref-nofound-tag-label" />
+        <html:input type="text" id="zotero-prefpane-__addonRef__-tag_norecid" preference="__prefsPrefix__.tag_norecid"
+          style="flex: 1; margin-left: 8px;" />
+      </hbox>
     </vbox>
-    <html:input type="text" id="zotero-prefpane-__addonRef__-tag_norecid" preference="__prefsPrefix__.tag_norecid">
-    </html:input>
   </groupbox>
 </vbox>
 <vbox>
