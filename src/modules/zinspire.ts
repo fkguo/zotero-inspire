@@ -1,5 +1,9 @@
 import { config } from "../../package.json";
 import { cleanMathTitle } from "../utils/mathTitle";
+import {
+  getJournalAbbreviations,
+  getJournalFullNames,
+} from "../utils/journalAbbreviations";
 import { getLocaleID, getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit/dist/helpers/progressWindow";
@@ -83,8 +87,74 @@ const buildVariantSet = (value: string): string[] => {
 const buildSearchIndexText = (value: string): string =>
   buildVariantSet(value).join(" ");
 
-const buildFilterTokenVariants = (value: string): string[] =>
-  buildVariantSet(value);
+const SEARCH_COLLAPSE_REGEX = /[.\s]+/g;
+
+const buildFilterTokenVariants = (
+  value: string,
+  options?: { ignoreSpaceDot?: boolean },
+): string[] => {
+  const variants = buildVariantSet(value);
+  const journalFullNames = getJournalFullNames(value);
+  if (journalFullNames.length) {
+    for (const fullName of journalFullNames) {
+      variants.push(...buildVariantSet(fullName));
+    }
+  }
+  let uniqueVariants = Array.from(new Set(variants));
+  if (!options?.ignoreSpaceDot) {
+    return uniqueVariants;
+  }
+  const collapsed = uniqueVariants
+    .map((token) => token.replace(SEARCH_COLLAPSE_REGEX, ""))
+    .filter((token): token is string => Boolean(token));
+  if (!collapsed.length) {
+    return uniqueVariants;
+  }
+  uniqueVariants = Array.from(new Set([...uniqueVariants, ...collapsed]));
+  return uniqueVariants;
+};
+
+const isFilterWhitespace = (char: string): boolean =>
+  char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
+
+type ParsedFilterToken = { text: string; quoted: boolean };
+
+const parseFilterTokens = (value: string): ParsedFilterToken[] => {
+  if (!value) {
+    return [];
+  }
+  const tokens: ParsedFilterToken[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  const pushToken = (quoted: boolean) => {
+    if (!current) {
+      return;
+    }
+    const trimmed = current.trim();
+    if (trimmed) {
+      tokens.push({ text: trimmed, quoted });
+    }
+    current = "";
+  };
+
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (char === '"') {
+      pushToken(inQuotes);
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && isFilterWhitespace(char)) {
+      pushToken(false);
+      continue;
+    }
+    current += char;
+  }
+
+  pushToken(inQuotes);
+  return tokens;
+};
 export class ZInsUtils {
   static registerPrefs() {
     const prefOptions = {
@@ -2338,9 +2408,7 @@ class InspireReferencePanelController {
       );
     }
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = buildSearchIndexText(
-      `${entry.displayText} ${entry.year ?? ""}`,
-    );
+    entry.searchText = buildEntrySearchText(entry);
     if (typeof meta.citation_count === "number") {
       entry.citationCount = meta.citation_count;
     }
@@ -2419,9 +2487,7 @@ class InspireReferencePanelController {
 
     // Update derived text fields
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = buildSearchIndexText(
-      `${entry.displayText} ${entry.year ?? ""}`,
-    );
+    entry.searchText = buildEntrySearchText(entry);
   }
 
   private buildEntry(
@@ -2477,9 +2543,7 @@ class InspireReferencePanelController {
       arxivDetails,
     };
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = buildSearchIndexText(
-      `${entry.displayText} ${entry.year ?? ""}`,
-    );
+    entry.searchText = buildEntrySearchText(entry);
     // DB lookup moved to enrichLocalStatus
     return entry;
   }
@@ -2536,9 +2600,7 @@ class InspireReferencePanelController {
       arxivDetails: arxiv,
     };
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = buildSearchIndexText(
-      `${entry.displayText} ${entry.year ?? ""}`,
-    );
+    entry.searchText = buildEntrySearchText(entry);
     return entry;
   }
 
@@ -2577,12 +2639,11 @@ class InspireReferencePanelController {
       return;
     }
 
-    const filterGroups = this.filterText
-      ? this.filterText
-        .split(/\s+/)
-        .map((token) => buildFilterTokenVariants(token))
-        .filter((variants) => variants.length)
-      : [];
+    const filterGroups = parseFilterTokens(this.filterText)
+      .map(({ text, quoted }) =>
+        buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }),
+      )
+      .filter((variants) => variants.length);
     const filtered = filterGroups.length
       ? this.allEntries.filter((entry) =>
         filterGroups.every((variants) =>
@@ -3505,9 +3566,7 @@ class InspireReferencePanelController {
     if (newItem) {
       entry.localItemID = newItem.id;
       entry.displayText = buildDisplayText(entry);
-      entry.searchText = buildSearchIndexText(
-        `${entry.displayText} ${entry.year ?? ""}`,
-      );
+      entry.searchText = buildEntrySearchText(entry);
       // Automatically link after adding
       await this.linkExistingReference(newItem.id);
       entry.isRelated = true;
@@ -3745,9 +3804,7 @@ class InspireReferencePanelController {
     if (newItem) {
       entry.localItemID = newItem.id;
       entry.displayText = buildDisplayText(entry);
-      entry.searchText = buildSearchIndexText(
-        `${entry.displayText} ${entry.year ?? ""}`,
-      );
+      entry.searchText = buildEntrySearchText(entry);
       entry.isRelated = false;
       this.renderReferenceList({ preserveScroll: true });
       // Restore scroll position after rendering if needed
@@ -5217,6 +5274,69 @@ function buildDisplayText(entry: InspireReferenceEntry) {
   const shouldShowYearInline = Boolean(normalizedYear && !summaryContainsYear);
   const yearPart = shouldShowYearInline ? ` (${normalizedYear})` : "";
   return `${label}${entry.authorText}${yearPart}: ${entry.title};`;
+}
+
+function extractJournalName(entry: InspireReferenceEntry): string | undefined {
+  const info = entry.publicationInfo;
+  if (info?.journal_title) {
+    return info.journal_title;
+  }
+  if (info?.journal_title_abbrev) {
+    return info.journal_title_abbrev;
+  }
+  if (entry.summary) {
+    const match = entry.summary.match(/^([^0-9(]+?)(?:\s+\d+|\(|$)/);
+    if (match) {
+      const journal = match[1].trim();
+      if (journal.length > 2) {
+        return journal;
+      }
+    }
+  }
+  return undefined;
+}
+
+function buildEntrySearchText(entry: InspireReferenceEntry): string {
+  const segments: string[] = [];
+  const collapsedSegments: string[] = [];
+
+  const addSegment = (text?: string) => {
+    if (!text) {
+      return;
+    }
+    segments.push(text);
+    const collapsed = text.replace(SEARCH_COLLAPSE_REGEX, "");
+    if (collapsed && collapsed !== text) {
+      collapsedSegments.push(collapsed);
+    }
+  };
+
+  addSegment(entry.displayText);
+  addSegment(entry.summary);
+
+  const journalName = extractJournalName(entry);
+  if (journalName) {
+    for (const abbr of getJournalAbbreviations(journalName)) {
+      addSegment(abbr);
+    }
+  }
+
+  const arxivDetails = formatArxivDetails(entry.arxivDetails);
+  if (arxivDetails?.id) {
+    const arxivTag = `[arXiv:${arxivDetails.id}]`;
+    // Avoid duplicating the tag if it's already part of the summary text
+    if (!entry.summary || !entry.summary.includes(arxivTag)) {
+      addSegment(arxivTag);
+    }
+    if (!entry.summary || !entry.summary.includes(arxivDetails.id)) {
+      addSegment(arxivDetails.id);
+    }
+  }
+
+  const allSegments = collapsedSegments.length
+    ? [...segments, ...collapsedSegments]
+    : segments;
+  return buildSearchIndexText(allSegments.join(" "));
 }
 
 async function findItemByRecid(recid: string) {
