@@ -33,6 +33,25 @@
 
 ### 1.3 UI Features
 
+#### Statistics Chart
+
+A statistics visualization chart is displayed at the top of the panel (between toolbar and list) for References, Cited By, and Author Papers modes:
+
+- **Two view modes**:
+  - **By Year**: Shows distribution of entries by publication year
+    - Intelligently merges early years to show at most 10 bars (dynamically adjusted based on container width)
+    - Prioritizes recent years for detailed breakdown
+    - Minimum 3 papers per bin, or merge adjacent bins
+  - **By Citations**: Shows distribution by citation count
+    - Fixed bins: 0, 1-9, 10-49, 50-99, 100-249, 250-499, 500+
+- **Interactive filtering**:
+  - Click a bar to filter entries in that bin
+  - Hold Ctrl/Cmd to multi-select multiple bins
+  - Click selected bar again to deselect
+  - Chart filter combines with text filter using AND logic
+- **Collapse/Expand**: Toggle button to hide/show chart
+- **Clear filter button**: Appears when any bins are selected, clears all chart filters
+
 #### Filter (Search)
 
 - Real-time filtering across all loaded entries
@@ -87,22 +106,39 @@
 
 ### 1.5 Caching
 
-| Cache                | Purpose                                          |
-| -------------------- | ------------------------------------------------ |
-| `referencesCache`  | Caches fetched references by recid + sort        |
-| `citedByCache`     | Caches cited-by results by recid + sort          |
-| `entryCitedCache`  | Caches entry-cited/author-papers results         |
-| `metadataCache`    | Caches individual record metadata                |
-| `rowCache`         | Caches DOM elements for rendered rows            |
-| `recidLookupCache` | Caches recid lookups to avoid repeated API calls |
+All data caches use LRU (Least Recently Used) eviction to prevent unbounded memory growth.
+
+| Cache                | Type | Max Size | Purpose                                          |
+| -------------------- | ---- | -------- | ------------------------------------------------ |
+| `referencesCache`  | LRU | 100 | Caches fetched references by recid + sort        |
+| `citedByCache`     | LRU | 50 | Caches cited-by results by recid + sort          |
+| `entryCitedCache`  | LRU | 50 | Caches entry-cited/author-papers results         |
+| `metadataCache`    | LRU | 500 | Caches individual record metadata                |
+| `rowCache`         | Map | - | Caches DOM elements for rendered rows (cleared on re-render) |
+| `recidLookupCache` | Map | - | Caches recid lookups to avoid repeated API calls |
+| `searchTextCache`  | WeakMap | - | Caches search text per entry (auto GC'd) |
 
 ### 1.6 Performance Optimizations
 
-- **Frontend pagination**: Only renders first 100 entries, "Load More" for rest
+- **Frontend pagination**: Only renders first 100 entries, with infinite scroll for rest
 - **Non-blocking enrichment**: Local status and citation counts fetched after initial render
 - **Progressive rendering**: Shows data as it loads, not after complete
 - **Batch API queries**: Citation counts fetched in batches of 50 recids
 - **String caching**: Locale strings cached for performance
+- **Chart statistics caching**: Chart stats cached per view mode to avoid recomputation
+
+#### v1.1.1 Performance Enhancements
+
+| Optimization | Description |
+|--------------|-------------|
+| **Filter Input Debouncing** | 150ms delay reduces re-renders during fast typing |
+| **Citation Count Parallel Fetching** | 3 batches fetched in parallel per round |
+| **Search Text Caching** | WeakMap caches `buildEntrySearchText()` results |
+| **Chart Lazy Calculation** | Uses `setTimeout(0)` / `requestIdleCallback` |
+| **Row Element Pooling** | Pool of up to 150 row elements for reuse |
+| **LRU Cache Limits** | Bounded caches prevent memory leaks |
+| **Local Status Query Optimization** | SQL batch size increased to 500 |
+| **Infinite Scroll** | IntersectionObserver auto-loads more entries |
 
 ---
 
@@ -157,6 +193,22 @@ tooltipHideDelay = 600ms      // Delay before hiding abstract
 
 // Batch operations
 BATCH_SIZE = 50               // For citation count enrichment and BibTeX batch copy
+PARALLEL_BATCHES = 3          // Parallel batches for citation count fetching
+
+// Chart statistics
+CHART_MAX_BARS = 10           // Maximum bars for year view (dynamically adjusted)
+CHART_MIN_COUNT_PER_BIN = 3   // Minimum papers per bin before merging
+
+// Performance optimizations (v1.1.1)
+filterDebounceDelay = 150     // ms, debounce delay for filter input
+maxRowPoolSize = 150          // Max row elements in pool
+LOCAL_STATUS_CHUNK_SIZE = 500 // SQL query batch size for local status
+
+// LRU cache limits
+referencesCache.maxSize = 100 // Max references cache entries
+citedByCache.maxSize = 50     // Max cited-by cache entries
+entryCitedCache.maxSize = 50  // Max entry-cited cache entries
+metadataCache.maxSize = 500   // Max metadata cache entries
 ```
 
 ---
@@ -183,4 +235,5 @@ updateRowStatus() / updateRowCitationCount()
 
 ---
 
-*Last updated: 2025*
+*Last updated: 2025-11-29 (v1.1.1)*
+
