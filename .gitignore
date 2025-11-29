@@ -4,6 +4,4 @@ package-lock.json
 zotero-cmd.json
 **/.DS_Store
 *.code-workspace
-FUTURE_IMPROVEMENTS.md
-FEATURES_REFERENCE_PANEL.md
 tmp/

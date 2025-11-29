@@ -80,6 +80,7 @@ export function applyTabButtonStyle(
   el: HTMLElement,
   isActive: boolean,
 ): void {
+  el.style.cursor = "pointer";
   if (isActive) {
     el.style.backgroundColor = "#e6f2ff";
     el.style.color = "#0b2d66";

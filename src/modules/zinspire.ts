@@ -6,7 +6,7 @@ import {
 } from "../utils/journalAbbreviations";
 import { getLocaleID, getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
-import { ProgressWindowHelper } from "zotero-plugin-toolkit/dist/helpers/progressWindow";
+import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   showTargetPickerUI,
   SaveTargetRow,
@@ -21,6 +21,7 @@ import {
   applyAbstractTooltipStyle,
   applyBibTeXButtonStyle,
 } from "./pickerUI";
+import { LRUCache } from "./inspire";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API Constants
@@ -285,6 +286,16 @@ export class ZInsMenu {
               _globalThis.inspire.updateSelectedCollection("citations");
             },
           },
+          {
+            tag: "menuseparator",
+          },
+          {
+            tag: "menuitem",
+            label: "Cancel Update",
+            commandListener: (_ev) => {
+              _globalThis.inspire.cancelUpdate();
+            },
+          },
         ],
         icon: menuIcon,
       },
@@ -363,6 +374,14 @@ interface EntryCitedSource {
   authorQuery?: string; // Author search query (deprecated, for cache key only)
   authorSearchInfo?: AuthorSearchInfo; // Full author info for precise search
   label: string;
+}
+
+interface ChartBin {
+  label: string;
+  count: number;
+  range?: [number, number]; // For citation bins: [min, max]
+  years?: number[]; // For year bins: [year] or [start, end, ...]
+  key: string; // Unique key for selection
 }
 
 type InspireViewMode = "references" | "citedBy" | "entryCited";
@@ -512,10 +531,16 @@ class InspireReferencePanelController {
   private entryCitedReturnScroll?: ScrollState;
   private pendingEntryScrollReset = false;
   private allEntries: InspireReferenceEntry[] = [];
-  private referencesCache = new Map<string, InspireReferenceEntry[]>();
-  private citedByCache = new Map<string, InspireReferenceEntry[]>();
-  private entryCitedCache = new Map<string, InspireReferenceEntry[]>();
-  private metadataCache = new Map<string, jsobject>();
+  // LRU caches to prevent unbounded memory growth
+  // References: ~100 entries, each with InspireReferenceEntry[]
+  private referencesCache = new LRUCache<string, InspireReferenceEntry[]>(100);
+  // Cited-by: ~50 entries (large arrays, paginated data)
+  private citedByCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  // Entry-cited: ~50 entries (similar to cited-by)
+  private entryCitedCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  // Metadata: ~500 entries (individual metadata objects, frequently accessed)
+  private metadataCache = new LRUCache<string, jsobject>(500);
+  // Row cache: cleared on each render, no LRU needed
   private rowCache = new Map<string, HTMLElement>();
   private activeAbort?: AbortController;
   private pendingToken?: string;
@@ -537,8 +562,31 @@ class InspireReferencePanelController {
   // Frontend pagination state (for cited-by and author papers)
   private renderedCount = 0;  // Number of entries currently rendered
   private loadMoreButton?: HTMLButtonElement;
+  private loadMoreObserver?: IntersectionObserver;  // For infinite scroll
+  private loadMoreContainer?: HTMLDivElement;  // Container being observed
+  private currentFilteredEntries?: InspireReferenceEntry[];  // For infinite scroll loading
   // Total count from API (may be larger than fetched entries due to limits)
   private totalApiCount: number | null = null;
+  // Chart state for citation/year statistics visualization
+  private chartContainer?: HTMLDivElement;
+  private chartSvgWrapper?: HTMLDivElement;
+  private chartCollapsed = true;  // Default to collapsed
+  private chartViewMode: "year" | "citation" = "year";
+  private chartSelectedBins: Set<string> = new Set();
+  private lastChartClickedKey?: string;
+  private cachedChartStats?: { mode: string; stats: ChartBin[] };
+  // ResizeObserver for dynamic chart re-rendering on width change
+  private chartResizeObserver?: ResizeObserver;
+  private chartResizeFrame?: { cancel: (id: number) => void; id: number };
+  private lastChartWidth?: number;
+  // Filter input debounce timer
+  private filterDebounceTimer?: ReturnType<typeof setTimeout>;
+  private readonly filterDebounceDelay = 150; // ms
+  // Chart deferred rendering timer
+  private chartRenderTimer?: ReturnType<typeof setTimeout>;
+  // Row element pool for recycling (reduces DOM creation and GC pressure)
+  private rowPool: HTMLDivElement[] = [];
+  private readonly maxRowPoolSize = 150;
 
   constructor(body: HTMLDivElement) {
     this.body = body;
@@ -673,13 +721,24 @@ class InspireReferencePanelController {
             listener: (event: Event) => {
               const target = event.target as HTMLInputElement;
               this.filterText = target.value.trim();
-              this.renderReferenceList();
+              // Debounce filter input to avoid excessive re-renders during fast typing
+              if (this.filterDebounceTimer) {
+                clearTimeout(this.filterDebounceTimer);
+              }
+              this.filterDebounceTimer = setTimeout(() => {
+                this.renderReferenceList();
+              }, this.filterDebounceDelay);
             },
           },
         ],
       },
       toolbar,
     ) as HTMLInputElement;
+
+    // Create chart container (between toolbar and list)
+    const chartContainer = this.createChartContainer();
+    this.body.appendChild(chartContainer);
+    this.observeChartResize(chartContainer);
 
     this.listEl = ztoolkit.UI.appendElement(
       {
@@ -710,6 +769,795 @@ class InspireReferencePanelController {
     }
   }
 
+  private observeChartResize(container: HTMLDivElement) {
+    const doc = this.body.ownerDocument;
+    const owningWindow = (doc?.defaultView || Zotero.getMainWindow?.()) as Window | undefined;
+    const ResizeObserverClass = owningWindow?.ResizeObserver ?? (typeof ResizeObserver !== "undefined" ? ResizeObserver : undefined);
+    if (!ResizeObserverClass) {
+      return;
+    }
+
+    if (this.chartResizeObserver) {
+      this.chartResizeObserver.disconnect();
+    }
+
+    const mainWindow = owningWindow ?? Zotero.getMainWindow?.();
+    const schedule = mainWindow?.requestAnimationFrame
+      ? mainWindow.requestAnimationFrame.bind(mainWindow)
+      : (cb: FrameRequestCallback) => (mainWindow?.setTimeout?.(cb, 16) ?? setTimeout(cb, 16)) as unknown as number;
+    const cancel = mainWindow?.cancelAnimationFrame
+      ? mainWindow.cancelAnimationFrame.bind(mainWindow)
+      : (id: number) => (mainWindow?.clearTimeout?.(id) ?? clearTimeout(id));
+
+    const resizeObserver = new ResizeObserverClass((entries: ResizeObserverEntry[]) => {
+      // Only re-render if we have data and width actually changed
+      if (!this.allEntries.length || this.chartCollapsed) {
+        return;
+      }
+      const entry = entries[0];
+      if (!entry) return;
+      const newWidth = entry.contentRect.width;
+      // Skip if width hasn't changed significantly (within 1px tolerance)
+      if (this.lastChartWidth !== undefined && Math.abs(newWidth - this.lastChartWidth) < 2) {
+        return;
+      }
+      this.lastChartWidth = newWidth;
+
+      this.clearPendingChartResize();
+      const frameId = schedule(() => {
+        this.chartResizeFrame = undefined;
+        this.renderChart();
+      });
+      this.chartResizeFrame = { cancel, id: frameId };
+    });
+
+    resizeObserver.observe(container);
+    this.chartResizeObserver = resizeObserver;
+  }
+
+  private clearPendingChartResize() {
+    if (this.chartResizeFrame) {
+      this.chartResizeFrame.cancel(this.chartResizeFrame.id);
+      this.chartResizeFrame = undefined;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Chart Methods - Statistics visualization for references/cited-by/author papers
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private createChartContainer(): HTMLDivElement {
+    const doc = this.body.ownerDocument;
+    const container = doc.createElement("div");
+    container.className = "zinspire-chart-container";
+    // Soft muted blue color scheme - subtle and professional
+    // Apply inline styles for reliable rendering (CSS files may not load properly in Zotero)
+    // Start collapsed by default (chartCollapsed = true)
+    container.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 6px 10px;
+      background: #f8fafc;
+      flex-shrink: 0;
+      height: auto;
+      min-height: auto;
+      max-height: auto;
+    `;
+
+    // Header with title and all buttons in one row:
+    // [Title] [Collapse] [By Year] [By Citations] [Clear Filter]
+    const header = doc.createElement("div");
+    header.className = "zinspire-chart-header";
+    header.style.cssText = `
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      margin-bottom: 4px;
+      flex-shrink: 0;
+    `;
+
+    // Title (leftmost)
+    const title = doc.createElement("span");
+    title.className = "zinspire-chart-title";
+    title.textContent = "Statistics";
+    title.style.cssText = `
+      font-weight: 600;
+      color: #374151;
+      font-size: 12px;
+      margin-right: 4px;
+    `;
+
+    // Collapse button - start collapsed (▶)
+    const collapseBtn = doc.createElement("button");
+    collapseBtn.className = "zinspire-chart-collapse-btn";
+    collapseBtn.type = "button";
+    collapseBtn.textContent = "▶";
+    collapseBtn.title = getString("references-panel-chart-expand");
+    collapseBtn.style.cssText = `
+      border: 1px solid #cbd5e1;
+      background: #f1f5f9;
+      font-size: 10px;
+      cursor: pointer;
+      color: #64748b;
+      padding: 2px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    `;
+    collapseBtn.onclick = () => {
+      this.toggleChartCollapse();
+    };
+
+    // View toggle buttons - soft blue theme
+    const yearBtn = doc.createElement("button");
+    yearBtn.className = "zinspire-chart-toggle-btn active";
+    yearBtn.type = "button";
+    yearBtn.textContent = getString("references-panel-chart-by-year");
+    yearBtn.dataset.mode = "year";
+    yearBtn.style.cssText = `
+      border: none;
+      border-radius: 5px;
+      padding: 3px 10px;
+      background: #475569;
+      font-size: 11px;
+      cursor: pointer;
+      color: white;
+      flex-shrink: 0;
+      font-weight: 500;
+    `;
+    yearBtn.onclick = () => this.toggleChartView("year");
+
+    const citationBtn = doc.createElement("button");
+    citationBtn.className = "zinspire-chart-toggle-btn";
+    citationBtn.type = "button";
+    citationBtn.textContent = getString("references-panel-chart-by-citation");
+    citationBtn.dataset.mode = "citation";
+    citationBtn.style.cssText = `
+      border: none;
+      border-radius: 5px;
+      padding: 3px 10px;
+      background: #e2e8f0;
+      font-size: 11px;
+      cursor: pointer;
+      color: #475569;
+      flex-shrink: 0;
+      font-weight: 500;
+    `;
+    citationBtn.onclick = () => this.toggleChartView("citation");
+
+    // Clear filter button (right after citations button)
+    const clearBtn = doc.createElement("button");
+    clearBtn.className = "zinspire-chart-clear-btn";
+    clearBtn.type = "button";
+    clearBtn.textContent = "✕";
+    clearBtn.title = getString("references-panel-chart-clear-filter");
+    clearBtn.style.cssText = `
+      border: none;
+      background: #fee2e2;
+      font-size: 11px;
+      cursor: pointer;
+      color: #dc2626;
+      padding: 3px 8px;
+      border-radius: 5px;
+      flex-shrink: 0;
+      display: none;
+      margin-left: 4px;
+      font-weight: 500;
+    `;
+    clearBtn.onclick = () => {
+      this.chartSelectedBins.clear();
+      this.renderChart();
+      this.renderReferenceList();
+    };
+
+    header.appendChild(title);
+    header.appendChild(collapseBtn);
+    header.appendChild(yearBtn);
+    header.appendChild(citationBtn);
+    header.appendChild(clearBtn);
+
+    // SVG wrapper for the chart - start hidden (collapsed by default)
+    const svgWrapper = doc.createElement("div");
+    svgWrapper.className = "zinspire-chart-svg-wrapper";
+    svgWrapper.style.cssText = `
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      height: 110px;
+      display: none;
+    `;
+    this.chartSvgWrapper = svgWrapper;
+
+    container.appendChild(header);
+    container.appendChild(svgWrapper);
+
+    this.chartContainer = container;
+    return container;
+  }
+
+  private toggleChartView(mode: "year" | "citation") {
+    // Check if chart is enabled in preferences
+    if (!this.isChartEnabled()) {
+      this.showChartDisabledMessage();
+      return;
+    }
+
+    if (this.chartViewMode === mode) return;
+    this.chartViewMode = mode;
+    this.chartSelectedBins.clear(); // Clear selection when switching views
+    this.cachedChartStats = undefined; // Invalidate cache
+
+    // Update button states with inline styles (soft blue/slate theme)
+    if (this.chartContainer) {
+      const buttons = this.chartContainer.querySelectorAll(".zinspire-chart-toggle-btn");
+      buttons.forEach((btn) => {
+        const btnEl = btn as HTMLButtonElement;
+        const isActive = btnEl.dataset.mode === mode;
+        btnEl.classList.toggle("active", isActive);
+        if (isActive) {
+          btnEl.style.background = "#475569"; // slate-600
+          btnEl.style.color = "white";
+        } else {
+          btnEl.style.background = "#e2e8f0"; // slate-200
+          btnEl.style.color = "#475569"; // slate-600
+        }
+      });
+    }
+
+    this.updateChartClearButton(); // Hide clear button after clearing selection
+    this.renderChart();
+    this.renderReferenceList();
+  }
+
+  /**
+   * Check if chart is enabled in preferences.
+   */
+  private isChartEnabled(): boolean {
+    return getPref("chart_enable") !== false;
+  }
+
+  /**
+   * Show message when chart is disabled and user tries to interact with it.
+   */
+  private showChartDisabledMessage() {
+    const win = Zotero.getMainWindow();
+    if (win) {
+      Services.prompt.alert(
+        win as unknown as mozIDOMWindowProxy,
+        getString("references-panel-chart-disabled-title") || "Chart Disabled",
+        getString("references-panel-chart-disabled-message") || "Statistics chart is disabled. Enable it in Zotero Preferences → INSPIRE."
+      );
+    }
+  }
+
+  private toggleChartCollapse() {
+    // Check if chart is enabled in preferences when trying to expand
+    if (!this.isChartEnabled() && this.chartCollapsed) {
+      this.showChartDisabledMessage();
+      return;
+    }
+
+    this.chartCollapsed = !this.chartCollapsed;
+    if (this.chartContainer && this.chartSvgWrapper) {
+      // Directly control visibility with JS (more reliable than CSS classes in Zotero)
+      if (this.chartCollapsed) {
+        this.chartSvgWrapper.style.display = "none";
+        this.chartContainer.style.height = "auto";
+        this.chartContainer.style.minHeight = "auto";
+        this.chartContainer.style.maxHeight = "auto";
+        this.chartContainer.style.padding = "6px 10px";
+      } else {
+        this.chartSvgWrapper.style.display = "block";
+        this.chartContainer.style.height = "150px";
+        this.chartContainer.style.minHeight = "150px";
+        this.chartContainer.style.maxHeight = "150px";
+        this.chartContainer.style.padding = "10px";
+        // Render chart when expanding
+        this.renderChart();
+      }
+      const collapseBtn = this.chartContainer.querySelector(".zinspire-chart-collapse-btn");
+      if (collapseBtn) {
+        collapseBtn.textContent = this.chartCollapsed ? "▶" : "▼";
+        (collapseBtn as HTMLButtonElement).title = getString(
+          this.chartCollapsed ? "references-panel-chart-expand" : "references-panel-chart-collapse"
+        );
+      }
+    }
+  }
+
+  private computeYearStats(entries: InspireReferenceEntry[], maxBars: number = 10): ChartBin[] {
+    const yearCounts = new Map<number, number>();
+    const MAX_BARS = maxBars;
+    const MIN_COUNT_PER_BIN = 3; // Minimum papers to warrant a separate bin
+
+    // Count entries per year
+    for (const entry of entries) {
+      const year = parseInt(entry.year || "0", 10);
+      if (year > 0) {
+        yearCounts.set(year, (yearCounts.get(year) || 0) + 1);
+      }
+    }
+
+    if (yearCounts.size === 0) return [];
+
+    // Sort years chronologically
+    const sorted = Array.from(yearCounts.entries()).sort((a, b) => a[0] - b[0]);
+    const totalCount = sorted.reduce((sum, [, count]) => sum + count, 0);
+
+    // Helper to format year label (use last 2 digits with apostrophe)
+    const formatYearLabel = (startYear: number, endYear?: number): string => {
+      const startStr = "'" + String(startYear).slice(-2);
+      if (endYear === undefined || endYear === startYear) {
+        return startStr;
+      }
+      const endStr = "'" + String(endYear).slice(-2);
+      return `${startStr}-${endStr}`;
+    };
+
+    // Helper to create a bin from years array
+    const createBin = (years: number[]): ChartBin => {
+      const count = years.reduce((sum, y) => sum + (yearCounts.get(y) || 0), 0);
+      return {
+        label: formatYearLabel(years[0], years[years.length - 1]),
+        count,
+        years,
+        key: years.length === 1 ? String(years[0]) : `${years[0]}-${years[years.length - 1]}`,
+      };
+    };
+
+    // If few unique years, just create one bin per year
+    if (sorted.length <= MAX_BARS) {
+      return sorted.map(([year, count]) => ({
+        label: formatYearLabel(year),
+        count,
+        years: [year],
+        key: String(year),
+      }));
+    }
+
+    // Strategy: Merge sparse early years, keep recent years separate
+    // Phase 1: Start from the oldest years, greedily merge until we have enough papers
+    const targetCountPerBin = Math.max(MIN_COUNT_PER_BIN, Math.ceil(totalCount / MAX_BARS));
+    let bins: ChartBin[] = [];
+    let currentYears: number[] = [];
+    let currentCount = 0;
+
+    for (let i = 0; i < sorted.length; i++) {
+      const [year, count] = sorted[i];
+      currentYears.push(year);
+      currentCount += count;
+
+      const remainingYears = sorted.length - i - 1;
+      const remainingBins = MAX_BARS - bins.length - 1;
+
+      // Create a bin if:
+      // 1. We have enough papers, OR
+      // 2. We need to leave room for remaining years (one year per bin for recent years)
+      const shouldCreateBin = currentCount >= targetCountPerBin ||
+        (remainingYears <= remainingBins && currentCount > 0) ||
+        i === sorted.length - 1;
+
+      if (shouldCreateBin && currentYears.length > 0) {
+        bins.push(createBin(currentYears));
+        currentYears = [];
+        currentCount = 0;
+      }
+    }
+
+    // Phase 2: If too many bins, merge small adjacent bins from the beginning
+    while (bins.length > MAX_BARS && bins.length >= 2) {
+      // Find the pair with smallest combined count to merge
+      let minSum = Infinity;
+      let mergeIdx = 0;
+      for (let i = 0; i < bins.length - 1; i++) {
+        const sum = bins[i].count + bins[i + 1].count;
+        if (sum < minSum) {
+          minSum = sum;
+          mergeIdx = i;
+        }
+      }
+      const allYears = [...(bins[mergeIdx].years || []), ...(bins[mergeIdx + 1].years || [])].sort((a, b) => a - b);
+      bins = [...bins.slice(0, mergeIdx), createBin(allYears), ...bins.slice(mergeIdx + 2)];
+    }
+
+    // Phase 3: Merge tiny leading bins (very few papers in early years)
+    while (bins.length > 3 && bins[0].count < MIN_COUNT_PER_BIN && bins[0].count + bins[1].count < targetCountPerBin * 1.5) {
+      const allYears = [...(bins[0].years || []), ...(bins[1].years || [])].sort((a, b) => a - b);
+      bins = [createBin(allYears), ...bins.slice(2)];
+    }
+
+    return bins;
+  }
+
+  private computeCitationStats(entries: InspireReferenceEntry[]): ChartBin[] {
+    const ranges: Array<{ label: string; min: number; max: number; key: string }> = [
+      { label: "0", min: 0, max: 0, key: "0" },
+      { label: "1-9", min: 1, max: 9, key: "1-9" },
+      { label: "10-49", min: 10, max: 49, key: "10-49" },
+      { label: "50-99", min: 50, max: 99, key: "50-99" },
+      { label: "100-249", min: 100, max: 249, key: "100-249" },
+      { label: "250-499", min: 250, max: 499, key: "250-499" },
+      { label: "500+", min: 500, max: Infinity, key: "500+" },
+    ];
+
+    const counts = new Map<string, number>();
+    ranges.forEach((r) => counts.set(r.key, 0));
+
+    for (const entry of entries) {
+      const citationCount = entry.citationCount ?? 0;
+      for (const range of ranges) {
+        if (citationCount >= range.min && citationCount <= range.max) {
+          counts.set(range.key, (counts.get(range.key) || 0) + 1);
+          break;
+        }
+      }
+    }
+
+    return ranges.map((r) => ({
+      label: r.label,
+      count: counts.get(r.key) || 0,
+      range: [r.min, r.max === Infinity ? Number.MAX_SAFE_INTEGER : r.max] as [number, number],
+      key: r.key,
+    }));
+  }
+
+  private renderChartLoading() {
+    if (!this.chartSvgWrapper) return;
+    this.chartSvgWrapper.textContent = "";
+    const loadingMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
+    loadingMsg.className = "zinspire-chart-no-data";
+    loadingMsg.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #9ca3af;
+      font-size: 12px;
+      font-style: italic;
+    `;
+    loadingMsg.textContent = "Loading...";
+    this.chartSvgWrapper.appendChild(loadingMsg);
+  }
+
+  private renderChart() {
+    // Early return for collapsed or missing container - no deferred scheduling needed
+    if (!this.chartSvgWrapper || this.chartCollapsed) return;
+
+    // Cancel any pending chart render to avoid duplicate work
+    if (this.chartRenderTimer) {
+      clearTimeout(this.chartRenderTimer);
+      this.chartRenderTimer = undefined;
+    }
+
+    // Defer chart rendering to allow main thread to handle UI updates first
+    // This improves perceived performance during data loading
+    this.chartRenderTimer = setTimeout(() => {
+      this.chartRenderTimer = undefined;
+      this.doRenderChart();
+    }, 0);
+  }
+
+  /**
+   * Actual chart rendering logic (called after deferred scheduling).
+   */
+  private doRenderChart() {
+    if (!this.chartSvgWrapper || this.chartCollapsed) return;
+
+    // Clear previous content
+    this.chartSvgWrapper.textContent = "";
+
+    // Get entries to analyze (use filtered entries if filter is active, else all)
+    const entries = this.allEntries;
+    if (!entries.length) {
+      const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
+      noDataMsg.className = "zinspire-chart-no-data";
+      noDataMsg.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: #9ca3af;
+        font-size: 12px;
+      `;
+      noDataMsg.textContent = getString("references-panel-chart-no-data");
+      this.chartSvgWrapper.appendChild(noDataMsg);
+      return;
+    }
+
+    // Dynamic bar count based on container width
+    const MAX_BAR_WIDTH = 50;
+    const MIN_BAR_WIDTH = 20;
+    const DEFAULT_MAX_BARS = 10;
+    const BAR_GAP = 3;
+    const PADDING = 16; // left + right padding
+
+    // Get actual container width
+    const containerWidth = this.chartSvgWrapper.clientWidth || 400;
+
+    // Calculate how many bars can fit at max width
+    // Formula: containerWidth = n * maxBarWidth + (n-1) * gap + padding
+    // Solving for n: n = (containerWidth - padding + gap) / (maxBarWidth + gap)
+    const maxPossibleBars = Math.floor((containerWidth - PADDING + BAR_GAP) / (MAX_BAR_WIDTH + BAR_GAP));
+    const dynamicMaxBars = Math.max(DEFAULT_MAX_BARS, Math.min(maxPossibleBars, 20)); // Cap at 20
+
+    // Compute stats based on current view mode
+    const stats = this.chartViewMode === "year"
+      ? this.computeYearStats(entries, dynamicMaxBars)
+      : this.computeCitationStats(entries);
+
+    if (!stats.length) {
+      const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
+      noDataMsg.className = "zinspire-chart-no-data";
+      noDataMsg.textContent = getString("references-panel-chart-no-data");
+      this.chartSvgWrapper.appendChild(noDataMsg);
+      return;
+    }
+
+    // Cache stats
+    this.cachedChartStats = { mode: this.chartViewMode, stats };
+
+    // Create SVG - use actual pixel dimensions, no viewBox scaling
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const doc = this.chartSvgWrapper.ownerDocument;
+
+    const svg = doc.createElementNS(SVG_NS, "svg") as SVGSVGElement;
+
+    // Chart dimensions in actual pixels
+    const chartHeight = 80; // Fixed chart area height
+    const barGap = 4;
+
+    // Calculate bar width first to determine if labels need rotation
+    const MAX_BAR_WIDTH_RENDER = 50;
+    const MIN_BAR_WIDTH_RENDER = 15;
+    const basePadding = { top: 4, right: 8, left: 8 };
+    const availableWidth = containerWidth - basePadding.left - basePadding.right;
+    const totalGaps = (stats.length - 1) * barGap;
+    const calculatedBarWidth = (availableWidth - totalGaps) / stats.length;
+    const barWidth = Math.max(MIN_BAR_WIDTH_RENDER, Math.min(calculatedBarWidth, MAX_BAR_WIDTH_RENDER));
+
+    // Determine if labels should be rotated (when bars are narrow or many)
+    const rotateLabels = barWidth < 38 || stats.length > 8;
+    // Increase bottom padding when labels are rotated to accommodate angled text
+    const padding = { ...basePadding, bottom: rotateLabels ? 42 : 24 };
+    const svgHeight = chartHeight + padding.top + padding.bottom;
+
+    // Use actual container width
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", String(svgHeight));
+    // No viewBox - draw in actual pixels, SVG will naturally fill width
+
+    const maxCount = Math.max(...stats.map((s) => s.count), 1);
+
+    const actualTotalWidth = stats.length * barWidth + totalGaps;
+    const startX = padding.left + (availableWidth - actualTotalWidth) / 2;
+
+    // Create bars
+    const fragment = doc.createDocumentFragment();
+
+    // Colors for bars (soft muted blue - professional, easy on eyes)
+    const selectedColor = "#3b82f6"; // blue-500 for selected
+    const unselectedColor = "#93c5fd"; // blue-300 for unselected
+
+    // Label positioning for rotated labels
+    const labelBaseline = padding.top + chartHeight + (rotateLabels ? 14 : 16);
+    const rotationAngle = -35; // Negative for counter-clockwise rotation
+
+    stats.forEach((bin, index) => {
+      const barHeight = Math.max((bin.count / maxCount) * chartHeight, 2); // Minimum height of 2
+      const x = startX + index * (barWidth + barGap);
+      const y = padding.top + chartHeight - barHeight;
+
+      // Bar group
+      const g = doc.createElementNS(SVG_NS, "g") as SVGGElement;
+      g.setAttribute("class", "zinspire-chart-bar-group");
+      g.dataset.key = bin.key;
+
+      // Bar rectangle
+      const isSelected = this.chartSelectedBins.has(bin.key);
+      const rect = doc.createElementNS(SVG_NS, "rect") as SVGRectElement;
+      rect.setAttribute("x", String(x));
+      rect.setAttribute("y", String(y));
+      rect.setAttribute("width", String(barWidth));
+      rect.setAttribute("height", String(barHeight));
+      rect.setAttribute("rx", "2");
+      rect.setAttribute("class", `zinspire-chart-bar${isSelected ? " selected" : ""}`);
+      rect.setAttribute("fill", isSelected ? selectedColor : unselectedColor);
+
+      // Tooltip
+      const title = doc.createElementNS(SVG_NS, "title") as SVGTitleElement;
+      title.textContent = `${bin.label}: ${bin.count} ${bin.count === 1 ? "paper" : "papers"}`;
+      rect.appendChild(title);
+
+      // X-axis label
+      const text = doc.createElementNS(SVG_NS, "text") as SVGTextElement;
+      const labelX = x + barWidth / 2;
+      text.setAttribute("y", String(labelBaseline));
+      if (rotateLabels) {
+        // Use "end" anchor so all labels align at their top (text end) regardless of length
+        // Shift x position right so the rotated text end sits under the bar center
+        const adjustedX = labelX + 11;
+        text.setAttribute("x", String(adjustedX));
+        text.setAttribute("text-anchor", "end");
+        text.setAttribute("transform", `rotate(${rotationAngle} ${adjustedX} ${labelBaseline})`);
+      } else {
+        text.setAttribute("x", String(labelX));
+        text.setAttribute("text-anchor", "middle");
+      }
+      text.setAttribute("font-size", "11");
+      text.setAttribute("fill", "#4a4a4f");
+      text.textContent = bin.label;
+
+      // Count label on top of bar (only if bar is tall enough)
+      if (barHeight > 18 && bin.count > 0) {
+        const countText = doc.createElementNS(SVG_NS, "text") as SVGTextElement;
+        countText.setAttribute("x", String(x + barWidth / 2));
+        countText.setAttribute("y", String(y + 14));
+        countText.setAttribute("text-anchor", "middle");
+        countText.setAttribute("font-size", "10");
+        countText.setAttribute("fill", isSelected ? "#ffffff" : "#1e3a5f");
+        countText.textContent = String(bin.count);
+        g.appendChild(countText);
+      }
+
+      g.appendChild(rect);
+      g.appendChild(text);
+      fragment.appendChild(g);
+    });
+
+    svg.appendChild(fragment);
+
+    // Event delegation for bar clicks
+    svg.addEventListener("click", (event) => {
+      const target = event.target as Element;
+      const group = target.closest(".zinspire-chart-bar-group");
+      if (group) {
+        const key = (group as HTMLElement).dataset.key;
+        if (key) {
+          this.handleChartBarClick(key, event);
+        }
+      }
+    });
+
+    this.chartSvgWrapper.appendChild(svg);
+
+    // Update clear button visibility
+    this.updateChartClearButton();
+  }
+
+  private handleChartBarClick(key: string, event: MouseEvent) {
+    const isRangeSelect = event.shiftKey;
+    const isMultiSelect = event.ctrlKey || event.metaKey;
+    const handledRange =
+      isRangeSelect && this.applyShiftChartSelection(key, isMultiSelect);
+
+    if (!handledRange) {
+      if (isMultiSelect) {
+        // Toggle the clicked bin
+        if (this.chartSelectedBins.has(key)) {
+          this.chartSelectedBins.delete(key);
+        } else {
+          this.chartSelectedBins.add(key);
+        }
+      } else {
+        // Single select: toggle if same, replace if different
+        if (this.chartSelectedBins.size === 1 && this.chartSelectedBins.has(key)) {
+          this.chartSelectedBins.clear();
+        } else {
+          this.chartSelectedBins.clear();
+          this.chartSelectedBins.add(key);
+        }
+      }
+    }
+
+    this.lastChartClickedKey = key;
+    this.renderChart();
+    this.renderReferenceList();
+  }
+
+  private applyShiftChartSelection(key: string, additive: boolean): boolean {
+    const stats = this.cachedChartStats?.stats;
+    if (!stats?.length) {
+      return false;
+    }
+
+    const rangeKeys = this.getChartRangeKeys(
+      this.lastChartClickedKey,
+      key,
+      stats,
+    );
+    if (!rangeKeys.length) {
+      // If no valid anchor, fall back to single key selection
+      if (!additive && !this.chartSelectedBins.has(key)) {
+        this.chartSelectedBins.clear();
+        this.chartSelectedBins.add(key);
+        return true;
+      }
+      return false;
+    }
+
+    if (!additive) {
+      this.chartSelectedBins.clear();
+    }
+    for (const rangeKey of rangeKeys) {
+      this.chartSelectedBins.add(rangeKey);
+    }
+    return true;
+  }
+
+  private getChartRangeKeys(
+    anchorKey: string | undefined,
+    targetKey: string,
+    stats: ChartBin[],
+  ): string[] {
+    const targetIndex = stats.findIndex((bin) => bin.key === targetKey);
+    if (targetIndex === -1) {
+      return [];
+    }
+
+    const anchorIndex = anchorKey
+      ? stats.findIndex((bin) => bin.key === anchorKey)
+      : -1;
+    const startIndex = anchorIndex === -1 ? targetIndex : anchorIndex;
+    const lower = Math.min(startIndex, targetIndex);
+    const upper = Math.max(startIndex, targetIndex);
+    return stats.slice(lower, upper + 1).map((bin) => bin.key);
+  }
+
+  private updateChartClearButton() {
+    if (!this.chartContainer) return;
+    const clearBtn = this.chartContainer.querySelector(".zinspire-chart-clear-btn") as HTMLButtonElement;
+    if (clearBtn) {
+      clearBtn.style.display = this.chartSelectedBins.size > 0 ? "inline-block" : "none";
+    }
+  }
+
+  private matchesChartFilter(entry: InspireReferenceEntry): boolean {
+    if (!this.chartSelectedBins.size) return true;
+
+    if (this.chartViewMode === "year") {
+      const entryYear = parseInt(entry.year || "0", 10);
+      if (entryYear <= 0) return false;
+
+      return Array.from(this.chartSelectedBins).some((binKey) => {
+        // binKey can be "2020" or "2018-2020"
+        if (binKey.includes("-")) {
+          const [start, end] = binKey.split("-").map((y) => parseInt(y, 10));
+          return entryYear >= start && entryYear <= end;
+        } else {
+          return entryYear === parseInt(binKey, 10);
+        }
+      });
+    } else {
+      // Citation mode
+      const citationCount = entry.citationCount ?? 0;
+
+      return Array.from(this.chartSelectedBins).some((binKey) => {
+        switch (binKey) {
+          case "0":
+            return citationCount === 0;
+          case "1-9":
+            return citationCount >= 1 && citationCount <= 9;
+          case "10-49":
+            return citationCount >= 10 && citationCount <= 49;
+          case "50-99":
+            return citationCount >= 50 && citationCount <= 99;
+          case "100-249":
+            return citationCount >= 100 && citationCount <= 249;
+          case "250-499":
+            return citationCount >= 250 && citationCount <= 499;
+          case "500+":
+            return citationCount >= 500;
+          default:
+            return false;
+        }
+      });
+    }
+  }
+
   destroy() {
     this.unregisterNotifier();
     this.cancelActiveRequest();
@@ -719,6 +1567,36 @@ class InspireReferencePanelController {
     this.entryCitedCache.clear();
     this.metadataCache.clear();
     this.rowCache.clear();
+    // Clear filter debounce timer
+    if (this.filterDebounceTimer) {
+      clearTimeout(this.filterDebounceTimer);
+      this.filterDebounceTimer = undefined;
+    }
+    // Clear chart render timer
+    if (this.chartRenderTimer) {
+      clearTimeout(this.chartRenderTimer);
+      this.chartRenderTimer = undefined;
+    }
+    // Clear row pool
+    this.rowPool.length = 0;
+    // Clear infinite scroll observer
+    if (this.loadMoreObserver) {
+      this.loadMoreObserver.disconnect();
+      this.loadMoreObserver = undefined;
+    }
+    this.loadMoreContainer = undefined;
+    this.currentFilteredEntries = undefined;
+    // Clear chart resize observer
+    this.clearPendingChartResize();
+    if (this.chartResizeObserver) {
+      this.chartResizeObserver.disconnect();
+      this.chartResizeObserver = undefined;
+    }
+    // Clear chart state
+    this.chartSelectedBins.clear();
+    this.cachedChartStats = undefined;
+    this.chartContainer = undefined;
+    this.chartSvgWrapper = undefined;
     InspireReferencePanelController.instances.delete(this);
     if (!InspireReferencePanelController.instances.size) {
       InspireReferencePanelController.navigationStack = [];
@@ -837,6 +1715,9 @@ class InspireReferencePanelController {
     this.allEntries = [];
     this.rowCache.clear();
     this.totalApiCount = null;
+    this.chartSelectedBins.clear(); // Clear chart selection on refresh
+    this.cachedChartStats = undefined; // Invalidate chart cache
+    this.renderChartLoading(); // Show loading state in chart
     this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
 
     // Re-trigger the load based on view mode
@@ -977,6 +1858,9 @@ class InspireReferencePanelController {
         this.cancelActiveRequest();
         this.allEntries = [];
         this.totalApiCount = null; // Reset API count for new item
+        this.chartSelectedBins.clear(); // Clear chart selection
+        this.cachedChartStats = undefined; // Invalidate chart cache
+        this.renderChartLoading(); // Show loading state in chart
         this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
       } else {
         // Check if we need to restore scroll position when switching back to original item
@@ -1526,6 +2410,8 @@ class InspireReferencePanelController {
         this.allEntries = entriesForDisplay;
         // Reset totalApiCount for cached data (allEntries.length is accurate)
         this.totalApiCount = null;
+        this.chartSelectedBins.clear(); // Clear chart selection on data change
+        this.renderChart();
         this.renderReferenceList({ preserveScroll: !shouldReset });
         if (shouldReset) {
           this.resetListScroll();
@@ -1634,6 +2520,8 @@ class InspireReferencePanelController {
         const entriesForDisplay =
           mode === "references" ? this.getSortedReferences(entries) : entries;
         this.allEntries = entriesForDisplay;
+        this.chartSelectedBins.clear(); // Clear chart selection on data change
+        this.renderChart();
         this.renderReferenceList();
         if (options.resetScroll && !hasRenderedFirstPage) {
           this.resetListScroll();
@@ -1966,6 +2854,14 @@ class InspireReferencePanelController {
     await Promise.all(workers);
   }
 
+  /**
+   * Enrich local status for entries by checking if they exist in the local library.
+   * Uses batch SQL queries to minimize database interactions.
+   * 
+   * Optimization: Increased chunk size from 100 to 500 to reduce query count.
+   * - 500 entries: 1 query instead of 5
+   * - 1000 entries: 2 queries instead of 10
+   */
   private async enrichLocalStatus(
     entries: InspireReferenceEntry[],
     signal?: AbortSignal,
@@ -1984,14 +2880,16 @@ class InspireReferencePanelController {
       return;
     }
 
-    const chunk_size = 100;
+    // Increased chunk size for fewer SQL queries (was 100, now 500)
+    // SQLite handles IN clauses with 500+ parameters efficiently
+    const CHUNK_SIZE = 500;
     const recidMap = new Map<string, number>();
 
-    for (let i = 0; i < recids.length; i += chunk_size) {
+    for (let i = 0; i < recids.length; i += CHUNK_SIZE) {
       if (signal?.aborted) {
         return;
       }
-      const chunk = recids.slice(i, i + chunk_size);
+      const chunk = recids.slice(i, i + CHUNK_SIZE);
       const placeholders = chunk.map(() => "?").join(",");
       const sql = `SELECT itemID, value FROM itemData JOIN itemDataValues USING(valueID) WHERE fieldID = ? AND value IN (${placeholders})`;
       try {
@@ -2028,6 +2926,7 @@ class InspireReferencePanelController {
   /**
    * Enrich citation counts for references entries.
    * Uses batch INSPIRE API queries to fetch citation counts efficiently.
+   * Parallel fetching: processes multiple batches concurrently for better performance.
    */
   private async enrichCitationCounts(
     entries: InspireReferenceEntry[],
@@ -2058,6 +2957,7 @@ class InspireReferencePanelController {
     // Batch query INSPIRE API for citation counts
     // Use chunks of 50 recids to avoid URL length limits
     const BATCH_SIZE = 50;
+    const PARALLEL_BATCHES = 3; // Number of batches to fetch in parallel
     const recidToEntry = new Map<string, InspireReferenceEntry[]>();
 
     // Group entries by recid (some might have the same recid)
@@ -2069,51 +2969,76 @@ class InspireReferencePanelController {
 
     const uniqueRecids = Array.from(recidToEntry.keys());
 
+    // Split into batches
+    const batches: string[][] = [];
     for (let i = 0; i < uniqueRecids.length; i += BATCH_SIZE) {
+      batches.push(uniqueRecids.slice(i, i + BATCH_SIZE));
+    }
+
+    // Process batches in parallel groups
+    for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
       if (signal?.aborted) return;
 
-      const batchRecids = uniqueRecids.slice(i, i + BATCH_SIZE);
-      const query = batchRecids.map(r => `recid:${r}`).join(" OR ");
-      const fieldsParam = "&fields=control_number,citation_count,titles.title,authors.full_name,author_count,publication_info,earliest_date,arxiv_eprints";
-      const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batchRecids.length}${fieldsParam}`;
+      const parallelBatches = batches.slice(i, i + PARALLEL_BATCHES);
+      await Promise.all(
+        parallelBatches.map(batch =>
+          this.fetchBatchCitationCounts(batch, recidToEntry, signal)
+        )
+      );
+    }
+  }
 
-      try {
-        const response = await fetch(url, signal ? { signal } : undefined).catch(() => null);
-        if (!response || response.status !== 200) continue;
+  /**
+   * Fetch citation counts for a single batch of recids.
+   * Extracted from enrichCitationCounts to enable parallel fetching.
+   */
+  private async fetchBatchCitationCounts(
+    batchRecids: string[],
+    recidToEntry: Map<string, InspireReferenceEntry[]>,
+    signal?: AbortSignal,
+  ) {
+    if (signal?.aborted || !batchRecids.length) return;
 
-        const payload: any = await response.json();
-        const hits = payload?.hits?.hits ?? [];
+    const query = batchRecids.map(r => `recid:${r}`).join(" OR ");
+    const fieldsParam = "&fields=control_number,citation_count,titles.title,authors.full_name,author_count,publication_info,earliest_date,arxiv_eprints";
+    const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batchRecids.length}${fieldsParam}`;
 
-        // Map results back to entries
-        for (const hit of hits) {
-          const recid = String(hit?.metadata?.control_number || hit?.id);
-          const metadata = hit?.metadata ?? {};
-          const citationCount = metadata?.citation_count;
+    try {
+      const response = await fetch(url, signal ? { signal } : undefined).catch(() => null);
+      if (!response || response.status !== 200) return;
 
-          if (recid && typeof citationCount === "number") {
-            const matchingEntries = recidToEntry.get(recid);
-            if (matchingEntries) {
-              for (const entry of matchingEntries) {
-                entry.citationCount = citationCount;
-                this.updateRowCitationCount(entry);
-              }
-            }
-          }
+      const payload: any = await response.json();
+      const hits = payload?.hits?.hits ?? [];
 
-          if (recid) {
-            const matchingEntries = recidToEntry.get(recid);
-            if (matchingEntries) {
-              for (const entry of matchingEntries) {
-                this.applySearchMetadataToEntry(entry, metadata);
-                this.updateRowMetadata(entry);
-              }
+      // Map results back to entries
+      for (const hit of hits) {
+        const recid = String(hit?.metadata?.control_number || hit?.id);
+        const metadata = hit?.metadata ?? {};
+        const citationCount = metadata?.citation_count;
+
+        if (recid && typeof citationCount === "number") {
+          const matchingEntries = recidToEntry.get(recid);
+          if (matchingEntries) {
+            for (const entry of matchingEntries) {
+              entry.citationCount = citationCount;
+              this.updateRowCitationCount(entry);
             }
           }
         }
-      } catch (err) {
-        if ((err as any)?.name !== "AbortError") {
-          Zotero.debug(`[${config.addonName}] Error fetching citation counts: ${err}`);
+
+        if (recid) {
+          const matchingEntries = recidToEntry.get(recid);
+          if (matchingEntries) {
+            for (const entry of matchingEntries) {
+              this.applySearchMetadataToEntry(entry, metadata);
+              this.updateRowMetadata(entry);
+            }
+          }
         }
+      }
+    } catch (err) {
+      if ((err as any)?.name !== "AbortError") {
+        Zotero.debug(`[${config.addonName}] Error fetching citation counts batch: ${err}`);
       }
     }
   }
@@ -2147,6 +3072,7 @@ class InspireReferencePanelController {
             "zinspire-ref-entry__stats",
             "zinspire-ref-entry__stats-button",
           );
+          newStatsButton.style.cursor = "pointer";
           newStatsButton.textContent = label;
           newStatsButton.addEventListener("click", (event) => {
             event.preventDefault();
@@ -2394,6 +3320,13 @@ class InspireReferencePanelController {
       entry.year && entry.year !== getString("references-panel-year-unknown")
         ? entry.year
         : undefined;
+    // Extract arXiv details from metadata if not already present
+    if (!entry.arxivDetails && meta.arxiv_eprints) {
+      const arxiv = extractArxivFromMetadata(meta);
+      if (arxiv) {
+        entry.arxivDetails = arxiv;
+      }
+    }
     const { primary: publicationInfo, errata } = splitPublicationInfo(
       meta.publication_info,
     );
@@ -2468,11 +3401,19 @@ class InspireReferencePanelController {
       entry.year = `${metadata.earliest_date}`.slice(0, 4);
     }
 
+    // Extract arXiv details from metadata if not already present
+    if (!entry.arxivDetails && metadata.arxiv_eprints) {
+      const arxiv = extractArxivFromMetadata(metadata);
+      if (arxiv) {
+        entry.arxivDetails = arxiv;
+      }
+    }
+
     // Publication summary update
     const { primary: publicationInfo, errata } = splitPublicationInfo(
       metadata.publication_info,
     );
-    if (publicationInfo || errata?.length) {
+    if (publicationInfo || entry.arxivDetails || errata?.length) {
       entry.publicationInfo = publicationInfo ?? entry.publicationInfo;
       entry.publicationInfoErrata = errata;
       const fallbackYear =
@@ -2629,6 +3570,11 @@ class InspireReferencePanelController {
       this.renderedCount = 0;
     }
 
+    // Clear infinite scroll state
+    this.cleanupInfiniteScroll();
+
+    // Recycle existing rows to pool before clearing
+    this.recycleRowsToPool();
     this.listEl.textContent = "";
     this.rowCache.clear();
     this.loadMoreButton = undefined;
@@ -2644,13 +3590,20 @@ class InspireReferencePanelController {
         buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }),
       )
       .filter((variants) => variants.length);
-    const filtered = filterGroups.length
+
+    // Apply text filter
+    const textFiltered = filterGroups.length
       ? this.allEntries.filter((entry) =>
         filterGroups.every((variants) =>
           variants.some((token) => entry.searchText.includes(token)),
         ),
       )
       : this.allEntries;
+
+    // Apply chart filter (AND logic with text filter)
+    const filtered = this.chartSelectedBins.size > 0
+      ? textFiltered.filter((entry) => this.matchesChartFilter(entry))
+      : textFiltered;
 
     if (!filtered.length) {
       this.renderMessage(getString("references-panel-no-match"));
@@ -2659,7 +3612,7 @@ class InspireReferencePanelController {
       // This improves perceived performance for references with 100+ entries
       // However, when filtering, show all matching results for better UX
       // (filtered results are usually smaller and users expect to see all matches)
-      const hasFilter = filterGroups.length > 0;
+      const hasFilter = filterGroups.length > 0 || this.chartSelectedBins.size > 0;
       const usePagination = !hasFilter && filtered.length > RENDER_PAGE_SIZE;
       const entriesToRender = usePagination
         ? filtered.slice(0, RENDER_PAGE_SIZE)
@@ -2672,9 +3625,13 @@ class InspireReferencePanelController {
       this.listEl.appendChild(fragment);
       this.renderedCount = entriesToRender.length;
 
-      // Add "Load More" button if there are more entries
+      // Add "Load More" button with infinite scroll if there are more entries
       if (usePagination && filtered.length > this.renderedCount) {
+        // Store filtered entries for infinite scroll
+        this.currentFilteredEntries = filtered;
         this.renderLoadMoreButton(filtered);
+      } else {
+        this.currentFilteredEntries = undefined;
       }
     }
 
@@ -2733,8 +3690,20 @@ class InspireReferencePanelController {
   }
 
   /**
-   * Render "Load More" button for paginated lists.
-   * Clicking it renders the next batch of entries.
+   * Clean up infinite scroll observer and related state.
+   */
+  private cleanupInfiniteScroll() {
+    if (this.loadMoreObserver) {
+      this.loadMoreObserver.disconnect();
+      this.loadMoreObserver = undefined;
+    }
+    this.loadMoreContainer = undefined;
+  }
+
+  /**
+   * Render "Load More" button for paginated lists with infinite scroll support.
+   * - Uses IntersectionObserver to auto-load when button becomes visible
+   * - Falls back to manual click if observer not supported
    */
   private renderLoadMoreButton(allFiltered: InspireReferenceEntry[]) {
     const doc = this.listEl.ownerDocument;
@@ -2762,19 +3731,70 @@ class InspireReferencePanelController {
       font-size: 13px;
     `;
     button.addEventListener("click", () => {
-      this.loadMoreEntries(allFiltered);
+      this.loadMoreEntriesInfinite();
     });
 
     container.appendChild(button);
     this.listEl.appendChild(container);
     this.loadMoreButton = button;
+    this.loadMoreContainer = container;
+
+    // Set up IntersectionObserver for infinite scroll
+    this.setupInfiniteScrollObserver(container);
+  }
+
+  /**
+   * Set up IntersectionObserver to auto-load more entries when the
+   * load-more container becomes visible (scrolls into view).
+   */
+  private setupInfiniteScrollObserver(container: HTMLDivElement) {
+    // Clean up existing observer
+    if (this.loadMoreObserver) {
+      this.loadMoreObserver.disconnect();
+    }
+
+    // Check if IntersectionObserver is available (should be in modern browsers)
+    const win = this.listEl.ownerDocument.defaultView;
+    if (!win || typeof win.IntersectionObserver !== "function") {
+      return;  // Fall back to manual click
+    }
+
+    // Create observer with rootMargin to trigger slightly before container is visible
+    // This provides smoother infinite scroll experience
+    this.loadMoreObserver = new win.IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            // Auto-load more entries when container is visible
+            this.loadMoreEntriesInfinite();
+            break;
+          }
+        }
+      },
+      {
+        root: this.listEl,  // Observe within the scroll container
+        rootMargin: "200px",  // Trigger 200px before container is visible
+        threshold: 0,
+      }
+    );
+
+    this.loadMoreObserver.observe(container);
   }
 
   /**
    * Load more entries (next page) into the list.
+   * Used by both manual click and infinite scroll observer.
    */
-  private loadMoreEntries(allFiltered: InspireReferenceEntry[]) {
-    // Remove load more button
+  private loadMoreEntriesInfinite() {
+    const allFiltered = this.currentFilteredEntries;
+    if (!allFiltered || this.renderedCount >= allFiltered.length) {
+      return;
+    }
+
+    // Clean up current infinite scroll state
+    this.cleanupInfiniteScroll();
+
+    // Remove load more button/container
     if (this.loadMoreButton?.parentElement) {
       this.loadMoreButton.parentElement.remove();
     }
@@ -2793,9 +3813,12 @@ class InspireReferencePanelController {
     this.listEl.appendChild(fragment);
     this.renderedCount = endIndex;
 
-    // Add new "Load More" button if there are still more entries
+    // Add new "Load More" button with infinite scroll if there are still more entries
     if (allFiltered.length > this.renderedCount) {
       this.renderLoadMoreButton(allFiltered);
+    } else {
+      // All entries rendered, clear filtered entries reference
+      this.currentFilteredEntries = undefined;
     }
   }
 
@@ -2950,6 +3973,10 @@ class InspireReferencePanelController {
       this.allEntries = entriesForDisplay;
       // Reset totalApiCount for cached data (allEntries.length is accurate)
       this.totalApiCount = null;
+      // Clear chart selection and render chart for new data
+      this.chartSelectedBins.clear();
+      this.cachedChartStats = undefined;
+      this.renderChart();
       this.renderReferenceList({
         preserveScroll: !shouldResetEntry,
       });
@@ -3218,11 +4245,52 @@ class InspireReferencePanelController {
     return sorted;
   }
 
+  /**
+   * Get a row element from the pool or create a new one.
+   * Pooled elements have their content cleared but retain the base class.
+   */
+  private getRowFromPool(): HTMLDivElement {
+    const pooled = this.rowPool.pop();
+    if (pooled) {
+      // Clear any leftover content from recycled row
+      pooled.textContent = "";
+      return pooled;
+    }
+    // Create new element if pool is empty
+    const doc = this.listEl.ownerDocument;
+    const row = doc.createElement("div");
+    row.classList.add("zinspire-ref-entry");
+    return row;
+  }
+
+  /**
+   * Return a row element to the pool for later reuse.
+   * Clears content and event listeners (by clearing innerHTML).
+   */
+  private returnRowToPool(row: HTMLDivElement) {
+    if (this.rowPool.length < this.maxRowPoolSize) {
+      // Clear content to release references and remove event listeners
+      row.textContent = "";
+      this.rowPool.push(row);
+    }
+    // If pool is full, just let the element be garbage collected
+  }
+
+  /**
+   * Recycle all current rows in the list to the pool before clearing.
+   */
+  private recycleRowsToPool() {
+    const rows = this.listEl.querySelectorAll(".zinspire-ref-entry");
+    for (const row of rows) {
+      this.returnRowToPool(row as HTMLDivElement);
+    }
+  }
+
   private createReferenceRow(entry: InspireReferenceEntry) {
     const doc = this.listEl.ownerDocument;
     const strings = getCachedStrings();
-    const row = doc.createElement("div");
-    row.classList.add("zinspire-ref-entry");
+    // Get row from pool or create new
+    const row = this.getRowFromPool();
 
     const marker = doc.createElement("span");
     marker.classList.add("zinspire-ref-entry__dot");
@@ -3341,6 +4409,7 @@ class InspireReferencePanelController {
         "zinspire-ref-entry__stats",
         "zinspire-ref-entry__stats-button",
       );
+      statsButton.style.cursor = "pointer";
       // Citation count with args still needs getString, but could be optimized if needed
       const label = hasCitationCount
         ? getString("references-panel-citation-count", {
@@ -3884,6 +4953,8 @@ class InspireReferencePanelController {
   }
 
   private renderMessage(message: string) {
+    // Recycle existing rows to pool before clearing
+    this.recycleRowsToPool();
     this.listEl.textContent = "";
     const empty = this.listEl.ownerDocument.createElement("div");
     empty.classList.add("zinspire-ref-panel__empty");
@@ -6874,3 +7945,19 @@ function setCitations(
   return extra;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Re-exports from modularized files (for incremental migration)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Export modular types for external use
+export type {
+  AuthorSearchInfo,
+  InspireReferenceEntry,
+  InspireArxivDetails,
+  ScrollSnapshot,
+  ScrollState,
+  NavigationSnapshot,
+  EntryCitedSource,
+  ChartBin,
+  InspireViewMode,
+};

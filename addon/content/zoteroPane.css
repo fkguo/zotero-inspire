@@ -48,6 +48,11 @@
   cursor: pointer;
 }
 
+.zinspire-ref-panel__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .zinspire-ref-panel__tabs {
   display: inline-flex;
   border: 1px solid var(--zotero-gray-4, #d1d1d5);
@@ -62,6 +67,11 @@
   font-size: 12px;
   cursor: pointer;
   color: var(--zotero-gray-7, #2b2b30);
+}
+
+.zinspire-ref-panel__tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .zinspire-ref-panel__filter {
@@ -202,10 +212,222 @@
 
 /* Loading animation for section refresh button */
 @keyframes zinspire-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .zinspire-section-button-loading {
   animation: zinspire-spin 1s linear infinite;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Citation Chart Styles
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.zinspire-chart-container {
+  display: flex;
+  flex-direction: column;
+  /* Visible border frame */
+  border: 2px solid #94a3b8;
+  border-radius: 8px;
+  padding: 10px;
+  /* Light mode background - subtle blue-gray */
+  background-color: #f1f5f9;
+  flex-shrink: 0;
+  /* Fixed height - does NOT change with panel width */
+  height: 200px;
+  min-height: 200px;
+  max-height: 200px;
+}
+
+.zinspire-chart-header {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.zinspire-chart-collapse-btn {
+  border: 1px solid #cbd5e1;
+  background: #e2e8f0;
+  font-size: 10px;
+  cursor: pointer;
+  color: #475569;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: all 120ms ease-in-out;
+  flex-shrink: 0;
+}
+
+.zinspire-chart-collapse-btn:hover {
+  background: #cbd5e1;
+}
+
+@media (prefers-color-scheme: dark) {
+  .zinspire-chart-collapse-btn {
+    border-color: #475569;
+    background: #334155;
+    color: #94a3b8;
+  }
+  .zinspire-chart-collapse-btn:hover {
+    background: #475569;
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-chart-collapse-btn,
+[data-color-scheme="dark"] .zinspire-chart-collapse-btn {
+  border-color: #475569;
+  background: #334155;
+  color: #94a3b8;
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-chart-collapse-btn:hover,
+[data-color-scheme="dark"] .zinspire-chart-collapse-btn:hover {
+  background: #475569;
+}
+
+.zinspire-chart-toggle-btn {
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 10px;
+  background: #ffffff;
+  font-size: 11px;
+  cursor: pointer;
+  color: #475569;
+  transition: all 120ms ease-in-out;
+  flex-shrink: 0;
+}
+
+.zinspire-chart-toggle-btn:hover {
+  background: #f1f5f9;
+}
+
+.zinspire-chart-toggle-btn.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+@media (prefers-color-scheme: dark) {
+  .zinspire-chart-toggle-btn {
+    border-color: #475569;
+    background: #1e293b;
+    color: #94a3b8;
+  }
+  .zinspire-chart-toggle-btn:hover {
+    background: #334155;
+  }
+  .zinspire-chart-toggle-btn.active {
+    background: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-chart-toggle-btn,
+[data-color-scheme="dark"] .zinspire-chart-toggle-btn {
+  border-color: #475569;
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-chart-toggle-btn:hover,
+[data-color-scheme="dark"] .zinspire-chart-toggle-btn:hover {
+  background: #334155;
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-chart-toggle-btn.active,
+[data-color-scheme="dark"] .zinspire-chart-toggle-btn.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.zinspire-chart-clear-btn {
+  border: 1px solid #fca5a5;
+  background: #fee2e2;
+  font-size: 11px;
+  cursor: pointer;
+  color: #dc2626;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: all 120ms ease-in-out;
+  flex-shrink: 0;
+}
+
+.zinspire-chart-clear-btn:hover {
+  background: #fecaca;
+}
+
+@media (prefers-color-scheme: dark) {
+  .zinspire-chart-clear-btn {
+    border-color: #7f1d1d;
+    background: #450a0a;
+    color: #fca5a5;
+  }
+  .zinspire-chart-clear-btn:hover {
+    background: #7f1d1d;
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-chart-clear-btn,
+[data-color-scheme="dark"] .zinspire-chart-clear-btn {
+  border-color: #7f1d1d;
+  background: #450a0a;
+  color: #fca5a5;
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-chart-clear-btn:hover,
+[data-color-scheme="dark"] .zinspire-chart-clear-btn:hover {
+  background: #7f1d1d;
+}
+
+.zinspire-chart-svg-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  /* Fixed height for SVG area */
+  height: 160px;
+}
+
+.zinspire-chart-svg-wrapper svg {
+  width: 100%;
+  height: 160px;
+  display: block;
+}
+
+.zinspire-chart-no-data {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 11px;
+  color: var(--zotero-gray-5, #b1b1b5);
+}
+
+.zinspire-chart-bar-group {
+  cursor: pointer;
+}
+
+.zinspire-chart-bar {
+  transition: opacity 120ms ease-in-out;
+}
+
+.zinspire-chart-bar-group:hover .zinspire-chart-bar {
+  opacity: 0.75;
+}
+
+.zinspire-chart-bar.selected {
+  stroke: var(--zotero-blue-8, #1a3d99);
+  stroke-width: 2;
 }

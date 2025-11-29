@@ -34,6 +34,10 @@ pref-arxiv-tag1 =
 pref-max-authors-label = Maximum authors to display:
 pref-max-authors-desc = Number of authors shown before "et al." in the references panel (default: 3)
 
+pref-chart-enable =
+    .label = Enable statistics chart
+pref-chart-enable-desc = Show interactive statistics chart (by year/citations) at the top of the panel. Chart is collapsed by default.
+
 pref-reader-auto-reopen =
     .label = Reopen reader tab when navigating back/forward
 pref-reader-auto-reopen-desc = When enabled, if the reader tab was closed, it will be reopened automatically when using Back or Forward navigation.

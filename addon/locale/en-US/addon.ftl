@@ -10,6 +10,7 @@ referencesSection = References
     .label = References
     .tooltiptext = INSPIRE References
 references-panel-header = References
+    .label = References
 references-panel-tab-references = References
 references-panel-tab-cited = Cited by
 references-panel-tab-entry-cited = Citing...
@@ -112,3 +113,13 @@ references-panel-bibtex-fetching = Fetching BibTeX entries...
 references-panel-bibtex-all-copied = { $count } BibTeX entries copied to clipboard
 references-panel-bibtex-all-failed = Failed to copy BibTeX entries
 references-panel-no-recid-entries = No INSPIRE records to copy
+
+# Chart localization strings
+references-panel-chart-collapse = Collapse chart
+references-panel-chart-expand = Expand chart
+references-panel-chart-by-year = By Year
+references-panel-chart-by-citation = By Citations
+references-panel-chart-no-data = No data to display
+references-panel-chart-clear-filter = Clear chart filter
+references-panel-chart-disabled-title = Chart Disabled
+references-panel-chart-disabled-message = Statistics chart is disabled. Enable it in Zotero Preferences → INSPIRE.
