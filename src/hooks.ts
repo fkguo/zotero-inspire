@@ -93,7 +93,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
       if (data.window) {
         const win = data.window as Window;
         const doc = win.document;
-        const button = doc.getElementById("zotero-prefpane-zotero-inspire-clear_history");
+        const button = doc.getElementById("zotero-prefpane-zoteroinspire-clear_history");
         if (button) {
           const originalLabel = button.getAttribute("data-l10n-id");
           button.setAttribute("data-l10n-id", "pref-search-history-cleared");
