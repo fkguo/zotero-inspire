@@ -7,3 +7,6 @@ zotero-cmd.json
 tmp/
 image/FUTURE_IMPROVEMENTS/*.png
 PERFORMANCE_OPTIMIZATIONS.md
+.cursor/rules/*
+*IMPOVEMENTS*.md
+FUTURE_IMPROVEMENTS.md
