@@ -6427,12 +6427,10 @@ class InspireReferencePanelController {
     const row = doc.createElement("div");
     row.classList.add("zinspire-ref-entry");
 
-    // Use innerHTML for efficient batch creation of all sub-elements
+    // Use innerHTML for non-button elements (Zotero XHTML removes buttons via innerHTML)
     row.innerHTML = `
       <div class="zinspire-ref-entry__text">
         <span class="zinspire-ref-entry__dot is-clickable"></span>
-        <button class="zinspire-ref-entry__link" type="button"></button>
-        <button class="zinspire-ref-entry__bibtex" type="button"></button>
         <div class="zinspire-ref-entry__content">
           <div class="zinspire-ref-entry__title">
             <span class="zinspire-ref-entry__label"></span>
@@ -6440,16 +6438,12 @@ class InspireReferencePanelController {
             <a class="zinspire-ref-entry__title-link" href="#"></a>
           </div>
           <div class="zinspire-ref-entry__meta"></div>
-          <button class="zinspire-ref-entry__stats zinspire-ref-entry__stats-button" type="button"></button>
         </div>
       </div>
     `;
 
-    // Apply inline styles to template elements (one-time cost)
     const textContainer = row.querySelector(".zinspire-ref-entry__text") as HTMLElement;
     const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
-    const linkButton = row.querySelector(".zinspire-ref-entry__link") as HTMLElement;
-    const bibtexButton = row.querySelector(".zinspire-ref-entry__bibtex") as HTMLElement;
     const content = row.querySelector(".zinspire-ref-entry__content") as HTMLElement;
 
     if (textContainer) applyRefEntryTextContainerStyle(textContainer);
@@ -6457,9 +6451,29 @@ class InspireReferencePanelController {
       applyRefEntryMarkerStyle(marker);
       marker.style.cursor = "pointer";
     }
-    if (linkButton) applyRefEntryLinkButtonStyle(linkButton);
-    if (bibtexButton) applyBibTeXButtonStyle(bibtexButton);
     if (content) applyRefEntryContentStyle(content);
+
+    // Create buttons via createElement (required for Zotero XHTML security)
+    const linkButton = doc.createElement("button");
+    linkButton.type = "button";
+    linkButton.classList.add("zinspire-ref-entry__link");
+    applyRefEntryLinkButtonStyle(linkButton);
+
+    const bibtexButton = doc.createElement("button");
+    bibtexButton.type = "button";
+    bibtexButton.classList.add("zinspire-ref-entry__bibtex");
+    applyBibTeXButtonStyle(bibtexButton);
+
+    const statsButton = doc.createElement("button");
+    statsButton.type = "button";
+    statsButton.classList.add("zinspire-ref-entry__stats", "zinspire-ref-entry__stats-button");
+
+    // Insert buttons at correct positions
+    if (textContainer && marker && content) {
+      textContainer.insertBefore(bibtexButton, content);
+      textContainer.insertBefore(linkButton, bibtexButton);
+      content.appendChild(statsButton);
+    }
 
     return row;
   }
