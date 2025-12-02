@@ -39,6 +39,16 @@ export class ZInsMenu {
           },
           {
             tag: "menuitem",
+            label: getString("menuitem-download-cache"),
+            commandListener: (_ev) => {
+              _globalThis.inspire.downloadReferencesCacheForSelection();
+            },
+          },
+          {
+            tag: "menuseparator",
+          },
+          {
+            tag: "menuitem",
             label: "Cancel Update",
             commandListener: (_ev) => {
               _globalThis.inspire.cancelUpdate();
@@ -80,6 +90,16 @@ export class ZInsMenu {
             label: getString("menuitem-submenulabel2"),
             commandListener: (_ev) => {
               _globalThis.inspire.updateSelectedCollection("citations");
+            },
+          },
+          {
+            tag: "menuseparator",
+          },
+          {
+            tag: "menuitem",
+            label: getString("menuitem-download-cache"),
+            commandListener: (_ev) => {
+              _globalThis.inspire.downloadReferencesCacheForCollection();
             },
           },
           {

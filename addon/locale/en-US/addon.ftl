@@ -5,6 +5,28 @@ menupopup-label = Update Inspire Metadata
 menuitem-submenulabel0 = With abstracts
 menuitem-submenulabel1 = Without abstracts
 menuitem-submenulabel2 = Citation counts only
+menuitem-download-cache = Download references cache
+
+download-cache-progress-title = Downloading references cache
+download-cache-start =
+  { $total ->
+    [one] Preparing cache for 1 item...
+   *[other] Preparing cache for { $total } items...
+  }
+download-cache-progress = Cached { $done } / { $total } items
+download-cache-success =
+  { $success ->
+    [one] Cached references for 1 item
+   *[other] Cached references for { $success } items
+  }
+download-cache-failed =
+  { $failed ->
+    [one] Failed to cache references for 1 item
+   *[other] Failed to cache references for { $failed } items
+  }
+download-cache-no-selection = Select at least one regular item to download references cache
+download-cache-no-recid = Unable to find INSPIRE IDs for the selected items
+download-cache-disabled = Enable local cache in Preferences → INSPIRE to use this feature
 
 pane-item-references-header = INSPIRE References
     .label = INSPIRE References
@@ -159,3 +181,8 @@ references-panel-count-search =
   }
 references-panel-filter-count-search =
   { $visible } / { $total } results for "{ $query }"
+
+# Cache source indicator strings
+references-panel-cache-source-api = From INSPIRE
+references-panel-cache-source-memory = From memory cache
+references-panel-cache-source-local = From local cache ({ $age }h ago)

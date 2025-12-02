@@ -176,3 +176,41 @@ export type ItemWithPendingInspireNote = Zotero.Item & {
   _zinspirePendingInspireNote?: string;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Local Cache Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cache type identifier for file naming
+ */
+export type LocalCacheType = "refs" | "cited" | "author";
+
+/**
+ * Local cache file structure for persistent storage.
+ * Uses short property names to reduce file size.
+ */
+export interface LocalCacheFile<T> {
+  v: number;           // version
+  t: LocalCacheType;   // type
+  k: string;           // key (recid or author BAI)
+  ts: number;          // timestamp (Date.now())
+  ttl: number;         // TTL in hours (-1 = permanent)
+  d: T;                // data
+  c?: boolean;         // complete flag (true = fetch completed successfully)
+  n?: number;          // total count from API (for smart caching: if n <= limit, data is complete)
+}
+
+/**
+ * Cache source indicator for UI display
+ */
+export type CacheSource = "api" | "memory" | "local";
+
+/**
+ * Data with cache source information
+ */
+export interface CachedData<T> {
+  data: T;
+  source: CacheSource;
+  ageHours?: number;   // Age in hours (for local cache)
+}
+

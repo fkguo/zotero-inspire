@@ -75,6 +75,8 @@ When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE Refe
   - **Export button**: Click to open a menu with multiple export options:
     - **Copy to Clipboard**: Copy all references in BibTeX, LaTeX (US), or LaTeX (EU) format to your clipboard.
     - **Export to File**: Save all references to a `.bib` or `.tex` file for large reference lists that may exceed clipboard limits.
+- **Automatic local caching (new in 1.1.3)**: When persistent cache is enabled in Preferences, every time you open a recid the References list is written to disk (cited-by / author tabs honor the configurable TTL), so subsequent loads—or offline sessions—reuse the cached payload instantly.
+- **Offline cache prefetch (new in 1.1.3)**: Right-click selected items or an entire collection, then choose `Download references cache` to pre-fetch the INSPIRE references into the local persistent cache (with a progress window and success/failure stats) so the panel can render instantly even when offline.
 
 ### Back/Forward Navigation
 
@@ -107,6 +109,7 @@ Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you ca
 - Filter supports common journal abbreviations such as "prl", "epja", "cpc", "ctp" etc.
 - Statistics chart (by years or by citations): switched off by default.
 - **INSPIRE Search from Search Bar** (1.1.2): Type `inspire:` followed by your query in Zotero's main search bar to search INSPIRE directly. Results appear in a new Search tab with full filtering/sorting support and search history.
+- **Right-click cache download** (1.1.3): Right-click items or collections and choose `Download references cache` to prefetch the long-lived References cache for offline use; the command reuses the same parsing logic as the References panel and reports success/failure counts.
 
 ## Installation
 
@@ -251,6 +254,16 @@ Configure the INSPIRE References Panel behavior:
 - **Maximum authors to display**: Number of authors shown before "et al." in the references panel (range: 1-20, default: 3)
 - **Enable statistics chart**: Show interactive statistics chart (by year/citations) at the top of the panel (disabled by default)
   - **Collapsed by default**: When enabled, the chart starts collapsed and can be expanded by clicking the toggle button (enabled by default)
+
+### Local Cache (new in 1.1.3)
+
+Control the persistent cache used for offline viewing:
+
+- **Enable local cache**: Master toggle; when disabled only in-memory caches are used.
+- **Show cache source indicator**: Displays whether the current view came from INSPIRE, memory, or local disk.
+- **Cache TTL (hours)**: Applies to Cited-by and Author tabs; References are always permanent.
+- **Custom cache directory**: Leave empty to use the Zotero data directory or click “Browse…” / “Reset” to manage a custom folder.
+- **Clear cache**: Removes all on-disk cache files and reports the number of entries deleted.
 
 ### Reader View Navigation
 

@@ -124,6 +124,12 @@ import {
   setInspireMeta,
   setCrossRefCitations,
   saveItemWithPendingInspireNote,
+  // Local cache
+  fetchReferencesEntries,
+  localCache,
+  // Cache types
+  type CacheSource,
+  type LocalCacheType,
 } from "./inspire";
 
 // Re-export for external use
@@ -892,6 +898,11 @@ class InspireReferencePanelController {
   private rateLimiterStatusEl?: HTMLSpanElement;
   private rateLimiterUnsubscribe?: () => void;
 
+  // Cache source indicator
+  private cacheSource: CacheSource = "api";
+  private cacheSourceAge?: number;  // Age in hours (for local cache)
+  private cacheSourceEl?: HTMLSpanElement;
+
   // Search mode state
   private searchCache = new LRUCache<string, InspireReferenceEntry[]>(50);
   private searchSort: InspireSortOption = "mostrecent";
@@ -1080,6 +1091,25 @@ class InspireReferencePanelController {
     this.rateLimiterUnsubscribe = onRateLimiterStatusChange((status) => {
       this.updateRateLimiterStatus(status);
     });
+
+    // Cache source indicator (shows whether data is from API, memory, or local cache)
+    this.cacheSourceEl = ztoolkit.UI.appendElement(
+      {
+        tag: "span",
+        classList: ["zinspire-ref-panel__cache-source"],
+      },
+      toolbar,
+    ) as HTMLSpanElement;
+    this.cacheSourceEl.hidden = true;
+    this.cacheSourceEl.style.cssText = `
+      font-size: 10px;
+      color: var(--fill-secondary, #64748b);
+      margin-left: 6px;
+      padding: 2px 6px;
+      background: var(--material-mix-quinary, #f1f5f9);
+      border-radius: 4px;
+      white-space: nowrap;
+    `;
 
     // Create search input container (hidden by default, shown in search mode)
     Zotero.debug(`[${config.addonName}] InspireReferencePanelController: creating search input container`);
@@ -2464,6 +2494,43 @@ class InspireReferencePanelController {
     }
   }
 
+  /**
+   * Update the cache source indicator.
+   * Shows whether data is from API, memory cache, or local cache.
+   */
+  private updateCacheSourceDisplay() {
+    if (!this.cacheSourceEl) return;
+
+    // Check if cache source display is enabled in preferences
+    const showSource = getPref("local_cache_show_source");
+    if (!showSource) {
+      this.cacheSourceEl.hidden = true;
+      return;
+    }
+
+    switch (this.cacheSource) {
+      case "api":
+        this.cacheSourceEl.textContent = getString("references-panel-cache-source-api");
+        this.cacheSourceEl.style.background = "var(--material-mix-quinary, #f1f5f9)";
+        this.cacheSourceEl.hidden = false;
+        break;
+      case "memory":
+        this.cacheSourceEl.textContent = getString("references-panel-cache-source-memory");
+        this.cacheSourceEl.style.background = "var(--material-mix-quinary, #e0f2fe)";
+        this.cacheSourceEl.hidden = false;
+        break;
+      case "local":
+        this.cacheSourceEl.textContent = getString("references-panel-cache-source-local", {
+          args: { age: this.cacheSourceAge ?? 0 },
+        });
+        this.cacheSourceEl.style.background = "var(--material-mix-quinary, #dcfce7)";
+        this.cacheSourceEl.hidden = false;
+        break;
+      default:
+        this.cacheSourceEl.hidden = true;
+    }
+  }
+
   private registerNotifier() {
     const callback = {
       notify: async (
@@ -2535,22 +2602,32 @@ class InspireReferencePanelController {
   /**
    * Refresh the current view by clearing cache and reloading data.
    * Called from the section button in the panel header.
+   * Clears both memory cache and local file cache.
    */
   handleRefresh() {
     if (!this.currentRecid) return;
 
-    // Clear cache based on current view mode
+    // Clear memory cache and local file cache based on current view mode
+    // Smart caching: delete both unsorted and sorted cache files
     switch (this.viewMode) {
       case "references":
         this.referencesCache.delete(this.currentRecid);
+        // References only use unsorted cache
+        localCache.delete("refs", this.currentRecid).catch(() => {});
         break;
       case "citedBy":
         this.citedByCache.delete(this.currentRecid);
+        // Delete both unsorted (if data was complete) and sorted cache
+        localCache.delete("cited", this.currentRecid).catch(() => {});
+        localCache.delete("cited", this.currentRecid, this.citedBySort).catch(() => {});
         break;
       case "entryCited":
         if (this.entryCitedSource?.recid) {
           const cacheKey = this.entryCitedSource.recid;
           this.entryCitedCache.delete(cacheKey);
+          // Delete both unsorted and sorted cache
+          localCache.delete("cited", cacheKey).catch(() => {});
+          localCache.delete("cited", cacheKey, this.entryCitedSort).catch(() => {});
         } else if (this.entryCitedSource?.authorSearchInfo) {
           // Author papers mode: clear cache using author query as key
           const authorKey =
@@ -2558,6 +2635,9 @@ class InspireReferencePanelController {
             this.entryCitedSource.authorSearchInfo.fullName;
           if (authorKey) {
             this.entryCitedCache.delete(authorKey);
+            // Delete both unsorted and sorted cache
+            localCache.delete("author", authorKey).catch(() => {});
+            localCache.delete("author", authorKey, this.entryCitedSort).catch(() => {});
           }
         }
         break;
@@ -2575,12 +2655,12 @@ class InspireReferencePanelController {
     this.renderChartLoading(); // Show loading state in chart
     this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
 
-    // Re-trigger the load based on view mode
+    // Re-trigger the load based on view mode (force=true to bypass any remaining cache)
     if (this.viewMode === "references" || this.viewMode === "citedBy") {
       if (this.currentItemID) {
         const item = Zotero.Items.get(this.currentItemID);
         if (item) {
-          this.loadEntries(this.currentRecid, this.viewMode).catch((err) => {
+          this.loadEntries(this.currentRecid, this.viewMode, { force: true }).catch((err) => {
             if ((err as any)?.name !== "AbortError") {
               Zotero.debug(
                 `[${config.addonName}] Failed to refresh INSPIRE data: ${err}`,
@@ -3474,6 +3554,26 @@ class InspireReferencePanelController {
     const cache = this.getCacheForMode(mode);
     const sortOption = this.getSortOptionForMode(mode);
     const cacheKey = this.getCacheKey(recid, mode, sortOption);
+
+    // Force mode: delete local cache to ensure fresh data from API
+    // Smart caching: delete both unsorted and sorted cache files
+    if (options.force) {
+      const localCacheType = this.getLocalCacheType(mode);
+      if (localCacheType) {
+        if (mode === "references") {
+          // References only use unsorted cache
+          await localCache.delete(localCacheType, recid);
+        } else {
+          // Cited By / Author: delete both unsorted and sorted cache
+          await Promise.all([
+            localCache.delete(localCacheType, recid),
+            localCache.delete(localCacheType, recid, sortOption),
+          ]);
+        }
+      }
+    }
+
+    // Step 1: Check memory cache (fastest)
     const cached = cache.get(cacheKey);
     if (cached && !options.force) {
       if (isActiveMode) {
@@ -3484,6 +3584,10 @@ class InspireReferencePanelController {
         // Reset totalApiCount for cached data (allEntries.length is accurate)
         this.totalApiCount = null;
         this.chartSelectedBins.clear(); // Clear chart selection on data change
+        // Update cache source indicator
+        this.cacheSource = "memory";
+        this.cacheSourceAge = undefined;
+        this.updateCacheSourceDisplay();
         this.renderChart();  // Use deferred render (same as original implementation)
         this.renderReferenceList({ preserveScroll: !shouldReset });
         if (shouldReset) {
@@ -3495,6 +3599,65 @@ class InspireReferencePanelController {
         }
       }
       return;
+    }
+
+    // Step 2: Check local file cache (if enabled)
+    // Smart caching strategy:
+    // - References: always store without sort (client-side sorting)
+    // - Cited By/Author: if total <= CITED_BY_MAX_RESULTS, store without sort; otherwise by sort
+    if (!options.force) {
+      const localCacheType = this.getLocalCacheType(mode);
+      if (localCacheType) {
+        let localResult: { data: InspireReferenceEntry[]; fromCache: true; ageHours: number; total?: number } | null = null;
+        let usedClientSideSort = false;
+
+        if (mode === "references") {
+          // References: always read without sort (client-side sorting)
+          localResult = await localCache.get<InspireReferenceEntry[]>(localCacheType, recid);
+          usedClientSideSort = true;
+        } else {
+          // Cited By / Author Papers: try unsorted cache first (if data was complete)
+          const unsortedResult = await localCache.get<InspireReferenceEntry[]>(localCacheType, recid);
+          if (unsortedResult && unsortedResult.total !== undefined && unsortedResult.total <= CITED_BY_MAX_RESULTS) {
+            // Data is complete, can use client-side sorting
+            localResult = unsortedResult;
+            usedClientSideSort = true;
+          } else {
+            // Try sort-specific cache
+            localResult = await localCache.get<InspireReferenceEntry[]>(localCacheType, recid, sortOption);
+          }
+        }
+
+        if (localResult) {
+          // Found in local cache - populate memory cache and display
+          cache.set(cacheKey, localResult.data);
+          if (isActiveMode) {
+            const shouldReset = Boolean(options.resetScroll);
+            // Apply client-side sorting if using unsorted cache
+            const entriesForDisplay = usedClientSideSort
+              ? (mode === "references" ? this.getSortedReferences(localResult.data) : this.getSortedCitedBy(localResult.data, sortOption as InspireSortOption))
+              : localResult.data;
+            this.allEntries = entriesForDisplay;
+            this.totalApiCount = localResult.total ?? null;
+            this.chartSelectedBins.clear();
+            // Update cache source indicator (ageHours returned from get() to avoid re-reading file)
+            this.cacheSource = "local";
+            this.cacheSourceAge = localResult.ageHours;
+            this.updateCacheSourceDisplay();
+            this.renderChart();
+            this.renderReferenceList({ preserveScroll: !shouldReset });
+            if (shouldReset) {
+              this.resetListScroll();
+            } else {
+              setTimeout(() => {
+                this.restoreScrollPositionIfNeeded();
+              }, 0);
+            }
+            this.setRefreshButtonLoading(false);
+          }
+          return;
+        }
+      }
     }
 
     const supportsAbort =
@@ -3586,7 +3749,10 @@ class InspireReferencePanelController {
           }
         };
 
-        entries = await this.fetchReferences(recid, controller?.signal, referencesOnProgress);
+        entries = await fetchReferencesEntries(recid, {
+          signal: controller?.signal,
+          onProgress: referencesOnProgress,
+        });
       } else if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
         // Author papers search mode with progressive rendering
         entries = await this.fetchAuthorPapers(
@@ -3606,11 +3772,34 @@ class InspireReferencePanelController {
       }
       cache.set(cacheKey, entries);
 
+      // Write to local cache (async, non-blocking)
+      // Smart caching strategy:
+      // - References: always store without sort (client-side sorting)
+      // - Cited By/Author: if total <= CITED_BY_MAX_RESULTS, store without sort; otherwise by sort
+      const localCacheType = this.getLocalCacheType(mode);
+      if (localCacheType) {
+        const totalFromApi = this.totalApiCount ?? entries.length;
+        if (mode === "references") {
+          // References: store without sort (client-side sorting)
+          localCache.set(localCacheType, recid, entries, undefined, entries.length).catch(() => {});
+        } else if (totalFromApi <= CITED_BY_MAX_RESULTS) {
+          // Data is complete - store without sort for client-side sorting
+          localCache.set(localCacheType, recid, entries, undefined, totalFromApi).catch(() => {});
+        } else {
+          // Data is truncated - store with sort parameter
+          localCache.set(localCacheType, recid, entries, sortOption, totalFromApi).catch(() => {});
+        }
+      }
+
       if (this.pendingToken === token && this.viewMode === mode) {
         const entriesForDisplay =
           mode === "references" ? this.getSortedReferences(entries) : entries;
         this.allEntries = entriesForDisplay;
         this.chartSelectedBins.clear(); // Clear chart selection on data change
+        // Update cache source indicator - data from API
+        this.cacheSource = "api";
+        this.cacheSourceAge = undefined;
+        this.updateCacheSourceDisplay();
         this.renderChart();  // Use deferred render (same as original implementation)
         this.renderReferenceList();
         if (options.resetScroll && !hasRenderedFirstPage) {
@@ -3659,48 +3848,6 @@ class InspireReferencePanelController {
         this.setRefreshButtonLoading(false);
       }
     }
-  }
-
-  private async fetchReferences(
-    recid: string,
-    signal?: AbortSignal,
-    onProgress?: (entries: InspireReferenceEntry[], total: number) => void,
-  ) {
-    Zotero.debug(
-      `[${config.addonName}] Fetching references for recid ${recid}`,
-    );
-    // Pre-fetch cached strings once before processing all references
-    const strings = getCachedStrings();
-    const response = await inspireFetch(
-      `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}?fields=metadata.references`,
-      signal ? { signal } : undefined,
-    ).catch(() => null);
-    if (!response || response.status === 404) {
-      throw new Error("Reference list not found");
-    }
-    const payload: any = await response.json();
-    const references = payload?.metadata?.references ?? [];
-    const totalCount = references.length;
-    Zotero.debug(
-      `[${config.addonName}] Retrieved ${totalCount} references for ${recid}`,
-    );
-
-    // Progressive rendering: process and report in batches
-    const entries: InspireReferenceEntry[] = [];
-    const BATCH_SIZE = 100;
-
-    for (let i = 0; i < totalCount; i++) {
-      if (signal?.aborted) break;
-      entries.push(this.buildEntry(references[i], i, strings));
-
-      // Report progress every batch for progressive rendering
-      // PERF-16: Pass array reference directly instead of cloning
-      if (onProgress && (entries.length % BATCH_SIZE === 0 || i === totalCount - 1)) {
-        onProgress(entries, totalCount);
-      }
-    }
-
-    return entries;
   }
 
   private async fetchCitedBy(
@@ -4551,69 +4698,6 @@ class InspireReferencePanelController {
     if (entry.authors.length) {
       entry.authorText = formatAuthors(entry.authors, authorCount);
     }
-  }
-
-  private buildEntry(
-    referenceWrapper: any,
-    index: number,
-    strings?: Record<string, string>,
-  ): InspireReferenceEntry {
-    const s = strings ?? getCachedStrings();
-    const reference = referenceWrapper?.reference ?? {};
-    const recid =
-      extractRecidFromRecordRef(referenceWrapper?.record?.["$ref"]) ||
-      extractRecidFromUrls(reference?.urls);
-    // Use limited author extraction for performance (large collaborations have thousands)
-    const { names: authors, total: totalAuthors } = extractAuthorNamesFromReference(
-      reference,
-      AUTHOR_IDS_EXTRACT_LIMIT,
-    );
-    const arxivDetails = extractArxivFromReference(reference);
-    const resolvedYear =
-      reference?.publication_info?.year?.toString() ??
-      (reference?.publication_info?.date
-        ? `${reference.publication_info.date}`.slice(0, 4)
-        : undefined);
-    const { primary: publicationInfo, errata } = splitPublicationInfo(
-      reference?.publication_info,
-    );
-    const summary = buildPublicationSummary(
-      publicationInfo,
-      arxivDetails,
-      resolvedYear,
-      errata,
-    );
-    const entry: InspireReferenceEntry = {
-      id: `${index}-${recid ?? reference?.label ?? Date.now()}`,
-      label: reference?.label,
-      recid: recid ?? undefined,
-      inspireUrl: buildReferenceUrl(reference, recid),
-      fallbackUrl: buildFallbackUrl(reference, arxivDetails),
-      title: cleanMathTitle(reference?.title?.title) || s.noTitle,
-      summary,
-      year: resolvedYear ?? s.yearUnknown,
-      authors,
-      totalAuthors,
-      authorText: formatAuthors(authors, totalAuthors),
-      displayText: "",
-      searchText: "",
-      citationCount:
-        typeof reference?.citation_count === "number"
-          ? reference.citation_count
-          : undefined,
-      citationCountWithoutSelf:
-        typeof reference?.citation_count_without_self_citations === "number"
-          ? reference.citation_count_without_self_citations
-          : undefined,
-      publicationInfo,
-      publicationInfoErrata: errata,
-      arxivDetails,
-    };
-    entry.displayText = buildDisplayText(entry);
-    // Defer searchText calculation to first filter for better initial load performance
-    entry.searchText = "";
-    // DB lookup moved to enrichLocalStatus
-    return entry;
   }
 
   private buildEntryFromSearch(hit: any, index: number): InspireReferenceEntry {
@@ -6376,6 +6460,27 @@ class InspireReferencePanelController {
     return this.entryCitedSort;
   }
 
+  /**
+   * Map view mode to local cache type.
+   * Returns null for modes that shouldn't use local cache (e.g., search results).
+   */
+  private getLocalCacheType(mode: InspireViewMode): LocalCacheType | null {
+    switch (mode) {
+      case "references":
+        return "refs";
+      case "citedBy":
+        return "cited";
+      case "entryCited":
+        // Author papers use "author" type; entry cited-by uses "cited"
+        return this.entryCitedSource?.authorSearchInfo ? "author" : "cited";
+      case "search":
+        // Search results are not cached to local storage
+        return null;
+      default:
+        return null;
+    }
+  }
+
   private getCacheKey(
     recidOrQuery: string,
     mode: InspireViewMode,
@@ -6410,6 +6515,32 @@ class InspireReferencePanelController {
       });
     } else if (this.referenceSort === "citationDesc") {
       // Use getCitationValue() to respect excludeSelfCitations toggle
+      sorted.sort(
+        (a, b) =>
+          this.getCitationValue(b) - this.getCitationValue(a),
+      );
+    }
+    return sorted;
+  }
+
+  /**
+   * Sort cited-by / author papers entries client-side.
+   * Used when reading from unsorted local cache (data is complete).
+   */
+  private getSortedCitedBy(entries: InspireReferenceEntry[], sort: InspireSortOption) {
+    if (!sort) return entries;
+    const sorted = [...entries];
+    if (sort === "mostrecent") {
+      // Sort by year descending (most recent first)
+      sorted.sort((a, b) => {
+        const aYear = Number(a.year);
+        const bYear = Number(b.year);
+        const safeA = Number.isFinite(aYear) ? aYear : -Infinity;
+        const safeB = Number.isFinite(bYear) ? bYear : -Infinity;
+        return safeB - safeA;
+      });
+    } else if (sort === "mostcited") {
+      // Sort by citation count descending
       sorted.sort(
         (a, b) =>
           this.getCitationValue(b) - this.getCitationValue(a),
