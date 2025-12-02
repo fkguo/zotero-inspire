@@ -596,6 +596,42 @@ if (!stats.length && this.chartViewMode === "year" && entries.length > 0) {
 
 ---
 
+## 12. 本地缓存与批量下载 (v1.1.3)
+
+### 12.1 Local Cache Service
+
+- `src/modules/inspire/localCache.ts` 负责本地持久化缓存 References、Cited By、Author Papers 数据，遵循以下策略：
+  - References：永久保留（`ttl = -1`）
+  - Cited By / Author Papers：默认 24 小时 TTL（可在偏好设置中配置）
+  - 引用计数：加载后在后台静默刷新
+- **智能缓存策略 (v1.1.3+)**：
+  - **References**：始终只存储一份无排序的缓存文件，排序在客户端运行时完成
+  - **Cited By / Author Papers**：
+    - 当总数 ≤ 10000 条时，存储一份无排序的缓存，排序在客户端完成（节约存储空间）
+    - 当总数 > 10000 条时，按不同排序（mostrecent/mostcited）分别存储缓存文件（因 API 返回的数据集不同）
+  - 缓存文件包含 `complete` 标记（`c`）和 `total` 字段（`n`），用于校验完整性和智能判断
+- 支持自定义缓存目录、清理缓存、显示缓存来源（API / 内存 / 本地）以及显示缓存大小统计。
+- 写入采用 500ms 防抖队列，Zotero 退出或切换缓存目录前会调用 `flushWrites()` 保证落盘。
+
+### 12.2 fetchReferencesEntries() 共享服务
+
+- 为避免 UI 与后台任务重复实现引用解析逻辑，`src/modules/inspire/referencesService.ts` 暴露 `fetchReferencesEntries()` 与 `buildReferenceEntry()`。
+- `InspireReferencePanelController` 和批量缓存下载功能都通过该服务从 INSPIRE API 拉取引用，并确保条目字段（作者、年份、摘要等）一致。
+
+### 12.3 右键"下载 References Cache"
+
+- 菜单位置：条目和合集右键 → `Update Inspire Metadata` → `Download references cache`。
+- 行为：
+  - 校验本地缓存已启用且存在可解析 recid 的条目。
+  - 使用 `ProgressWindowHelper` 显示进度，完成后展示成功/失败统计。
+  - 对每个 recid 调用 `fetchReferencesEntries()` 并写入本地缓存（单份无排序缓存，客户端排序）。
+- 错误处理：若目录不可写、缓存禁用或选中条目缺少 recid，会即时弹窗提示；单个 recid 失败不会中断整个批次。
+- **性能优化 (v1.1.3+)**：相比早期版本减少 2/3 的磁盘写入（仅写入一次而非三次）。
+
+> 📌 提示：此功能主要面向离线使用场景，可预先缓存 References，后续在 References 面板中无需联网即可加载本地数据。
+
+---
+
 ## 版本信息
 
 - **文档创建日期**: 2025-11-27
@@ -611,5 +647,6 @@ if (!stats.length && this.chartViewMode === "year" && entries.length > 0) {
 - **v1.1.2 事件委托**: 2025-12-01 (PERF-14，监听器从 10000+ 降至 4)
 - **v1.1.2 子元素池化**: 2025-12-01 (PERF-13，行子元素创建减少 ~65%)
 - **v1.1.2 Bug 修复**: 2025-12-01 (图表渲染一致性、年份模式回退、作者过滤器图表同步)
+- **v1.1.3 本地缓存增强**: 2025-12-02 (fetchReferencesEntries 共享服务、右键批量下载 References Cache、偏好设置自定义目录、智能缓存策略)
 - **对应代码分支**: dev_inspire_refs
-- **对应插件版本**: 1.1.2
+- **对应插件版本**: 1.1.3

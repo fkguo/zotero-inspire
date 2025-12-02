@@ -91,3 +91,9 @@ export {
   type RateLimiterStatus,
 } from "./rateLimiter";
 
+// Re-export local cache service
+export { localCache } from "./localCache";
+
+// Re-export reference services
+export { fetchReferencesEntries, buildReferenceEntry } from "./referencesService";
+

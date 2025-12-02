@@ -123,6 +123,17 @@ All data caches use LRU (Least Recently Used) eviction to prevent unbounded memo
 | `recidLookupCache` | Map | - | Caches recid lookups to avoid repeated API calls |
 | `searchTextCache`  | WeakMap | - | Caches search text per entry (auto GC'd) |
 
+#### Local persistent cache (v1.1.3)
+
+- A dedicated `localCache` service stores References/Cited By/Author Papers JSON files on disk (with configurable directory, TTL, and clear buttons in Preferences → INSPIRE). References are permanent; other tabs default to 24 h TTL.
+- **Smart caching strategy**:
+  - **References**: Always stores a single unsorted cache file; sorting is done client-side at runtime
+  - **Cited By / Author Papers**:
+    - When total ≤ 10,000: stores a single unsorted cache file; sorting is done client-side (saves storage)
+    - When total > 10,000: stores separate cache files per sort option (mostrecent/mostcited), as API returns different datasets
+  - Cache files include `complete` flag and `total` field for integrity validation and smart decision-making
+- The right-click **Download references cache** command (items or collections) uses the same helper to pre-populate the local cache and displays a progress window summarizing successes/failures. **Performance improved (v1.1.3+)**: reduces disk writes by 2/3 (writes once instead of three times). 
+
 ### 1.6 Performance Optimizations
 
 - **Frontend pagination**: Only renders first 100 entries, with infinite scroll for rest
@@ -151,18 +162,20 @@ All data caches use LRU (Least Recently Used) eviction to prevent unbounded memo
 
 ### 2.1 Item Menu
 
-| Operation                                        | Description                             |
-| ------------------------------------------------ | --------------------------------------- |
-| **Update from INSPIRE (with abstract)**    | Full metadata update including abstract |
-| **Update from INSPIRE (without abstract)** | Metadata update excluding abstract      |
-| **Update citation counts**                 | Only update citation counts             |
+| Operation                                        | Description                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------- |
+| **Update from INSPIRE (with abstract)**    | Full metadata update including abstract                           |
+| **Update from INSPIRE (without abstract)** | Metadata update excluding abstract                                |
+| **Update citation counts**                 | Only update citation counts                                       |
+| **Download references cache** (new in 1.1.3) | Prefetch INSPIRE references for the selected items into the local cache (shows progress and success/failure stats) |
 
 ### 2.2 Collection Menu
 
-| Operation                         | Description                          |
-| --------------------------------- | ------------------------------------ |
-| **Update all from INSPIRE** | Update all items in collection       |
-| **Update citation counts**  | Update citation counts for all items |
+| Operation                         | Description                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| **Update all from INSPIRE** | Update all items in collection                                             |
+| **Update citation counts**  | Update citation counts for all items                                       |
+| **Download references cache** (new in 1.1.3) | Prefetch references for every item in the collection into the local cache (same progress UI as the item command) |
 
 ---
 

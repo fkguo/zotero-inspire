@@ -8,6 +8,9 @@ import {
 } from "./constants";
 import type { jsobject, ItemWithPendingInspireNote } from "./types";
 import { getInspireMeta, getCrossrefCount } from "./metadataService";
+import { deriveRecidFromItem } from "./apiUtils";
+import { localCache } from "./localCache";
+import { fetchReferencesEntries } from "./referencesService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -152,6 +155,38 @@ export class ZInspire {
     }
   }
 
+  async downloadReferencesCacheForSelection() {
+    if (!localCache.isEnabled()) {
+      this.showCacheNotification(getString("download-cache-disabled"), "error");
+      return;
+    }
+    const items = ZoteroPane.getSelectedItems();
+    const regularItems = items.filter((item) => item?.isRegularItem());
+    if (!regularItems.length) {
+      this.showCacheNotification(getString("download-cache-no-selection"), "error");
+      return;
+    }
+    await this.prefetchReferencesCache(regularItems);
+  }
+
+  async downloadReferencesCacheForCollection() {
+    if (!localCache.isEnabled()) {
+      this.showCacheNotification(getString("download-cache-disabled"), "error");
+      return;
+    }
+    const collection = ZoteroPane.getSelectedCollection();
+    if (!collection) {
+      this.showCacheNotification(getString("download-cache-no-selection"), "error");
+      return;
+    }
+    const items = collection.getChildItems().filter((item) => item?.isRegularItem());
+    if (!items.length) {
+      this.showCacheNotification(getString("download-cache-no-selection"), "error");
+      return;
+    }
+    await this.prefetchReferencesCache(items);
+  }
+
   async updateItems(items: Zotero.Item[], operation: string) {
     this.resetState("initial");
     this.isCancelled = false;
@@ -268,6 +303,72 @@ export class ZInspire {
     });
     statsWindow.show();
     statsWindow.startCloseTimer(5000);
+  }
+
+  private async prefetchReferencesCache(items: Zotero.Item[]): Promise<void> {
+    const recidSet = new Set<string>();
+    for (const item of items) {
+      const recid = deriveRecidFromItem(item);
+      if (recid) {
+        recidSet.add(recid);
+      }
+    }
+
+    if (!recidSet.size) {
+      this.showCacheNotification(getString("download-cache-no-recid"), "error");
+      return;
+    }
+
+    const total = recidSet.size;
+    const progressWindow = new ProgressWindowHelper(getString("download-cache-progress-title"));
+    progressWindow.createLine({
+      text: getString("download-cache-start", { args: { total } }),
+      progress: 0,
+    });
+    progressWindow.show();
+
+    let processed = 0;
+    let success = 0;
+    let failed = 0;
+
+    for (const recid of recidSet) {
+      processed++;
+      progressWindow.changeLine({
+        text: getString("download-cache-progress", { args: { done: processed, total } }),
+        progress: Math.round((processed / total) * 100),
+      });
+
+      try {
+        const entries = await fetchReferencesEntries(recid);
+        // Store without sort parameter (client-side sorting for references)
+        // Pass total = entries.length since references data is always complete
+        await localCache.set("refs", recid, entries, undefined, entries.length);
+        success++;
+      } catch (err) {
+        failed++;
+        Zotero.debug(`[${config.addonName}] Failed to cache references for ${recid}: ${err}`);
+      }
+    }
+
+    progressWindow.changeHeadline(getString("download-cache-progress-title"));
+    progressWindow.createLine({
+      text: getString("download-cache-success", { args: { success } }),
+      type: "success",
+    });
+    if (failed > 0) {
+      progressWindow.createLine({
+        text: getString("download-cache-failed", { args: { failed } }),
+        type: "error",
+      });
+    }
+    progressWindow.startCloseTimer(4000);
+  }
+
+  private showCacheNotification(message: string, type: "info" | "error" = "info") {
+    const window = new ProgressWindowHelper(config.addonName);
+    window.createLine({ text: message, type });
+    window.show();
+    window.startCloseTimer(3000);
   }
 
   // Legacy serial method (kept for reference)
