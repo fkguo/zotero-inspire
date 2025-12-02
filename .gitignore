@@ -5,3 +5,5 @@ zotero-cmd.json
 **/.DS_Store
 *.code-workspace
 tmp/
+image/FUTURE_IMPROVEMENTS/*.png
+PERFORMANCE_OPTIMIZATIONS.md
