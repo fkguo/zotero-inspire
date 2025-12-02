@@ -6,11 +6,11 @@ menuitem-submenulabel0 = With abstracts
 menuitem-submenulabel1 = Without abstracts
 menuitem-submenulabel2 = Citation counts only
 
-referencesSection = References
-    .label = References
+pane-item-references-header = INSPIRE References
+    .label = INSPIRE References
+pane-item-references-sidenav = INSPIRE References
+    .label = INSPIRE References
     .tooltiptext = INSPIRE References
-references-panel-header = References
-    .label = References
 references-panel-tab-references = References
 references-panel-tab-cited = Cited by
 references-panel-tab-entry-cited = Citing...
@@ -108,11 +108,21 @@ update-cancelled-stats = Updated { $completed }/{ $total } items before cancella
 zoteroinspire-refresh-button =
     .tooltiptext = Refresh INSPIRE data
 zoteroinspire-copy-all-button =
-    .tooltiptext = Copy all references as BibTeX
-references-panel-bibtex-fetching = Fetching BibTeX entries...
+    .tooltiptext = Export references (BibTeX/LaTeX)
+references-panel-bibtex-fetching = Fetching entries...
 references-panel-bibtex-all-copied = { $count } BibTeX entries copied to clipboard
-references-panel-bibtex-all-failed = Failed to copy BibTeX entries
-references-panel-no-recid-entries = No INSPIRE records to copy
+references-panel-bibtex-all-failed = Failed to fetch entries
+references-panel-no-recid-entries = No INSPIRE records to export
+
+# Export menu localization strings
+references-panel-export-copy-header = 📋 Copy to Clipboard
+references-panel-export-file-header = 💾 Export to File
+references-panel-export-copied = { $count } { $format } entries copied
+references-panel-export-saved = { $count } { $format } entries saved
+references-panel-export-clipboard-failed = Failed to copy to clipboard (content too large?)
+references-panel-export-too-large = Content too large ({ $size }KB) - please use "Export to File" instead
+references-panel-export-cancelled = Export cancelled
+references-panel-export-save-title = Export References
 
 # Chart localization strings
 references-panel-chart-collapse = Collapse chart
@@ -123,3 +133,29 @@ references-panel-chart-no-data = No data to display
 references-panel-chart-clear-filter = Clear chart filter
 references-panel-chart-disabled-title = Chart Disabled
 references-panel-chart-disabled-message = Statistics chart is disabled. Enable it in Zotero Preferences → INSPIRE.
+references-panel-chart-author-filter = ≤10 Authors
+references-panel-chart-author-filter-tooltip = Filter: only show papers with 10 or fewer authors (excludes large collaborations)
+references-panel-chart-selfcite-filter = Excl. self-cit.
+references-panel-chart-selfcite-filter-tooltip = Use citation counts without self-citations when in "By Citations" mode.
+
+# Rate limiter localization strings
+references-panel-rate-limit-tooltip = INSPIRE API rate limit status
+references-panel-rate-limit-queued = { $count } requests queued (rate limiting active)
+
+# Search feature localization strings
+references-panel-tab-search = Search
+references-panel-search-placeholder = INSPIRE search query...
+references-panel-search-button-tooltip = Execute INSPIRE search
+references-panel-search-history-tooltip = Show search history
+references-panel-search-clear-history = Clear search history
+references-panel-search-prompt = Enter a search query to search INSPIRE
+references-panel-search-empty = No results found for this search
+references-panel-search-label-default = Search results
+references-panel-status-loading-search = Searching INSPIRE...
+references-panel-count-search =
+  { $count ->
+    [one] 1 result for "{ $query }"
+   *[other] { $count } results for "{ $query }"
+  }
+references-panel-filter-count-search =
+  { $visible } / { $total } results for "{ $query }"

@@ -87,6 +87,22 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
     case "load":
       registerPrefsScripts(data.window);
       break;
+    case "clearHistory":
+      ZInspireReferencePane.clearAllHistory();
+      // Show confirmation
+      if (data.window) {
+        const win = data.window as Window;
+        const doc = win.document;
+        const button = doc.getElementById("zotero-prefpane-zotero-inspire-clear_history");
+        if (button) {
+          const originalLabel = button.getAttribute("data-l10n-id");
+          button.setAttribute("data-l10n-id", "pref-search-history-cleared");
+          setTimeout(() => {
+            button.setAttribute("data-l10n-id", originalLabel || "pref-search-history-clear");
+          }, 2000);
+        }
+      }
+      break;
     default:
       return;
   }

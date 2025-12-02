@@ -197,21 +197,43 @@ export async function findItemByRecid(recid: string): Promise<Zotero.Item | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Clipboard Utility
+// Clipboard Utility (Zotero-specific implementation)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function copyToClipboard(text: string, doc?: Document): Promise<boolean> {
+/**
+ * Copy text to the system clipboard.
+ * This implementation uses Zotero-specific APIs with multiple fallbacks:
+ * 1. Zotero.Utilities.Internal.copyTextToClipboard (preferred)
+ * 2. Mozilla nsIClipboardHelper service
+ * 3. DOM textarea + execCommand fallback
+ * Returns true on success, false on failure.
+ */
+export async function copyToClipboard(text: string): Promise<boolean> {
   try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+    // Use Zotero's built-in clipboard utility (preferred in Zotero environment)
+    const clipboardService = Zotero.Utilities.Internal?.copyTextToClipboard;
+    if (typeof clipboardService === "function") {
+      clipboardService(text);
       return true;
     }
-    // Fallback for environments without Clipboard API (Zotero)
+
+    // Fallback: use Mozilla's clipboard helper service
+    const componentsAny = Components as any;
+    const clipboardHelper = componentsAny?.classes?.[
+      "@mozilla.org/widget/clipboardhelper;1"
+    ]?.getService(componentsAny?.interfaces?.nsIClipboardHelper);
+    if (clipboardHelper) {
+      clipboardHelper.copyString(text);
+      return true;
+    }
+
+    // Fallback: create a temporary textarea and use execCommand
+    const doc = Zotero.getMainWindow()?.document;
     if (doc) {
       const textarea = doc.createElement("textarea");
       textarea.value = text;
       textarea.style.position = "fixed";
-      textarea.style.top = "-9999px";
+      textarea.style.opacity = "0";
       textarea.style.left = "-9999px";
       doc.body.appendChild(textarea);
       textarea.focus();

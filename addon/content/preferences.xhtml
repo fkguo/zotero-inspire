@@ -5,55 +5,55 @@
 <vbox id="zotero-prefpane-__addonRef__" style="padding: 8px;">
   <html:style>
     .zinspire-pref-section {
-      margin-bottom: 16px;
-      padding: 12px 16px;
-      background: var(--material-background, #f8fafc);
-      border: 1px solid var(--fill-tertiary, #e2e8f0);
-      border-radius: 8px;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: var(--material-background, #f8fafc);
+    border: 1px solid var(--fill-tertiary, #e2e8f0);
+    border-radius: 8px;
     }
     .zinspire-pref-section:last-of-type {
-      margin-bottom: 8px;
+    margin-bottom: 8px;
     }
     .zinspire-pref-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--fill-primary, #1e293b);
-      margin: 0 0 10px 0;
-      padding-bottom: 6px;
-      border-bottom: 1px solid var(--fill-quinary, #e2e8f0);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fill-primary, #1e293b);
+    margin: 0 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--fill-quinary, #e2e8f0);
     }
     .zinspire-pref-desc {
-      font-size: 11px;
-      color: var(--fill-secondary, #64748b);
-      margin-top: 4px;
-      margin-left: 20px;
+    font-size: 11px;
+    color: var(--fill-secondary, #64748b);
+    margin-top: 4px;
+    margin-left: 20px;
     }
     .zinspire-pref-row {
-      margin-bottom: 8px;
+    margin-bottom: 8px;
     }
     .zinspire-pref-row:last-child {
-      margin-bottom: 0;
+    margin-bottom: 0;
     }
     .zinspire-pref-input {
-      padding: 4px 8px;
-      border: 1px solid var(--fill-tertiary, #cbd5e1);
-      border-radius: 4px;
-      background: var(--material-background, white);
+    padding: 4px 8px;
+    border: 1px solid var(--fill-tertiary, #cbd5e1);
+    border-radius: 4px;
+    background: var(--material-background, white);
     }
     .zinspire-pref-footer {
-      font-size: 11px;
-      color: var(--fill-secondary, #94a3b8);
-      text-align: center;
-      padding: 8px;
-      border-top: 1px solid var(--fill-quinary, #e2e8f0);
-      margin-top: 8px;
+    font-size: 11px;
+    color: var(--fill-secondary, #94a3b8);
+    text-align: center;
+    padding: 8px;
+    border-top: 1px solid var(--fill-quinary, #e2e8f0);
+    margin-top: 8px;
     }
     .zinspire-pref-hbox {
-      display: flex;
-      gap: 16px;
+    display: flex;
+    gap: 16px;
     }
     .zinspire-pref-hbox-item {
-      flex: 1;
+    flex: 1;
     }
   </html:style>
 
@@ -114,6 +114,21 @@
       <checkbox id="zotero-prefpane-__addonRef__-chart_enable" preference="__prefsPrefix__.chart_enable"
         data-l10n-id="pref-chart-enable" />
       <html:p class="zinspire-pref-desc" data-l10n-id="pref-chart-enable-desc"></html:p>
+      <vbox style="margin-left: 20px; margin-top: 6px;">
+        <checkbox id="zotero-prefpane-__addonRef__-chart_default_collapsed"
+          preference="__prefsPrefix__.chart_default_collapsed" data-l10n-id="pref-chart-default-collapsed" />
+      </vbox>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 12px;">
+      <hbox align="center">
+        <button id="zotero-prefpane-__addonRef__-clear_history" data-l10n-id="pref-search-history-clear"
+          oncommand="Zotero.__addonInstance__.hooks.onPrefsEvent('clearHistory', { window });" />
+        <label style="width: 20px;" />
+        <label data-l10n-id="pref-search-history-days-label" />
+        <html:input type="number" id="zotero-prefpane-__addonRef__-search_history_days"
+          preference="__prefsPrefix__.search_history_days" min="1" max="365"
+          class="zinspire-pref-input" style="width: 60px; margin-left: 8px;" />
+      </hbox>
     </vbox>
   </vbox>
 

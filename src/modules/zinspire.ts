@@ -1,9 +1,6 @@
 import { config } from "../../package.json";
 import { cleanMathTitle } from "../utils/mathTitle";
-import {
-  getJournalAbbreviations,
-  getJournalFullNames,
-} from "../utils/journalAbbreviations";
+import { getJournalAbbreviations } from "../utils/journalAbbreviations";
 import { getLocaleID, getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
@@ -21,393 +18,128 @@ import {
   applyAbstractTooltipStyle,
   applyBibTeXButtonStyle,
 } from "./pickerUI";
-import { LRUCache } from "./inspire";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// API Constants
+// Import from inspire/ submodules (avoid code duplication)
 // ─────────────────────────────────────────────────────────────────────────────
-const INSPIRE_API_BASE = "https://inspirehep.net/api";
-const INSPIRE_LITERATURE_URL = "https://inspirehep.net/literature";
-const ARXIV_ABS_URL = "https://arxiv.org/abs";
-const DOI_ORG_URL = "https://doi.org";
-const CROSSREF_API_URL = "https://api.crossref.org/works";
+import {
+  // Constants
+  INSPIRE_API_BASE,
+  INSPIRE_LITERATURE_URL,
+  ARXIV_ABS_URL,
+  DOI_ORG_URL,
+  CROSSREF_API_URL,
+  CITED_BY_PAGE_SIZE,
+  CITED_BY_MAX_PAGES,
+  CITED_BY_MAX_RESULTS,
+  CITED_BY_PARALLEL_BATCH_SIZE,
+  RENDER_PAGE_SIZE,
+  NAVIGATION_STACK_LIMIT,
+  LARGE_COLLABORATION_THRESHOLD,
+  REFERENCE_SORT_OPTIONS,
+  INSPIRE_SORT_OPTIONS,
+  DEFAULT_REFERENCE_SORT,
+  DEFAULT_CITED_BY_SORT,
+  isReferenceSortOption,
+  isInspireSortOption,
+  SEARCH_HISTORY_MAX_ENTRIES,
+  SEARCH_HISTORY_PREF_KEY,
+  SEARCH_HISTORY_DAYS_PREF_KEY,
+  SEARCH_HISTORY_DAYS_DEFAULT,
+  AUTHOR_IDS_EXTRACT_LIMIT,
+  // Types
+  type ReferenceSortOption,
+  type InspireSortOption,
+  type InspireViewMode,
+  type AuthorSearchInfo,
+  type InspireReferenceEntry,
+  type InspireArxivDetails,
+  type ScrollSnapshot,
+  type ScrollState,
+  type NavigationSnapshot,
+  type EntryCitedSource,
+  type ChartBin,
+  type SearchHistoryItem,
+  type jsobject,
+  // Text utilities
+  normalizeSearchText,
+  buildVariantSet,
+  buildSearchIndexText,
+  buildFilterTokenVariants,
+  parseFilterTokens,
+  // Classes and utilities
+  LRUCache,
+  ZInsUtils,
+  ZInsMenu,
+  ReaderTabHelper,
+  // Rate limiter
+  inspireFetch,
+  getRateLimiterStatus,
+  onRateLimiterStatusChange,
+  type RateLimiterStatus,
+  // Formatters
+  getCachedStrings,
+  formatAuthors,
+  formatAuthorName,
+  buildInitials,
+  buildDisplayText,
+  extractJournalName,
+  buildEntrySearchText,
+  splitPublicationInfo,
+  getPublicationNoteLabel,
+  formatPublicationInfo,
+  buildPublicationSummary,
+  normalizeArxivID,
+  normalizeArxivCategories,
+  formatArxivDetails,
+  formatArxivTag,
+  convertFullNameToSearchQuery,
+  // API utilities
+  deriveRecidFromItem,
+  extractRecidFromRecordRef,
+  extractRecidFromUrls,
+  extractRecidFromUrl,
+  buildReferenceUrl,
+  buildFallbackUrl,
+  buildFallbackUrlFromMetadata,
+  extractArxivFromReference,
+  extractArxivFromMetadata,
+  findItemByRecid,
+  copyToClipboard,
+  // Author utilities
+  extractAuthorNamesFromReference,
+  extractAuthorNamesLimited,
+  isValidBAI,
+  extractAuthorSearchInfos,
+  // Metadata service
+  getInspireMeta,
+  fetchRecidFromInspire,
+  fetchInspireMetaByRecid,
+  fetchInspireAbstract,
+  fetchBibTeX,
+  buildMetaFromMetadata,
+  getCrossrefCount,
+  // Item updater
+  ZInspire,
+  setInspireMeta,
+  setCrossRefCitations,
+  saveItemWithPendingInspireNote,
+} from "./inspire";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Text Normalization Constants
-// ─────────────────────────────────────────────────────────────────────────────
-const SPECIAL_CHAR_REPLACEMENTS: Record<string, string> = {
-  "ß": "ss",
-  "æ": "ae",
-  "œ": "oe",
-  "ø": "o",
-  "đ": "d",
-  "ð": "d",
-  "þ": "th",
-  "ł": "l",
-};
-const SPECIAL_CHAR_REGEX = /[ßæœøđðþł]/g;
-const GERMAN_UMLAUT_REPLACEMENTS: Record<string, string> = {
-  "ä": "ae",
-  "ö": "oe",
-  "ü": "ue",
-};
-const GERMAN_UMLAUT_REGEX = /[äöü]/g;
-const COMBINING_MARKS_REGEX = /[\u0300-\u036f]/g;
-
-const normalizeSearchText = (value: string): string => {
-  if (!value) {
-    return "";
-  }
-  const lower = value.toLowerCase();
-  const replaced = lower.replace(
-    SPECIAL_CHAR_REGEX,
-    (char) => SPECIAL_CHAR_REPLACEMENTS[char] ?? char,
-  );
-  return replaced.normalize("NFD").replace(COMBINING_MARKS_REGEX, "");
-};
-
-const buildVariantSet = (value: string): string[] => {
-  if (!value) {
-    return [];
-  }
-  const normalized = normalizeSearchText(value);
-  const umlautExpanded = normalizeSearchText(
-    value
-      .toLowerCase()
-      .replace(
-        GERMAN_UMLAUT_REGEX,
-        (char) => GERMAN_UMLAUT_REPLACEMENTS[char] ?? char,
-      ),
-  );
-  const variants = [normalized, umlautExpanded].filter(
-    (token): token is string => Boolean(token),
-  );
-  return Array.from(new Set(variants));
-};
-
-const buildSearchIndexText = (value: string): string =>
-  buildVariantSet(value).join(" ");
-
-const SEARCH_COLLAPSE_REGEX = /[.\s]+/g;
-
-const buildFilterTokenVariants = (
-  value: string,
-  options?: { ignoreSpaceDot?: boolean },
-): string[] => {
-  const variants = buildVariantSet(value);
-  const journalFullNames = getJournalFullNames(value);
-  if (journalFullNames.length) {
-    for (const fullName of journalFullNames) {
-      variants.push(...buildVariantSet(fullName));
-    }
-  }
-  let uniqueVariants = Array.from(new Set(variants));
-  if (!options?.ignoreSpaceDot) {
-    return uniqueVariants;
-  }
-  const collapsed = uniqueVariants
-    .map((token) => token.replace(SEARCH_COLLAPSE_REGEX, ""))
-    .filter((token): token is string => Boolean(token));
-  if (!collapsed.length) {
-    return uniqueVariants;
-  }
-  uniqueVariants = Array.from(new Set([...uniqueVariants, ...collapsed]));
-  return uniqueVariants;
-};
-
-const isFilterWhitespace = (char: string): boolean =>
-  char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
-
-type ParsedFilterToken = { text: string; quoted: boolean };
-
-const parseFilterTokens = (value: string): ParsedFilterToken[] => {
-  if (!value) {
-    return [];
-  }
-  const tokens: ParsedFilterToken[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  const pushToken = (quoted: boolean) => {
-    if (!current) {
-      return;
-    }
-    const trimmed = current.trim();
-    if (trimmed) {
-      tokens.push({ text: trimmed, quoted });
-    }
-    current = "";
-  };
-
-  for (let i = 0; i < value.length; i++) {
-    const char = value[i];
-    if (char === '"') {
-      pushToken(inQuotes);
-      inQuotes = !inQuotes;
-      continue;
-    }
-    if (!inQuotes && isFilterWhitespace(char)) {
-      pushToken(false);
-      continue;
-    }
-    current += char;
-  }
-
-  pushToken(inQuotes);
-  return tokens;
-};
-export class ZInsUtils {
-  static registerPrefs() {
-    const prefOptions = {
-      pluginID: config.addonID,
-      src: rootURI + "content/preferences.xhtml",
-      image: `chrome://${config.addonRef}/content/icons/inspire@2x.png`,
-      defaultXUL: true,
-    };
-    Zotero.PreferencePanes.register(prefOptions);
-  }
-
-  static registerNotifier() {
-    const callback = {
-      notify: async (
-        event: string,
-        type: string,
-        ids: number[] | string[],
-        extraData: { [key: string]: any },
-      ) => {
-        if (!addon?.data.alive) {
-          this.unregisterNotifier(notifierID);
-          return;
-        }
-        addon.hooks.onNotify(event, type, ids, extraData);
-      },
-    };
-
-    const notifierID = Zotero.Notifier.registerObserver(callback, ["item"]);
-
-    Zotero.Plugins.addObserver({
-      shutdown: ({ id }) => {
-        if (id === addon.data.config.addonID)
-          this.unregisterNotifier(notifierID);
-      },
-    });
-  }
-
-  private static unregisterNotifier(notifierID: string) {
-    Zotero.Notifier.unregisterObserver(notifierID);
-  }
-}
-
-export class ZInsMenu {
-  static registerRightClickMenuPopup() {
-    ztoolkit.Menu.register("item", {
-      tag: "menuseparator",
-    });
-    const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
-    ztoolkit.Menu.register(
-      "item",
-      {
-        tag: "menu",
-        label: getString("menupopup-label"),
-        children: [
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel0"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("full");
-            },
-          },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel1"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("noabstract");
-            },
-          },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel2"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("citations");
-            },
-          },
-          {
-            tag: "menuseparator",
-          },
-          {
-            tag: "menuitem",
-            label: "Cancel Update",
-            commandListener: (_ev) => {
-              _globalThis.inspire.cancelUpdate();
-            },
-          },
-        ],
-        icon: menuIcon,
-      },
-      // "before",
-      // document.querySelector(
-      //   "#zotero-itemmenu-addontemplate-test",
-      // ) as XUL.MenuItem,
-    );
-    // ztoolkit.Menu.register("menuFile", {
-    //   tag: "menuseparator",
-    // });
-  }
-
-  static registerRightClickCollectionMenu() {
-    ztoolkit.Menu.register("collection", {
-      tag: "menuseparator",
-    });
-    const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
-    ztoolkit.Menu.register(
-      "collection",
-      {
-        tag: "menu",
-        label: getString("menupopup-label"),
-        children: [
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel0"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("full");
-            },
-          },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel1"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("noabstract");
-            },
-          },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel2"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("citations");
-            },
-          },
-          {
-            tag: "menuseparator",
-          },
-          {
-            tag: "menuitem",
-            label: "Cancel Update",
-            commandListener: (_ev) => {
-              _globalThis.inspire.cancelUpdate();
-            },
-          },
-        ],
-        icon: menuIcon,
-      },
-      // "before",
-      // document.querySelector(
-      //   "#zotero-itemmenu-addontemplate-test",
-      // ) as XUL.MenuItem,
-    );
-  }
-}
+// Re-export for external use
+export { ZInsUtils, ZInsMenu, ZInspire };
 
 /**
- * Author search information for precise INSPIRE author search.
- * Priority: BAI > recid > fullName
- * BAI (INSPIRE Author ID) like "Feng.Kun.Guo.1" is the most reliable.
+ * Clear all search history.
  */
-interface AuthorSearchInfo {
-  fullName: string;
-  bai?: string;    // INSPIRE BAI (e.g., "Feng.Kun.Guo.1") - most precise
-  recid?: string;  // INSPIRE author recid (backup)
+function clearAllHistoryPrefs(): void {
+  try {
+    Zotero.Prefs.set(`${config.addonRef}.${SEARCH_HISTORY_PREF_KEY}`, "[]", true);
+    Zotero.debug(`[${config.addonName}] Search history cleared`);
+  } catch (err) {
+    Zotero.debug(`[${config.addonName}] Failed to clear history: ${err}`);
+  }
 }
-
-interface InspireReferenceEntry {
-  id: string;
-  label?: string;
-  recid?: string;
-  inspireUrl?: string;
-  fallbackUrl?: string;
-  title: string;
-  summary?: string;
-  year: string;
-  authors: string[];
-  totalAuthors?: number;  // Total author count (for detecting "et al." need)
-  authorSearchInfos?: AuthorSearchInfo[];  // Author info for precise search
-  authorText: string;
-  displayText: string;
-  searchText: string;
-  localItemID?: number;
-  isRelated?: boolean;
-  citationCount?: number;
-  publicationInfo?: any;
-  publicationInfoErrata?: Array<{ info: any; label: string }>;
-  arxivDetails?: InspireArxivDetails | string | null;
-  abstract?: string;
-  abstractLoading?: boolean;
-}
-
-interface InspireArxivDetails {
-  id?: string;
-  categories?: string[];
-}
-
-interface ScrollSnapshot {
-  element: Element;
-  top: number;
-  left: number;
-}
-
-interface ScrollState {
-  scrollTop: number;
-  scrollLeft: number;
-  scrollSnapshots: ScrollSnapshot[];
-  activeElement: Element | null;
-}
-
-interface NavigationSnapshot {
-  itemID: number;
-  recid?: string;
-  scrollState: ScrollState;
-  tabType: "library" | "reader";
-  readerTabID?: string;
-}
-
-interface EntryCitedSource {
-  recid?: string;
-  authorQuery?: string; // Author search query (deprecated, for cache key only)
-  authorSearchInfo?: AuthorSearchInfo; // Full author info for precise search
-  label: string;
-}
-
-interface ChartBin {
-  label: string;
-  count: number;
-  range?: [number, number]; // For citation bins: [min, max]
-  years?: number[]; // For year bins: [year] or [start, end, ...]
-  key: string; // Unique key for selection
-}
-
-type InspireViewMode = "references" | "citedBy" | "entryCited";
-const REFERENCE_SORT_OPTIONS = ["default", "yearDesc", "citationDesc"] as const;
-type ReferenceSortOption = (typeof REFERENCE_SORT_OPTIONS)[number];
-const INSPIRE_SORT_OPTIONS = ["mostrecent", "mostcited"] as const;
-type InspireSortOption = (typeof INSPIRE_SORT_OPTIONS)[number];
-const DEFAULT_REFERENCE_SORT: ReferenceSortOption = "default";
-const DEFAULT_CITED_BY_SORT: InspireSortOption = "mostrecent";
-// Page sizing: use consistent page size to avoid pagination offset bugs
-// INSPIRE API calculates offset as (page-1) * size, so different sizes cause gaps
-const CITED_BY_PAGE_SIZE = 250; // Consistent page size for all pages
-const CITED_BY_MAX_PAGES = 40;  // Max pages to fetch (40 * 250 = 10000)
-const CITED_BY_MAX_RESULTS = 10000;
-const CITED_BY_PARALLEL_BATCH_SIZE = 3; // Number of pages to fetch in parallel
-// Frontend pagination: render entries in chunks for better performance
-const RENDER_PAGE_SIZE = 100; // Number of entries to render per "page"
-const NAVIGATION_STACK_LIMIT = 20;
-// Large collaboration threshold: if authors > this, only show first author + et al.
-const LARGE_COLLABORATION_THRESHOLD = 20;
-
-const isReferenceSortOption = (value: string): value is ReferenceSortOption =>
-  (REFERENCE_SORT_OPTIONS as readonly string[]).includes(value);
-
-const isInspireSortOption = (value: string): value is InspireSortOption =>
-  (INSPIRE_SORT_OPTIONS as readonly string[]).includes(value);
 
 export class ZInspireReferencePane {
   private static controllers = new WeakMap<
@@ -433,18 +165,20 @@ export class ZInspireReferencePane {
       paneID: 'zoteroinspire-references',
       pluginID: config.addonID,
       header: {
-        l10nID: 'zoteroinspire-references-panel-header',
+        l10nID: "pane-item-references-header",
         icon: paneIcon,
         darkIcon: paneIcon,
       },
       sidenav: {
-        l10nID: 'zoteroinspire-referencesSection',
+        l10nID: "pane-item-references-sidenav",
         icon: paneIcon2x,
         darkIcon: paneIcon2x,
       },
       onInit: (args) => {
+        Zotero.debug(`[${config.addonName}] ZInspireReferencePane.onInit called`);
         try {
           args.setEnabled(true);
+          Zotero.debug(`[${config.addonName}] ZInspireReferencePane.onInit: pane enabled`);
         } catch (err) {
           Zotero.debug(
             `[${config.addonName}] Failed to enable INSPIRE pane: ${err}`,
@@ -452,6 +186,7 @@ export class ZInspireReferencePane {
         }
         const controller = new InspireReferencePanelController(args.body);
         this.controllers.set(args.body, controller);
+        Zotero.debug(`[${config.addonName}] ZInspireReferencePane.onInit: controller created, instances count=${InspireReferencePanelController.getInstances().size}`);
       },
       onRender: () => {
         // Required by Zotero 7 ItemPaneSection API even if we render manually
@@ -483,25 +218,577 @@ export class ZInspireReferencePane {
           type: "custom",
           icon: `chrome://${config.addonRef}/content/icons/clipboard.svg`,
           l10nID: "zoteroinspire-copy-all-button",
-          onClick: ({ body }: { body: HTMLDivElement }) => {
+          onClick: ({ body, event }: { body: HTMLDivElement; event: Event }) => {
             try {
               const controller = this.controllers.get(body);
-              controller?.copyAllBibTeX();
+              controller?.showExportMenu(event);
             } catch (e) {
               Zotero.debug(
-                `[${config.addonName}] Copy BibTeX button error: ${e}`,
+                `[${config.addonName}] Export button error: ${e}`,
               );
             }
           },
         },
       ],
     });
+
+    // Register search bar listener for inspire: prefix
+    this.registerSearchBarListener();
   }
 
   static unregisterPanel() {
     if (typeof this.registrationKey === "string") {
       Zotero.ItemPaneManager.unregisterSection(this.registrationKey);
       this.registrationKey = undefined;
+    }
+    this.unregisterSearchBarListener();
+  }
+
+  /**
+   * Clear all history (both search and filter) from preferences and active instances.
+   * Called from preferences panel.
+   */
+  static clearAllHistory() {
+    clearAllHistoryPrefs();
+    // Also clear history in all active controller instances
+    for (const controller of InspireReferencePanelController.getInstances()) {
+      controller.clearAllHistoryInInstance();
+    }
+  }
+
+  // Search bar listener for `inspire:` prefix detection
+  private static searchBarListener?: (event: Event) => void;
+  private static searchBarElement?: HTMLInputElement;
+
+  /**
+   * Register a listener on Zotero's main search bar to detect `inspire:` prefix.
+   * This enables searching INSPIRE directly from the main search bar.
+   */
+  static registerSearchBarListener() {
+    const mainWindow = Zotero.getMainWindow?.();
+    if (!mainWindow) return;
+
+    // Try to find the main search bar
+    const searchBar = mainWindow.document.getElementById("zotero-tb-search-textbox") as HTMLInputElement | null;
+    if (!searchBar) {
+      Zotero.debug(`[${config.addonName}] Search bar not found, skipping listener registration`);
+      return;
+    }
+
+    this.searchBarElement = searchBar;
+
+    // Disable native browser autocomplete and Zotero's history dropdown
+    // Try multiple attributes to ensure history dropdown is disabled
+    searchBar.setAttribute("autocomplete", "off");
+    searchBar.setAttribute("disableautocomplete", "true");
+    searchBar.setAttribute("enablehistory", "false");
+    searchBar.setAttribute("disablehistory", "true");
+    // Remove autocompletesearch attribute if present
+    searchBar.removeAttribute("autocompletesearch");
+
+    // Also try to disable on the parent quicksearch component
+    const quickSearchComponent = mainWindow.document.getElementById("zotero-tb-search");
+    if (quickSearchComponent) {
+      quickSearchComponent.setAttribute("disableautocomplete", "true");
+      quickSearchComponent.setAttribute("enablehistory", "false");
+      // Try to access and clear any history property
+      if ((quickSearchComponent as any).disableAutoComplete) {
+        (quickSearchComponent as any).disableAutoComplete = true;
+      }
+      if ((quickSearchComponent as any).enableHistory !== undefined) {
+        (quickSearchComponent as any).enableHistory = false;
+      }
+    }
+    // Store original attributes for cleanup
+    (this as any)._searchBarOriginalAutocomplete = searchBar.getAttribute("autocomplete");
+
+    // Create inline hint overlay for showing search history suggestions
+    // The hint appears as gray text after user's input, completed with Tab/→
+    let hintOverlay: HTMLSpanElement | null = null;
+    let currentHint = "";
+
+    const createHintOverlay = () => {
+      if (hintOverlay) return;
+
+      // Create a container for positioning
+      const searchBarParent = searchBar.parentElement;
+      if (!searchBarParent) return;
+
+      // Make parent position relative if not already
+      const parentStyle = mainWindow.getComputedStyle(searchBarParent);
+      if (parentStyle && parentStyle.position === "static") {
+        searchBarParent.style.position = "relative";
+      }
+
+      hintOverlay = mainWindow.document.createElement("span");
+      hintOverlay.className = "zinspire-search-hint";
+      hintOverlay.style.cssText = `
+        position: absolute;
+        left: 0;
+        top: 0;
+        pointer-events: none;
+        color: #999;
+        font-family: inherit;
+        font-size: inherit;
+        white-space: nowrap;
+        overflow: hidden;
+        opacity: 0.6;
+        z-index: 1;
+        display: none;
+      `;
+
+      // Insert hint overlay after search bar
+      searchBar.insertAdjacentElement("afterend", hintOverlay);
+      (this as any)._searchBarHintOverlay = hintOverlay;
+    };
+
+    const updateHintOverlay = (userInput: string) => {
+      if (!hintOverlay) createHintOverlay();
+      if (!hintOverlay) return;
+
+      // Only show hint when user has typed "inspire:" prefix
+      if (!userInput.toLowerCase().startsWith("inspire:")) {
+        hintOverlay.style.display = "none";
+        currentHint = "";
+        return;
+      }
+
+      // Get search history from preferences
+      const historyJson = Zotero.Prefs.get(`${config.prefsPrefix}.${SEARCH_HISTORY_PREF_KEY}`, true) as string | undefined;
+      let history: string[] = [];
+      try {
+        if (historyJson) {
+          history = JSON.parse(historyJson);
+        }
+      } catch {
+        history = [];
+      }
+
+      if (history.length === 0) {
+        hintOverlay.style.display = "none";
+        currentHint = "";
+        return;
+      }
+
+      // Get the query part after "inspire:"
+      const queryPart = userInput.slice(8); // After "inspire:"
+
+      // Find a matching history item that starts with user's query
+      let matchingHint = "";
+      for (const historyQuery of history) {
+        if (historyQuery.toLowerCase().startsWith(queryPart.toLowerCase()) && historyQuery.length > queryPart.length) {
+          matchingHint = historyQuery;
+          break;
+        }
+      }
+
+      if (!matchingHint) {
+        // If no prefix match, show the most recent search as suggestion (only if user just typed "inspire:")
+        if (queryPart.length === 0 || queryPart.trim() === "") {
+          matchingHint = history[0];
+        } else {
+          hintOverlay.style.display = "none";
+          currentHint = "";
+          return;
+        }
+      }
+
+      // Calculate the hint text (the part user hasn't typed yet)
+      const hintSuffix = matchingHint.slice(queryPart.length);
+      currentHint = matchingHint;
+
+      // Position hint overlay to appear after user's text
+      // We need to calculate text width to position correctly
+      const inputStyle = mainWindow.getComputedStyle(searchBar);
+      if (!inputStyle) {
+        hintOverlay.style.display = "none";
+        return;
+      }
+      const paddingLeft = parseFloat(inputStyle.paddingLeft) || 0;
+
+      // Create a temporary span to measure text width
+      const measureSpan = mainWindow.document.createElement("span");
+      measureSpan.style.cssText = `
+        position: absolute;
+        visibility: hidden;
+        font-family: ${inputStyle.fontFamily || "inherit"};
+        font-size: ${inputStyle.fontSize || "inherit"};
+        font-weight: ${inputStyle.fontWeight || "normal"};
+        letter-spacing: ${inputStyle.letterSpacing || "normal"};
+        white-space: pre;
+      `;
+      measureSpan.textContent = userInput;
+      mainWindow.document.body.appendChild(measureSpan);
+      const textWidth = measureSpan.offsetWidth;
+      mainWindow.document.body.removeChild(measureSpan);
+
+      // Update hint overlay
+      hintOverlay.textContent = hintSuffix;
+      hintOverlay.style.left = `${paddingLeft + textWidth}px`;
+      hintOverlay.style.top = `${parseFloat(inputStyle.paddingTop) || 0}px`;
+      hintOverlay.style.lineHeight = inputStyle.lineHeight || "normal";
+      hintOverlay.style.display = "inline";
+    };
+
+    const acceptHint = () => {
+      if (currentHint && searchBar.value.toLowerCase().startsWith("inspire:")) {
+        searchBar.value = "inspire:" + currentHint;
+        if (hintOverlay) {
+          hintOverlay.style.display = "none";
+        }
+        currentHint = "";
+        return true;
+      }
+      return false;
+    };
+
+    // Persistent storage for selected items - saved BEFORE Zotero's filter clears them
+    let savedItemIds: number[] = [];
+
+    // Helper to save current selection
+    const saveCurrentSelection = () => {
+      const pane = Zotero.getActiveZoteroPane?.();
+      if (pane) {
+        const selected = pane.getSelectedItems?.();
+        if (selected && selected.length > 0) {
+          savedItemIds = selected.map((item: any) => item.id);
+          Zotero.debug(`[${config.addonName}] Saved selection: ${savedItemIds.length} items`);
+        }
+      }
+    };
+
+    // Focus listener: save selection when user focuses on search bar
+    // Also check if we should hide autocomplete based on current value
+    const focusListener = () => {
+      saveCurrentSelection();
+      // Check if current value starts with inspire: and hide autocomplete if so
+      const isInspireSearch = searchBar.value.toLowerCase().startsWith("inspire:");
+      if (isInspireSearch) {
+        setAutocompleteHidden(true);
+      }
+    };
+
+    // Blur listener: restore autocomplete when search bar loses focus
+    const blurListener = () => {
+      // Restore autocomplete popup visibility when not focused
+      // But only if not in the middle of accepting a hint
+      setTimeout(() => {
+        if (mainWindow.document.activeElement !== searchBar) {
+          setAutocompleteHidden(false);
+        }
+      }, 100);
+    };
+
+    // Helper to toggle autocomplete popup hiding via CSS class
+    const setAutocompleteHidden = (hidden: boolean) => {
+      const quickSearchComponent = mainWindow.document.getElementById("zotero-tb-search");
+      if (quickSearchComponent) {
+        if (hidden) {
+          quickSearchComponent.classList.add("zinspire-hide-autocomplete");
+          searchBar.classList.add("zinspire-hide-autocomplete");
+        } else {
+          quickSearchComponent.classList.remove("zinspire-hide-autocomplete");
+          searchBar.classList.remove("zinspire-hide-autocomplete");
+        }
+      }
+
+      // Also try programmatic methods to close popup
+      if (hidden && quickSearchComponent) {
+        // Try various methods to close popup
+        if ((quickSearchComponent as any).popup) {
+          try {
+            (quickSearchComponent as any).popup.hidePopup?.();
+          } catch {
+            // Ignore errors
+          }
+        }
+        if (typeof (quickSearchComponent as any).closePopup === "function") {
+          try {
+            (quickSearchComponent as any).closePopup();
+          } catch {
+            // Ignore errors
+          }
+        }
+        // Try to find and hide any autocomplete popup in the document
+        const autocompletePopup = mainWindow.document.querySelector(".autocomplete-richlistbox, .autocomplete-popup, [type='autocomplete-richlistbox']");
+        if (autocompletePopup) {
+          try {
+            (autocompletePopup as any).hidePopup?.();
+            (autocompletePopup as HTMLElement).style.display = "none";
+          } catch {
+            // Ignore errors
+          }
+        }
+      }
+    };
+
+    // Input listener: keep updating selection while user types (before Zotero filters)
+    // Also update inline hint and toggle autocomplete popup visibility for inspire: searches
+    const inputListener = (event: Event) => {
+      const target = event.target as HTMLInputElement;
+      const value = target.value;
+
+      // Update inline hint
+      updateHintOverlay(value);
+
+      // When typing inspire: prefix, hide autocomplete popup; otherwise show it
+      const isInspireSearch = value.toLowerCase().startsWith("inspire:");
+      setAutocompleteHidden(isInspireSearch);
+
+      // Only save if we're starting to type inspire:
+      // At the very beginning of typing, selection might still be intact
+      if (value.toLowerCase().startsWith("inspire") && value.length <= 8) {
+        saveCurrentSelection();
+      }
+    };
+
+    // Keydown listener: handle Enter key with inspire: prefix, and Tab/ArrowRight for hint completion
+    // Use capture phase to intercept before Zotero's handlers
+    this.searchBarListener = (event: Event) => {
+      const target = event.target as HTMLInputElement;
+      const value = target.value;
+      const keyEvent = event as KeyboardEvent;
+
+      // Handle Tab or ArrowRight to accept inline hint
+      if ((keyEvent.key === "Tab" || keyEvent.key === "ArrowRight") && currentHint) {
+        // Only accept hint if cursor is at the end of input
+        if (target.selectionStart === value.length) {
+          if (acceptHint()) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+        }
+      }
+
+      // Hide hint on Escape
+      if (keyEvent.key === "Escape" && hintOverlay) {
+        hintOverlay.style.display = "none";
+        currentHint = "";
+      }
+
+      // Only handle Enter key for search
+      if (keyEvent.key !== "Enter") {
+        return;
+      }
+
+      // Check for inspire: prefix
+      if (value.toLowerCase().startsWith("inspire:")) {
+        const query = value.slice(8).trim();
+
+        if (query) {
+          Zotero.debug(`[${config.addonName}] INSPIRE search triggered from search bar: query="${query}"`);
+
+          // CRITICAL: Stop event propagation BEFORE any other processing
+          // - preventDefault: Prevent default browser/form behavior
+          // - stopPropagation: Prevent event from reaching parent elements
+          // - stopImmediatePropagation: Prevent other listeners on SAME element (Zotero's handlers)
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+
+          // Save the query before any DOM manipulation
+          const searchQuery = query;
+
+          // CRITICAL FIX: Transfer focus FIRST, before clearing search bar
+          // This prevents Zotero's quicksearch from processing the Enter key
+          const pane = Zotero.getActiveZoteroPane?.();
+          const mainWindow = Zotero.getMainWindow?.();
+
+          // Try to focus on items view to take focus away from search bar
+          // This must happen BEFORE clearing the search bar
+          if (pane) {
+            try {
+              // Focus on the items tree/view - this removes focus from search bar
+              const itemsView = (pane as any).itemsView;
+              if (itemsView && typeof itemsView.focus === "function") {
+                itemsView.focus();
+                Zotero.debug(`[${config.addonName}] Focus transferred to itemsView`);
+              } else {
+                // Fallback: try to focus on the item tree element directly
+                const itemTree = mainWindow?.document?.getElementById("zotero-items-tree");
+                if (itemTree) {
+                  itemTree.focus();
+                  Zotero.debug(`[${config.addonName}] Focus transferred to zotero-items-tree`);
+                }
+              }
+            } catch (e) {
+              Zotero.debug(`[${config.addonName}] Failed to transfer focus: ${e}`);
+            }
+          }
+
+          // Now clear the search bar (after focus is transferred)
+          target.value = "";
+
+          // Hide inline hint overlay
+          if (hintOverlay) {
+            hintOverlay.style.display = "none";
+            currentHint = "";
+          }
+
+          // Blur the search bar to close any autocomplete/history dropdown
+          target.blur();
+
+          // Also clear the quicksearch component wrapper if it exists
+          const quickSearch = mainWindow?.document?.getElementById("zotero-tb-search");
+          if (quickSearch) {
+            // Clear value on the search component
+            if (typeof (quickSearch as any).value !== "undefined") {
+              (quickSearch as any).value = "";
+            }
+            // Also try clearing via the searchTextbox property if available
+            if ((quickSearch as any).searchTextbox) {
+              (quickSearch as any).searchTextbox.value = "";
+            }
+          }
+
+          // Restore item selection using saved IDs
+          if (savedItemIds.length > 0 && pane) {
+            Zotero.debug(`[${config.addonName}] Restoring ${savedItemIds.length} saved items`);
+            // Restore selection after a brief delay to let Zotero process the clear
+            setTimeout(() => {
+              pane.selectItems?.(savedItemIds);
+              Zotero.debug(`[${config.addonName}] Item selection restored`);
+            }, 50);
+          }
+
+          // Trigger INSPIRE search
+          this.triggerSearch(searchQuery);
+        }
+      }
+    };
+
+    // Flag to track if we're handling an inspire search (shared between keydown and keypress)
+    let handlingInspireSearch = false;
+
+    // Keypress listener: also block keypress events if we're handling inspire search
+    // Some components (like XUL quicksearch) may listen on keypress instead of keydown
+    const keypressListener = (event: Event) => {
+      const keyEvent = event as KeyboardEvent;
+      if (keyEvent.key === "Enter" && handlingInspireSearch) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        Zotero.debug(`[${config.addonName}] Blocked keypress Enter event during INSPIRE search`);
+        // Reset the flag after blocking
+        handlingInspireSearch = false;
+      }
+    };
+
+    // Wrap the keydown listener to set the flag
+    const originalKeydownListener = this.searchBarListener;
+    this.searchBarListener = (event: Event) => {
+      const target = event.target as HTMLInputElement;
+      const value = target.value;
+      const keyEvent = event as KeyboardEvent;
+
+      // Set flag before calling original handler if this is an inspire: search
+      if (keyEvent.key === "Enter" && value.toLowerCase().startsWith("inspire:")) {
+        handlingInspireSearch = true;
+      }
+
+      // Call original handler
+      originalKeydownListener(event);
+    };
+
+    searchBar.addEventListener("focus", focusListener);
+    searchBar.addEventListener("blur", blurListener);
+    searchBar.addEventListener("input", inputListener);
+    // CRITICAL: Use capture phase (third param true) to intercept before Zotero's bubble-phase handlers
+    searchBar.addEventListener("keydown", this.searchBarListener, { capture: true });
+    // Also listen on keypress in capture phase to block any XUL/command handlers
+    searchBar.addEventListener("keypress", keypressListener, { capture: true });
+
+    // Store references for cleanup
+    (this as any)._searchBarFocusListener = focusListener;
+    (this as any)._searchBarBlurListener = blurListener;
+    (this as any)._searchBarInputListener = inputListener;
+    (this as any)._searchBarKeypressListener = keypressListener;
+
+    Zotero.debug(`[${config.addonName}] Search bar listeners registered on element: ${searchBar.id}`);
+  }
+
+  /**
+   * Unregister the search bar listener.
+   */
+  static unregisterSearchBarListener() {
+    if (this.searchBarElement) {
+      if (this.searchBarListener) {
+        // Must use same capture option as addEventListener to properly remove
+        this.searchBarElement.removeEventListener("keydown", this.searchBarListener, { capture: true });
+      }
+      const focusListener = (this as any)._searchBarFocusListener;
+      if (focusListener) {
+        this.searchBarElement.removeEventListener("focus", focusListener);
+        (this as any)._searchBarFocusListener = undefined;
+      }
+      const blurListener = (this as any)._searchBarBlurListener;
+      if (blurListener) {
+        this.searchBarElement.removeEventListener("blur", blurListener);
+        (this as any)._searchBarBlurListener = undefined;
+      }
+      const inputListener = (this as any)._searchBarInputListener;
+      if (inputListener) {
+        this.searchBarElement.removeEventListener("input", inputListener);
+        (this as any)._searchBarInputListener = undefined;
+      }
+      const keypressListener = (this as any)._searchBarKeypressListener;
+      if (keypressListener) {
+        this.searchBarElement.removeEventListener("keypress", keypressListener, { capture: true });
+        (this as any)._searchBarKeypressListener = undefined;
+      }
+      // Remove inline hint overlay
+      const hintOverlay = (this as any)._searchBarHintOverlay;
+      if (hintOverlay && hintOverlay.parentElement) {
+        hintOverlay.parentElement.removeChild(hintOverlay);
+        (this as any)._searchBarHintOverlay = undefined;
+      }
+      // Restore original autocomplete attributes
+      this.searchBarElement.removeAttribute("autocomplete");
+      this.searchBarElement.removeAttribute("disableautocomplete");
+      this.searchBarElement.removeAttribute("enablehistory");
+      this.searchBarElement.removeAttribute("disablehistory");
+      // Also restore on quicksearch component
+      const mainWindow = Zotero.getMainWindow?.();
+      if (mainWindow) {
+        const quickSearchComponent = mainWindow.document.getElementById("zotero-tb-search");
+        if (quickSearchComponent) {
+          quickSearchComponent.removeAttribute("disableautocomplete");
+          quickSearchComponent.removeAttribute("enablehistory");
+        }
+      }
+      this.searchBarListener = undefined;
+      this.searchBarElement = undefined;
+      Zotero.debug(`[${config.addonName}] Search bar listeners unregistered`);
+    }
+  }
+
+  /**
+   * Trigger an INSPIRE search in the first active panel controller.
+   */
+  private static triggerSearch(query: string) {
+    Zotero.debug(`[${config.addonName}] triggerSearch called with query="${query}"`);
+    // Use the InspireReferencePanelController's static instances set
+    const instances = InspireReferencePanelController.getInstances();
+    Zotero.debug(`[${config.addonName}] Active panel controller instances: ${instances.size}`);
+    if (instances.size === 0) {
+      Zotero.debug(`[${config.addonName}] No active panel controllers available for search`);
+      // Show a notification to the user
+      const progressWindow = new ProgressWindowHelper("INSPIRE Search");
+      progressWindow.createLine({
+        text: "Please open the INSPIRE panel first",
+        type: "error",
+      });
+      progressWindow.show();
+      progressWindow.startCloseTimer(3000);
+      return;
+    }
+    for (const controller of instances) {
+      Zotero.debug(`[${config.addonName}] Calling executeInspireSearch on controller`);
+      controller.executeInspireSearch(query).catch((err: Error) => {
+        Zotero.debug(`[${config.addonName}] Failed to trigger search: ${err}`);
+      });
+      break; // Only need to trigger on one controller
     }
   }
 }
@@ -511,6 +798,13 @@ class InspireReferencePanelController {
   private static navigationStack: NavigationSnapshot[] = [];
   private static forwardStack: NavigationSnapshot[] = [];
   private static isNavigatingHistory = false;
+
+  /**
+   * Get all active controller instances for external access.
+   */
+  static getInstances(): Set<InspireReferencePanelController> {
+    return this.instances;
+  }
   private static sharedPendingScrollRestore?: ScrollState & { itemID: number };
 
   private body: HTMLDivElement;
@@ -570,7 +864,8 @@ class InspireReferencePanelController {
   // Chart state for citation/year statistics visualization
   private chartContainer?: HTMLDivElement;
   private chartSvgWrapper?: HTMLDivElement;
-  private chartCollapsed = true;  // Default to collapsed
+  private chartSubHeader?: HTMLDivElement;
+  private chartCollapsed: boolean;  // Initialized from preferences in constructor
   private chartViewMode: "year" | "citation" = "year";
   private chartSelectedBins: Set<string> = new Set();
   private lastChartClickedKey?: string;
@@ -579,6 +874,12 @@ class InspireReferencePanelController {
   private chartResizeObserver?: ResizeObserver;
   private chartResizeFrame?: { cancel: (id: number) => void; id: number };
   private lastChartWidth?: number;
+
+  // Track whether the chart needs a refresh (e.g., after we displayed an empty state)
+  private chartNeedsRefresh = true;
+  private lastRenderedEntries: InspireReferenceEntry[] = [];
+  private chartStatsTopLine?: HTMLSpanElement;
+  private chartStatsBottomLine?: HTMLSpanElement;
   // Filter input debounce timer
   private filterDebounceTimer?: ReturnType<typeof setTimeout>;
   private readonly filterDebounceDelay = 150; // ms
@@ -587,11 +888,37 @@ class InspireReferencePanelController {
   // Row element pool for recycling (reduces DOM creation and GC pressure)
   private rowPool: HTMLDivElement[] = [];
   private readonly maxRowPoolSize = 150;
+  // Rate limiter status display
+  private rateLimiterStatusEl?: HTMLSpanElement;
+  private rateLimiterUnsubscribe?: () => void;
+
+  // Search mode state
+  private searchCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  private searchSort: InspireSortOption = "mostrecent";
+  private currentSearchQuery?: string;  // Current active search query
+  private searchHistory: SearchHistoryItem[] = [];  // Recent search queries
+  private searchInputContainer?: HTMLDivElement;  // Search input UI container
+  private searchInput?: HTMLInputElement;  // Search query input field
+  private searchHistoryDropdown?: HTMLDivElement;  // Search history dropdown
+
+  // Author count filter for chart
+  private authorFilterEnabled = false;  // Filter for papers with <= 10 authors
+  private excludeSelfCitations = false; // Use citation counts excluding self citations in chart
+
+  // Event delegation handlers (PERF-14: single listener instead of per-row)
+  private boundHandleListClick?: (e: MouseEvent) => void;
+  private boundHandleListMouseOver?: (e: MouseEvent) => void;
+  private boundHandleListMouseOut?: (e: MouseEvent) => void;
+  private boundHandleListMouseMove?: (e: MouseEvent) => void;
 
   constructor(body: HTMLDivElement) {
+    Zotero.debug(`[${config.addonName}] InspireReferencePanelController constructor called`);
     this.body = body;
     this.body.classList.add("zinspire-ref-panel");
     this.enableTextSelection();
+
+    // Initialize chart collapsed state from preferences
+    this.chartCollapsed = getPref("chart_default_collapsed") !== false;
 
     const toolbar = ztoolkit.UI.appendElement(
       {
@@ -622,7 +949,9 @@ class InspireReferencePanelController {
       references: this.createTabButton(tabs, "references"),
       citedBy: this.createTabButton(tabs, "citedBy"),
       entryCited: this.createTabButton(tabs, "entryCited"),
+      search: this.createTabButton(tabs, "search"),
     };
+    // Search tab is always visible - users can search directly from panel
     this.sortSelect = ztoolkit.UI.appendElement(
       {
         tag: "select",
@@ -726,7 +1055,8 @@ class InspireReferencePanelController {
                 clearTimeout(this.filterDebounceTimer);
               }
               this.filterDebounceTimer = setTimeout(() => {
-                this.renderReferenceList();
+                this.renderChart();           // Update chart to reflect filtered data
+                this.renderReferenceList();   // Update list with filtered entries
               }, this.filterDebounceDelay);
             },
           },
@@ -734,6 +1064,30 @@ class InspireReferencePanelController {
       },
       toolbar,
     ) as HTMLInputElement;
+
+    // Rate limiter status indicator
+    this.rateLimiterStatusEl = ztoolkit.UI.appendElement(
+      {
+        tag: "span",
+        classList: ["zinspire-ref-panel__rate-status"],
+        attributes: {
+          title: getString("references-panel-rate-limit-tooltip"),
+        },
+      },
+      toolbar,
+    ) as HTMLSpanElement;
+    this.rateLimiterStatusEl.hidden = true;
+    this.rateLimiterUnsubscribe = onRateLimiterStatusChange((status) => {
+      this.updateRateLimiterStatus(status);
+    });
+
+    // Create search input container (hidden by default, shown in search mode)
+    Zotero.debug(`[${config.addonName}] InspireReferencePanelController: creating search input container`);
+    this.createSearchInputContainer(toolbar);
+
+    // Load search history from preferences
+    this.loadSearchHistory();
+    Zotero.debug(`[${config.addonName}] InspireReferencePanelController: loaded search history, count=${this.searchHistory.length}`);
 
     // Create chart container (between toolbar and list)
     const chartContainer = this.createChartContainer();
@@ -748,10 +1102,16 @@ class InspireReferencePanelController {
       this.body,
     ) as HTMLDivElement;
 
+    // Setup event delegation on listEl (PERF-14: reduces listeners from 10000+ to 4)
+    this.setupEventDelegation();
+
+    this.allEntries = [];
+    this.renderChartImmediate();
     this.renderMessage(getString("references-panel-status-empty"));
     this.registerNotifier();
     InspireReferencePanelController.instances.add(this);
     InspireReferencePanelController.syncBackButtonStates();
+    Zotero.debug(`[${config.addonName}] InspireReferencePanelController constructor completed, instances count=${InspireReferencePanelController.instances.size}`);
   }
 
   private enableTextSelection() {
@@ -766,6 +1126,177 @@ class InspireReferencePanelController {
     while (current) {
       applySelectable(current);
       current = current.parentElement;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Event Delegation (PERF-14)
+  // Single listeners on listEl instead of per-row listeners.
+  // Reduces listener count from 10000+ to 4 for long lists.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Find entry by ID from allEntries array.
+   * Used by event delegation to map row elements back to entry data.
+   */
+  private findEntryById(id: string): InspireReferenceEntry | undefined {
+    return this.allEntries.find((e) => e.id === id);
+  }
+
+  /**
+   * Setup event delegation on listEl.
+   * Handles click, mouseover, mouseout, mousemove for all row elements.
+   */
+  private setupEventDelegation() {
+    // Click handler for all interactive elements
+    this.boundHandleListClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const row = target.closest(".zinspire-ref-entry") as HTMLElement | null;
+      if (!row) return;
+
+      const entryId = row.dataset.entryId;
+      const entry = entryId ? this.findEntryById(entryId) : null;
+      if (!entry) return;
+
+      // Marker click (add/show item)
+      if (target.closest(".zinspire-ref-entry__dot")) {
+        event.preventDefault();
+        const marker = target.closest(".zinspire-ref-entry__dot") as HTMLElement;
+        this.handleMarkerClick(entry, marker).catch(() => void 0);
+        return;
+      }
+
+      // Link button click (link/unlink reference)
+      if (target.closest(".zinspire-ref-entry__link")) {
+        event.preventDefault();
+        const linkButton = target.closest(".zinspire-ref-entry__link") as HTMLElement;
+        this.handleLinkAction(entry, linkButton).catch((err) => {
+          if ((err as any)?.name !== "AbortError") {
+            Zotero.debug(`[${config.addonName}] Unable to link reference: ${err}`);
+          }
+        });
+        return;
+      }
+
+      // Title link click (open URL)
+      if (target.closest(".zinspire-ref-entry__title-link")) {
+        event.preventDefault();
+        this.handleTitleClick(entry);
+        return;
+      }
+
+      // Stats button click (show citing papers)
+      if (target.closest(".zinspire-ref-entry__stats-button")) {
+        event.preventDefault();
+        this.showEntryCitedTab(entry).catch(() => void 0);
+        return;
+      }
+
+      // BibTeX button click (copy BibTeX)
+      if (target.closest(".zinspire-ref-entry__bibtex")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const bibtexButton = target.closest(".zinspire-ref-entry__bibtex") as HTMLButtonElement;
+        if (!bibtexButton.disabled) {
+          this.handleBibTeXCopy(entry, bibtexButton).catch(() => void 0);
+        }
+        return;
+      }
+
+      // Author link click (show author papers)
+      if (target.closest(".zinspire-ref-entry__author-link")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const authorLink = target.closest(".zinspire-ref-entry__author-link") as HTMLElement;
+        const authorIndex = parseInt(authorLink.dataset.authorIndex ?? "-1", 10);
+        if (authorIndex >= 0 && entry.authorSearchInfos?.[authorIndex]) {
+          this.showAuthorPapersTab(entry.authorSearchInfos[authorIndex]).catch(() => void 0);
+        } else if (authorIndex >= 0 && entry.authors[authorIndex]) {
+          // Fallback: use author name directly
+          this.showAuthorPapersTab({ fullName: entry.authors[authorIndex] }).catch(() => void 0);
+        }
+        return;
+      }
+    };
+
+    // Mouseover handler for tooltip and hover effects
+    this.boundHandleListMouseOver = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const row = target.closest(".zinspire-ref-entry") as HTMLElement | null;
+      if (!row) return;
+
+      const entryId = row.dataset.entryId;
+      const entry = entryId ? this.findEntryById(entryId) : null;
+
+      // Title link hover - show abstract tooltip
+      const titleLink = target.closest(".zinspire-ref-entry__title-link");
+      if (titleLink && entry) {
+        this.scheduleAbstractTooltip(entry, event);
+        return;
+      }
+
+      // BibTeX button hover
+      const bibtexButton = target.closest(".zinspire-ref-entry__bibtex") as HTMLButtonElement | null;
+      if (bibtexButton && !bibtexButton.disabled) {
+        bibtexButton.style.opacity = "1";
+        return;
+      }
+    };
+
+    // Mouseout handler for tooltip and hover effects
+    this.boundHandleListMouseOut = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+
+      // Title link mouseout - hide tooltip
+      const titleLink = target.closest(".zinspire-ref-entry__title-link");
+      if (titleLink) {
+        this.handleTitleMouseLeave(event);
+        return;
+      }
+
+      // BibTeX button mouseout
+      const bibtexButton = target.closest(".zinspire-ref-entry__bibtex") as HTMLButtonElement | null;
+      if (bibtexButton && !bibtexButton.disabled) {
+        bibtexButton.style.opacity = "0.7";
+        return;
+      }
+    };
+
+    // Mousemove handler for tooltip position
+    this.boundHandleListMouseMove = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const titleLink = target.closest(".zinspire-ref-entry__title-link");
+      if (titleLink) {
+        this.updateTooltipPosition(event);
+      }
+    };
+
+    // Attach listeners to listEl
+    this.listEl.addEventListener("click", this.boundHandleListClick);
+    this.listEl.addEventListener("mouseover", this.boundHandleListMouseOver);
+    this.listEl.addEventListener("mouseout", this.boundHandleListMouseOut);
+    this.listEl.addEventListener("mousemove", this.boundHandleListMouseMove);
+  }
+
+  /**
+   * Clean up event delegation listeners.
+   */
+  private cleanupEventDelegation() {
+    if (this.boundHandleListClick) {
+      this.listEl.removeEventListener("click", this.boundHandleListClick);
+      this.boundHandleListClick = undefined;
+    }
+    if (this.boundHandleListMouseOver) {
+      this.listEl.removeEventListener("mouseover", this.boundHandleListMouseOver);
+      this.boundHandleListMouseOver = undefined;
+    }
+    if (this.boundHandleListMouseOut) {
+      this.listEl.removeEventListener("mouseout", this.boundHandleListMouseOut);
+      this.boundHandleListMouseOut = undefined;
+    }
+    if (this.boundHandleListMouseMove) {
+      this.listEl.removeEventListener("mousemove", this.boundHandleListMouseMove);
+      this.boundHandleListMouseMove = undefined;
     }
   }
 
@@ -846,8 +1377,7 @@ class InspireReferencePanelController {
       max-height: auto;
     `;
 
-    // Header with title and all buttons in one row:
-    // [Title] [Collapse] [By Year] [By Citations] [Clear Filter]
+    // Header with view buttons
     const header = doc.createElement("div");
     header.className = "zinspire-chart-header";
     header.style.cssText = `
@@ -861,23 +1391,31 @@ class InspireReferencePanelController {
       flex-shrink: 0;
     `;
 
-    // Title (leftmost)
-    const title = doc.createElement("span");
-    title.className = "zinspire-chart-title";
-    title.textContent = "Statistics";
-    title.style.cssText = `
-      font-weight: 600;
-      color: #374151;
-      font-size: 12px;
-      margin-right: 4px;
+    // Sub-header for filters (second row)
+    const subHeader = doc.createElement("div");
+    subHeader.className = "zinspire-chart-subheader";
+    subHeader.style.cssText = `
+      display: ${this.chartCollapsed ? "none" : "flex"};
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 6px;
+      font-size: 11px;
+      margin-bottom: 4px;
+      margin-left: 0;
+      padding-left: 0;
+      width: 100%;
+      flex-shrink: 0;
     `;
+    this.chartSubHeader = subHeader;
 
-    // Collapse button - start collapsed (▶)
+    // Collapse button - initial state based on chartCollapsed preference
     const collapseBtn = doc.createElement("button");
     collapseBtn.className = "zinspire-chart-collapse-btn";
     collapseBtn.type = "button";
-    collapseBtn.textContent = "▶";
-    collapseBtn.title = getString("references-panel-chart-expand");
+    collapseBtn.textContent = this.chartCollapsed ? "▶" : "▼";
+    collapseBtn.title = getString(this.chartCollapsed ? "references-panel-chart-expand" : "references-panel-chart-collapse");
     collapseBtn.style.cssText = `
       border: 1px solid #cbd5e1;
       background: #f1f5f9;
@@ -954,25 +1492,141 @@ class InspireReferencePanelController {
       this.renderReferenceList();
     };
 
-    header.appendChild(title);
+    // Author filter button (filter papers with <= 10 authors, i.e., non-large-collaboration)
+    const authorFilterBtn = doc.createElement("button");
+    authorFilterBtn.className = "zinspire-chart-author-filter-btn";
+    authorFilterBtn.type = "button";
+    authorFilterBtn.textContent = getString("references-panel-chart-author-filter");
+    authorFilterBtn.title = getString("references-panel-chart-author-filter-tooltip");
+    authorFilterBtn.style.cssText = `
+      border: none;
+      border-radius: 5px;
+      padding: 3px 10px;
+      background: #e2e8f0;
+      font-size: 11px;
+      cursor: pointer;
+      color: #475569;
+      flex-shrink: 0;
+      font-weight: 500;
+    `;
+    const updateAuthorFilterStyle = () => {
+      if (this.authorFilterEnabled) {
+        authorFilterBtn.style.background = "#475569";
+        authorFilterBtn.style.color = "white";
+      } else {
+        authorFilterBtn.style.background = "#e2e8f0";
+        authorFilterBtn.style.color = "#475569";
+      }
+    };
+    authorFilterBtn.onclick = () => {
+      this.authorFilterEnabled = !this.authorFilterEnabled;
+      updateAuthorFilterStyle();
+      this.renderChart();
+      this.renderReferenceList();
+    };
+    updateAuthorFilterStyle();
+
+    // Self-citation exclusion toggle
+    const selfCiteBtn = doc.createElement("button");
+    selfCiteBtn.className = "zinspire-chart-selfcite-filter-btn";
+    selfCiteBtn.type = "button";
+    selfCiteBtn.textContent = getString("references-panel-chart-selfcite-filter");
+    selfCiteBtn.title = getString("references-panel-chart-selfcite-filter-tooltip");
+    selfCiteBtn.style.cssText = `
+      border: none;
+      border-radius: 5px;
+      padding: 3px 10px;
+      background: #e2e8f0;
+      font-size: 11px;
+      cursor: pointer;
+      color: #475569;
+      flex-shrink: 0;
+      font-weight: 500;
+    `;
+    const updateSelfCiteStyle = () => {
+      if (this.excludeSelfCitations) {
+        selfCiteBtn.style.background = "#475569";
+        selfCiteBtn.style.color = "white";
+      } else {
+        selfCiteBtn.style.background = "#e2e8f0";
+        selfCiteBtn.style.color = "#475569";
+      }
+    };
+    selfCiteBtn.onclick = () => {
+      this.excludeSelfCitations = !this.excludeSelfCitations;
+      updateSelfCiteStyle();
+      // Re-apply sorting when in References mode with citationDesc sort
+      // since citation values depend on excludeSelfCitations flag
+      if (this.viewMode === "references" && this.referenceSort === "citationDesc") {
+        const cacheKey = this.currentRecid ?? "";
+        const cached = this.referencesCache.get(cacheKey);
+        if (cached) {
+          this.allEntries = this.getSortedReferences(cached);
+        }
+      }
+      this.renderChart();
+      this.renderReferenceList();
+    };
+    updateSelfCiteStyle();
+
+    // Spacer to push stats to the right
+    const spacer = doc.createElement("div");
+    spacer.style.cssText = `flex: 1;`;
+
+    // Stats display (two lines: header + subheader alignment)
+    const statsTopLine = doc.createElement("span");
+    statsTopLine.className = "zinspire-chart-stats zinspire-chart-stats-top";
+    statsTopLine.style.cssText = `
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 500;
+      text-align: left;
+      line-height: 1.3;
+    `;
+    const statsBottomLine = doc.createElement("span");
+    statsBottomLine.className = "zinspire-chart-stats zinspire-chart-stats-bottom";
+    statsBottomLine.style.cssText = `
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 500;
+      text-align: left;
+      line-height: 1.3;
+    `;
+
+    this.chartStatsTopLine = statsTopLine;
+    this.chartStatsBottomLine = statsBottomLine;
+
     header.appendChild(collapseBtn);
     header.appendChild(yearBtn);
     header.appendChild(citationBtn);
     header.appendChild(clearBtn);
+    header.appendChild(spacer);
+    header.appendChild(statsTopLine);
 
-    // SVG wrapper for the chart - start hidden (collapsed by default)
+    // Add filter buttons to subheader
+    subHeader.appendChild(authorFilterBtn);
+    subHeader.appendChild(selfCiteBtn);
+
+    // Add spacer before bottom stats to align with top line
+    const subHeaderSpacer = doc.createElement("div");
+    subHeaderSpacer.style.cssText = `flex: 1;`;
+    subHeader.appendChild(subHeaderSpacer);
+    subHeader.appendChild(statsBottomLine);
+
+    // SVG wrapper for the chart - initial visibility based on chartCollapsed preference
     const svgWrapper = doc.createElement("div");
     svgWrapper.className = "zinspire-chart-svg-wrapper";
     svgWrapper.style.cssText = `
       flex: 1;
       min-height: 0;
       overflow: hidden;
-      height: 110px;
-      display: none;
+      height: 130px;
+      display: ${this.chartCollapsed ? "none" : "block"};
     `;
     this.chartSvgWrapper = svgWrapper;
 
     container.appendChild(header);
+    container.appendChild(subHeader);
     container.appendChild(svgWrapper);
 
     this.chartContainer = container;
@@ -1046,18 +1700,33 @@ class InspireReferencePanelController {
       // Directly control visibility with JS (more reliable than CSS classes in Zotero)
       if (this.chartCollapsed) {
         this.chartSvgWrapper.style.display = "none";
+        // Clear chart data to avoid hidden filters affecting list rendering
+        this.chartSvgWrapper.textContent = "";
+        this.chartSelectedBins.clear();
+        this.cachedChartStats = undefined;
+        this.lastChartClickedKey = undefined;
+        this.chartNeedsRefresh = true;
+        this.clearChartStatsDisplay();
+        this.renderReferenceList({ preserveScroll: true });
+        this.updateChartClearButton();
+        if (this.chartSubHeader) {
+          this.chartSubHeader.style.display = "none";
+        }
         this.chartContainer.style.height = "auto";
         this.chartContainer.style.minHeight = "auto";
         this.chartContainer.style.maxHeight = "auto";
         this.chartContainer.style.padding = "6px 10px";
       } else {
         this.chartSvgWrapper.style.display = "block";
-        this.chartContainer.style.height = "150px";
-        this.chartContainer.style.minHeight = "150px";
-        this.chartContainer.style.maxHeight = "150px";
+        if (this.chartSubHeader) {
+          this.chartSubHeader.style.display = "flex";
+        }
+        this.chartContainer.style.height = "auto";
+        this.chartContainer.style.minHeight = "auto";
+        this.chartContainer.style.maxHeight = "auto";
         this.chartContainer.style.padding = "10px";
         // Render chart when expanding
-        this.renderChart();
+        this.renderChartImmediate();
       }
       const collapseBtn = this.chartContainer.querySelector(".zinspire-chart-collapse-btn");
       if (collapseBtn) {
@@ -1188,7 +1857,7 @@ class InspireReferencePanelController {
     ranges.forEach((r) => counts.set(r.key, 0));
 
     for (const entry of entries) {
-      const citationCount = entry.citationCount ?? 0;
+      const citationCount = this.getCitationValue(entry);
       for (const range of ranges) {
         if (citationCount >= range.min && citationCount <= range.max) {
           counts.set(range.key, (counts.get(range.key) || 0) + 1);
@@ -1203,6 +1872,26 @@ class InspireReferencePanelController {
       range: [r.min, r.max === Infinity ? Number.MAX_SAFE_INTEGER : r.max] as [number, number],
       key: r.key,
     }));
+  }
+
+  /**
+   * Get the citation value that should be used for chart calculations.
+   * When excludeSelfCitations is enabled and data is available, prefer the
+   * citationCountWithoutSelf field. Otherwise fall back to the standard citationCount.
+   */
+  private getCitationValue(entry: InspireReferenceEntry): number {
+    if (this.excludeSelfCitations) {
+      if (typeof entry.citationCountWithoutSelf === "number") {
+        return entry.citationCountWithoutSelf;
+      }
+    }
+    if (typeof entry.citationCount === "number") {
+      return entry.citationCount;
+    }
+    if (typeof entry.citationCountWithoutSelf === "number") {
+      return entry.citationCountWithoutSelf;
+    }
+    return 0;
   }
 
   private renderChartLoading() {
@@ -1223,9 +1912,21 @@ class InspireReferencePanelController {
     this.chartSvgWrapper.appendChild(loadingMsg);
   }
 
+  // Throttle interval for chart rendering during rapid data updates (ms)
+  private static readonly CHART_THROTTLE_INTERVAL = 300;
+  private lastChartRenderTime = 0;
+
+  /**
+   * Render chart with throttling (for rapid updates during progressive loading).
+   * Use renderChartImmediate() when you need guaranteed synchronous rendering.
+   */
   private renderChart() {
     // Early return for collapsed or missing container - no deferred scheduling needed
-    if (!this.chartSvgWrapper || this.chartCollapsed) return;
+    if (!this.chartSvgWrapper) return;
+    if (this.chartCollapsed) {
+      this.chartNeedsRefresh = true;
+      return;
+    }
 
     // Cancel any pending chart render to avoid duplicate work
     if (this.chartRenderTimer) {
@@ -1233,12 +1934,43 @@ class InspireReferencePanelController {
       this.chartRenderTimer = undefined;
     }
 
+    // Throttle chart rendering during rapid updates (e.g., progressive loading)
+    const now = performance.now();
+    const timeSinceLastRender = now - this.lastChartRenderTime;
+    const delay = timeSinceLastRender < InspireReferencePanelController.CHART_THROTTLE_INTERVAL
+      ? InspireReferencePanelController.CHART_THROTTLE_INTERVAL - timeSinceLastRender
+      : 0;
+
     // Defer chart rendering to allow main thread to handle UI updates first
     // This improves perceived performance during data loading
     this.chartRenderTimer = setTimeout(() => {
       this.chartRenderTimer = undefined;
+      this.lastChartRenderTime = performance.now();
       this.doRenderChart();
-    }, 0);
+    }, delay);
+  }
+
+  /**
+   * Render chart immediately without throttling.
+   * Use this when chart must be rendered synchronously (e.g., first data load, tab switch).
+   */
+  private renderChartImmediate() {
+    // Cancel any pending throttled render
+    if (this.chartRenderTimer) {
+      clearTimeout(this.chartRenderTimer);
+      this.chartRenderTimer = undefined;
+    }
+    if (!this.chartSvgWrapper) {
+      return;
+    }
+    if (this.chartCollapsed) {
+      // Mark for refresh so we re-render once the user expands the chart
+      this.chartNeedsRefresh = true;
+      return;
+    }
+    this.lastChartRenderTime = performance.now();
+    this.doRenderChart();
+    this.chartNeedsRefresh = false;
   }
 
   /**
@@ -1250,8 +1982,11 @@ class InspireReferencePanelController {
     // Clear previous content
     this.chartSvgWrapper.textContent = "";
 
-    // Get entries to analyze (use filtered entries if filter is active, else all)
-    const entries = this.allEntries;
+    // Get entries to analyze (apply author filter if enabled)
+    // Use allEntries as base, then apply authorFilterEnabled if active
+    const entries = this.authorFilterEnabled
+      ? this.allEntries.filter((entry) => this.matchesAuthorFilter(entry))
+      : this.allEntries;
     if (!entries.length) {
       const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
       noDataMsg.className = "zinspire-chart-no-data";
@@ -1285,11 +2020,21 @@ class InspireReferencePanelController {
     const dynamicMaxBars = Math.max(DEFAULT_MAX_BARS, Math.min(maxPossibleBars, 20)); // Cap at 20
 
     // Compute stats based on current view mode
-    const stats = this.chartViewMode === "year"
+    let stats = this.chartViewMode === "year"
       ? this.computeYearStats(entries, dynamicMaxBars)
       : this.computeCitationStats(entries);
 
+    // Fallback: If year mode returns no stats but we have entries, try citation mode
+    // This handles cases where references lack year information
+    if (!stats.length && this.chartViewMode === "year" && entries.length > 0) {
+      Zotero.debug(`[${config.addonName}] Chart: No year data for ${entries.length} entries, falling back to citation view`);
+      stats = this.computeCitationStats(entries);
+      // Note: Don't change chartViewMode - this is just a display fallback
+      // User can still switch views, and next render will try year mode first
+    }
+
     if (!stats.length) {
+      this.clearChartStatsDisplay();
       const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
       noDataMsg.className = "zinspire-chart-no-data";
       noDataMsg.textContent = getString("references-panel-chart-no-data");
@@ -1299,6 +2044,9 @@ class InspireReferencePanelController {
 
     // Cache stats
     this.cachedChartStats = { mode: this.chartViewMode, stats };
+
+    // Update stats display in header
+    this.updateChartStatsDisplay(entries);
 
     // Create SVG - use actual pixel dimensions, no viewBox scaling
     const SVG_NS = "http://www.w3.org/2000/svg";
@@ -1515,6 +2263,76 @@ class InspireReferencePanelController {
     }
   }
 
+  /**
+   * Update the stats display in chart header.
+   * - By Year mode: shows total paper count (single line)
+   * - By Citations mode: shows total citations on line 1, h-index and avg on line 2
+   */
+  private updateChartStatsDisplay(entries: InspireReferenceEntry[]) {
+    const topLine = this.chartStatsTopLine;
+    const bottomLine = this.chartStatsBottomLine;
+    if (!topLine) return;
+
+    topLine.textContent = "";
+    if (bottomLine) {
+      bottomLine.textContent = "";
+    }
+
+    if (this.chartViewMode === "year") {
+      // Show total paper count (single line)
+      const totalPapers = entries.length;
+      topLine.textContent = `${totalPapers.toLocaleString()} ${totalPapers === 1 ? "paper" : "papers"}`;
+      if (bottomLine) {
+        bottomLine.textContent = "";
+      }
+    } else {
+      // Show total citations, h-index, and average citations in two lines
+      const citations = entries.map((entry) => this.getCitationValue(entry));
+      const totalCitations = citations.reduce((sum, c) => sum + c, 0);
+      const hIndex = this.calculateHIndex(citations);
+      const avgCitations = entries.length > 0 ? totalCitations / entries.length : 0;
+
+      topLine.textContent = `${totalCitations.toLocaleString()} ${this.excludeSelfCitations ? "cit. (no self)" : "citations"}`;
+      if (bottomLine) {
+        bottomLine.textContent = `h=${hIndex} · avg ${avgCitations.toFixed(1)}`;
+      }
+    }
+  }
+
+  /**
+   * Calculate h-index from citation counts.
+   * h-index: the maximum h such that h papers have at least h citations each.
+   */
+  private calculateHIndex(citations: number[]): number {
+    if (citations.length === 0) return 0;
+
+    // Sort in descending order
+    const sorted = [...citations].sort((a, b) => b - a);
+
+    // Find h: largest index where sorted[i] >= i + 1
+    let h = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      if (sorted[i] >= i + 1) {
+        h = i + 1;
+      } else {
+        break;
+      }
+    }
+    return h;
+  }
+
+  /**
+   * Clear the stats display when no data is available.
+   */
+  private clearChartStatsDisplay() {
+    if (this.chartStatsTopLine) {
+      this.chartStatsTopLine.textContent = "";
+    }
+    if (this.chartStatsBottomLine) {
+      this.chartStatsBottomLine.textContent = "";
+    }
+  }
+
   private matchesChartFilter(entry: InspireReferenceEntry): boolean {
     if (!this.chartSelectedBins.size) return true;
 
@@ -1533,7 +2351,7 @@ class InspireReferencePanelController {
       });
     } else {
       // Citation mode
-      const citationCount = entry.citationCount ?? 0;
+      const citationCount = this.getCitationValue(entry);
 
       return Array.from(this.chartSelectedBins).some((binKey) => {
         switch (binKey) {
@@ -1558,6 +2376,18 @@ class InspireReferencePanelController {
     }
   }
 
+  /**
+   * Check if an entry matches the author count filter.
+   * Returns true if author filter is disabled or if entry has <= 10 authors.
+   * Uses totalAuthors field which comes from INSPIRE API's author_count.
+   */
+  private matchesAuthorFilter(entry: InspireReferenceEntry): boolean {
+    // Use totalAuthors which is the actual author count from INSPIRE API
+    // This is more reliable than authors.length which is limited for performance
+    const authorCount = entry.totalAuthors ?? entry.authors?.length ?? 0;
+    return authorCount > 0 && authorCount <= 10;
+  }
+
   destroy() {
     this.unregisterNotifier();
     this.cancelActiveRequest();
@@ -1567,6 +2397,8 @@ class InspireReferencePanelController {
     this.entryCitedCache.clear();
     this.metadataCache.clear();
     this.rowCache.clear();
+    // Clean up event delegation listeners (PERF-14)
+    this.cleanupEventDelegation();
     // Clear filter debounce timer
     if (this.filterDebounceTimer) {
       clearTimeout(this.filterDebounceTimer);
@@ -1597,6 +2429,11 @@ class InspireReferencePanelController {
     this.cachedChartStats = undefined;
     this.chartContainer = undefined;
     this.chartSvgWrapper = undefined;
+    // Clear rate limiter subscription
+    if (this.rateLimiterUnsubscribe) {
+      this.rateLimiterUnsubscribe();
+      this.rateLimiterUnsubscribe = undefined;
+    }
     InspireReferencePanelController.instances.delete(this);
     if (!InspireReferencePanelController.instances.size) {
       InspireReferencePanelController.navigationStack = [];
@@ -1607,6 +2444,24 @@ class InspireReferencePanelController {
     InspireReferencePanelController.syncBackButtonStates();
     this.entryCitedSource = undefined;
     this.updateTabSelection();
+  }
+
+  /**
+   * Update the rate limiter status indicator.
+   * Shows queued request count when rate limiting is active.
+   */
+  private updateRateLimiterStatus(status: RateLimiterStatus) {
+    if (!this.rateLimiterStatusEl) return;
+
+    if (status.isThrottling && status.queuedCount > 0) {
+      this.rateLimiterStatusEl.textContent = `⏳ ${status.queuedCount}`;
+      this.rateLimiterStatusEl.hidden = false;
+      this.rateLimiterStatusEl.title = getString("references-panel-rate-limit-queued", {
+        args: { count: status.queuedCount },
+      });
+    } else {
+      this.rateLimiterStatusEl.hidden = true;
+    }
   }
 
   private registerNotifier() {
@@ -1730,6 +2585,8 @@ class InspireReferencePanelController {
               Zotero.debug(
                 `[${config.addonName}] Failed to refresh INSPIRE data: ${err}`,
               );
+              this.allEntries = [];
+              this.renderChartImmediate();
               this.renderMessage(getString("references-panel-status-error"));
             }
           });
@@ -1744,6 +2601,8 @@ class InspireReferencePanelController {
             Zotero.debug(
               `[${config.addonName}] Failed to refresh entryCited data: ${err}`,
             );
+            this.allEntries = [];
+            this.renderChartImmediate();
             this.renderMessage(getString("references-panel-status-error"));
           }
         });
@@ -1782,7 +2641,7 @@ class InspireReferencePanelController {
         const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${recids.length}&format=bibtex`;
 
         try {
-          const response = await fetch(url);
+          const response = await inspireFetch(url);
           if (response.ok) {
             const bibtex = await response.text();
             if (bibtex?.trim()) {
@@ -1824,12 +2683,238 @@ class InspireReferencePanelController {
     setTimeout(() => progressWin.close(), 2000);
   }
 
+  /**
+   * Show export menu with format options (BibTeX, LaTeX US, LaTeX EU).
+   * User can choose to copy to clipboard or export to file.
+   */
+  showExportMenu(event: Event) {
+    const entriesWithRecid = this.allEntries.filter((e) => e.recid);
+    if (!entriesWithRecid.length) {
+      const strings = getCachedStrings();
+      new ztoolkit.ProgressWindow(config.addonName)
+        .createLine({ text: strings.noRecidEntries, type: "default" })
+        .show();
+      return;
+    }
+
+    const doc = this.body.ownerDocument;
+
+    // Remove existing popup if any
+    const existingPopup = doc.getElementById("zinspire-export-popup");
+    if (existingPopup) {
+      existingPopup.remove();
+    }
+
+    // Create popup menu
+    const popup = doc.createXULElement("menupopup") as XUL.MenuPopup;
+    popup.id = "zinspire-export-popup";
+
+    const formats = [
+      { id: "bibtex", label: "BibTeX (.bib)", ext: ".bib" },
+      { id: "latex-us", label: "LaTeX (US)", ext: ".tex" },
+      { id: "latex-eu", label: "LaTeX (EU)", ext: ".tex" },
+    ];
+
+    // Copy to clipboard section header
+    const copyHeader = doc.createXULElement("menuitem");
+    copyHeader.setAttribute("label", getString("references-panel-export-copy-header"));
+    copyHeader.setAttribute("disabled", "true");
+    popup.appendChild(copyHeader);
+
+    for (const format of formats) {
+      const item = doc.createXULElement("menuitem");
+      item.setAttribute("label", `  ${format.label}`);
+      item.addEventListener("command", () => {
+        this.exportEntries(format.id, "clipboard");
+      });
+      popup.appendChild(item);
+    }
+
+    // Separator
+    popup.appendChild(doc.createXULElement("menuseparator"));
+
+    // Export to file section header
+    const exportHeader = doc.createXULElement("menuitem");
+    exportHeader.setAttribute("label", getString("references-panel-export-file-header"));
+    exportHeader.setAttribute("disabled", "true");
+    popup.appendChild(exportHeader);
+
+    for (const format of formats) {
+      const item = doc.createXULElement("menuitem");
+      item.setAttribute("label", `  ${format.label}`);
+      item.addEventListener("command", () => {
+        this.exportEntries(format.id, "file", format.ext);
+      });
+      popup.appendChild(item);
+    }
+
+    // Add popup to document and show near the button
+    doc.documentElement.appendChild(popup);
+    const anchor = event.target as Element;
+    // openPopup(anchor, position, x, y, isContextMenu, attributesOverride, triggerEvent)
+    // position: "after_start" = below anchor, left-aligned
+    //   - "before_start/end" = above anchor
+    //   - "after_start/end" = below anchor  
+    //   - "start" = left-aligned, "end" = right-aligned
+    // x, y: offset from calculated position
+    // isContextMenu: false (not a context menu)
+    // attributesOverride: false (don't override popup attributes)
+    popup.openPopup(anchor, "after_end", 0, 0, false, false);
+  }
+
+  /**
+   * Export entries in specified format to clipboard or file.
+   * Supports: bibtex, latex-us, latex-eu
+   */
+  private async exportEntries(
+    format: string,
+    target: "clipboard" | "file",
+    fileExt: string = ".bib"
+  ) {
+    const entriesWithRecid = this.allEntries.filter((e) => e.recid);
+    const strings = getCachedStrings();
+
+    const BATCH_SIZE = 50;
+    const allContent: string[] = [];
+    let successCount = 0;
+    let failedBatches = 0;
+
+    const progressWin = new ztoolkit.ProgressWindow(config.addonName)
+      .createLine({ text: strings.bibtexFetching, type: "default" })
+      .show();
+
+    try {
+      for (let i = 0; i < entriesWithRecid.length; i += BATCH_SIZE) {
+        const batch = entriesWithRecid.slice(i, i + BATCH_SIZE);
+        const recids = batch.map((e) => e.recid!);
+        const query = recids.map((r) => `recid:${r}`).join(" OR ");
+        const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${recids.length}&format=${format}`;
+
+        try {
+          const response = await inspireFetch(url);
+          if (response.ok) {
+            const content = await response.text();
+            if (content?.trim()) {
+              allContent.push(content.trim());
+              // Count entries (BibTeX uses @type{, LaTeX uses \cite{ or direct entries)
+              const entryCount = format === "bibtex"
+                ? (content.match(/@\w+\{/g) || []).length
+                : recids.length;
+              successCount += entryCount;
+            } else {
+              failedBatches++;
+            }
+          } else {
+            failedBatches++;
+          }
+        } catch (e) {
+          Zotero.debug(`[${config.addonName}] Failed to fetch ${format} batch: ${e}`);
+          failedBatches++;
+        }
+      }
+
+      if (!allContent.length) {
+        progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
+        setTimeout(() => progressWin.close(), 2000);
+        return;
+      }
+
+      const fullContent = allContent.join("\n\n");
+      const formatLabel = format === "bibtex" ? "BibTeX" : format === "latex-us" ? "LaTeX(US)" : "LaTeX(EU)";
+
+      if (target === "clipboard") {
+        // Warn if content is very large (may exceed clipboard limits)
+        const contentSize = new Blob([fullContent]).size;
+        const CLIPBOARD_WARN_SIZE = 500 * 1024; // 500KB threshold
+
+        if (contentSize > CLIPBOARD_WARN_SIZE) {
+          // Content too large, suggest file export
+          progressWin.changeLine({
+            text: getString("references-panel-export-too-large", {
+              args: { size: Math.round(contentSize / 1024) },
+            }),
+            type: "fail",
+          });
+          setTimeout(() => progressWin.close(), 3000);
+          return;
+        }
+
+        const success = await copyToClipboard(fullContent);
+        if (success) {
+          progressWin.changeLine({
+            text: getString("references-panel-export-copied", {
+              args: { count: successCount, format: formatLabel },
+            }),
+            type: "success",
+          });
+        } else {
+          progressWin.changeLine({
+            text: getString("references-panel-export-clipboard-failed"),
+            type: "fail",
+          });
+        }
+      } else {
+        // Export to file
+        const filename = `references_${this.currentRecid || "export"}${fileExt}`;
+        const filePath = await this.promptSaveFile(filename, fileExt);
+        if (filePath) {
+          await Zotero.File.putContentsAsync(filePath, fullContent);
+          progressWin.changeLine({
+            text: getString("references-panel-export-saved", {
+              args: { count: successCount, format: formatLabel },
+            }),
+            type: "success",
+          });
+        } else {
+          progressWin.changeLine({
+            text: getString("references-panel-export-cancelled"),
+            type: "default",
+          });
+        }
+      }
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] Export error: ${e}`);
+      progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
+    }
+
+    setTimeout(() => progressWin.close(), 2000);
+  }
+
+  /**
+   * Prompt user to save file with FilePicker dialog.
+   */
+  private async promptSaveFile(defaultFilename: string, ext: string): Promise<string | null> {
+    const win = Zotero.getMainWindow();
+    const fp = new win.FilePicker();
+    fp.init(win, getString("references-panel-export-save-title"), fp.modeSave);
+
+    if (ext === ".bib") {
+      fp.appendFilter("BibTeX", "*.bib");
+    } else {
+      fp.appendFilter("LaTeX", "*.tex");
+    }
+    fp.appendFilters(fp.filterAll);
+    fp.defaultString = defaultFilename;
+
+    const result = await fp.show();
+    if (result === fp.returnOK || result === fp.returnReplace) {
+      return fp.file;
+    }
+    return null;
+  }
+
   async handleItemChange(
     args: _ZoteroTypes.ItemPaneManagerSection.SectionHookArgs,
   ) {
     try {
       if (args.tabType !== "library" && args.tabType !== "reader") {
-        this.renderMessage(getString("references-panel-reader-mode"));
+        // Don't override search mode display
+        if (this.viewMode !== "search") {
+          this.allEntries = [];
+          this.renderChartImmediate();
+          this.renderMessage(getString("references-panel-reader-mode"));
+          this.lastRenderedEntries = [];
+        }
         return;
       }
       this.currentTabType = args.tabType === "reader" ? "reader" : "library";
@@ -1841,7 +2926,13 @@ class InspireReferencePanelController {
       if (!item || !item.isRegularItem()) {
         this.currentItemID = undefined;
         this.currentRecid = undefined;
-        this.renderMessage(getString("references-panel-select-item"));
+        // In search mode, don't show "select item" message - keep search results visible
+        if (this.viewMode !== "search") {
+          this.allEntries = [];
+          this.renderChartImmediate();
+          this.renderMessage(getString("references-panel-select-item"));
+          this.lastRenderedEntries = [];
+        }
         this.updateSortSelector();
         return;
       }
@@ -1854,14 +2945,24 @@ class InspireReferencePanelController {
       }
 
       if (itemChanged) {
-        this.clearEntryCitedContext();
-        this.cancelActiveRequest();
-        this.allEntries = [];
-        this.totalApiCount = null; // Reset API count for new item
-        this.chartSelectedBins.clear(); // Clear chart selection
-        this.cachedChartStats = undefined; // Invalidate chart cache
-        this.renderChartLoading(); // Show loading state in chart
-        this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
+        // In search mode, don't clear entries - preserve search results
+        if (this.viewMode !== "search") {
+          this.clearEntryCitedContext();
+          this.cancelActiveRequest();
+          this.allEntries = [];
+          this.totalApiCount = null; // Reset API count for new item
+          this.chartSelectedBins.clear(); // Clear chart selection
+          this.cachedChartStats = undefined; // Invalidate chart cache
+          // Clear filter state for new item to avoid incorrect filtering
+          this.filterText = "";
+          if (this.filterInput) {
+            this.filterInput.value = "";
+          }
+          this.renderChartLoading(); // Show loading state in chart
+          this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
+        } else {
+          Zotero.debug(`[${config.addonName}] handleItemChange: in search mode, preserving search results`);
+        }
       } else {
         // Check if we need to restore scroll position when switching back to original item
         // Only restore if we are not loading new content (item didn't change)
@@ -1872,22 +2973,33 @@ class InspireReferencePanelController {
         deriveRecidFromItem(item) ?? (await fetchRecidFromInspire(item));
       if (!recid) {
         this.currentRecid = undefined;
+        this.allEntries = [];
+        this.renderChartImmediate();
         this.renderMessage(getString("references-panel-no-recid"));
+        this.lastRenderedEntries = [];
         this.updateSortSelector();
         return;
       }
       if (this.currentRecid !== recid) {
         this.currentRecid = recid;
         this.updateSortSelector();
-        await this.loadEntries(recid, this.viewMode).catch((err) => {
-          if ((err as any)?.name !== "AbortError") {
-            Zotero.debug(
-              `[${config.addonName}] Failed to load INSPIRE data: ${err}`,
-            );
-            this.renderMessage(getString("references-panel-status-error"));
-          }
-        });
-      } else {
+        // Don't load entries if in search mode - keep search results visible
+        if (this.viewMode !== "search") {
+          await this.loadEntries(recid, this.viewMode).catch((err) => {
+            if ((err as any)?.name !== "AbortError") {
+              Zotero.debug(
+                `[${config.addonName}] Failed to load INSPIRE data: ${err}`,
+              );
+              this.allEntries = [];
+              this.renderChartImmediate();
+              this.renderMessage(getString("references-panel-status-error"));
+            }
+          });
+        }
+      } else if (this.viewMode !== "search") {
+        // Recid unchanged but item changed (e.g., user switched away and back)
+        // Need to re-render both chart and list since renderChartLoading() was called
+        this.renderChartImmediate();
         this.renderReferenceList({ preserveScroll: true });
         // Restore scroll position after rendering if needed
         setTimeout(() => {
@@ -2091,51 +3203,12 @@ class InspireReferencePanelController {
   }
 
   private resetListScroll() {
-    const resetNode = (node: any) => {
-      if (!node) {
-        return;
-      }
-      if (typeof node.scrollTop === "number") {
-        node.scrollTop = 0;
-      }
-      if (typeof node.scrollLeft === "number") {
-        node.scrollLeft = 0;
-      }
-      if (typeof node.scrollTo === "function") {
-        try {
-          node.scrollTo(0, 0);
-        } catch (_err) {
-          // Ignore scroll failures
-        }
-      }
-    };
-    let current: Element | null = this.listEl;
-    while (current) {
-      resetNode(current);
-      if (current === this.body) {
-        break;
-      }
-      current = current.parentElement;
-    }
-    this.scrollSectionIntoView();
-  }
-
-  private scrollSectionIntoView() {
-    const sectionRoot =
-      (typeof (this.body as any).closest === "function"
-        ? (this.body.closest(".item-pane-section") as HTMLElement | null)
-        : null) ?? this.body;
-    if (!sectionRoot || typeof sectionRoot.scrollIntoView !== "function") {
-      return;
-    }
-    try {
-      sectionRoot.scrollIntoView({ block: "start", behavior: "auto" });
-    } catch (_err) {
-      try {
-        sectionRoot.scrollIntoView(true);
-      } catch (_err2) {
-        // Ignore scroll failures
-      }
+    // Only reset the list element's scroll position, NOT parent elements
+    // Resetting parent scroll or calling scrollIntoView causes the entire
+    // item pane to jump when switching tabs, which is a poor UX
+    if (this.listEl) {
+      this.listEl.scrollTop = 0;
+      this.listEl.scrollLeft = 0;
     }
   }
 
@@ -2411,7 +3484,7 @@ class InspireReferencePanelController {
         // Reset totalApiCount for cached data (allEntries.length is accurate)
         this.totalApiCount = null;
         this.chartSelectedBins.clear(); // Clear chart selection on data change
-        this.renderChart();
+        this.renderChart();  // Use deferred render (same as original implementation)
         this.renderReferenceList({ preserveScroll: !shouldReset });
         if (shouldReset) {
           this.resetListScroll();
@@ -2439,11 +3512,17 @@ class InspireReferencePanelController {
       // Reset total count for new load
       this.totalApiCount = null;
 
+      // Track previous entry count for incremental append
+      let previousEntryCount = 0;
+
       // Progressive rendering callback for cited-by and author papers
+      // Optimized to use incremental append instead of full re-render
       const onProgress = (currentEntries: InspireReferenceEntry[], total: number | null) => {
         if (this.pendingToken !== token || this.viewMode !== mode) {
           return;
         }
+        const prevCount = previousEntryCount;
+        previousEntryCount = currentEntries.length;
         this.allEntries = currentEntries;
 
         // Save API total count (may be larger than what we fetch due to limits)
@@ -2458,14 +3537,20 @@ class InspireReferencePanelController {
           this.setStatus(`Loading... ${loadedCount}${totalStr} records`);
         }
 
-        // Render first page immediately for faster perceived performance
-        // Also re-render when filtering to update filter results with new data
-        if (!hasRenderedFirstPage || this.filterText) {
-          this.renderReferenceList({ preserveScroll: hasRenderedFirstPage });
-          if (options.resetScroll && !hasRenderedFirstPage) {
+        // First page: full render for initial display
+        if (!hasRenderedFirstPage) {
+          this.renderChartImmediate();  // Render chart immediately on first page
+          this.renderReferenceList({ preserveScroll: false });
+          if (options.resetScroll) {
             this.resetListScroll();
           }
           hasRenderedFirstPage = true;
+        } else if (this.filterText || this.chartSelectedBins.size > 0) {
+          // If filtering is active, need full re-render to apply filter
+          this.renderReferenceList({ preserveScroll: true });
+        } else {
+          // Incremental append for subsequent batches (no filter active)
+          this.appendNewEntries(prevCount);
         }
       };
 
@@ -2474,6 +3559,7 @@ class InspireReferencePanelController {
         this.totalApiCount = null;
 
         // Custom progress handler for references that applies sorting
+        // Use same pattern as onProgress (cited-by) which works correctly
         const referencesOnProgress = (currentEntries: InspireReferenceEntry[], total: number) => {
           if (this.pendingToken !== token || this.viewMode !== mode) {
             return;
@@ -2486,13 +3572,17 @@ class InspireReferencePanelController {
             this.setStatus(`Loading... ${currentEntries.length} of ${total} references`);
           }
 
-          // Progressive render
-          if (!hasRenderedFirstPage || this.filterText) {
-            this.renderReferenceList({ preserveScroll: hasRenderedFirstPage });
-            if (options.resetScroll && !hasRenderedFirstPage) {
+          // First page: full render for initial display (same pattern as onProgress)
+          if (!hasRenderedFirstPage) {
+            this.renderChartImmediate();  // Render chart on first page
+            this.renderReferenceList({ preserveScroll: false });
+            if (options.resetScroll) {
               this.resetListScroll();
             }
             hasRenderedFirstPage = true;
+          } else if (this.filterText) {
+            // If filtering is active, need full re-render to apply filter
+            this.renderReferenceList({ preserveScroll: true });
           }
         };
 
@@ -2521,7 +3611,7 @@ class InspireReferencePanelController {
           mode === "references" ? this.getSortedReferences(entries) : entries;
         this.allEntries = entriesForDisplay;
         this.chartSelectedBins.clear(); // Clear chart selection on data change
-        this.renderChart();
+        this.renderChart();  // Use deferred render (same as original implementation)
         this.renderReferenceList();
         if (options.resetScroll && !hasRenderedFirstPage) {
           this.resetListScroll();
@@ -2581,7 +3671,7 @@ class InspireReferencePanelController {
     );
     // Pre-fetch cached strings once before processing all references
     const strings = getCachedStrings();
-    const response = await fetch(
+    const response = await inspireFetch(
       `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}?fields=metadata.references`,
       signal ? { signal } : undefined,
     ).catch(() => null);
@@ -2604,8 +3694,9 @@ class InspireReferencePanelController {
       entries.push(this.buildEntry(references[i], i, strings));
 
       // Report progress every batch for progressive rendering
+      // PERF-16: Pass array reference directly instead of cloning
       if (onProgress && (entries.length % BATCH_SIZE === 0 || i === totalCount - 1)) {
-        onProgress([...entries], totalCount);
+        onProgress(entries, totalCount);
       }
     }
 
@@ -2625,12 +3716,12 @@ class InspireReferencePanelController {
     const query = encodeURIComponent(`refersto:recid:${recid}`);
     const sortParam = sort ? `&sort=${sort}` : "";
     // Include authors.ids for BAI extraction (most reliable for author search)
-    const fieldsParam = "&fields=control_number,titles.title,authors.full_name,authors.ids,publication_info,earliest_date,dois,arxiv_eprints,citation_count";
+    const fieldsParam = "&fields=control_number,titles.title,authors.full_name,authors.ids,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
 
     // Helper to fetch a single page
     const fetchPage = async (pageNum: number, pageSize: number): Promise<any[]> => {
       const url = `${INSPIRE_API_BASE}/literature?q=${query}&size=${pageSize}&page=${pageNum}${sortParam}${fieldsParam}`;
-      const response = await fetch(url, signal ? { signal } : undefined).catch(() => null);
+      const response = await inspireFetch(url, signal ? { signal } : undefined).catch(() => null);
       if (!response || response.status === 404) {
         return [];
       }
@@ -2640,7 +3731,7 @@ class InspireReferencePanelController {
 
     // Step 1: Fetch first page to get total count and display initial results quickly
     const firstUrl = `${INSPIRE_API_BASE}/literature?q=${query}&size=${CITED_BY_PAGE_SIZE}&page=1${sortParam}${fieldsParam}`;
-    const firstResponse = await fetch(firstUrl, signal ? { signal } : undefined).catch(() => null);
+    const firstResponse = await inspireFetch(firstUrl, signal ? { signal } : undefined).catch(() => null);
     if (!firstResponse || firstResponse.status === 404) {
       throw new Error("Cited-by list not found");
     }
@@ -2735,12 +3826,12 @@ class InspireReferencePanelController {
     const query = encodeURIComponent(queryString);
     const sortParam = sort ? `&sort=${sort}` : "";
     // Include authors.ids for BAI extraction (most reliable for author search)
-    const fieldsParam = "&fields=control_number,titles.title,authors.full_name,authors.ids,publication_info,earliest_date,dois,arxiv_eprints,citation_count";
+    const fieldsParam = "&fields=control_number,titles.title,authors.full_name,authors.ids,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
 
     // Helper to fetch a single page
     const fetchPage = async (pageNum: number, pageSize: number): Promise<any[]> => {
       const url = `${INSPIRE_API_BASE}/literature?q=${query}&size=${pageSize}&page=${pageNum}${sortParam}${fieldsParam}`;
-      const response = await fetch(url, signal ? { signal } : undefined).catch(() => null);
+      const response = await inspireFetch(url, signal ? { signal } : undefined).catch(() => null);
       if (!response || response.status === 404) {
         return [];
       }
@@ -2750,7 +3841,7 @@ class InspireReferencePanelController {
 
     // Step 1: Fetch first page to get total count and display initial results quickly
     const firstUrl = `${INSPIRE_API_BASE}/literature?q=${query}&size=${CITED_BY_PAGE_SIZE}&page=1${sortParam}${fieldsParam}`;
-    const firstResponse = await fetch(firstUrl, signal ? { signal } : undefined).catch(() => null);
+    const firstResponse = await inspireFetch(firstUrl, signal ? { signal } : undefined).catch(() => null);
     if (!firstResponse || firstResponse.status === 404) {
       throw new Error("Author papers not found");
     }
@@ -3000,11 +4091,11 @@ class InspireReferencePanelController {
     if (signal?.aborted || !batchRecids.length) return;
 
     const query = batchRecids.map(r => `recid:${r}`).join(" OR ");
-    const fieldsParam = "&fields=control_number,citation_count,titles.title,authors.full_name,author_count,publication_info,earliest_date,arxiv_eprints";
+    const fieldsParam = "&fields=control_number,citation_count,citation_count_without_self_citations,titles.title,authors.full_name,author_count,publication_info,earliest_date,arxiv_eprints";
     const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batchRecids.length}${fieldsParam}`;
 
     try {
-      const response = await fetch(url, signal ? { signal } : undefined).catch(() => null);
+      const response = await inspireFetch(url, signal ? { signal } : undefined).catch(() => null);
       if (!response || response.status !== 200) return;
 
       const payload: any = await response.json();
@@ -3045,6 +4136,7 @@ class InspireReferencePanelController {
 
   /**
    * Update the citation count display for a single row.
+   * Uses getCitationValue() to respect excludeSelfCitations toggle.
    */
   private updateRowCitationCount(entry: InspireReferenceEntry) {
     const row = this.rowCache.get(entry.id);
@@ -3053,9 +4145,14 @@ class InspireReferencePanelController {
     const statsButton = row.querySelector(".zinspire-ref-entry__stats-button") as HTMLButtonElement | null;
     const statsDiv = row.querySelector(".zinspire-ref-entry__stats:not(.zinspire-ref-entry__stats-button)") as HTMLDivElement | null;
 
-    if (typeof entry.citationCount === "number") {
+    const displayCitationCount = this.getCitationValue(entry);
+    const hasCitationCount = displayCitationCount > 0 ||
+      typeof entry.citationCount === "number" ||
+      typeof entry.citationCountWithoutSelf === "number";
+
+    if (hasCitationCount) {
       const label = getString("references-panel-citation-count", {
-        args: { count: entry.citationCount },
+        args: { count: displayCitationCount },
       });
 
       if (statsButton) {
@@ -3117,6 +4214,10 @@ class InspireReferencePanelController {
     }
   }
 
+  /**
+   * Update row metadata after entry data changes (PERF-13 compatible).
+   * Uses the same template structure as updateRowContent - only updates content, not structure.
+   */
   private updateRowMetadata(entry: InspireReferenceEntry) {
     const row = this.rowCache.get(entry.id);
     if (!row) return;
@@ -3124,96 +4225,72 @@ class InspireReferencePanelController {
     // Get cached strings for performance
     const s = getCachedStrings();
 
-    // Rebuild the title container with proper author and title links
-    const titleContainer = row.querySelector(
-      ".zinspire-ref-entry__title",
-    ) as HTMLDivElement | null;
-    if (titleContainer) {
-      // Clear and rebuild the container
-      titleContainer.textContent = "";
-
-      // Add label if present
+    // Update label (show/hide) - PERF-13: use existing element
+    const labelSpan = row.querySelector(".zinspire-ref-entry__label") as HTMLElement;
+    if (labelSpan) {
       if (entry.label) {
-        const labelSpan = titleContainer.ownerDocument.createElement("span");
         labelSpan.textContent = `[${entry.label}] `;
-        titleContainer.appendChild(labelSpan);
+        labelSpan.style.display = "";
+      } else {
+        labelSpan.textContent = "";
+        labelSpan.style.display = "none";
       }
-
-      // Rebuild author links
-      this.appendAuthorLinks(titleContainer, entry);
-
-      // Add year if needed
-      const normalizedYear =
-        entry.year && entry.year !== s.yearUnknown ? entry.year : "";
-      const summaryContainsYear =
-        normalizedYear &&
-        entry.summary &&
-        entry.summary.includes(`(${normalizedYear})`);
-      if (normalizedYear && !summaryContainsYear) {
-        const yearSpan = titleContainer.ownerDocument.createElement("span");
-        yearSpan.textContent = ` (${normalizedYear})`;
-        titleContainer.appendChild(yearSpan);
-      }
-
-      // Add separator and title link
-      const separatorSpan = titleContainer.ownerDocument.createElement("span");
-      separatorSpan.textContent = ": ";
-      titleContainer.appendChild(separatorSpan);
-
-      const titleLink = titleContainer.ownerDocument.createElement("a");
-      titleLink.classList.add("zinspire-ref-entry__title-link");
-      titleLink.textContent = entry.title + ";";
-      titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
-      titleLink.addEventListener("click", (event) => {
-        event.preventDefault();
-        this.handleTitleClick(entry);
-      });
-      titleLink.addEventListener("mouseenter", (event) => {
-        this.scheduleAbstractTooltip(entry, event);
-      });
-      titleLink.addEventListener("mouseleave", (event) => {
-        this.handleTitleMouseLeave(event);
-      });
-      titleLink.addEventListener("mousemove", (event) => {
-        this.updateTooltipPosition(event);
-      });
-      titleContainer.appendChild(titleLink);
     }
 
-    const meta = row.querySelector(
-      ".zinspire-ref-entry__meta",
-    ) as HTMLDivElement | null;
+    // Update authors container - PERF-13: clear and rebuild author links only
+    const authorsContainer = row.querySelector(".zinspire-ref-entry__authors") as HTMLElement;
+    if (authorsContainer) {
+      authorsContainer.innerHTML = "";
+      this.appendAuthorLinks(authorsContainer, entry, s);
+    }
+
+    // Update title link - PERF-13: use existing element, events handled by delegation
+    const titleLink = row.querySelector(".zinspire-ref-entry__title-link") as HTMLAnchorElement;
+    if (titleLink) {
+      titleLink.textContent = entry.title + ";";
+      titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
+    }
+
+    // Update meta (show/hide) - PERF-13: use existing element
+    const meta = row.querySelector(".zinspire-ref-entry__meta") as HTMLElement;
     if (meta) {
       if (entry.summary) {
         meta.textContent = entry.summary;
-        meta.hidden = false;
+        meta.style.display = "";
       } else {
-        meta.hidden = true;
+        meta.textContent = "";
+        meta.style.display = "none";
       }
     }
-    const stats = row.querySelector(
-      ".zinspire-ref-entry__stats",
-    ) as HTMLDivElement | null;
-    if (stats) {
-      if (typeof entry.citationCount === "number") {
-        stats.textContent = getString("references-panel-citation-count", {
-          args: { count: entry.citationCount },
-        });
-        stats.hidden = false;
+
+    // Update stats button (show/hide) - PERF-13: use existing element
+    const statsButton = row.querySelector(".zinspire-ref-entry__stats-button") as HTMLButtonElement;
+    if (statsButton) {
+      const displayCitationCount = this.getCitationValue(entry);
+      const hasCitationCount = displayCitationCount > 0 ||
+        typeof entry.citationCount === "number" ||
+        typeof entry.citationCountWithoutSelf === "number";
+      const isReferencesMode = this.viewMode === "references";
+      const canShowEntryCitedTab = Boolean(entry.recid) && (hasCitationCount || !isReferencesMode);
+
+      if (canShowEntryCitedTab || hasCitationCount) {
+        const label = hasCitationCount
+          ? getString("references-panel-citation-count", {
+            args: { count: displayCitationCount },
+          })
+          : s.citationUnknown;
+        statsButton.textContent = label;
+        statsButton.style.display = "";
+        if (canShowEntryCitedTab) {
+          statsButton.style.cursor = "pointer";
+          statsButton.disabled = false;
+        } else {
+          statsButton.style.cursor = "default";
+          statsButton.disabled = true;
+        }
       } else {
-        stats.hidden = true;
-      }
-    } else if (typeof entry.citationCount === "number") {
-      const content = row.querySelector(
-        ".zinspire-ref-entry__content",
-      ) as HTMLDivElement | null;
-      if (content) {
-        const statsEl = content.ownerDocument.createElement("div");
-        statsEl.classList.add("zinspire-ref-entry__stats");
-        statsEl.textContent = getString("references-panel-citation-count", {
-          args: { count: entry.citationCount },
-        });
-        content.appendChild(statsEl);
+        statsButton.textContent = "";
+        statsButton.style.display = "none";
       }
     }
   }
@@ -3309,6 +4386,12 @@ class InspireReferencePanelController {
       entry.authors = allAuthors;
       entry.authorText = formatAuthors(entry.authors, entry.totalAuthors);
     }
+    this.updateEntryAuthorCount(
+      entry,
+      typeof (meta as any)?.author_count === "number"
+        ? Number((meta as any).author_count)
+        : undefined,
+    );
     if (
       (!entry.year ||
         entry.year === getString("references-panel-year-unknown")) &&
@@ -3341,9 +4424,19 @@ class InspireReferencePanelController {
       );
     }
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = buildEntrySearchText(entry);
+    // Invalidate searchText so it will be recalculated on next filter
+    entry.searchText = "";
     if (typeof meta.citation_count === "number") {
       entry.citationCount = meta.citation_count;
+    }
+    const metaSelfCitations =
+      typeof meta.citation_count_without_self_citations === "number"
+        ? meta.citation_count_without_self_citations
+        : typeof meta.citation_count_wo_self_citations === "number"
+          ? meta.citation_count_wo_self_citations
+          : undefined;
+    if (typeof metaSelfCitations === "number") {
+      entry.citationCountWithoutSelf = metaSelfCitations;
     }
     if (typeof meta.abstractNote === "string" && meta.abstractNote.trim()) {
       entry.abstract = meta.abstractNote.trim();
@@ -3361,6 +4454,14 @@ class InspireReferencePanelController {
       return;
     }
     const strings = getCachedStrings();
+
+    // Citation count update (including self-citation exclusion)
+    if (typeof metadata.citation_count === "number") {
+      entry.citationCount = metadata.citation_count;
+    }
+    if (typeof metadata.citation_count_without_self_citations === "number") {
+      entry.citationCountWithoutSelf = metadata.citation_count_without_self_citations;
+    }
 
     // Title update
     if (
@@ -3392,6 +4493,13 @@ class InspireReferencePanelController {
         entry.authorText = formatAuthors(entry.authors, entry.totalAuthors);
       }
     }
+    const metadataAuthorCount =
+      typeof metadata.author_count === "number"
+        ? metadata.author_count
+        : Array.isArray(metadata.authors)
+          ? metadata.authors.length
+          : undefined;
+    this.updateEntryAuthorCount(entry, metadataAuthorCount);
 
     // Year update
     if (
@@ -3428,7 +4536,21 @@ class InspireReferencePanelController {
 
     // Update derived text fields
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = buildEntrySearchText(entry);
+    // Invalidate searchText so it will be recalculated on next filter
+    entry.searchText = "";
+  }
+
+  private updateEntryAuthorCount(
+    entry: InspireReferenceEntry,
+    authorCount?: number,
+  ) {
+    if (typeof authorCount !== "number") {
+      return;
+    }
+    entry.totalAuthors = authorCount;
+    if (entry.authors.length) {
+      entry.authorText = formatAuthors(entry.authors, authorCount);
+    }
   }
 
   private buildEntry(
@@ -3479,12 +4601,17 @@ class InspireReferencePanelController {
         typeof reference?.citation_count === "number"
           ? reference.citation_count
           : undefined,
+      citationCountWithoutSelf:
+        typeof reference?.citation_count_without_self_citations === "number"
+          ? reference.citation_count_without_self_citations
+          : undefined,
       publicationInfo,
       publicationInfoErrata: errata,
       arxivDetails,
     };
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = buildEntrySearchText(entry);
+    // Defer searchText calculation to first filter for better initial load performance
+    entry.searchText = "";
     // DB lookup moved to enrichLocalStatus
     return entry;
   }
@@ -3536,26 +4663,81 @@ class InspireReferencePanelController {
         typeof metadata.citation_count === "number"
           ? metadata.citation_count
           : undefined,
+      citationCountWithoutSelf:
+        typeof metadata.citation_count_without_self_citations === "number"
+          ? metadata.citation_count_without_self_citations
+          : undefined,
       publicationInfo,
       publicationInfoErrata: errata,
       arxivDetails: arxiv,
     };
     entry.displayText = buildDisplayText(entry);
-    entry.searchText = buildEntrySearchText(entry);
+    // Defer searchText calculation to first filter for better initial load performance
+    // entry.searchText will be lazily computed in ensureSearchText()
+    entry.searchText = "";
     return entry;
+  }
+
+  /**
+   * Apply all active filters to entries (text filter, chart filter, author filter).
+   * This is used by both renderReferenceList and doRenderChart for consistency.
+   * Ensures chart stats always match the filtered list view.
+   */
+  private getFilteredEntries(entries: InspireReferenceEntry[]): InspireReferenceEntry[] {
+    // Parse and apply text filter
+    const filterGroups = parseFilterTokens(this.filterText)
+      .map(({ text, quoted }) =>
+        buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }),
+      )
+      .filter((variants) => variants.length);
+
+    const textFiltered = filterGroups.length
+      ? entries.filter((entry) =>
+        filterGroups.every((variants) =>
+          variants.some((token) => ensureSearchText(entry).includes(token)),
+        ),
+      )
+      : entries;
+
+    // Apply chart filter (AND logic with text filter)
+    const chartFiltered = this.chartSelectedBins.size > 0
+      ? textFiltered.filter((entry) => this.matchesChartFilter(entry))
+      : textFiltered;
+
+    // Apply author count filter (AND logic with previous filters)
+    const filtered = this.authorFilterEnabled
+      ? chartFiltered.filter((entry) => this.matchesAuthorFilter(entry))
+      : chartFiltered;
+
+    return filtered;
   }
 
   private renderReferenceList(options: { preserveScroll?: boolean; resetPagination?: boolean } = {}) {
     const { preserveScroll = false, resetPagination = true } = options;
+
+    // Save list scroll position for potential restoration
     const previousScrollTop = preserveScroll ? this.listEl.scrollTop : 0;
     const previousScrollLeft = preserveScroll ? this.listEl.scrollLeft : 0;
+
+    // Find and save the item pane scroll container position
+    // This prevents the item pane from jumping when list content height changes
+    const itemPaneContainer = this.body.closest(".item-pane-content") as HTMLElement | null;
+    const itemPaneScrollTop = itemPaneContainer?.scrollTop ?? 0;
+    const itemPaneScrollLeft = itemPaneContainer?.scrollLeft ?? 0;
+
     const restoreScroll = () => {
+      // Restore list scroll
       if (preserveScroll) {
         this.listEl.scrollTop = previousScrollTop;
         this.listEl.scrollLeft = previousScrollLeft;
       } else {
         this.listEl.scrollTop = 0;
         this.listEl.scrollLeft = 0;
+      }
+      // Always restore item pane position to prevent jump
+      if (itemPaneContainer) {
+        itemPaneContainer.scrollTop = itemPaneScrollTop;
+        itemPaneContainer.scrollLeft = itemPaneScrollLeft;
       }
     };
 
@@ -3585,25 +4767,15 @@ class InspireReferencePanelController {
       return;
     }
 
+    // Apply all active filters using shared filtering logic
+    const filtered = this.getFilteredEntries(this.allEntries);
+
+    // Parse filter tokens for UI feedback (to show filter count message)
     const filterGroups = parseFilterTokens(this.filterText)
       .map(({ text, quoted }) =>
         buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }),
       )
       .filter((variants) => variants.length);
-
-    // Apply text filter
-    const textFiltered = filterGroups.length
-      ? this.allEntries.filter((entry) =>
-        filterGroups.every((variants) =>
-          variants.some((token) => entry.searchText.includes(token)),
-        ),
-      )
-      : this.allEntries;
-
-    // Apply chart filter (AND logic with text filter)
-    const filtered = this.chartSelectedBins.size > 0
-      ? textFiltered.filter((entry) => this.matchesChartFilter(entry))
-      : textFiltered;
 
     if (!filtered.length) {
       this.renderMessage(getString("references-panel-no-match"));
@@ -3612,7 +4784,7 @@ class InspireReferencePanelController {
       // This improves perceived performance for references with 100+ entries
       // However, when filtering, show all matching results for better UX
       // (filtered results are usually smaller and users expect to see all matches)
-      const hasFilter = filterGroups.length > 0 || this.chartSelectedBins.size > 0;
+      const hasFilter = filterGroups.length > 0 || this.chartSelectedBins.size > 0 || this.authorFilterEnabled;
       const usePagination = !hasFilter && filtered.length > RENDER_PAGE_SIZE;
       const entriesToRender = usePagination
         ? filtered.slice(0, RENDER_PAGE_SIZE)
@@ -3634,6 +4806,7 @@ class InspireReferencePanelController {
         this.currentFilteredEntries = undefined;
       }
     }
+    this.lastRenderedEntries = filtered;
 
     // Use API total count for citedBy/entryCited modes if available
     // This shows the correct total even when we haven't fetched all entries
@@ -3822,12 +4995,97 @@ class InspireReferencePanelController {
     }
   }
 
+  /**
+   * Incrementally append new entries to the list without full re-render.
+   * Used during progressive loading to avoid re-rendering the entire list.
+   * Only appends entries from previousCount to current allEntries.length.
+   * 
+   * @param previousCount Number of entries already rendered
+   * @returns Number of newly appended entries
+   */
+  private appendNewEntries(previousCount: number): number {
+    // Skip if filtering is active (need full re-render to apply filter)
+    if (this.filterText || this.chartSelectedBins.size > 0) {
+      return 0;
+    }
+
+    const newEntries = this.allEntries.slice(previousCount);
+    if (!newEntries.length) {
+      return 0;
+    }
+
+    // Check if we need pagination
+    const currentRendered = this.renderedCount;
+    const maxToRender = RENDER_PAGE_SIZE;
+
+    // If we haven't rendered first page yet, skip (will be handled by full render)
+    if (currentRendered === 0) {
+      return 0;
+    }
+
+    // Calculate how many more we can render before needing "Load More"
+    const entriesAlreadyInDom = currentRendered;
+    const totalAvailable = this.allEntries.length;
+
+    // If pagination is active and we've rendered the first page,
+    // don't auto-append more entries (let infinite scroll handle it)
+    if (totalAvailable > maxToRender && entriesAlreadyInDom >= maxToRender) {
+      // Just update the "Load More" button text if it exists
+      if (this.loadMoreButton) {
+        this.currentFilteredEntries = this.allEntries;
+        const remaining = totalAvailable - entriesAlreadyInDom;
+        const nextBatch = Math.min(remaining, RENDER_PAGE_SIZE);
+        this.loadMoreButton.textContent = `Load ${nextBatch} more (${remaining} remaining)`;
+      }
+      return 0;
+    }
+
+    // Append new entries up to page limit
+    const entriesToAppend = newEntries.slice(0, maxToRender - entriesAlreadyInDom);
+    if (!entriesToAppend.length) {
+      return 0;
+    }
+
+    const fragment = this.listEl.ownerDocument.createDocumentFragment();
+    for (const entry of entriesToAppend) {
+      fragment.appendChild(this.createReferenceRow(entry));
+    }
+
+    // Insert before load-more container if it exists, otherwise append
+    if (this.loadMoreContainer && this.loadMoreContainer.parentElement === this.listEl) {
+      this.listEl.insertBefore(fragment, this.loadMoreContainer);
+    } else {
+      this.listEl.appendChild(fragment);
+    }
+
+    this.renderedCount += entriesToAppend.length;
+
+    // Add/update "Load More" if needed
+    if (totalAvailable > this.renderedCount) {
+      this.currentFilteredEntries = this.allEntries;
+      if (!this.loadMoreContainer) {
+        this.renderLoadMoreButton(this.allEntries);
+      } else {
+        const remaining = totalAvailable - this.renderedCount;
+        const nextBatch = Math.min(remaining, RENDER_PAGE_SIZE);
+        if (this.loadMoreButton) {
+          this.loadMoreButton.textContent = `Load ${nextBatch} more (${remaining} remaining)`;
+        }
+      }
+    }
+
+    return entriesToAppend.length;
+  }
+
   private getCacheForMode(mode: InspireViewMode) {
     if (mode === "references") {
       return this.referencesCache;
     }
     if (mode === "citedBy") {
       return this.citedByCache;
+    }
+    if (mode === "search") {
+      return this.searchCache;
     }
     return this.entryCitedCache;
   }
@@ -3838,6 +5096,9 @@ class InspireReferencePanelController {
     }
     if (mode === "citedBy") {
       return getString("references-panel-status-loading-cited");
+    }
+    if (mode === "search") {
+      return getString("references-panel-status-loading-search");
     }
     // For entryCited mode, show different message based on source type
     if (this.entryCitedSource?.authorQuery) {
@@ -3853,6 +5114,9 @@ class InspireReferencePanelController {
     if (mode === "citedBy") {
       return getString("references-panel-empty-cited");
     }
+    if (mode === "search") {
+      return getString("references-panel-search-empty");
+    }
     // For entryCited mode, show different message based on source type
     if (this.entryCitedSource?.authorQuery) {
       return getString("references-panel-author-empty");
@@ -3866,6 +5130,11 @@ class InspireReferencePanelController {
     }
     if (mode === "citedBy") {
       return getString("references-panel-count-cited", { args: { count } });
+    }
+    if (mode === "search") {
+      return getString("references-panel-count-search", {
+        args: { count, query: this.getSearchLabel() },
+      });
     }
     // For entryCited mode, show different message based on source type
     if (this.entryCitedSource?.authorQuery) {
@@ -3893,6 +5162,11 @@ class InspireReferencePanelController {
         args: { visible, total },
       });
     }
+    if (mode === "search") {
+      return getString("references-panel-filter-count-search", {
+        args: { visible, total, query: this.getSearchLabel() },
+      });
+    }
     // For entryCited mode, show different message based on source type
     if (this.entryCitedSource?.authorQuery) {
       return getString("references-panel-filter-count-author", {
@@ -3909,6 +5183,10 @@ class InspireReferencePanelController {
       this.entryCitedSource?.label ||
       getString("references-panel-entry-label-default")
     );
+  }
+
+  private getSearchLabel() {
+    return this.currentSearchQuery || getString("references-panel-search-label-default");
   }
 
   private createTabButton(
@@ -3935,17 +5213,57 @@ class InspireReferencePanelController {
 
   private async activateViewMode(mode: InspireViewMode) {
     if (this.viewMode === mode) {
-      if (mode !== "entryCited") {
+      if (mode !== "entryCited" && mode !== "search") {
         return;
       }
     }
     if (mode === "entryCited" && this.viewMode !== "entryCited") {
-      if (this.viewMode === "references" || this.viewMode === "citedBy") {
+      if (this.viewMode === "references" || this.viewMode === "citedBy" || this.viewMode === "search") {
         this.entryCitedPreviousMode = this.viewMode;
       }
     }
     this.viewMode = mode;
     this.updateTabSelection();
+    this.updateSearchUIVisibility();
+
+    // For search mode, use current search query
+    if (mode === "search") {
+      if (!this.currentSearchQuery) {
+        // Clear chart and show prompt message
+        this.allEntries = [];
+        this.chartSelectedBins.clear();
+        this.cachedChartStats = undefined;
+        this.chartNeedsRefresh = true;
+        this.chartNeedsRefresh = true;
+        this.lastRenderedEntries = [];
+        this.chartNeedsRefresh = true;
+        this.clearChartStatsDisplay();
+        this.renderChart();
+        this.renderMessage(getString("references-panel-search-prompt"));
+        return;
+      }
+      const cacheKey = this.getCacheKey(this.currentSearchQuery, "search", this.searchSort);
+      const cached = this.searchCache.get(cacheKey);
+      if (cached) {
+        this.allEntries = cached;
+        this.totalApiCount = null;
+        this.chartSelectedBins.clear();
+        this.cachedChartStats = undefined;
+        this.renderChartImmediate();  // Use immediate render for cache hit
+        this.renderReferenceList({ preserveScroll: false });
+        return;
+      }
+      await this.loadSearchResults(this.currentSearchQuery).catch((err) => {
+        if ((err as any)?.name !== "AbortError") {
+          Zotero.debug(`[${config.addonName}] Failed to load search results: ${err}`);
+          this.allEntries = [];
+          this.renderChartImmediate();
+          this.renderMessage(getString("references-panel-status-error"));
+        }
+      });
+      return;
+    }
+
     // For entryCited mode, support both recid and authorQuery
     const targetKey =
       mode === "entryCited"
@@ -3956,6 +5274,8 @@ class InspireReferencePanelController {
         mode === "entryCited"
           ? getString("references-panel-entry-select")
           : getString("references-panel-status-empty");
+      this.allEntries = [];
+      this.renderChartImmediate();
       this.renderMessage(message);
       return;
     }
@@ -3976,7 +5296,11 @@ class InspireReferencePanelController {
       // Clear chart selection and render chart for new data
       this.chartSelectedBins.clear();
       this.cachedChartStats = undefined;
-      this.renderChart();
+      this.lastRenderedEntries = [];
+      this.chartNeedsRefresh = true;
+      this.lastRenderedEntries = [];
+      this.chartNeedsRefresh = true;
+      this.renderChartImmediate();  // Use immediate render for cache hit
       this.renderReferenceList({
         preserveScroll: !shouldResetEntry,
       });
@@ -3993,7 +5317,10 @@ class InspireReferencePanelController {
         Zotero.debug(
           `[${config.addonName}] Failed to load ${mode} list: ${err}`,
         );
+        this.allEntries = [];
+        this.renderChartImmediate();
         this.renderMessage(getString("references-panel-status-error"));
+        this.lastRenderedEntries = [];
       }
     });
     if (shouldResetEntry) {
@@ -4014,6 +5341,11 @@ class InspireReferencePanelController {
         button.hidden = !hasEntrySource;
         button.disabled = !hasEntrySource;
         // Update the tab label dynamically based on source type
+        button.textContent = this.getTabLabel(mode);
+      } else if (mode === "search") {
+        // Search tab is always visible and enabled
+        button.hidden = false;
+        button.disabled = false;
         button.textContent = this.getTabLabel(mode);
       }
       const isActive = mode === this.viewMode;
@@ -4049,6 +5381,9 @@ class InspireReferencePanelController {
     if (mode === "citedBy") {
       return getString("references-panel-tab-cited");
     }
+    if (mode === "search") {
+      return getString("references-panel-tab-search");
+    }
     // For entryCited mode, show different tab name based on source type
     if (this.entryCitedSource?.authorQuery) {
       return getString("references-panel-tab-author-papers");
@@ -4073,12 +5408,16 @@ class InspireReferencePanelController {
         ? this.referenceSort
         : this.viewMode === "citedBy"
           ? this.citedBySort
-          : this.entryCitedSort;
+          : this.viewMode === "search"
+            ? this.searchSort
+            : this.entryCitedSort;
     this.sortSelect.value = currentValue;
     const hasTarget =
       this.viewMode === "entryCited"
         ? Boolean(this.entryCitedSource?.recid || this.entryCitedSource?.authorQuery)
-        : Boolean(this.currentRecid);
+        : this.viewMode === "search"
+          ? Boolean(this.currentSearchQuery)
+          : Boolean(this.currentRecid);
     this.sortSelect.disabled = !hasTarget;
   }
 
@@ -4099,6 +5438,7 @@ class InspireReferencePanelController {
         },
       ];
     }
+    // citedBy, entryCited, and search all use the same sort options
     return [
       {
         value: "mostrecent",
@@ -4164,6 +5504,36 @@ class InspireReferencePanelController {
       });
       return;
     }
+    if (this.viewMode === "search") {
+      if (!this.currentSearchQuery) {
+        this.sortSelect.value = this.searchSort;
+        return;
+      }
+      if (!isInspireSortOption(rawValue)) {
+        this.sortSelect.value = this.searchSort;
+        return;
+      }
+      if (rawValue === this.searchSort) {
+        return;
+      }
+      this.searchSort = rawValue;
+      const cacheKey = this.getCacheKey(this.currentSearchQuery, "search", rawValue);
+      const cached = this.searchCache.get(cacheKey);
+      if (cached) {
+        this.allEntries = cached;
+        this.totalApiCount = null;
+        this.renderReferenceList();
+        return;
+      }
+      this.loadSearchResults(this.currentSearchQuery).catch((err) => {
+        if ((err as any)?.name !== "AbortError") {
+          Zotero.debug(
+            `[${config.addonName}] Failed to sort search results: ${err}`,
+          );
+        }
+      });
+      return;
+    }
     // For entryCited mode, use either recid or authorQuery as the key
     const entryKey =
       this.entryCitedSource?.recid || this.entryCitedSource?.authorQuery;
@@ -4196,12 +5566,812 @@ class InspireReferencePanelController {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // INSPIRE Search Methods
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Create the search input container UI.
+   * Includes search input field and history dropdown.
+   */
+  private createSearchInputContainer(toolbar: HTMLDivElement) {
+    const doc = this.body.ownerDocument;
+
+    // Create container for search input and history
+    this.searchInputContainer = doc.createElement("div");
+    this.searchInputContainer.className = "zinspire-search-container";
+    this.searchInputContainer.style.cssText = `
+      display: none;
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+      flex: 1 1 auto;
+      position: relative;
+    `;
+
+    // Create wrapper for input + inline hint positioning
+    const inputWrapper = doc.createElement("div");
+    inputWrapper.className = "zinspire-search-input-wrapper";
+    inputWrapper.style.cssText = `
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 150px;
+      display: flex;
+      align-items: center;
+    `;
+
+    // Search input field - needs transparent background for hint to show through
+    this.searchInput = doc.createElement("input");
+    this.searchInput.type = "text";
+    this.searchInput.className = "zinspire-search-input";
+    this.searchInput.placeholder = getString("references-panel-search-placeholder");
+    // Disable browser autocomplete to use our inline hint instead
+    this.searchInput.setAttribute("autocomplete", "off");
+    this.searchInput.setAttribute("autocorrect", "off");
+    this.searchInput.setAttribute("autocapitalize", "off");
+    this.searchInput.setAttribute("spellcheck", "false");
+    this.searchInput.style.cssText = `
+      width: 100%;
+      padding: 4px 8px;
+      border: 1px solid var(--zotero-gray-4, #d1d1d5);
+      border-radius: 4px;
+      font-size: 12px;
+      background-color: transparent !important;
+      background: none !important;
+      position: relative;
+      z-index: 2;
+      font-family: system-ui, -apple-system, sans-serif;
+    `;
+
+    // Create inline hint overlay (gray text showing suggestion)
+    // This sits behind the input but shows through the transparent background
+    const inlineHint = doc.createElement("span");
+    inlineHint.className = "zinspire-search-inline-hint";
+    inlineHint.style.cssText = `
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #999;
+      font-size: 12px;
+      pointer-events: none;
+      white-space: pre;
+      overflow: hidden;
+      z-index: 1;
+      display: none;
+      font-family: system-ui, -apple-system, sans-serif;
+      line-height: 1;
+    `;
+
+    // Track current hint for Tab/ArrowRight completion
+    let currentHintText = "";
+
+    // Update inline hint based on input
+    const updateInlineHint = () => {
+      const inputValue = this.searchInput?.value || "";
+
+      if (!inputValue || this.searchHistory.length === 0) {
+        inlineHint.style.display = "none";
+        currentHintText = "";
+        return;
+      }
+
+      // Find matching history entry
+      let matchingHint = "";
+      for (const historyItem of this.searchHistory) {
+        const historyQuery = historyItem.query;
+        if (historyQuery.toLowerCase().startsWith(inputValue.toLowerCase()) && historyQuery.length > inputValue.length) {
+          matchingHint = historyQuery;
+          break;
+        }
+      }
+
+      if (!matchingHint) {
+        inlineHint.style.display = "none";
+        currentHintText = "";
+        return;
+      }
+
+      // Show hint: display only the remaining suggestion after what user typed
+      const rawSuffix = matchingHint.slice(inputValue.length);
+      // Use replace to handle multiple spaces and preserve them
+      const hintSuffix = rawSuffix.replace(/ /g, '\u00A0');
+      currentHintText = matchingHint;
+
+      // Calculate position based on input text width using canvas for accurate measurement
+      const canvas = doc.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (ctx && this.searchInput) {
+        // Match the input font and styling exactly
+        const computedStyle = this.searchInput.ownerDocument.defaultView?.getComputedStyle(this.searchInput);
+        if (computedStyle) {
+          const font = computedStyle.font ||
+            `${computedStyle.fontWeight} ${computedStyle.fontSize} ${computedStyle.fontFamily}`;
+          ctx.font = font;
+
+          // Replace spaces with NBSP for measurement, as measureText often ignores trailing spaces
+          const textToMeasure = inputValue.replace(/ /g, '\u00A0');
+          const textWidth = ctx.measureText(textToMeasure).width;
+
+          // Get padding and border width
+          const paddingLeft = parseFloat(computedStyle.paddingLeft) || 9;
+          const borderLeft = parseFloat(computedStyle.borderLeftWidth) || 0;
+          const startOffset = paddingLeft + borderLeft;
+
+          inlineHint.textContent = hintSuffix;
+          inlineHint.style.left = `${startOffset + textWidth}px`;
+          inlineHint.style.display = "block";
+
+          // Match font style of input
+          inlineHint.style.font = font;
+          inlineHint.style.fontSize = computedStyle.fontSize;
+          inlineHint.style.fontFamily = computedStyle.fontFamily;
+          inlineHint.style.lineHeight = computedStyle.lineHeight;
+
+          Zotero.debug(`[${config.addonName}] Inline hint: "${hintSuffix}" at ${startOffset + textWidth}px`);
+        } else {
+          // Fallback if computed style fails
+          ctx.font = "12px system-ui, -apple-system, sans-serif";
+          const textToMeasure = inputValue.replace(/ /g, '\u00A0');
+          const textWidth = ctx.measureText(textToMeasure).width;
+          inlineHint.textContent = hintSuffix;
+          inlineHint.style.left = `${9 + textWidth}px`;
+          inlineHint.style.display = "block";
+        }
+      } else {
+        // Fallback: use approximate character width
+        const charWidth = 7; // approximate width per character
+        const textWidth = inputValue.length * charWidth;
+
+        inlineHint.textContent = hintSuffix;
+        inlineHint.style.left = `${9 + textWidth}px`;
+        inlineHint.style.display = "block";
+
+        Zotero.debug(`[${config.addonName}] Inline hint (fallback): "${hintSuffix}" at ${9 + textWidth}px`);
+      }
+    };
+
+    // Handle keyboard events
+    this.searchInput.addEventListener("keydown", (event) => {
+      Zotero.debug(`[${config.addonName}] Panel search input keydown: key=${event.key}`);
+
+      // Tab or ArrowRight at end of input: accept inline hint
+      if ((event.key === "Tab" || event.key === "ArrowRight") && currentHintText) {
+        const cursorAtEnd = this.searchInput?.selectionStart === this.searchInput?.value.length;
+        if (cursorAtEnd && this.searchInput) {
+          event.preventDefault();
+          this.searchInput.value = currentHintText;
+          inlineHint.style.display = "none";
+          currentHintText = "";
+          return;
+        }
+      }
+
+      // Escape: hide inline hint
+      if (event.key === "Escape") {
+        inlineHint.style.display = "none";
+        currentHintText = "";
+        this.hideSearchHistoryDropdown();
+      }
+
+      // Enter: execute search
+      if (event.key === "Enter") {
+        event.preventDefault();
+        inlineHint.style.display = "none";
+        currentHintText = "";
+        const query = this.searchInput?.value.trim();
+        Zotero.debug(`[${config.addonName}] Panel search Enter pressed, query="${query}"`);
+        if (query) {
+          this.executeInspireSearch(query).catch((err) => {
+            Zotero.debug(`[${config.addonName}] Panel search error: ${err}`);
+          });
+        }
+      }
+
+      // ArrowDown: show history dropdown
+      if (event.key === "ArrowDown" && this.searchHistoryDropdown) {
+        event.preventDefault();
+        this.showSearchHistoryDropdown();
+      }
+    });
+
+    // Update hint on input
+    this.searchInput.addEventListener("input", () => {
+      updateInlineHint();
+      // Hide dropdown when user is typing (inline hint is shown instead)
+      this.hideSearchHistoryDropdown();
+    });
+
+    // Focus: just update hint, don't show dropdown automatically
+    this.searchInput.addEventListener("focus", () => {
+      Zotero.debug(`[${config.addonName}] Panel search input focused, history count: ${this.searchHistory.length}`);
+      updateInlineHint();
+      // Don't auto-show dropdown - user can click ▼ button or press ArrowDown
+    });
+
+    // Blur: hide hint
+    this.searchInput.addEventListener("blur", () => {
+      // Delay to allow click on hint/dropdown
+      setTimeout(() => {
+        inlineHint.style.display = "none";
+        currentHintText = "";
+      }, 150);
+    });
+
+    inputWrapper.appendChild(this.searchInput);
+    inputWrapper.appendChild(inlineHint);
+
+    // Create search button
+    const searchButton = doc.createElement("button");
+    searchButton.type = "button";
+    searchButton.className = "zinspire-search-button";
+    searchButton.textContent = "🔍";
+    searchButton.title = getString("references-panel-search-button-tooltip");
+    searchButton.style.cssText = `
+      border: 1px solid var(--zotero-gray-4, #d1d1d5);
+      border-radius: 4px;
+      padding: 4px 8px;
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+    `;
+    searchButton.addEventListener("click", () => {
+      const query = this.searchInput?.value.trim();
+      Zotero.debug(`[${config.addonName}] Panel search button clicked, query="${query}"`);
+      if (query) {
+        this.executeInspireSearch(query).catch((err) => {
+          Zotero.debug(`[${config.addonName}] Panel search button error: ${err}`);
+        });
+      }
+    });
+
+    // Create history dropdown button
+    const historyButton = doc.createElement("button");
+    historyButton.type = "button";
+    historyButton.className = "zinspire-history-button";
+    historyButton.textContent = "▼";
+    historyButton.title = getString("references-panel-search-history-tooltip");
+    historyButton.style.cssText = `
+      border: 1px solid var(--zotero-gray-4, #d1d1d5);
+      border-radius: 4px;
+      padding: 4px 6px;
+      background: transparent;
+      cursor: pointer;
+      font-size: 10px;
+    `;
+    historyButton.addEventListener("click", () => {
+      this.toggleSearchHistoryDropdown();
+    });
+
+    // Create history dropdown container
+    this.searchHistoryDropdown = doc.createElement("div");
+    this.searchHistoryDropdown.className = "zinspire-search-history-dropdown";
+    this.searchHistoryDropdown.style.cssText = `
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      max-height: 200px;
+      overflow-y: auto;
+      background: var(--zotero-gray-1, #ffffff);
+      border: 1px solid var(--zotero-gray-4, #d1d1d5);
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      z-index: 1000;
+      margin-top: 2px;
+    `;
+
+    // Close dropdown when clicking outside
+    doc.addEventListener("click", (event) => {
+      if (
+        this.searchHistoryDropdown &&
+        !this.searchInputContainer?.contains(event.target as Node)
+      ) {
+        this.hideSearchHistoryDropdown();
+      }
+    });
+
+    this.searchInputContainer.appendChild(inputWrapper);
+    this.searchInputContainer.appendChild(searchButton);
+    this.searchInputContainer.appendChild(historyButton);
+    this.searchInputContainer.appendChild(this.searchHistoryDropdown);
+    toolbar.appendChild(this.searchInputContainer);
+    Zotero.debug(`[${config.addonName}] createSearchInputContainer: completed, container added to toolbar`);
+  }
+
+  /**
+   * Show or hide the search UI based on current view mode.
+   */
+  private updateSearchUIVisibility() {
+    Zotero.debug(`[${config.addonName}] updateSearchUIVisibility: viewMode=${this.viewMode}, searchInputContainer=${!!this.searchInputContainer}`);
+    if (!this.searchInputContainer) {
+      Zotero.debug(`[${config.addonName}] updateSearchUIVisibility: WARNING - searchInputContainer is null`);
+      return;
+    }
+
+    const isSearchMode = this.viewMode === "search";
+    this.searchInputContainer.style.display = isSearchMode ? "flex" : "none";
+    Zotero.debug(`[${config.addonName}] updateSearchUIVisibility: set searchInputContainer.display="${isSearchMode ? "flex" : "none"}"`);
+
+    // Keep filter input visible in search mode for local filtering of search results
+    // Users can use INSPIRE search to get broad results, then use filter to refine locally
+  }
+
+  /**
+   * Show the search history dropdown.
+   */
+  private showSearchHistoryDropdown() {
+    if (!this.searchHistoryDropdown || this.searchHistory.length === 0) return;
+
+    const doc = this.body.ownerDocument;
+    this.searchHistoryDropdown.innerHTML = "";
+
+    for (const historyItem of this.searchHistory) {
+      const query = historyItem.query;
+      const item = doc.createElement("div");
+      item.className = "zinspire-search-history-item";
+      item.textContent = query;
+      item.style.cssText = `
+        padding: 6px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        border-bottom: 1px solid var(--zotero-gray-3, #e6e6e6);
+      `;
+      item.addEventListener("mouseenter", () => {
+        item.style.backgroundColor = "var(--zotero-gray-2, #f0f0f0)";
+      });
+      item.addEventListener("mouseleave", () => {
+        item.style.backgroundColor = "";
+      });
+      item.addEventListener("click", () => {
+        if (this.searchInput) {
+          this.searchInput.value = query;
+        }
+        this.hideSearchHistoryDropdown();
+        this.executeInspireSearch(query).catch(() => void 0);
+      });
+      this.searchHistoryDropdown.appendChild(item);
+    }
+
+    // Add clear history option
+    const clearItem = doc.createElement("div");
+    clearItem.className = "zinspire-search-history-clear";
+    clearItem.textContent = getString("references-panel-search-clear-history");
+    clearItem.style.cssText = `
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--zotero-gray-6, #666666);
+      text-align: center;
+      font-style: italic;
+    `;
+    clearItem.addEventListener("mouseenter", () => {
+      clearItem.style.backgroundColor = "var(--zotero-gray-2, #f0f0f0)";
+    });
+    clearItem.addEventListener("mouseleave", () => {
+      clearItem.style.backgroundColor = "";
+    });
+    clearItem.addEventListener("click", () => {
+      this.clearSearchHistory();
+      this.hideSearchHistoryDropdown();
+    });
+    this.searchHistoryDropdown.appendChild(clearItem);
+
+    this.searchHistoryDropdown.style.display = "block";
+  }
+
+  /**
+   * Hide the search history dropdown.
+   */
+  private hideSearchHistoryDropdown() {
+    if (this.searchHistoryDropdown) {
+      this.searchHistoryDropdown.style.display = "none";
+    }
+  }
+
+  /**
+   * Toggle the search history dropdown visibility.
+   */
+  private toggleSearchHistoryDropdown() {
+    if (!this.searchHistoryDropdown) return;
+    if (this.searchHistoryDropdown.style.display === "none") {
+      this.showSearchHistoryDropdown();
+    } else {
+      this.hideSearchHistoryDropdown();
+    }
+  }
+
+  /**
+   * Load search history from preferences.
+   */
+  private loadSearchHistory() {
+    try {
+      const stored = Zotero.Prefs.get(`${config.addonRef}.${SEARCH_HISTORY_PREF_KEY}`, true) as string | undefined;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Migrate old format (string[]) to new format (SearchHistoryItem[])
+        if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
+          this.searchHistory = (parsed as unknown as string[]).map(q => ({
+            query: q,
+            timestamp: Date.now()
+          }));
+          this.saveSearchHistory(); // Save in new format
+        } else {
+          this.searchHistory = parsed as SearchHistoryItem[];
+        }
+      }
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] Failed to load search history: ${err}`);
+      this.searchHistory = [];
+    }
+  }
+
+  /**
+   * Save search history to preferences.
+   */
+  private saveSearchHistory() {
+    try {
+      Zotero.Prefs.set(
+        `${config.addonRef}.${SEARCH_HISTORY_PREF_KEY}`,
+        JSON.stringify(this.searchHistory),
+        true
+      );
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] Failed to save search history: ${err}`);
+    }
+  }
+
+  /**
+   * Add a query to search history.
+   */
+  private addToSearchHistory(query: string) {
+    // Remove if already exists (to move to top)
+    const index = this.searchHistory.findIndex(item => item.query === query);
+    if (index !== -1) {
+      this.searchHistory.splice(index, 1);
+    }
+
+    // Add to front with current timestamp
+    this.searchHistory.unshift({
+      query,
+      timestamp: Date.now()
+    });
+
+    // Filter by retention days
+    const retentionDays = (Zotero.Prefs.get(`${config.prefsPrefix}.${SEARCH_HISTORY_DAYS_PREF_KEY}`, true) as number) || SEARCH_HISTORY_DAYS_DEFAULT;
+    const cutoff = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
+
+    this.searchHistory = this.searchHistory.filter(item => item.timestamp >= cutoff);
+
+    // Limit to max entries (increased limit)
+    if (this.searchHistory.length > SEARCH_HISTORY_MAX_ENTRIES) {
+      this.searchHistory = this.searchHistory.slice(0, SEARCH_HISTORY_MAX_ENTRIES);
+    }
+    this.saveSearchHistory();
+  }
+
+  /**
+   * Clear search history.
+   */
+  private clearSearchHistory() {
+    this.searchHistory = [];
+    this.saveSearchHistory();
+  }
+
+  /**
+   * Clear all history in this instance (called from preferences).
+   */
+  clearAllHistoryInInstance() {
+    this.searchHistory = [];
+  }
+
+  /**
+   * Execute an INSPIRE search query.
+   * This is the main entry point for search functionality.
+   */
+  async executeInspireSearch(query: string) {
+    Zotero.debug(`[${config.addonName}] executeInspireSearch called with query="${query}"`);
+    if (!query.trim()) {
+      Zotero.debug(`[${config.addonName}] executeInspireSearch: empty query, returning`);
+      return;
+    }
+
+    const trimmedQuery = query.trim();
+    this.currentSearchQuery = trimmedQuery;
+    this.addToSearchHistory(trimmedQuery);
+    Zotero.debug(`[${config.addonName}] executeInspireSearch: query set to "${trimmedQuery}"`);
+
+    // Update search input value
+    if (this.searchInput) {
+      this.searchInput.value = trimmedQuery;
+      Zotero.debug(`[${config.addonName}] executeInspireSearch: updated search input value`);
+    } else {
+      Zotero.debug(`[${config.addonName}] executeInspireSearch: WARNING - searchInput is null/undefined`);
+    }
+
+    // Switch to search mode and update UI
+    Zotero.debug(`[${config.addonName}] executeInspireSearch: switching to search mode`);
+    this.viewMode = "search";
+    this.updateTabSelection();
+    this.updateSearchUIVisibility();
+
+    // Load search results
+    Zotero.debug(`[${config.addonName}] executeInspireSearch: calling loadSearchResults`);
+    await this.loadSearchResults(trimmedQuery);
+    Zotero.debug(`[${config.addonName}] executeInspireSearch: loadSearchResults completed`);
+  }
+
+  /**
+   * Load search results from INSPIRE API.
+   */
+  private async loadSearchResults(query: string) {
+    Zotero.debug(`[${config.addonName}] loadSearchResults: starting for query="${query}"`);
+    this.cancelActiveRequest();
+
+    const loadingMessage = this.getLoadingMessageForMode("search");
+    this.allEntries = [];
+    this.setStatus(loadingMessage);
+    this.renderMessage(loadingMessage);
+    Zotero.debug(`[${config.addonName}] loadSearchResults: set status to "${loadingMessage}"`);
+
+    const cacheKey = this.getCacheKey(query, "search", this.searchSort);
+    const cached = this.searchCache.get(cacheKey);
+    if (cached) {
+      Zotero.debug(`[${config.addonName}] loadSearchResults: returning cached results (${cached.length} entries)`);
+      this.allEntries = cached;
+      this.totalApiCount = null;
+      this.chartSelectedBins.clear();
+      this.renderChartImmediate();  // Use immediate render for cache hit
+      this.renderReferenceList();
+      return;
+    }
+    Zotero.debug(`[${config.addonName}] loadSearchResults: no cache hit, fetching from API`);
+
+    const supportsAbort = typeof AbortController !== "undefined";
+    const controller = supportsAbort ? new AbortController() : null;
+    this.activeAbort = controller ?? undefined;
+    const token = `search-${cacheKey}-${performance.now()}`;
+    this.pendingToken = token;
+
+    try {
+      let hasRenderedFirstPage = false;
+      let previousEntryCount = 0;
+
+      const onProgress = (currentEntries: InspireReferenceEntry[], total: number | null) => {
+        if (this.pendingToken !== token || this.viewMode !== "search") {
+          return;
+        }
+        const prevCount = previousEntryCount;
+        previousEntryCount = currentEntries.length;
+        this.allEntries = currentEntries;
+
+        if (total !== null) {
+          this.totalApiCount = total;
+        }
+
+        if (!this.filterText) {
+          const loadedCount = currentEntries.length;
+          const totalStr = total !== null ? ` of ${total}` : "";
+          this.setStatus(`Searching... ${loadedCount}${totalStr} results`);
+        }
+
+        if (!hasRenderedFirstPage) {
+          this.renderChartImmediate();  // Render chart immediately on first page
+          this.renderReferenceList({ preserveScroll: false });
+          this.resetListScroll();
+          hasRenderedFirstPage = true;
+        } else if (this.filterText || this.chartSelectedBins.size > 0) {
+          this.renderReferenceList({ preserveScroll: true });
+        } else {
+          this.appendNewEntries(prevCount);
+        }
+      };
+
+      const entries = await this.fetchInspireSearch(
+        query,
+        this.searchSort,
+        controller?.signal,
+        onProgress,
+      );
+
+      this.searchCache.set(cacheKey, entries);
+
+      if (this.pendingToken === token && this.viewMode === "search") {
+        this.allEntries = entries;
+        this.chartSelectedBins.clear();
+        this.renderChartImmediate();  // Use immediate render for final data load
+        this.renderReferenceList();
+      }
+
+      // Enrich with local status
+      const enrichToken = token;
+      const enrichSignal = controller?.signal;
+      setTimeout(async () => {
+        if (this.pendingToken !== enrichToken) return;
+        try {
+          await this.enrichLocalStatus(entries, enrichSignal);
+        } catch (err) {
+          if ((err as any)?.name !== "AbortError") {
+            Zotero.debug(`[${config.addonName}] Search enrichment error: ${err}`);
+          }
+        }
+      }, 0);
+    } catch (err) {
+      if ((err as any)?.name !== "AbortError") {
+        Zotero.debug(`[${config.addonName}] INSPIRE search error: ${err}`);
+        this.allEntries = [];
+        this.renderChartImmediate();
+        this.renderMessage(getString("references-panel-status-error"));
+      }
+    } finally {
+      if (this.pendingToken === token) {
+        this.activeAbort = undefined;
+      }
+    }
+  }
+
+  /**
+   * Fetch search results from INSPIRE API.
+   */
+  private async fetchInspireSearch(
+    query: string,
+    sort: InspireSortOption,
+    signal?: AbortSignal,
+    onProgress?: (entries: InspireReferenceEntry[], total: number | null) => void,
+  ): Promise<InspireReferenceEntry[]> {
+    const startTime = performance.now();
+    Zotero.debug(`[${config.addonName}] fetchInspireSearch: starting for query="${query}", sort=${sort}`);
+    const entries: InspireReferenceEntry[] = [];
+    const encodedQuery = encodeURIComponent(query);
+    const sortParam = `&sort=${sort}`;
+    const fieldsParam = "&fields=control_number,titles.title,authors.full_name,authors.ids,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
+
+    // Fetch first page to get total count
+    const firstUrl = `${INSPIRE_API_BASE}/literature?q=${encodedQuery}&size=${CITED_BY_PAGE_SIZE}&page=1${sortParam}${fieldsParam}`;
+    Zotero.debug(`[${config.addonName}] fetchInspireSearch: fetching first page from ${firstUrl}`);
+    const firstFetchStart = performance.now();
+    const firstResponse = await inspireFetch(firstUrl, signal ? { signal } : undefined).catch((err) => {
+      Zotero.debug(`[${config.addonName}] fetchInspireSearch: first page fetch failed: ${err}`);
+      return null;
+    });
+    Zotero.debug(`[${config.addonName}] fetchInspireSearch: first page fetch took ${(performance.now() - firstFetchStart).toFixed(0)}ms`);
+    if (!firstResponse || firstResponse.status === 404) {
+      Zotero.debug(`[${config.addonName}] fetchInspireSearch: first response failed, status=${firstResponse?.status}`);
+      throw new Error("Search failed");
+    }
+
+    const firstPayload: any = await firstResponse.json();
+    const totalHits = firstPayload?.hits?.total ?? 0;
+    const firstHits = Array.isArray(firstPayload?.hits?.hits) ? firstPayload.hits.hits : [];
+
+    Zotero.debug(`[${config.addonName}] fetchInspireSearch: found ${totalHits} total results, first page has ${firstHits.length} hits`);
+
+    if (totalHits === 0) {
+      return [];
+    }
+
+    // Process first page
+    const strings = getCachedStrings();
+    for (let i = 0; i < firstHits.length; i++) {
+      if (signal?.aborted) break;
+      entries.push(this.buildEntryFromSearchHit(firstHits[i], i, strings));
+    }
+
+    // PERF-16: Pass array reference directly instead of cloning
+    if (onProgress) {
+      onProgress(entries, totalHits);
+    }
+
+    // If there are more pages, fetch them in parallel batches
+    const totalPages = Math.ceil(Math.min(totalHits, CITED_BY_MAX_RESULTS) / CITED_BY_PAGE_SIZE);
+    if (totalPages <= 1) {
+      return entries;
+    }
+
+    // Fetch remaining pages in parallel batches
+    for (let batchStart = 2; batchStart <= totalPages; batchStart += CITED_BY_PARALLEL_BATCH_SIZE) {
+      if (signal?.aborted) break;
+
+      const batchPages: number[] = [];
+      for (let p = batchStart; p < batchStart + CITED_BY_PARALLEL_BATCH_SIZE && p <= totalPages; p++) {
+        batchPages.push(p);
+      }
+
+      const batchResults = await Promise.all(
+        batchPages.map(async (pageNum) => {
+          const url = `${INSPIRE_API_BASE}/literature?q=${encodedQuery}&size=${CITED_BY_PAGE_SIZE}&page=${pageNum}${sortParam}${fieldsParam}`;
+          const response = await inspireFetch(url, signal ? { signal } : undefined).catch(() => null);
+          if (!response || !response.ok) return [];
+          const payload: any = await response.json();
+          return Array.isArray(payload?.hits?.hits) ? payload.hits.hits : [];
+        }),
+      );
+
+      // Process batch results
+      for (const pageHits of batchResults) {
+        for (const hit of pageHits) {
+          if (signal?.aborted) break;
+          entries.push(this.buildEntryFromSearchHit(hit, entries.length, strings));
+        }
+      }
+
+      // PERF-16: Pass array reference directly instead of cloning
+      if (onProgress && !signal?.aborted) {
+        onProgress(entries, totalHits);
+      }
+    }
+
+    Zotero.debug(`[${config.addonName}] fetchInspireSearch: completed in ${(performance.now() - startTime).toFixed(0)}ms, ${entries.length} entries`);
+    return entries;
+  }
+
+  /**
+   * Build an entry from a search hit result.
+   */
+  private buildEntryFromSearchHit(
+    hit: any,
+    index: number,
+    strings: ReturnType<typeof getCachedStrings>,
+  ): InspireReferenceEntry {
+    const meta = hit?.metadata || hit;
+    const recid = String(meta?.control_number ?? "");
+    const rawTitle = meta?.titles?.[0]?.title ?? strings.noTitle;
+    const title = cleanMathTitle(rawTitle);
+    const authors = meta?.authors ?? [];
+    const { primary: publicationInfo, errata } = splitPublicationInfo(meta?.publication_info);
+    const arxivDetails = extractArxivFromMetadata(meta);
+    const earliestDate = meta?.earliest_date ?? "";
+    const year = earliestDate ? earliestDate.slice(0, 4) : publicationInfo?.year ?? "";
+    const citationCount = typeof meta?.citation_count === "number" ? meta.citation_count : null;
+
+    const { names: authorNames, total: totalAuthors } = extractAuthorNamesLimited(authors, 3);
+    const authorText = formatAuthors(authorNames, totalAuthors);
+    const fallbackYear = year || undefined;
+    const summary = buildPublicationSummary(publicationInfo, arxivDetails, fallbackYear, errata);
+
+    const inspireUrl = recid ? `${INSPIRE_LITERATURE_URL}/${recid}` : "";
+    const fallbackUrl = buildFallbackUrlFromMetadata(meta, arxivDetails);
+
+    const entry: InspireReferenceEntry = {
+      id: `search-${index}-${recid || Date.now()}`,
+      recid,
+      title,
+      authors: authorNames,
+      totalAuthors,
+      authorSearchInfos: extractAuthorSearchInfos(authors, 3),
+      authorText,
+      displayText: "",
+      year: year || strings.yearUnknown,
+      summary,
+      citationCount,
+      inspireUrl,
+      fallbackUrl,
+      searchText: "",
+      localItemID: undefined,
+      isRelated: false,
+      publicationInfo,
+      publicationInfoErrata: errata,
+      arxivDetails,
+    };
+
+    // Build displayText for proper filtering (matches behavior in buildEntry and buildEntryFromSearch)
+    entry.displayText = buildDisplayText(entry);
+    // Defer searchText calculation to first filter for better initial load performance
+    entry.searchText = "";
+
+    return entry;
+  }
+
   private getSortOptionForMode(mode: InspireViewMode) {
     if (mode === "references") {
       return this.referenceSort;
     }
     if (mode === "citedBy") {
       return this.citedBySort;
+    }
+    if (mode === "search") {
+      return this.searchSort;
     }
     return this.entryCitedSort;
   }
@@ -4218,6 +6388,9 @@ class InspireReferencePanelController {
       // Differentiate author queries from recid queries
       const prefix = this.entryCitedSource?.authorQuery ? "author" : "entry";
       return `${recidOrQuery}:${prefix}:${sort ?? this.entryCitedSort}`;
+    }
+    if (mode === "search") {
+      return `${recidOrQuery}:search:${sort ?? this.searchSort}`;
     }
     return recidOrQuery;
   }
@@ -4236,41 +6409,83 @@ class InspireReferencePanelController {
         return safeB - safeA;
       });
     } else if (this.referenceSort === "citationDesc") {
+      // Use getCitationValue() to respect excludeSelfCitations toggle
       sorted.sort(
         (a, b) =>
-          (b.citationCount ?? Number.NEGATIVE_INFINITY) -
-          (a.citationCount ?? Number.NEGATIVE_INFINITY),
+          this.getCitationValue(b) - this.getCitationValue(a),
       );
     }
     return sorted;
   }
 
   /**
-   * Get a row element from the pool or create a new one.
-   * Pooled elements have their content cleared but retain the base class.
+   * Create a row template with all sub-elements pre-created (PERF-13).
+   * This template is reused when pooling rows - only content is updated, not structure.
    */
-  private getRowFromPool(): HTMLDivElement {
-    const pooled = this.rowPool.pop();
-    if (pooled) {
-      // Clear any leftover content from recycled row
-      pooled.textContent = "";
-      return pooled;
-    }
-    // Create new element if pool is empty
+  private createRowTemplate(): HTMLDivElement {
     const doc = this.listEl.ownerDocument;
     const row = doc.createElement("div");
     row.classList.add("zinspire-ref-entry");
+
+    // Use innerHTML for efficient batch creation of all sub-elements
+    row.innerHTML = `
+      <div class="zinspire-ref-entry__text">
+        <span class="zinspire-ref-entry__dot is-clickable"></span>
+        <button class="zinspire-ref-entry__link" type="button"></button>
+        <button class="zinspire-ref-entry__bibtex" type="button"></button>
+        <div class="zinspire-ref-entry__content">
+          <div class="zinspire-ref-entry__title">
+            <span class="zinspire-ref-entry__label"></span>
+            <span class="zinspire-ref-entry__authors"></span><span class="zinspire-ref-entry__separator">: </span>
+            <a class="zinspire-ref-entry__title-link" href="#"></a>
+          </div>
+          <div class="zinspire-ref-entry__meta"></div>
+          <button class="zinspire-ref-entry__stats zinspire-ref-entry__stats-button" type="button"></button>
+        </div>
+      </div>
+    `;
+
+    // Apply inline styles to template elements (one-time cost)
+    const textContainer = row.querySelector(".zinspire-ref-entry__text") as HTMLElement;
+    const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
+    const linkButton = row.querySelector(".zinspire-ref-entry__link") as HTMLElement;
+    const bibtexButton = row.querySelector(".zinspire-ref-entry__bibtex") as HTMLElement;
+    const content = row.querySelector(".zinspire-ref-entry__content") as HTMLElement;
+
+    if (textContainer) applyRefEntryTextContainerStyle(textContainer);
+    if (marker) {
+      applyRefEntryMarkerStyle(marker);
+      marker.style.cursor = "pointer";
+    }
+    if (linkButton) applyRefEntryLinkButtonStyle(linkButton);
+    if (bibtexButton) applyBibTeXButtonStyle(bibtexButton);
+    if (content) applyRefEntryContentStyle(content);
+
     return row;
   }
 
   /**
-   * Return a row element to the pool for later reuse.
-   * Clears content and event listeners (by clearing innerHTML).
+   * Get a row element from the pool or create a new one (PERF-13).
+   * Pooled elements retain their structure - only content needs updating.
+   */
+  private getRowFromPool(): HTMLDivElement {
+    const pooled = this.rowPool.pop();
+    if (pooled) {
+      // PERF-13: Don't clear content, structure is preserved for reuse
+      return pooled;
+    }
+    // Create new template if pool is empty
+    return this.createRowTemplate();
+  }
+
+  /**
+   * Return a row element to the pool for later reuse (PERF-13).
+   * Structure is preserved - no need to clear content.
    */
   private returnRowToPool(row: HTMLDivElement) {
     if (this.rowPool.length < this.maxRowPoolSize) {
-      // Clear content to release references and remove event listeners
-      row.textContent = "";
+      // PERF-13: Keep structure intact, just reset data attributes
+      delete row.dataset.entryId;
       this.rowPool.push(row);
     }
     // If pool is full, just let the element be garbage collected
@@ -4286,181 +6501,136 @@ class InspireReferencePanelController {
     }
   }
 
-  private createReferenceRow(entry: InspireReferenceEntry) {
-    const doc = this.listEl.ownerDocument;
+  /**
+   * Update row content with entry data (PERF-13).
+   * Called after getting a row from pool - only updates text/attributes, not structure.
+   */
+  private updateRowContent(row: HTMLDivElement, entry: InspireReferenceEntry) {
     const strings = getCachedStrings();
-    // Get row from pool or create new
-    const row = this.getRowFromPool();
 
-    const marker = doc.createElement("span");
-    marker.classList.add("zinspire-ref-entry__dot");
-    // Use filled circle for local items, circled plus for missing (click to add)
-    marker.textContent = entry.localItemID ? "●" : "⊕";
-    marker.dataset.state = entry.localItemID ? "local" : "missing";
-    applyRefEntryMarkerStyle(marker);
-    applyRefEntryMarkerColor(marker, Boolean(entry.localItemID));
-    marker.setAttribute(
-      "title",
-      entry.localItemID ? strings.dotLocal : strings.dotAdd,
-    );
-    marker.classList.add("is-clickable");
-    marker.style.cursor = "pointer";
-    marker.addEventListener("click", (event) => {
-      event.preventDefault();
-      const target = (event.target as HTMLElement).closest(
-        ".zinspire-ref-entry__dot",
-      ) as HTMLElement | null;
-      this.handleMarkerClick(entry, target ?? undefined).catch(() => void 0);
-    });
+    // Store entry ID for event delegation (PERF-14)
+    row.dataset.entryId = entry.id;
 
-    const linkButton = doc.createElement("button");
-    linkButton.classList.add("zinspire-ref-entry__link");
-    applyRefEntryLinkButtonStyle(linkButton);
-    linkButton.setAttribute(
-      "title",
-      entry.isRelated ? strings.linkExisting : strings.linkMissing,
-    );
-    this.renderLinkButton(linkButton, Boolean(entry.isRelated));
-    linkButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      this.handleLinkAction(entry, linkButton).catch((err) => {
-        if ((err as any)?.name !== "AbortError") {
-          Zotero.debug(
-            `[${config.addonName}] Unable to link reference: ${err}`,
-          );
-        }
-      });
-    });
-
-    const content = doc.createElement("div");
-    content.classList.add("zinspire-ref-entry__content");
-    applyRefEntryContentStyle(content);
-
-    // Build structured entry text with clickable author names
-    const entryTextContainer = doc.createElement("div");
-    entryTextContainer.classList.add("zinspire-ref-entry__title");
-
-    // Add label if present
-    if (entry.label) {
-      const labelSpan = doc.createElement("span");
-      labelSpan.textContent = `[${entry.label}] `;
-      entryTextContainer.appendChild(labelSpan);
-    }
-
-    // Create clickable author links (pass cached strings for performance)
-    this.appendAuthorLinks(entryTextContainer, entry, strings);
-
-    // Add year if needed
-    const normalizedYear =
-      entry.year && entry.year !== strings.yearUnknown ? entry.year : "";
-    const summaryContainsYear =
-      normalizedYear &&
-      entry.summary &&
-      entry.summary.includes(`(${normalizedYear})`);
-    if (normalizedYear && !summaryContainsYear) {
-      const yearSpan = doc.createElement("span");
-      yearSpan.textContent = ` (${normalizedYear})`;
-      entryTextContainer.appendChild(yearSpan);
-    }
-
-    // Add separator and title link
-    const separatorSpan = doc.createElement("span");
-    separatorSpan.textContent = ": ";
-    entryTextContainer.appendChild(separatorSpan);
-
-    const titleLink = doc.createElement("a");
-    titleLink.classList.add("zinspire-ref-entry__title-link");
-    titleLink.textContent = entry.title + ";";
-    titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
-    titleLink.addEventListener("click", (event) => {
-      event.preventDefault();
-      this.handleTitleClick(entry);
-    });
-    // Add hover events for abstract tooltip
-    titleLink.addEventListener("mouseenter", (event) => {
-      this.scheduleAbstractTooltip(entry, event);
-    });
-    titleLink.addEventListener("mouseleave", (event) => {
-      this.handleTitleMouseLeave(event);
-    });
-    titleLink.addEventListener("mousemove", (event) => {
-      this.updateTooltipPosition(event);
-    });
-    entryTextContainer.appendChild(titleLink);
-
-    content.appendChild(entryTextContainer);
-    if (entry.summary) {
-      const meta = doc.createElement("div");
-      meta.classList.add("zinspire-ref-entry__meta");
-      meta.textContent = entry.summary;
-      content.appendChild(meta);
-    }
-    // Show citation count button only if:
-    // 1. Entry has recid (so we can navigate to citing records), AND
-    // 2. Either citation count is known, OR we're in citedBy/entryCited mode (not references)
-    const hasCitationCount = typeof entry.citationCount === "number";
-    const isReferencesMode = this.viewMode === "references";
-    const canShowEntryCitedTab = Boolean(entry.recid) && (hasCitationCount || !isReferencesMode);
-
-    if (canShowEntryCitedTab) {
-      const statsButton = doc.createElement("button");
-      statsButton.type = "button";
-      statsButton.classList.add(
-        "zinspire-ref-entry__stats",
-        "zinspire-ref-entry__stats-button",
+    // Update marker
+    const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
+    if (marker) {
+      marker.textContent = entry.localItemID ? "●" : "⊕";
+      marker.dataset.state = entry.localItemID ? "local" : "missing";
+      applyRefEntryMarkerColor(marker, Boolean(entry.localItemID));
+      marker.setAttribute(
+        "title",
+        entry.localItemID ? strings.dotLocal : strings.dotAdd,
       );
-      statsButton.style.cursor = "pointer";
-      // Citation count with args still needs getString, but could be optimized if needed
-      const label = hasCitationCount
-        ? getString("references-panel-citation-count", {
-          args: { count: entry.citationCount },
-        })
-        : strings.citationUnknown;
-      statsButton.textContent = label;
-      statsButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        this.showEntryCitedTab(entry).catch(() => void 0);
-      });
-      content.appendChild(statsButton);
-    } else if (hasCitationCount) {
-      const stats = doc.createElement("div");
-      stats.classList.add("zinspire-ref-entry__stats");
-      stats.textContent = getString("references-panel-citation-count", {
-        args: { count: entry.citationCount },
-      });
-      content.appendChild(stats);
     }
 
-    // BibTeX copy button - only show if recid is available
-    const bibtexButton = doc.createElement("button");
-    bibtexButton.type = "button";
-    bibtexButton.classList.add("zinspire-ref-entry__bibtex");
-    applyBibTeXButtonStyle(bibtexButton);
-    bibtexButton.textContent = "📋";
-    bibtexButton.setAttribute("title", strings.copyBibtex);
-    if (entry.recid) {
-      bibtexButton.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        await this.handleBibTeXCopy(entry, bibtexButton);
-      });
-      bibtexButton.addEventListener("mouseenter", () => {
+    // Update link button
+    const linkButton = row.querySelector(".zinspire-ref-entry__link") as HTMLButtonElement;
+    if (linkButton) {
+      linkButton.setAttribute(
+        "title",
+        entry.isRelated ? strings.linkExisting : strings.linkMissing,
+      );
+      this.renderLinkButton(linkButton, Boolean(entry.isRelated));
+    }
+
+    // Update bibtex button
+    const bibtexButton = row.querySelector(".zinspire-ref-entry__bibtex") as HTMLButtonElement;
+    if (bibtexButton) {
+      bibtexButton.textContent = "📋";
+      bibtexButton.setAttribute("title", strings.copyBibtex);
+      if (entry.recid) {
+        bibtexButton.disabled = false;
         bibtexButton.style.opacity = "1";
-      });
-      bibtexButton.addEventListener("mouseleave", () => {
-        bibtexButton.style.opacity = "0.7";
-      });
-    } else {
-      bibtexButton.disabled = true;
-      bibtexButton.style.opacity = "0.3";
-      bibtexButton.style.cursor = "not-allowed";
+        bibtexButton.style.cursor = "pointer";
+      } else {
+        bibtexButton.disabled = true;
+        bibtexButton.style.opacity = "0.3";
+        bibtexButton.style.cursor = "not-allowed";
+      }
     }
 
-    const textContainer = doc.createElement("div");
-    textContainer.classList.add("zinspire-ref-entry__text");
-    applyRefEntryTextContainerStyle(textContainer);
-    textContainer.append(marker, linkButton, bibtexButton, content);
-    row.appendChild(textContainer);
+    // Update label (show/hide)
+    const labelSpan = row.querySelector(".zinspire-ref-entry__label") as HTMLElement;
+    if (labelSpan) {
+      if (entry.label) {
+        labelSpan.textContent = `[${entry.label}] `;
+        labelSpan.style.display = "";
+      } else {
+        labelSpan.textContent = "";
+        labelSpan.style.display = "none";
+      }
+    }
+
+    // Update authors container
+    const authorsContainer = row.querySelector(".zinspire-ref-entry__authors") as HTMLElement;
+    if (authorsContainer) {
+      // Clear and rebuild author links (variable count)
+      authorsContainer.innerHTML = "";
+      this.appendAuthorLinks(authorsContainer, entry, strings);
+    }
+
+    // Update title link
+    const titleLink = row.querySelector(".zinspire-ref-entry__title-link") as HTMLAnchorElement;
+    if (titleLink) {
+      titleLink.textContent = entry.title + ";";
+      titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
+    }
+
+    // Update meta (show/hide)
+    const meta = row.querySelector(".zinspire-ref-entry__meta") as HTMLElement;
+    if (meta) {
+      if (entry.summary) {
+        meta.textContent = entry.summary;
+        meta.style.display = "";
+      } else {
+        meta.textContent = "";
+        meta.style.display = "none";
+      }
+    }
+
+    // Update stats button (show/hide and content)
+    const statsButton = row.querySelector(".zinspire-ref-entry__stats-button") as HTMLButtonElement;
+    if (statsButton) {
+      const displayCitationCount = this.getCitationValue(entry);
+      const hasCitationCount = displayCitationCount > 0 ||
+        typeof entry.citationCount === "number" ||
+        typeof entry.citationCountWithoutSelf === "number";
+      const isReferencesMode = this.viewMode === "references";
+      const canShowEntryCitedTab = Boolean(entry.recid) && (hasCitationCount || !isReferencesMode);
+
+      if (canShowEntryCitedTab || hasCitationCount) {
+        const label = hasCitationCount
+          ? getString("references-panel-citation-count", {
+            args: { count: displayCitationCount },
+          })
+          : strings.citationUnknown;
+        statsButton.textContent = label;
+        statsButton.style.display = "";
+        // Make it clickable only if we can show entry cited tab
+        if (canShowEntryCitedTab) {
+          statsButton.style.cursor = "pointer";
+          statsButton.disabled = false;
+        } else {
+          statsButton.style.cursor = "default";
+          statsButton.disabled = true;
+        }
+      } else {
+        statsButton.textContent = "";
+        statsButton.style.display = "none";
+      }
+    }
+  }
+
+  /**
+   * Create a reference row element for an entry (PERF-13).
+   * Uses pooled row templates and only updates content, not structure.
+   */
+  private createReferenceRow(entry: InspireReferenceEntry) {
+    // Get row from pool (with pre-created structure) or create new template
+    const row = this.getRowFromPool();
+    // Update row content with entry data
+    this.updateRowContent(row, entry);
+    // Cache the row for later updates (e.g., citation count, status)
     this.rowCache.set(entry.id, row);
     return row;
   }
@@ -4509,9 +6679,11 @@ class InspireReferencePanelController {
     // Filter out entries where formatAuthorName returns empty string
     // Also filter out "others" (will be converted to et al.)
     // Also track author search info (recid if available) for precise search
+    // Store original index for event delegation (PERF-14)
     type AuthorDisplay = {
       formatted: string;        // Display name (e.g., "J. Smith")
       searchInfo: AuthorSearchInfo;  // Search info with fullName and optional recid
+      originalIndex: number;    // Original index in entry.authors for event delegation
     };
     const validAuthors: AuthorDisplay[] = [];
     // For large collaborations, only process first author
@@ -4530,6 +6702,7 @@ class InspireReferencePanelController {
         validAuthors.push({
           formatted,
           searchInfo: { fullName, bai, recid },
+          originalIndex: i,
         });
       }
     }
@@ -4565,22 +6738,19 @@ class InspireReferencePanelController {
         comma.textContent = ", ";
         container.appendChild(comma);
       }
-      const { formatted, searchInfo } = authorsToShow[i];
+      const { formatted, searchInfo, originalIndex } = authorsToShow[i];
       const authorLink = doc.createElement("a");
       authorLink.classList.add("zinspire-ref-entry__author-link");
       authorLink.textContent = formatted;
       authorLink.href = "#";
+      // Store original author index for event delegation (PERF-14)
+      authorLink.dataset.authorIndex = String(originalIndex);
       // Show BAI in tooltip if available (most reliable identifier)
       const idHint = searchInfo.bai ? ` (${searchInfo.bai})` : "";
       authorLink.title = getString("references-panel-author-click-hint", {
         args: { author: searchInfo.fullName },
       }) + idHint;
-      authorLink.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        // Pass full search info for precise author search
-        this.showAuthorPapersTab(searchInfo).catch(() => void 0);
-      });
+      // Event handled by delegation (PERF-14)
       applyAuthorLinkStyle(authorLink);
       container.appendChild(authorLink);
     }
@@ -4635,7 +6805,8 @@ class InspireReferencePanelController {
     if (newItem) {
       entry.localItemID = newItem.id;
       entry.displayText = buildDisplayText(entry);
-      entry.searchText = buildEntrySearchText(entry);
+      // Invalidate searchText so it will be recalculated on next filter
+      entry.searchText = "";
       // Automatically link after adding
       await this.linkExistingReference(newItem.id);
       entry.isRelated = true;
@@ -4686,7 +6857,7 @@ class InspireReferencePanelController {
       this.viewMode === "entryCited"
         ? this.entryCitedPreviousMode
         : this.viewMode;
-    if (previousMode === "references" || previousMode === "citedBy") {
+    if (previousMode === "references" || previousMode === "citedBy" || previousMode === "search") {
       this.entryCitedPreviousMode = previousMode;
     }
     const recidChanged = this.entryCitedSource?.recid !== entry.recid;
@@ -4747,7 +6918,7 @@ class InspireReferencePanelController {
       this.viewMode === "entryCited"
         ? this.entryCitedPreviousMode
         : this.viewMode;
-    if (previousMode === "references" || previousMode === "citedBy") {
+    if (previousMode === "references" || previousMode === "citedBy" || previousMode === "search") {
       this.entryCitedPreviousMode = previousMode;
     }
     const queryChanged = this.entryCitedSource?.authorQuery !== authorQuery;
@@ -4792,7 +6963,11 @@ class InspireReferencePanelController {
       return;
     }
     const target =
-      this.entryCitedPreviousMode === "citedBy" ? "citedBy" : "references";
+      this.entryCitedPreviousMode === "citedBy"
+        ? "citedBy"
+        : this.entryCitedPreviousMode === "search"
+          ? "search"
+          : "references";
     const scrollState = this.entryCitedReturnScroll;
     await this.activateViewMode(target).catch(() => void 0);
     this.applyScrollState(scrollState);
@@ -4873,7 +7048,8 @@ class InspireReferencePanelController {
     if (newItem) {
       entry.localItemID = newItem.id;
       entry.displayText = buildDisplayText(entry);
-      entry.searchText = buildEntrySearchText(entry);
+      // Invalidate searchText so it will be recalculated on next filter
+      entry.searchText = "";
       entry.isRelated = false;
       this.renderReferenceList({ preserveScroll: true });
       // Restore scroll position after rendering if needed
@@ -4961,6 +7137,8 @@ class InspireReferencePanelController {
     empty.textContent = message;
     this.listEl.appendChild(empty);
     this.setStatus(message);
+    this.chartNeedsRefresh = true;
+    this.lastRenderedEntries = [];
   }
 
   private setStatus(text: string) {
@@ -5428,2523 +7606,25 @@ class InspireReferencePanelController {
   }
 }
 
-class ReaderTabHelper {
-  // Get Zotero_Tabs dynamically to avoid initialization timing issues
-  private static get tabs() {
-    return typeof Zotero_Tabs !== "undefined" ? Zotero_Tabs : undefined;
-  }
-
-  // Get Zotero.Reader dynamically
-  private static get readerAPI() {
-    return (Zotero?.Reader as any) ?? undefined;
-  }
-
-  static selectTab(tabID: string) {
-    const tabs = this.tabs;
-    if (tabs && typeof tabs.select === "function") {
-      try {
-        tabs.select(tabID);
-      } catch (err) {
-        Zotero.debug(
-          `[${config.addonName}] Failed to select reader tab ${tabID}: ${err}`,
-        );
-      }
-    }
-  }
-
-  static focusReader(reader?: _ZoteroTypes.ReaderInstance) {
-    if (!reader) {
-      return;
-    }
-    const win = (reader as any)?._window as Window | undefined;
-    try {
-      reader.focus?.();
-      win?.focus?.();
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] Failed to focus reader ${reader.tabID}: ${err}`,
-      );
-    }
-  }
-
-  static getReaderByTabID(tabID: string) {
-    return this.readerAPI?.getByTabID?.(tabID) as _ZoteroTypes.ReaderInstance | undefined;
-  }
-
-  static getReaderByItemID(itemID?: number) {
-    if (!itemID || !this.readerAPI?._readers) {
-      return undefined;
-    }
-    const readers = this.readerAPI._readers as _ZoteroTypes.ReaderInstance[];
-    return readers.find((reader) => reader.itemID === itemID);
-  }
-
-  static getSelectedTabID() {
-    return this.tabs?.selectedID;
-  }
-
-  static getSelectedTabType(): "library" | "reader" | "other" {
-    const type = this.tabs?.selectedType;
-    if (type === "library") return "library";
-    if (type === "reader") return "reader";
-    return "other";
-  }
-
-  /**
-   * Find reader tab ID by looking at parent item's attachments.
-   * Reader tabs are opened for attachment items, not parent items.
-   */
-  static getReaderTabIDForParentItem(parentItemID?: number): string | undefined {
-    if (!parentItemID) {
-      return undefined;
-    }
-    try {
-      const parentItem = Zotero.Items.get(parentItemID);
-      if (!parentItem) {
-        return undefined;
-      }
-      // Get all attachment IDs for this parent item
-      const attachmentIDs = parentItem.getAttachments?.() || [];
-      for (const attachmentID of attachmentIDs) {
-        // Check if there's a reader tab for this attachment
-        const tabID = this.tabs?.getTabIDByItemID?.(attachmentID);
-        if (tabID) {
-          return tabID;
-        }
-        // Also check via reader API
-        const reader = this.getReaderByItemID(attachmentID);
-        if (reader?.tabID) {
-          return reader.tabID;
-        }
-      }
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] Failed to find reader tab for parent item ${parentItemID}: ${err}`,
-      );
-    }
-    return undefined;
-  }
-}
-
-function deriveRecidFromItem(item: Zotero.Item) {
-  const archiveLocation = (
-    item.getField("archiveLocation") as string | undefined
-  )?.trim();
-  if (archiveLocation && /^\d+$/.test(archiveLocation)) {
-    return archiveLocation;
-  }
-  const url = item.getField("url") as string | undefined;
-  const recidFromUrl = extractRecidFromUrl(url);
-  if (recidFromUrl) {
-    return recidFromUrl;
-  }
-  const extra = item.getField("extra") as string | undefined;
-  if (extra) {
-    const match = extra.match(/inspirehep\.net\/(?:record|literature)\/(\d+)/i);
-    if (match) {
-      return match[1];
-    }
-  }
-  return null;
-}
-
-function extractRecidFromRecordRef(ref?: string) {
-  if (!ref) {
-    return null;
-  }
-  const match = ref.match(/\/(\d+)(?:\?.*)?$/);
-  return match ? match[1] : null;
-}
-
-function extractRecidFromUrls(urls?: Array<{ value: string }>) {
-  if (!Array.isArray(urls)) {
-    return null;
-  }
-  for (const entry of urls) {
-    const candidate = extractRecidFromUrl(entry?.value);
-    if (candidate) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function extractRecidFromUrl(url?: string | null) {
-  if (!url) {
-    return null;
-  }
-  const match = url.match(/(?:literature|record)\/(\d+)/);
-  return match ? match[1] : null;
-}
-
-/**
- * Extract author names from a reference object with a limit for performance.
- * Falls back to collaboration names if no authors found.
- * For large collaborations (>50 authors), only extract first author.
- * Returns both author names and total count for "et al." logic.
- */
-function extractAuthorNamesFromReference(
-  reference: any,
-  limit: number,
-): { names: string[]; total: number } {
-  if (Array.isArray(reference?.authors) && reference.authors.length) {
-    const totalAuthors = reference.authors.length;
-    // For large collaborations, only extract first author
-    const effectiveLimit = totalAuthors > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
-    const result: string[] = [];
-    const maxToProcess = Math.min(totalAuthors, effectiveLimit);
-    for (let i = 0; i < maxToProcess; i++) {
-      const author = reference.authors[i];
-      let name: string | null = null;
-      if (author?.full_name) {
-        name = author.full_name;
-      } else if (author?.name) {
-        name = author.name;
-      } else if (author?.last_name || author?.first_name) {
-        const first = author.first_name ?? "";
-        const last = author.last_name ?? "";
-        name = `${last}, ${first}`.replace(/^, |, $/, "").trim();
-      }
-      if (name) {
-        result.push(name);
-      }
-    }
-    if (result.length) {
-      return { names: result, total: totalAuthors };
-    }
-  }
-  if (
-    Array.isArray(reference?.collaborations) &&
-    reference.collaborations.length
-  ) {
-    const maxCollabs = Math.min(reference.collaborations.length, limit);
-    const names = reference.collaborations.slice(0, maxCollabs).filter(Boolean);
-    return { names, total: reference.collaborations.length };
-  }
-  return { names: [], total: 0 };
-}
-
-/**
- * Extract last name from author full name for INSPIRE search.
- * Handles both "Last, First" and "First Last" formats.
- * Returns the last name portion for `author:LastName` query.
- */
-/**
- * Extract author names from INSPIRE authors array with a limit.
- * This avoids performance issues with large collaborations (thousands of authors).
- */
-const AUTHOR_IDS_EXTRACT_LIMIT = 10; // Support up to 10 displayed authors
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Cached locale strings for rendering performance
-// getString() calls formatMessagesSync() every time, which is slow.
-// For static strings used repeatedly in lists, we cache them here.
-// ─────────────────────────────────────────────────────────────────────────────
-let _cachedStrings: Record<string, string> | null = null;
-
-function getCachedStrings(): Record<string, string> {
-  if (!_cachedStrings) {
-    _cachedStrings = {
-      // Entry row strings (used in createReferenceRow, updateRowMetadata)
-      dotLocal: getString("references-panel-dot-local"),
-      dotAdd: getString("references-panel-dot-add"),
-      linkExisting: getString("references-panel-link-existing"),
-      linkMissing: getString("references-panel-link-missing"),
-      yearUnknown: getString("references-panel-year-unknown"),
-      citationUnknown: getString("references-panel-citation-count-unknown"),
-      unknownAuthor: getString("references-panel-unknown-author"),
-      copyBibtex: getString("references-panel-copy-bibtex"),
-      noTitle: getString("references-panel-no-title"),
-      // Abstract tooltip strings
-      noAbstract: getString("references-panel-no-abstract"),
-      loadingAbstract: getString("references-panel-loading-abstract"),
-      // Status messages (used in status bar updates)
-      statusLoading: getString("references-panel-status-loading"),
-      statusLoadingCited: getString("references-panel-status-loading-cited"),
-      statusLoadingAuthor: getString("references-panel-status-loading-author"),
-      statusLoadingEntry: getString("references-panel-status-loading-entry"),
-      statusError: getString("references-panel-status-error"),
-      statusEmpty: getString("references-panel-status-empty"),
-      // Empty list messages
-      emptyList: getString("references-panel-empty-list"),
-      emptyCited: getString("references-panel-empty-cited"),
-      authorEmpty: getString("references-panel-author-empty"),
-      entryEmpty: getString("references-panel-entry-empty"),
-      noMatch: getString("references-panel-no-match"),
-      // Tab labels
-      tabReferences: getString("references-panel-tab-references"),
-      tabCited: getString("references-panel-tab-cited"),
-      tabAuthorPapers: getString("references-panel-tab-author-papers"),
-      tabEntryCited: getString("references-panel-tab-entry-cited"),
-      // Sort options
-      sortDefault: getString("references-panel-sort-default"),
-      sortMostrecent: getString("references-panel-sort-mostrecent"),
-      sortMostcited: getString("references-panel-sort-mostcited"),
-      // Navigation
-      entryLabelDefault: getString("references-panel-entry-label-default"),
-      selectItem: getString("references-panel-select-item"),
-      noRecid: getString("references-panel-no-recid"),
-      readerMode: getString("references-panel-reader-mode"),
-      entrySelect: getString("references-panel-entry-select"),
-      // Batch BibTeX copy
-      bibtexFetching: getString("references-panel-bibtex-fetching"),
-      bibtexAllFailed: getString("references-panel-bibtex-all-failed"),
-      noRecidEntries: getString("references-panel-no-recid-entries"),
-    };
-  }
-  return _cachedStrings;
-}
-
-/**
- * Clear cached strings (useful if locale changes at runtime).
- */
-function clearCachedStrings() {
-  _cachedStrings = null;
-}
-
-/**
- * Extract author names with limit, handling large collaborations.
- * For large collaborations (>50 authors), only extract first author.
- * Returns both author names and total count for "et al." logic.
- */
-function extractAuthorNamesLimited(
-  authors: any[] | undefined,
-  limit: number,
-): { names: string[]; total: number } {
-  if (!Array.isArray(authors) || !authors.length) {
-    return { names: [], total: 0 };
-  }
-  const totalAuthors = authors.length;
-  // For large collaborations, only extract first author
-  const effectiveLimit = totalAuthors > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
-  const result: string[] = [];
-  const maxToProcess = Math.min(totalAuthors, effectiveLimit);
-  for (let i = 0; i < maxToProcess; i++) {
-    const name = authors[i]?.full_name || authors[i]?.full_name_unicode_normalized;
-    if (name) {
-      result.push(name);
-    }
-  }
-  return { names: result, total: totalAuthors };
-}
-
-/**
- * Validate INSPIRE BAI format.
- * Valid BAI examples: "Feng.Kun.Guo.1", "E.Witten.1", "R.L.Jaffe.1"
- * BAI must contain at least one letter segment and end with a number.
- */
-function isValidBAI(bai: string): boolean {
-  if (!bai || typeof bai !== "string") {
-    return false;
-  }
-  // BAI format: Name.Parts.Separated.By.Dots.Number
-  // Must have at least 2 parts (name + number), and last part must be a number
-  const parts = bai.split(".");
-  if (parts.length < 2) {
-    return false;
-  }
-  // Last part should be a number (disambiguation number)
-  const lastPart = parts[parts.length - 1];
-  if (!/^\d+$/.test(lastPart)) {
-    return false;
-  }
-  // At least one name part should contain letters
-  const nameParts = parts.slice(0, -1);
-  const hasLetterPart = nameParts.some((part) => /[A-Za-z]/.test(part));
-  if (!hasLetterPart) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * Extract author search info (fullName + BAI/recid) from INSPIRE authors array.
- * BAI (INSPIRE Author ID) like "Feng.Kun.Guo.1" is the most reliable for precise search.
- * For large collaborations (>50 authors), only extract first author's info.
- * See: https://github.com/inspirehep/rest-api-doc
- */
-function extractAuthorSearchInfos(
-  authors: any[] | undefined,
-  limit: number,
-): AuthorSearchInfo[] | undefined {
-  if (!Array.isArray(authors) || !authors.length) {
-    return undefined;
-  }
-  // For large collaborations, only extract first author's search info
-  const effectiveLimit = authors.length > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
-  const result: AuthorSearchInfo[] = [];
-  const maxToProcess = Math.min(authors.length, effectiveLimit);
-  for (let i = 0; i < maxToProcess; i++) {
-    const author = authors[i];
-    const fullName = author?.full_name || author?.full_name_unicode_normalized;
-    if (!fullName) {
-      continue;
-    }
-
-    // Extract BAI from ids array (most reliable for author search)
-    // Validate BAI format to avoid false positives
-    let bai: string | undefined;
-    if (Array.isArray(author.ids)) {
-      for (const id of author.ids) {
-        if (id?.schema === "INSPIRE BAI" && id?.value && isValidBAI(id.value)) {
-          bai = id.value;
-          break;
-        }
-      }
-    }
-
-    // Extract recid for display purposes (not used for search anymore)
-    let recid: string | undefined;
-    if (author.recid) {
-      recid = String(author.recid);
-    } else if (author.record?.$ref) {
-      const match = author.record.$ref.match(/\/authors\/(\d+)$/);
-      if (match) {
-        recid = match[1];
-      }
-    }
-
-    result.push({ fullName, bai, recid });
-  }
-  return result.length > 0 ? result : undefined;
-}
-
-/**
- * Normalize consecutive initials like "R.L." to "R. L." for proper parsing.
- * This handles cases where initials are written without spaces between them.
- * Examples:
- *   "R.L." → "R. L."
- *   "R.L.K." → "R. L. K."
- *   "R.L. Jaffe" → "R. L. Jaffe"
- */
-function normalizeInitials(name: string): string {
-  if (!name) {
-    return name;
-  }
-  // Pattern: uppercase letter followed by dot and another uppercase letter
-  // Insert space after dot when followed by another initial (uppercase letter + optional dot)
-  // "R.L." → "R. L.", "R.L.K." → "R. L. K."
-  return name.replace(/([A-Z])\.([A-Z])/g, "$1. $2");
-}
-
-/**
- * Convert full name to INSPIRE search query format.
- * "Guo, Feng-Kun" → "f k guo" (initials of first name + last name, all lowercase)
- * "Edward Witten" → "e witten"
- * "R.L. Jaffe" → "r l jaffe"
- *
- * INSPIRE author search uses this format for name-based queries.
- */
-function convertFullNameToSearchQuery(fullName: string): string {
-  if (!fullName?.trim()) {
-    return "";
-  }
-  const trimmed = fullName.trim();
-  let lastName = "";
-  let firstName = "";
-
-  // Handle "Last, First" format (common in bibliographic data)
-  if (trimmed.includes(",")) {
-    const [lastPart, firstPart] = trimmed.split(",", 2);
-    lastName = (lastPart || "").trim();
-    firstName = (firstPart || "").trim();
-  } else {
-    // Handle "First Last" format
-    const parts = trimmed.split(/\s+/);
-    if (parts.length === 1) {
-      return parts[0].toLowerCase();
-    }
-    // Last word is last name, everything before is first name(s)
-    lastName = parts[parts.length - 1];
-    firstName = parts.slice(0, -1).join(" ");
-  }
-
-  if (!lastName) {
-    return "";
-  }
-
-  // Normalize consecutive initials: "R.L." → "R. L."
-  const normalizedFirstName = normalizeInitials(firstName);
-
-  // Convert first name to initials: "Feng-Kun" → "f k", "Edward" → "e", "R. L." → "r l"
-  // Split by space, hyphen, or dot (for initials like "R.L.")
-  const initials = normalizedFirstName
-    .split(/[\s\-.]+/)  // Split by space, hyphen, or dot
-    .map((part) => part.charAt(0)?.toLowerCase())
-    .filter(Boolean)
-    .join(" ");
-
-  // Format: "initials lastname" (all lowercase)
-  if (initials) {
-    return `${initials} ${lastName.toLowerCase()}`;
-  }
-  return lastName.toLowerCase();
-}
-
-function splitPublicationInfo(
-  raw?: any | any[],
-): { primary?: any; errata?: Array<{ info: any; label: string }> } {
-  if (!raw) {
-    return {};
-  }
-  const list = (Array.isArray(raw) ? raw : [raw]).filter(Boolean);
-  if (!list.length) {
-    return {};
-  }
-  let primary = list.find((info) => !getPublicationNoteLabel(info));
-  if (!primary) {
-    primary = list[0];
-  }
-  const errata = list
-    .filter((info) => info && info !== primary)
-    .map((info) => {
-      const label = getPublicationNoteLabel(info);
-      return label ? { info, label } : undefined;
-    })
-    .filter((note): note is { info: any; label: string } => Boolean(note));
-  return {
-    primary,
-    errata: errata.length ? errata : undefined,
-  };
-}
-
-function getPublicationNoteLabel(info: any): string | undefined {
-  if (!info || typeof info !== "object") {
-    return undefined;
-  }
-  const collectValues = (value: any): string[] => {
-    if (typeof value === "string") {
-      return [value];
-    }
-    if (Array.isArray(value)) {
-      return value.flatMap(collectValues);
-    }
-    return [];
-  };
-  const values: string[] = [];
-  if (info.material !== undefined) values.push(...collectValues(info.material));
-  if (info.note !== undefined) values.push(...collectValues(info.note));
-  if (info.pubinfo_freetext !== undefined) {
-    values.push(...collectValues(info.pubinfo_freetext));
-  }
-  if (info.additional_info !== undefined) {
-    values.push(...collectValues(info.additional_info));
-  }
-  const labelRegexes: Array<{ regex: RegExp; label: string }> = [
-    { regex: /erratum/i, label: "Erratum" },
-    { regex: /addendum/i, label: "Addendum" },
-  ];
-  for (const value of values) {
-    for (const { regex, label } of labelRegexes) {
-      if (regex.test(value)) {
-        return label;
-      }
-    }
-  }
-  return undefined;
-}
-
-function buildPublicationSummary(
-  info?: any,
-  arxiv?: InspireArxivDetails | string | null,
-  fallbackYear?: string,
-  errata?: any[],
-) {
-  const mainSummary = formatPublicationInfo(info, fallbackYear);
-  const arxivTag = formatArxivTag(arxiv);
-  // const baseSummary = mainSummary || arxivTag;
-  // Show both journal informaion and arXiv information when both are available
-  const baseSummary = [mainSummary, arxivTag].filter(Boolean).join(" ");
-
-  const errataSummaries = (errata ?? [])
-    .map((entry) => {
-      const text = formatPublicationInfo(entry.info, fallbackYear, {
-        omitJournal: true,
-      });
-      return text ? `${entry.label}: ${text}` : null;
-    })
-    .filter((text): text is string => Boolean(text));
-
-  if (errataSummaries.length) {
-    const errataText = `[${errataSummaries.join("; ")}]`;
-    return baseSummary ? `${baseSummary} ${errataText}` : errataText;
-  }
-
-  return baseSummary;
-}
-
-function formatPublicationInfo(
-  info?: any,
-  fallbackYear?: string,
-  options?: { omitJournal?: boolean },
-) {
-  if (!info) {
-    return "";
-  }
-  const parts: string[] = [];
-  const journal = options?.omitJournal
-    ? ""
-    : info.journal_title || info.journal_title_abbrev || "";
-  const volume = info.journal_volume || info.volume || "";
-  const artid = info.artid || info.article_number || info.eprintid;
-  const pageStart =
-    info.page_start ||
-    info.pagination ||
-    (Array.isArray(info.pages) ? info.pages[0] : undefined);
-  const pageEnd =
-    info.page_end ||
-    (Array.isArray(info.pages) ? info.pages[1] : undefined);
-  if (journal) {
-    parts.push(journal);
-  }
-  if (volume) {
-    parts.push(volume);
-  }
-  const normalizedFallbackYear =
-    fallbackYear && typeof fallbackYear === "string"
-      ? fallbackYear.match(/\d{4}/)?.[0] ?? fallbackYear
-      : undefined;
-  const resolvedYear =
-    info.year ??
-    (info.date ? String(info.date).slice(0, 4) : undefined) ??
-    normalizedFallbackYear;
-  const yearPart = resolvedYear ? `(${resolvedYear})` : undefined;
-  let yearInserted = false;
-  const insertYearIfNeeded = () => {
-    if (!yearInserted && yearPart) {
-      parts.push(yearPart);
-      yearInserted = true;
-    }
-  };
-  if (artid) {
-    insertYearIfNeeded();
-    parts.push(artid);
-  } else if (pageStart) {
-    insertYearIfNeeded();
-    const range =
-      pageEnd && pageEnd !== pageStart ? `${pageStart}-${pageEnd}` : pageStart;
-    parts.push(range);
-  } else {
-    insertYearIfNeeded();
-  }
-  if (!parts.length && info.publication_info) {
-    const fallback = [
-      options?.omitJournal ? undefined : info.publication_info.title,
-      info.publication_info.volume,
-      info.publication_info.year
-        ? `(${info.publication_info.year})`
-        : normalizedFallbackYear
-          ? `(${normalizedFallbackYear})`
-          : undefined,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    if (fallback) {
-      parts.push(fallback);
-    }
-  }
-  return parts.join(" ").trim();
-}
-
-function buildReferenceUrl(reference: any, recid?: string | null) {
-  if (recid) {
-    return `${INSPIRE_LITERATURE_URL}/${recid}`;
-  }
-  if (Array.isArray(reference?.urls) && reference.urls.length) {
-    return reference.urls[0].value;
-  }
-  return buildFallbackUrl(reference);
-}
-
-function buildFallbackUrl(
-  reference: any,
-  arxiv?: InspireArxivDetails | string | null,
-) {
-  if (Array.isArray(reference?.dois) && reference.dois.length) {
-    return `${DOI_ORG_URL}/${reference.dois[0]}`;
-  }
-  const explicit = formatArxivDetails(arxiv);
-  if (explicit?.id) {
-    return `${ARXIV_ABS_URL}/${explicit.id}`;
-  }
-  const derived = formatArxivDetails(reference?.arxiv_eprint);
-  if (derived?.id) {
-    return `${ARXIV_ABS_URL}/${derived.id}`;
-  }
-  return undefined;
-}
-
-function buildFallbackUrlFromMetadata(
-  metadata: any,
-  arxiv?: InspireArxivDetails | null,
-) {
-  if (!metadata) {
-    return undefined;
-  }
-  if (Array.isArray(metadata?.dois) && metadata.dois.length) {
-    const first = metadata.dois[0];
-    const value =
-      typeof first === "string" ? first : (first?.value as string | undefined);
-    if (value) {
-      return `${DOI_ORG_URL}/${value}`;
-    }
-  }
-  const provided = formatArxivDetails(arxiv)?.id;
-  if (provided) {
-    return `${ARXIV_ABS_URL}/${provided}`;
-  }
-  const derived = extractArxivFromMetadata(metadata);
-  if (derived?.id) {
-    return `${ARXIV_ABS_URL}/${derived.id}`;
-  }
-  return undefined;
-}
-
-function extractArxivFromReference(
-  reference: any,
-): InspireArxivDetails | undefined {
-  if (!reference) {
-    return undefined;
-  }
-  const id = normalizeArxivID(reference?.arxiv_eprint);
-  const categoriesRaw =
-    reference?.arxiv_categories ??
-    reference?.arxiv_category ??
-    reference?.arxiv_subject;
-  const categories = normalizeArxivCategories(categoriesRaw);
-  if (!id && !categories.length) {
-    return undefined;
-  }
-  return {
-    id,
-    categories,
-  };
-}
-
-function extractArxivFromMetadata(
-  metadata: any,
-): InspireArxivDetails | undefined {
-  if (!metadata) {
-    return undefined;
-  }
-  if (Array.isArray(metadata?.arxiv_eprints) && metadata.arxiv_eprints.length) {
-    const first = metadata.arxiv_eprints.find(
-      (entry: any) => entry?.value || entry?.id,
-    );
-    if (!first) {
-      return undefined;
-    }
-    const id = normalizeArxivID(
-      typeof first === "string" ? first : (first?.value ?? first?.id),
-    );
-    const categories = normalizeArxivCategories(first?.categories);
-    if (!id && !categories.length) {
-      return undefined;
-    }
-    return { id, categories };
-  }
-  return undefined;
-}
-
-function formatArxivTag(
-  raw?: InspireArxivDetails | string | null,
-): string | undefined {
-  const details = formatArxivDetails(raw);
-  if (!details?.id) {
-    return undefined;
-  }
-  return `[arXiv:${details.id}]`;
-}
-
-function formatArxivDetails(
-  raw?: InspireArxivDetails | string | null,
-): { id?: string; categories: string[] } | undefined {
-  if (!raw) {
-    return undefined;
-  }
-  if (typeof raw === "string") {
-    const id = normalizeArxivID(raw);
-    return id ? { id, categories: [] } : undefined;
-  }
-  const id = normalizeArxivID(raw.id);
-  const categories = normalizeArxivCategories(raw.categories);
-  if (!id && !categories.length) {
-    return undefined;
-  }
-  return { id, categories };
-}
-
-function normalizeArxivID(raw?: string | null) {
-  if (!raw || typeof raw !== "string") {
-    return undefined;
-  }
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  return trimmed.replace(/^arxiv\s*:/i, "").trim();
-}
-
-function normalizeArxivCategories(input?: any): string[] {
-  if (!input) {
-    return [];
-  }
-  const values = Array.isArray(input) ? input : [input];
-  return values
-    .map((value) =>
-      typeof value === "string" ? value.trim() : undefined,
-    )
-    .filter((value): value is string => Boolean(value));
-}
-
-/**
- * Format author list for display.
- * - If totalAuthors > displayed authors, show "et al."
- * - If totalAuthors > 50 (large collaboration), show only first author + "et al."
- * - Convert "others" to "et al."
- */
-function formatAuthors(authors: string[], totalAuthors?: number): string {
-  if (!authors.length) {
-    return getString("references-panel-unknown-author");
-  }
-  // Filter out "others" and convert to et al. indication
-  const hasOthers = authors.some(
-    (name) => name.toLowerCase() === "others",
-  );
-  const filteredAuthors = authors.filter(
-    (name) => name.toLowerCase() !== "others",
-  );
-  const formatted = filteredAuthors
-    .map((name) => formatAuthorName(name))
-    .filter((name): name is string => Boolean(name));
-  if (!formatted.length) {
-    return getString("references-panel-unknown-author");
-  }
-  const maxAuthors = (getPref("max_authors") as number) || 3;
-  const actualTotal = totalAuthors ?? authors.length;
-  // For large collaborations, always show first author + et al.
-  if (actualTotal > LARGE_COLLABORATION_THRESHOLD) {
-    return `${formatted[0]} et al.`;
-  }
-  // If more authors than max, or more authors than displayed, show et al.
-  if (formatted.length > maxAuthors || actualTotal > formatted.length || hasOthers) {
-    const displayCount = Math.min(formatted.length, maxAuthors);
-    return `${formatted.slice(0, displayCount).join(", ")} et al.`;
-  }
-  return formatted.join(", ");
-}
-
-const NON_PERSON_AUTHOR_PATTERN =
-  /\b(collaboration|group|team|consortium|experiment)\b/i;
-const FAMILY_NAME_PARTICLES = new Set([
-  "da",
-  "de",
-  "del",
-  "della",
-  "der",
-  "di",
-  "dos",
-  "du",
-  "van",
-  "von",
-  "bin",
-  "ibn",
-  "al",
-  "la",
-  "le",
-  "mac",
-  "mc",
-  "st",
-  "st.",
-  "saint",
-]);
-
-function formatAuthorName(rawName?: string) {
-  if (!rawName) {
-    return "";
-  }
-  const trimmed = rawName.trim();
-  if (!trimmed) {
-    return "";
-  }
-  if (NON_PERSON_AUTHOR_PATTERN.test(trimmed)) {
-    return trimmed;
-  }
-  const hasComma = trimmed.includes(",");
-  let family = "";
-  let given = "";
-  if (hasComma) {
-    const [familyPart, givenPart] = trimmed.split(",", 2);
-    family = (familyPart || "").trim();
-    given = (givenPart || "").trim();
-  } else {
-    const parts = trimmed.split(/\s+/);
-    if (parts.length === 1) {
-      family = parts[0];
-    } else {
-      let index = parts.length - 1;
-      const familyParts = [parts[index]];
-      index -= 1;
-      while (index >= 0) {
-        const candidate = parts[index];
-        const lower = candidate.toLowerCase();
-        if (FAMILY_NAME_PARTICLES.has(lower)) {
-          familyParts.unshift(candidate);
-          index -= 1;
-        } else {
-          break;
-        }
-      }
-      family = familyParts.join(" ");
-      given = parts.slice(0, parts.length - familyParts.length).join(" ");
-    }
-  }
-  if (!given) {
-    return family || trimmed;
-  }
-  const initials = buildInitials(given);
-  if (!initials) {
-    return `${given} ${family}`.trim();
-  }
-  return `${initials} ${family}`.trim();
-}
-
-function buildInitials(given: string) {
-  // Normalize consecutive initials: "R.L." → "R. L."
-  const normalizedGiven = normalizeInitials(given);
-  const words = normalizedGiven.split(/\s+/).filter(Boolean);
-  if (!words.length) {
-    return "";
-  }
-  const wordInitials = words
-    .map((word) => {
-      // Handle already-initialed words like "R." - just keep them
-      if (/^[A-Z]\.$/.test(word)) {
-        return word;
-      }
-      const segments = word.split(/-+/).filter(Boolean);
-      if (!segments.length) {
-        return "";
-      }
-      const segmentInitials = segments
-        .map((segment) => segment.trim()[0])
-        .filter((char): char is string => Boolean(char))
-        .map((char) => `${char.toUpperCase()}.`);
-      return segmentInitials.join("-");
-    })
-    .filter(Boolean);
-  return wordInitials.join(" ");
-}
-
-function buildDisplayText(entry: InspireReferenceEntry) {
-  const label = entry.label ? `[${entry.label}] ` : "";
-  // Use cached string for performance (this function is called in loops)
-  const yearUnknown = getCachedStrings().yearUnknown;
-  const normalizedYear =
-    entry.year && entry.year !== yearUnknown ? entry.year : "";
-  const summaryContainsYear =
-    normalizedYear &&
-    entry.summary &&
-    entry.summary.includes(`(${normalizedYear})`);
-  const shouldShowYearInline = Boolean(normalizedYear && !summaryContainsYear);
-  const yearPart = shouldShowYearInline ? ` (${normalizedYear})` : "";
-  return `${label}${entry.authorText}${yearPart}: ${entry.title};`;
-}
-
-function extractJournalName(entry: InspireReferenceEntry): string | undefined {
-  const info = entry.publicationInfo;
-  if (info?.journal_title) {
-    return info.journal_title;
-  }
-  if (info?.journal_title_abbrev) {
-    return info.journal_title_abbrev;
-  }
-  if (entry.summary) {
-    const match = entry.summary.match(/^([^0-9(]+?)(?:\s+\d+|\(|$)/);
-    if (match) {
-      const journal = match[1].trim();
-      if (journal.length > 2) {
-        return journal;
-      }
-    }
-  }
-  return undefined;
-}
-
-function buildEntrySearchText(entry: InspireReferenceEntry): string {
-  const segments: string[] = [];
-  const collapsedSegments: string[] = [];
-
-  const addSegment = (text?: string) => {
-    if (!text) {
-      return;
-    }
-    segments.push(text);
-    const collapsed = text.replace(SEARCH_COLLAPSE_REGEX, "");
-    if (collapsed && collapsed !== text) {
-      collapsedSegments.push(collapsed);
-    }
-  };
-
-  addSegment(entry.displayText);
-  addSegment(entry.summary);
-
-  const journalName = extractJournalName(entry);
-  if (journalName) {
-    for (const abbr of getJournalAbbreviations(journalName)) {
-      addSegment(abbr);
-    }
-  }
-
-  const arxivDetails = formatArxivDetails(entry.arxivDetails);
-  if (arxivDetails?.id) {
-    const arxivTag = `[arXiv:${arxivDetails.id}]`;
-    // Avoid duplicating the tag if it's already part of the summary text
-    if (!entry.summary || !entry.summary.includes(arxivTag)) {
-      addSegment(arxivTag);
-    }
-    if (!entry.summary || !entry.summary.includes(arxivDetails.id)) {
-      addSegment(arxivDetails.id);
-    }
-  }
-
-  const allSegments = collapsedSegments.length
-    ? [...segments, ...collapsedSegments]
-    : segments;
-  return buildSearchIndexText(allSegments.join(" "));
-}
-
-async function findItemByRecid(recid: string) {
-  const fieldID = Zotero.ItemFields.getID("archiveLocation");
-  if (!fieldID) {
-    return null;
-  }
-  const sql = `
-    SELECT itemID
-    FROM itemData
-      JOIN itemDataValues USING(valueID)
-    WHERE fieldID = ?
-      AND value = ?
-    LIMIT 1
-  `;
-  const itemID = await Zotero.DB.valueQueryAsync(sql, [fieldID, recid]);
-  if (!itemID) {
-    return null;
-  }
-  return Zotero.Items.get(Number(itemID));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Type Definitions
+// Utility Functions (use imports from ./inspire for most functions)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Generic JSON object type for dynamic INSPIRE metadata
+ * Lazily compute searchText for an entry if not already computed.
+ * This is a performance optimization - searchText is only computed when
+ * actually needed for filtering, not during initial data loading.
  */
-type jsobject = {
-  [key: string]: any;
-};
-
-/**
- * INSPIRE API metadata response structure (partial)
- */
-interface InspireMetadataResponse {
-  control_number?: string;
-  titles?: Array<{ title: string; source?: string }>;
-  authors?: Array<{
-    full_name: string;
-    inspire_roles?: string[];
-    affiliations?: Array<{ value: string }>;
-  }>;
-  publication_info?: Array<{
-    journal_title?: string;
-    journal_volume?: string;
-    journal_issue?: string;
-    year?: number;
-    artid?: string;
-    page_start?: string;
-    page_end?: string;
-    material?: string;
-    pubinfo_freetext?: string;
-  }>;
-  citation_count?: number;
-  citation_count_without_self_citations?: number;
-  dois?: Array<{ value: string }>;
-  arxiv_eprints?: Array<{ value: string; categories?: string[] }>;
-  abstracts?: Array<{ value: string; source?: string }>;
-  texkeys?: string[];
-  document_type?: string[];
-  collaborations?: Array<{ value: string }>;
-  isbns?: Array<{ value: string }>;
-  imprints?: Array<{ publisher?: string; date?: string }>;
-  author_count?: number;
-  earliest_date?: string;
-}
-export class ZInspire {
-  current: number;
-  toUpdate: number;
-  itemsToUpdate: Zotero.Item[];
-  numberOfUpdatedItems: number;
-  counter: number;
-  CrossRefcounter: number;
-  noRecidCount: number;
-  error_norecid: boolean;
-  error_norecid_shown: boolean;
-  final_count_shown: boolean;
-  progressWindow: ProgressWindowHelper;
-  private isCancelled: boolean = false;
-  constructor(
-    current: number = -1,
-    toUpdate: number = 0,
-    itemsToUpdate: Zotero.Item[] = [],
-    numberOfUpdatedItems: number = 0,
-    counter: number = 0,
-    CrossRefcounter: number = 0,
-    noRecidCount: number = 0,
-    error_norecid: boolean = false,
-    error_norecid_shown: boolean = false,
-    final_count_shown: boolean = false,
-  ) {
-    this.current = current;
-    this.toUpdate = toUpdate;
-    this.itemsToUpdate = itemsToUpdate;
-    this.numberOfUpdatedItems = numberOfUpdatedItems;
-    this.counter = counter;
-    this.CrossRefcounter = CrossRefcounter;
-    this.noRecidCount = noRecidCount;
-    this.error_norecid = error_norecid;
-    this.error_norecid_shown = error_norecid_shown;
-    this.final_count_shown = final_count_shown;
-    this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-      closeOnClick: true,
-      closeTime: -1,
-    });
+function ensureSearchText(entry: InspireReferenceEntry): string {
+  if (!entry.searchText) {
+    entry.searchText = buildEntrySearchText(entry);
   }
-
-  resetState(operation: string) {
-    if (operation === "initial") {
-      if (this.progressWindow) {
-        this.progressWindow.close();
-      }
-      this.current = -1;
-      this.toUpdate = 0;
-      this.itemsToUpdate = [];
-      this.numberOfUpdatedItems = 0;
-      this.counter = 0;
-      this.CrossRefcounter = 0;
-      this.noRecidCount = 0;
-      this.error_norecid = false;
-      this.error_norecid_shown = false;
-      this.final_count_shown = false;
-    } else {
-      if (this.error_norecid) {
-        this.progressWindow.close();
-        const icon = "chrome://zotero/skin/cross.png";
-        if (this.error_norecid && !this.error_norecid_shown) {
-          //ztoolkit.log("hello");
-          const progressWindowNoRecid = new ztoolkit.ProgressWindow(
-            config.addonName,
-            { closeOnClick: true },
-          );
-          progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
-          const itemWord = this.noRecidCount === 1 ? "item" : "items";
-          if (getPref("tag_enable") && getPref("tag_norecid") !== "") {
-            progressWindowNoRecid.createLine({
-              icon: icon,
-              text:
-                `No INSPIRE recid was found for ${this.noRecidCount} ${itemWord}. Tagged with '${getPref("tag_norecid")}'.`,
-            });
-          } else {
-            progressWindowNoRecid.createLine({
-              icon: icon,
-              text: `No INSPIRE recid was found for ${this.noRecidCount} ${itemWord}.`,
-            });
-          }
-          progressWindowNoRecid.show();
-          progressWindowNoRecid.startCloseTimer(3000);
-          this.error_norecid_shown = true;
-        }
-      } else {
-        if (!this.final_count_shown) {
-          const icon = "chrome://zotero/skin/tick.png";
-          this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-            closeOnClick: true,
-          });
-          this.progressWindow.changeHeadline("Finished");
-          // ztoolkit.log(this.progressWindow.ItemProgress)
-          if (operation === "full" || operation === "noabstract") {
-            this.progressWindow.createLine({
-              text: "INSPIRE metadata updated for " + this.counter + " items.",
-              progress: 100,
-            });
-          } else if (operation === "citations") {
-            this.progressWindow.createLine({
-              text:
-                "INSPIRE citations updated for " +
-                this.counter +
-                " items;\n" +
-                "CrossRef citations updated for " +
-                this.CrossRefcounter +
-                " items.",
-              progress: 100,
-            });
-          }
-          this.progressWindow.show();
-          this.progressWindow.startCloseTimer(4000);
-          this.final_count_shown = true;
-        }
-      }
-    }
-  }
-
-  /**
-   * Cancel the ongoing update operation
-   */
-  cancelUpdate() {
-    if (!this.isCancelled && this.numberOfUpdatedItems < this.toUpdate) {
-      this.isCancelled = true;
-      try {
-        this.progressWindow.changeLine({
-          text: getString("update-cancelled")
-        });
-      } catch (_e) { /* ignore */ }
-      Zotero.debug(`[${config.addonName}] cancelUpdate: cancelled by user`);
-    }
-  }
-
-  updateSelectedCollection(operation: string) {
-    const pane = Zotero.getActiveZoteroPane();
-    const collection = pane?.getSelectedCollection();
-    if (collection) {
-      const items = collection.getChildItems(false, false);
-      this.updateItems(items, operation);
-    }
-  }
-
-  updateSelectedItems(operation: string) {
-    const pane = Zotero.getActiveZoteroPane();
-    const items = pane ? pane.getSelectedItems() : [];
-    this.updateItems(items, operation);
-  }
-
-  updateItems(items0: Zotero.Item[], operation: string) {
-    Zotero.debug(`[${config.addonName}] updateItems: starting, items0.length=${items0.length}, operation=${operation}`);
-    // don't update note items
-    const items = items0.filter((item) => item.isRegularItem());
-    Zotero.debug(`[${config.addonName}] updateItems: filtered items.length=${items.length}`);
-
-    Zotero.debug(`[${config.addonName}] updateItems: numberOfUpdatedItems=${this.numberOfUpdatedItems}, toUpdate=${this.toUpdate}`);
-    if (items.length === 0 || this.numberOfUpdatedItems < this.toUpdate) {
-      Zotero.debug(`[${config.addonName}] updateItems: early return due to condition check`);
-      return;
-    }
-
-    Zotero.debug(`[${config.addonName}] updateItems: calling resetState("initial")`);
-    this.resetState("initial");
-    this.toUpdate = items.length;
-    this.itemsToUpdate = items;
-
-    // Progress Windows
-    this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-      closeOnClick: false,  // Keep window open during update
-    });
-    const icon =
-      "chrome://zotero/skin/toolbar-advanced-search" +
-      // @ts-ignore - Plugin instance is not typed
-      (Zotero.hiDPI ? "@2x" : "") +
-      ".png";
-    if (operation === "full" || operation === "noabstract") {
-      this.progressWindow.changeHeadline("Retrieving INSPIRE metadata", icon);
-    }
-    if (operation === "citations") {
-      this.progressWindow.changeHeadline(
-        "Retrieving citation counts",
-        icon,
-      );
-    }
-    const inspireIcon =
-      `chrome://${config.addonRef}/content/icons/inspire` +
-      // @ts-ignore - Plugin instance is not typed
-      (Zotero.hiDPI ? "@2x" : "") +
-      ".png";
-    this.progressWindow.createLine({
-      text: "Retrieving... (Press ESC to cancel)",
-      icon: inspireIcon,
-    });
-    this.progressWindow.show();
-
-    // Add keyboard listener for ESC key to cancel
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !this.isCancelled && this.numberOfUpdatedItems < this.toUpdate) {
-        this.cancelUpdate();
-        document.removeEventListener('keydown', handleKeyPress);
-      }
-    };
-    document.addEventListener('keydown', handleKeyPress);
-
-    // Use concurrent processing for better performance
-    Zotero.debug(`[${config.addonName}] updateItems: calling updateItemsConcurrent`);
-    this.updateItemsConcurrent(operation).catch((err) => {
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent rejected: ${err}`);
-      try {
-        this.progressWindow.close();
-      } catch (_e) { /* ignore */ }
-      this.numberOfUpdatedItems = this.toUpdate;
-    }).finally(() => {
-      // Clean up keyboard listener
-      document.removeEventListener('keydown', handleKeyPress);
-    });
-  }
-
-  /**
-   * Process items concurrently with controlled parallelism.
-   * INSPIRE API allows 15 requests per 5 seconds, so we use 4 concurrent workers.
-   */
-  private async updateItemsConcurrent(operation: string) {
-    try {
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: starting, operation=${operation}`);
-
-      // Reset cancel flag at start
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: step 1 - resetting cancel flag`);
-      this.isCancelled = false;
-
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: step 2 - setting up variables`);
-      const CONCURRENCY = 4; // Staying safe for INSPIRE API (15 req/5s limit)
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: step 3 - getting items, itemsToUpdate exists: ${!!this.itemsToUpdate}`);
-      const items = this.itemsToUpdate;
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: step 4 - items.length=${items ? items.length : 'null'}`);
-      const total = items.length;
-      let completed = 0;
-      let currentIndex = 0;
-
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: total=${total}`);
-
-      const updateProgress = () => {
-        completed++;
-        const percent = Math.round((completed / total) * 100);
-        try {
-          this.progressWindow.changeLine({ progress: percent });
-          this.progressWindow.changeLine({
-            text: `${completed}/${total} items updated`,
-          });
-          this.progressWindow.show();
-        } catch (e) {
-          Zotero.debug(`[${config.addonName}] updateProgress error: ${e}`);
-        }
-      };
-
-      const processItem = async (item: Zotero.Item): Promise<void> => {
-        // Check if cancelled before processing
-        if (this.isCancelled) {
-          return; // Skip this item
-        }
-        try {
-          await this.updateItemInternal(item, operation);
-        } catch (err) {
-          Zotero.debug(`[${config.addonName}] processItem error for item=${item.id}: ${err}`);
-        }
-        updateProgress();
-      };
-
-      // Worker function that processes items from the shared queue
-      const worker = async (): Promise<void> => {
-        while (currentIndex < items.length && !this.isCancelled) {
-          const index = currentIndex++;
-          if (index >= items.length) break;
-          await processItem(items[index]);
-        }
-      };
-
-      // Start concurrent workers
-      const workers: Promise<void>[] = [];
-      const workerCount = Math.min(CONCURRENCY, total);
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: starting ${workerCount} workers`);
-      for (let i = 0; i < workerCount; i++) {
-        workers.push(worker());
-      }
-
-      await Promise.all(workers);
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: all workers finished, completed=${completed}`);
-
-      // Finish
-      if (!this.isCancelled) {
-        this.progressWindow.close();
-        this.numberOfUpdatedItems = total;
-        this.current = total - 1;
-        this.resetState(operation);
-        Zotero.debug(`[${config.addonName}] updateItemsConcurrent: done, counter=${this.counter}`);
-      } else {
-        // Cancelled - show stats
-        this.progressWindow.close();
-        this.numberOfUpdatedItems = total;
-        this.current = total - 1;
-        this.showCancelledStats(completed, total);
-      }
-    } catch (err) {
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: fatal error: ${err}`);
-      try {
-        this.progressWindow.close();
-      } catch (_e) { /* ignore */ }
-      this.numberOfUpdatedItems = this.toUpdate;
-    }
-  }
-
-  /**
-   * Show statistics when update was cancelled
-   */
-  private showCancelledStats(completed: number, total: number) {
-    const statsWindow = new ztoolkit.ProgressWindow(config.addonName, {
-      closeOnClick: true,
-    });
-    statsWindow.changeHeadline(getString("update-cancelled"));
-    const icon = "chrome://zotero/skin/warning.png";
-    statsWindow.createLine({
-      icon: icon,
-      text: getString("update-cancelled-stats", { args: { completed: completed.toString(), total: total.toString() } }),
-    });
-    statsWindow.show();
-    statsWindow.startCloseTimer(5000);
-  }
-
-  // Legacy serial method (kept for reference, can be removed later)
-  updateNextItem(operation: string) {
-    this.numberOfUpdatedItems++;
-
-    if (this.current === this.toUpdate - 1) {
-      this.progressWindow.close();
-      this.resetState(operation);
-      return;
-    }
-
-    this.current++;
-
-    // Progress Windows
-    const percent = Math.round(
-      (this.numberOfUpdatedItems / this.toUpdate) * 100,
-    );
-    this.progressWindow.changeLine({ progress: percent });
-    this.progressWindow.changeLine({
-      text: "Item " + this.current + " of " + this.toUpdate,
-    });
-    this.progressWindow.show();
-
-    this.updateItem(this.itemsToUpdate[this.current], operation);
-  }
-
-  /**
-   * Internal method to update a single item (used by concurrent processor)
-   */
-  private async updateItemInternal(item: Zotero.Item, operation: string) {
-    Zotero.debug(`[${config.addonName}] updateItemInternal: starting, item=${item.id}, operation=${operation}`);
-    if (
-      operation === "full" ||
-      operation === "noabstract" ||
-      operation === "citations"
-    ) {
-      Zotero.debug(`[${config.addonName}] updateItemInternal: calling getInspireMeta`);
-      const metaInspire = await getInspireMeta(item, operation);
-      Zotero.debug(`[${config.addonName}] updateItemInternal: getInspireMeta returned, recid=${metaInspire !== -1 ? metaInspire.recid : 'N/A'}`);
-      if (metaInspire !== -1 && metaInspire.recid !== undefined) {
-        if (item.hasTag(getPref("tag_norecid") as string)) {
-          item.removeTag(getPref("tag_norecid") as string);
-        }
-        if (item.itemType === "report" || item.itemType === "preprint") {
-          item.setType(Zotero.ItemTypes.getID("journalArticle") as number);
-        }
-        if (item.itemType !== "book" && metaInspire.document_type == "book") {
-          item.setType(Zotero.ItemTypes.getID("book") as number);
-        }
-        await setInspireMeta(item, metaInspire, operation);
-        await saveItemWithPendingInspireNote(item);
-        this.counter++;
-      } else {
-        if (
-          getPref("tag_enable") &&
-          getPref("tag_norecid") !== "" &&
-          !item.hasTag(getPref("tag_norecid") as string)
-        ) {
-          item.addTag(getPref("tag_norecid") as string, 1);
-          await item.saveTx();
-        } else if (
-          !getPref("tag_enable") &&
-          item.hasTag(getPref("tag_norecid") as string)
-        ) {
-          item.removeTag(getPref("tag_norecid") as string);
-          await item.saveTx();
-        }
-        this.error_norecid = true;
-        this.noRecidCount++;
-        if (operation === "citations") {
-          const crossref_count = await setCrossRefCitations(item);
-          await item.saveTx();
-          if (crossref_count >= 0) {
-            this.CrossRefcounter++;
-          }
-        }
-      }
-    }
-  }
-
-  async updateItem(item: Zotero.Item, operation: string) {
-    if (
-      operation === "full" ||
-      operation === "noabstract" ||
-      operation === "citations"
-    ) {
-      // await removeArxivNote(item)
-
-      const metaInspire = await getInspireMeta(item, operation);
-      // Zotero.debug(`updateItem metaInspire: ${metaInspire}`);
-      if (metaInspire !== -1 && metaInspire.recid !== undefined) {
-        if (item.hasTag(getPref("tag_norecid") as string)) {
-          item.removeTag(getPref("tag_norecid") as string);
-          item.saveTx();
-        }
-        // if (metaInspire.journalAbbreviation && (item.itemType === 'report' || item.itemType === 'preprint')) {
-        if (item.itemType === "report" || item.itemType === "preprint") {
-          item.setType(Zotero.ItemTypes.getID("journalArticle") as number);
-        }
-
-        if (item.itemType !== "book" && metaInspire.document_type == "book")
-          item.setType(Zotero.ItemTypes.getID("book") as number);
-
-        await setInspireMeta(item, metaInspire, operation);
-        await saveItemWithPendingInspireNote(item);
-        this.counter++;
-      } else {
-        if (
-          getPref("tag_enable") &&
-          getPref("tag_norecid") !== "" &&
-          !item.hasTag(getPref("tag_norecid") as string)
-        ) {
-          item.addTag(getPref("tag_norecid") as string, 1);
-          item.saveTx();
-        } else if (
-          !getPref("tag_enable") &&
-          item.hasTag(getPref("tag_norecid") as string)
-        ) {
-          item.removeTag(getPref("tag_norecid") as string);
-          item.saveTx();
-        }
-        this.error_norecid = true;
-        this.noRecidCount++;
-        if (operation == "citations") {
-          const crossref_count = await setCrossRefCitations(item);
-          item.saveTx();
-          if (crossref_count >= 0) {
-            this.CrossRefcounter++;
-          }
-        }
-      }
-      this.updateNextItem(operation);
-    } else {
-      this.updateNextItem(operation);
-    }
-  }
+  return entry.searchText;
 }
 
-async function getInspireMeta(item: Zotero.Item, operation: string) {
-  const doi0 = item.getField("DOI") as string;
-  let doi = doi0;
-  const url = item.getField("url") as string;
-  const extra = item.getField("extra") as string;
-  let searchOrNot = 0;
-
-  let idtype = "doi";
-  const arxivReg = new RegExp(/arxiv/i);
-  if (!doi || arxivReg.test(doi)) {
-    if (extra.includes("arXiv:") || extra.includes("_eprint:")) {
-      // arXiv number from Extra
-      idtype = "arxiv";
-      const regexArxivId = /(arXiv:|_eprint:)(.+)/; //'arXiv:(.+)'
-      /* in this way, different situations are included:
-      New and old types of arXiv number; 
-      whether or not the arXiv line is at the end of extra
-      */
-      if (extra.match(regexArxivId)) {
-        const arxiv_split = (extra.match(regexArxivId) || "   ")[2].split(" ");
-        if (arxiv_split[0] === "") {
-          doi = arxiv_split[1];
-        } else {
-          doi = arxiv_split[0];
-        }
-      }
-    } else if (/(doi|arxiv|\/literature\/)/i.test(url)) {
-      // patt taken from the Citations Count plugin
-      const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
-      const m = patt.exec(url);
-      if (!m) {
-        // DOI from url
-        if (/doi/i.test(url)) {
-          doi = url.replace(/^.+doi.org\//, "");
-        } else if (url.includes("/literature/")) {
-          const _recid = /[^/]*$/.exec(url) || "    ";
-          if (_recid[0].match(/^\d+/)) {
-            idtype = "literature";
-            doi = _recid[0];
-          }
-        }
-      } else {
-        // arxiv number from from url
-        idtype = "arxiv";
-        doi = m[1];
-      }
-    } else if (/DOI:/i.test(extra)) {
-      // DOI in extra
-      const regexDOIinExtra = /DOI:(.+)/i;
-      doi = (extra.match(regexDOIinExtra) || "")[1].trim();
-    } else if (/doi\.org\//i.test(extra)) {
-      const regexDOIinExtra = /doi\.org\/(.+)/i;
-      doi = (extra.match(regexDOIinExtra) || "")[1];
-    } else {
-      // INSPIRE recid in archiveLocation or Citation Key in Extra
-      const _recid = item.getField("archiveLocation") as string;
-      if (_recid.match(/^\d+/)) {
-        idtype = "literature";
-        doi = _recid;
-      }
-    }
-  } else if (/doi/i.test(doi)) {
-    //doi.includes("doi")
-    doi = doi.replace(/^.+doi.org\//, ""); //doi.replace('https://doi.org/', '')
-  }
-
-  if (!doi && extra.includes("Citation Key:")) searchOrNot = 1;
-  const t0 = performance.now();
-
-  let urlInspire = "";
-  if (searchOrNot === 0) {
-    const edoi = encodeURIComponent(doi);
-    urlInspire = `${INSPIRE_API_BASE}/${idtype}/${edoi}`;
-  } else if (searchOrNot === 1) {
-    const citekey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0].split(
-      ": ",
-    )[1];
-    urlInspire =
-      `${INSPIRE_API_BASE}/literature?q=texkey%20${encodeURIComponent(citekey)}`;
-  }
-
-  if (!urlInspire) {
-    return -1;
-  }
-
-  // Zotero.debug(`urlInspire: ${urlInspire}`);
-
-  let status: number | null = null;
-  const response = (await fetch(urlInspire)
-    //   .then(response => response.json())
-    .then((response) => {
-      if (response.status !== 404) {
-        status = 1;
-        return response.json();
-      }
-    })
-    .catch((_err) => null)) as any;
-
-  // Zotero.debug(`getInspireMeta response: ${response}, status: ${status}`)
-  if (status === null) {
-    return -1;
-  }
-
-  const t1 = performance.now();
-  Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`);
-
-  try {
-    const meta = (() => {
-      if (searchOrNot === 0) {
-        return response["metadata"];
-      } else {
-        const hits = response["hits"].hits;
-        if (hits.length === 1) return hits[0].metadata;
-      }
-    })();
-    if (!meta) {
-      return -1;
-    }
-    const assignStart = performance.now();
-    const metaInspire = buildMetaFromMetadata(meta, operation);
-    if (operation !== "citations") {
-      const assignEnd = performance.now();
-      Zotero.debug(
-        `Assigning meta took ${assignEnd - assignStart} milliseconds.`,
-      );
-    }
-    return metaInspire;
-  } catch (err) {
-    return -1;
-  }
-}
-
-// Cache for recid lookups to avoid repeated API calls for the same item
-// Key: itemID, Value: recid (string) or null (not found)
-// Note: Only caches successful lookups to allow retrying failed ones
-const recidLookupCache = new Map<number, string>();
-
-async function fetchRecidFromInspire(item: Zotero.Item) {
-  // Validate item.id before using as cache key
-  if (typeof item.id !== "number" || !Number.isFinite(item.id)) {
-    Zotero.debug(`[${config.addonName}] Invalid item.id: ${item.id}, skipping cache`);
-    const meta = (await getInspireMeta(item, "literatureLookup")) as jsobject | -1;
-    if (meta === -1 || typeof meta !== "object") return null;
-    return meta.recid as string | undefined | null;
-  }
-
-  // Check cache first to avoid redundant API calls
-  const cached = recidLookupCache.get(item.id);
-  if (cached !== undefined) {
-    Zotero.debug(`[${config.addonName}] Using cached recid for item ${item.id}: ${cached}`);
-    return cached;
-  }
-
-  const meta = (await getInspireMeta(item, "literatureLookup")) as
-    | jsobject
-    | -1;
-  if (meta === -1 || typeof meta !== "object") {
-    // Don't cache failed lookups - allow retry on next access
-    return null;
-  }
-  const recid = meta.recid as string | undefined | null;
-  if (recid) {
-    // Only cache successful lookups with valid recid
-    recidLookupCache.set(item.id, recid);
-  }
-  return recid;
-}
-
-async function fetchInspireMetaByRecid(
-  recid: string,
-  signal?: AbortSignal,
-  operation: string = "full",
-  minimal: boolean = false,
-) {
-  let url = `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}`;
-  if (minimal) {
-    url += "?fields=metadata.title,metadata.creators,metadata.date";
-  }
-  const response = await fetch(url, { signal }).catch(() => null);
-  if (!response || response.status === 404) {
-    return -1;
-  }
-  const payload: any = await response.json();
-  const meta = payload?.metadata;
-  if (!meta) {
-    return -1;
-  }
-  try {
-    return buildMetaFromMetadata(meta, operation);
-  } catch (_err) {
-    return -1;
-  }
-}
-
-/**
- * Fetch only the abstract for a given recid from INSPIRE API.
- * Tries the lightweight fields endpoint first, falls back to full record and search.
- */
-async function fetchInspireAbstract(
-  recid: string,
-  signal?: AbortSignal,
-): Promise<string | null> {
-  // Reuse existing metadata fetcher to ensure consistent parsing (includes abstracts)
-  const meta = await fetchInspireMetaByRecid(recid, signal, "full").catch(
-    () => -1,
-  );
-  if (meta !== -1 && meta) {
-    const abstract = (meta as jsobject).abstractNote;
-    if (typeof abstract === "string" && abstract.trim()) {
-      return abstract.trim();
-    }
-  }
-  return await fetchAbstractDirect(recid, signal);
-}
-
-async function fetchAbstractDirect(
-  recid: string,
-  signal?: AbortSignal,
-): Promise<string | null> {
-  const url = `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}?fields=metadata.abstracts`;
-  try {
-    const response = await fetch(url, { signal }).catch(() => null);
-    if (!response || !response.ok) {
-      return null;
-    }
-    const payload: any = await response.json();
-    const abstracts = payload?.metadata?.abstracts;
-    if (Array.isArray(abstracts) && abstracts.length) {
-      const preferred =
-        abstracts.find((a) => (a?.language || "").toLowerCase() === "en") ||
-        abstracts.find((a) => a?.source === "arXiv") ||
-        abstracts[0];
-      const text = (preferred?.value || "").trim();
-      return text || null;
-    }
-  } catch (_err) {
-    return null;
-  }
-  return null;
-}
-
-/**
- * Fetch BibTeX entry for a given INSPIRE recid.
- * Uses the INSPIRE API's format=bibtex parameter.
- */
-async function fetchBibTeX(
-  recid: string,
-  signal?: AbortSignal,
-): Promise<string | null> {
-  const url = `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}?format=bibtex`;
-  try {
-    const response = await fetch(url, { signal }).catch(() => null);
-    if (!response || !response.ok) {
-      return null;
-    }
-    const bibtex = await response.text();
-    return bibtex?.trim() || null;
-  } catch (_err) {
-    return null;
-  }
-}
-
-/**
- * Copy text to the system clipboard.
- * Returns true on success, false on failure.
- */
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    // Use Zotero's built-in clipboard utility (preferred in Zotero environment)
-    const clipboardService = Zotero.Utilities.Internal?.copyTextToClipboard;
-    if (typeof clipboardService === "function") {
-      clipboardService(text);
-      return true;
-    }
-
-    // Fallback: use Mozilla's clipboard helper service
-    const componentsAny = Components as any;
-    const clipboardHelper = componentsAny?.classes?.[
-      "@mozilla.org/widget/clipboardhelper;1"
-    ]?.getService(componentsAny?.interfaces?.nsIClipboardHelper);
-    if (clipboardHelper) {
-      clipboardHelper.copyString(text);
-      return true;
-    }
-
-    // Fallback: create a temporary textarea and use execCommand
-    const doc = Zotero.getMainWindow()?.document;
-    if (doc) {
-      const textarea = doc.createElement("textarea");
-      textarea.value = text;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      textarea.style.left = "-9999px";
-      doc.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      const success = doc.execCommand("copy");
-      textarea.remove();
-      return success;
-    }
-    return false;
-  } catch (_err) {
-    Zotero.debug(`[${config.addonName}] Failed to copy to clipboard: ${_err}`);
-    return false;
-  }
-}
-
-function buildMetaFromMetadata(meta: any, operation: string) {
-  if (!meta) {
-    throw new Error("Missing metadata");
-  }
-  const metaInspire: jsobject = {};
-  metaInspire.recid = meta["control_number"];
-  metaInspire.citation_count = meta["citation_count"];
-  metaInspire.citation_count_wo_self_citations =
-    meta["citation_count_without_self_citations"];
-
-  if (operation !== "citations") {
-    if (meta["dois"]) {
-      metaInspire.DOI = meta["dois"][0].value;
-    }
-
-    if (meta["publication_info"]) {
-      const publicationInfo = meta["publication_info"];
-      const first = publicationInfo[0];
-      if (first?.journal_title) {
-        const jAbbrev = first.journal_title as string;
-        metaInspire.journalAbbreviation = jAbbrev.replace(/\.\s|\./g, ". ");
-        if (first.journal_volume) {
-          metaInspire.volume = first.journal_volume;
-        }
-        if (first.artid) {
-          metaInspire.pages = first.artid;
-        } else if (first.page_start) {
-          metaInspire.pages = first.page_start;
-          if (first.page_end) {
-            metaInspire.pages = metaInspire.pages + "-" + first.page_end;
-          }
-        }
-        metaInspire.date = first.year;
-        metaInspire.issue = first.journal_issue;
-      }
-
-      if (publicationInfo.length > 1) {
-        const errNotes: string[] = [];
-        for (let i = 1; i < publicationInfo.length; i++) {
-          const next = publicationInfo[i];
-          if (next.material === "erratum") {
-            const jAbbrev = next.journal_title;
-            let pagesErr = "";
-            if (next.artid) {
-              pagesErr = next.artid;
-            } else if (next.page_start) {
-              pagesErr = next.page_start;
-              if (next.page_end) {
-                pagesErr = pagesErr + "-" + next.page_end;
-              }
-            }
-            errNotes[i - 1] =
-              `Erratum: ${jAbbrev} ${next.journal_volume}, ${pagesErr} (${next.year})`;
-          } else if (next.journal_title && (next.page_start || next.artid)) {
-            let pagesNext = "";
-            if (next.page_start) {
-              pagesNext = next.page_start;
-              if (next.page_end) {
-                pagesNext = pagesNext + "-" + next.page_end;
-              }
-            } else if (next.artid) {
-              pagesNext = next.artid;
-            }
-            errNotes[i - 1] =
-              `${next.journal_title}  ${next.journal_volume} (${next.year}) ${pagesNext}`;
-          }
-          if (next.pubinfo_freetext) {
-            errNotes[i - 1] = next.pubinfo_freetext;
-          }
-        }
-        if (errNotes.length > 0) {
-          metaInspire.note = `[${errNotes.join(", ")}]`;
-        }
-      }
-    }
-
-    const metaArxiv = meta["arxiv_eprints"];
-    if (metaArxiv) {
-      metaInspire.arxiv = metaArxiv[0];
-      metaInspire.urlArxiv = `${ARXIV_ABS_URL}/${metaInspire.arxiv.value}`;
-    }
-
-    const metaAbstract = meta["abstracts"];
-    if (metaAbstract) {
-      metaInspire.abstractNote = metaAbstract[0].value;
-      for (let i = 0; i < metaAbstract.length; i++) {
-        if (metaAbstract[i].source === "arXiv") {
-          metaInspire.abstractNote = metaAbstract[i].value;
-          break;
-        }
-      }
-    }
-
-    const rawTitle = meta["titles"]?.[0]?.title;
-    metaInspire.title = rawTitle ? cleanMathTitle(rawTitle) : rawTitle;
-    metaInspire.document_type = meta["document_type"];
-    metaInspire.citekey = meta["texkeys"]?.[0];
-    if (meta["isbns"]) {
-      metaInspire.isbns = meta["isbns"].map((e: any) => e.value);
-    }
-    if (meta["imprints"]) {
-      const imprint = meta["imprints"][0];
-      if (imprint.publisher) {
-        metaInspire.publisher = imprint.publisher;
-      }
-      if (imprint.date) {
-        metaInspire.date = imprint.date;
-      }
-    }
-
-    const creators: any[] = [];
-    const metaCol = meta["collaborations"];
-    if (metaCol) {
-      metaInspire.collaborations = metaCol.map((e: any) => e.value);
-    }
-
-    const metaAuthors = meta["authors"];
-    if (metaAuthors?.length) {
-      const authorCount = meta["author_count"] || metaAuthors.length;
-      let maxAuthorCount = authorCount;
-      if (authorCount > 10) {
-        maxAuthorCount = 3;
-      }
-      for (let j = 0; j < maxAuthorCount; j++) {
-        const [lastName, firstName] = metaAuthors[j].full_name.split(", ");
-        creators[j] = {
-          firstName,
-          lastName,
-          creatorType: metaAuthors[j].inspire_roles
-            ? metaAuthors[j].inspire_roles[0]
-            : "author",
-        };
-      }
-      if (authorCount > 10) {
-        creators.push({
-          name: "others",
-          creatorType: "author",
-        });
-      }
-    } else if (metaCol) {
-      for (let i = 0; i < metaCol.length; i++) {
-        creators[i] = {
-          name: metaInspire.collaborations[i],
-          creatorType: "author",
-        };
-      }
-    }
-    metaInspire.creators = creators;
-  }
-
-  return metaInspire;
-}
-
-/*
-copied from https://github.com/eschnett/zotero-citationcounts/blob/master/chrome/content/zotero-citationcounts.js
-*/
-async function getCrossrefCount(item: Zotero.Item) {
-  const doi = item.getField("DOI");
-  if (!doi) {
-    // There is no DOI; skip item
-    return -1;
-  }
-  const edoi = encodeURIComponent(doi);
-
-  const t0 = performance.now();
-  let response: any = null;
-
-  if (response === null) {
-    const style = "vnd.citationstyles.csl+json";
-    const xform = "transform/application/" + style;
-    const url = `${CROSSREF_API_URL}/${edoi}/${xform}`;
-    response = await fetch(url)
-      .then((response) => response.json())
-      .catch((_err) => null);
-  }
-
-  if (response === null) {
-    const url = "https://doi.org/" + edoi;
-    const style = "vnd.citationstyles.csl+json";
-    response = await fetch(url, {
-      headers: {
-        Accept: "application/" + style,
-      },
-    })
-      .then((response) => response.json())
-      .catch((_err) => null);
-  }
-
-  if (response === null) {
-    // Something went wrong
-    return -1;
-  }
-
-  const t1 = performance.now();
-  Zotero.debug(`Fetching CrossRef meta took ${t1 - t0} milliseconds.`);
-
-  let str = null;
-  try {
-    str = response["is-referenced-by-count"];
-  } catch (err) {
-    // There are no citation counts
-    return -1;
-  }
-
-  const count = str ? parseInt(str) : -1;
-  return count;
-}
-
-async function setInspireMeta(
-  item: Zotero.Item,
-  metaInspire: jsobject,
-  operation: string,
-) {
-  // const today = new Date(Date.now()).toLocaleDateString('zh-CN');
-  let extra = item.getField("extra") as string;
-  const publication = item.getField("publicationTitle") as string;
-  const citekey_pref = getPref("citekey");
-  // item.setField('archiveLocation', metaInspire);
-  if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
-    if (operation === "full" || operation === "noabstract") {
-      item.setField("archive", "INSPIRE");
-      item.setField("archiveLocation", metaInspire.recid);
-
-      if (metaInspire.journalAbbreviation) {
-        if (item.itemType === "journalArticle") {
-          //metaInspire.document_type[0]  === "article"
-          item.setField("journalAbbreviation", metaInspire.journalAbbreviation);
-        } else if (
-          metaInspire.document_type[0] === "book" &&
-          item.itemType === "book"
-        ) {
-          item.setField("series", metaInspire.journalAbbreviation);
-        } else {
-          item.setField("publicationTitle", metaInspire.journalAbbreviation);
-        }
-      }
-      // to avoid setting undefined to zotero items
-      if (metaInspire.volume) {
-        if (metaInspire.document_type[0] == "book") {
-          item.setField("seriesNumber", metaInspire.volume);
-        } else {
-          item.setField("volume", metaInspire.volume);
-        }
-      }
-      if (metaInspire.pages && metaInspire.document_type[0] !== "book") {
-        item.setField("pages", metaInspire.pages);
-      }
-      if (metaInspire.date) {
-        item.setField("date", metaInspire.date);
-      }
-      if (metaInspire.issue) {
-        item.setField("issue", metaInspire.issue);
-      }
-      if (metaInspire.DOI) {
-        // if (metaInspire.document_type[0] === "book") {
-        if (
-          item.itemType === "journalArticle" ||
-          item.itemType === "preprint"
-        ) {
-          item.setField("DOI", metaInspire.DOI);
-        } else {
-          item.setField("url", `${DOI_ORG_URL}/${metaInspire.DOI}`);
-        }
-      }
-
-      if (metaInspire.isbns && !item.getField("ISBN")) {
-        item.setField("ISBN", metaInspire.isbns);
-      }
-      if (
-        metaInspire.publisher &&
-        !item.getField("publisher") &&
-        (item.itemType == "book" || item.itemType == "bookSection")
-      )
-        item.setField("publisher", metaInspire.publisher);
-
-      /* set the title and creators if there are none */
-      if (!item.getField("title")) {
-        item.setField("title", metaInspire.title);
-      }
-      if (
-        !item.getCreator(0) ||
-        !(item.getCreator(0) as _ZoteroTypes.Item.Creator).firstName
-      )
-        item.setCreators(metaInspire.creators);
-
-      // The current arXiv.org Zotero translator put all cross-listed categories after the ID, and the primary category is not the first. Here we replace that list by only the primary one.
-      // set the arXiv url, useful to use Find Available PDF for newly added arXiv papers
-      if (metaInspire.arxiv) {
-        const arxivId = metaInspire.arxiv.value;
-        const _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/gim);
-        let arXivInfo = "";
-        if (/^\d/.test(arxivId)) {
-          const arxivPrimeryCategory = metaInspire.arxiv.categories[0];
-          arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`;
-        } else {
-          arXivInfo = "arXiv:" + arxivId;
-        }
-        const numberOfArxiv = (extra.match(_arxivReg) || "").length;
-        // Zotero.debug(`number of arXiv lines: ${numberOfArxiv}`)
-        if (numberOfArxiv !== 1) {
-          // The arXiv.org translater could add two lines of arXiv to extra; remove one in that case
-          extra = extra.replace(_arxivReg, "");
-          if (extra.endsWith("\n")) {
-            extra += arXivInfo;
-          } else {
-            extra += "\n" + arXivInfo;
-          }
-        } else {
-          extra = extra.replace(/^.*(arXiv:|_eprint:).*$/gim, arXivInfo);
-          // Zotero.debug(`extra w arxiv-2: ${extra}`)
-        }
-
-        // set journalAbbr. to the arXiv ID prior to journal publication
-        if (!metaInspire.journalAbbreviation) {
-          if (item.itemType == "journalArticle") {
-            item.setField("journalAbbreviation", arXivInfo);
-          }
-          if (publication.startsWith("arXiv:")) {
-            item.setField("publicationTitle", "");
-          }
-        }
-        const url = item.getField("url");
-        if (metaInspire.urlArxiv && !url) {
-          item.setField("url", metaInspire.urlArxiv);
-        }
-      }
-
-      extra = extra.replace(/^.*type: article.*$\n/gm, "");
-
-      if (metaInspire.collaborations && !extra.includes("tex.collaboration")) {
-        extra =
-          extra +
-          "\n" +
-          "tex.collaboration: " +
-          metaInspire.collaborations.join(", ");
-      }
-
-      // Zotero.debug('setInspire-4')
-      extra = setCitations(
-        extra,
-        metaInspire.citation_count,
-        metaInspire.citation_count_wo_self_citations,
-      );
-
-      await queueOrUpsertInspireNote(item, metaInspire.note);
-
-      // for citekey preference
-      if (citekey_pref === "inspire") {
-        if (extra.includes("Citation Key")) {
-          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
-            "")[0].split(": ")[1];
-          if (initialCiteKey !== metaInspire.citekey)
-            extra = extra.replace(
-              /^.*Citation\sKey.*$/gm,
-              `Citation Key: ${metaInspire.citekey}`,
-            );
-        } else {
-          extra += "\nCitation Key: " + metaInspire.citekey;
-        }
-      }
-    }
-
-    if (operation === "full" && metaInspire.abstractNote) {
-      item.setField("abstractNote", metaInspire.abstractNote);
-    }
-
-    if (operation === "citations") {
-      extra = setCitations(
-        extra,
-        metaInspire.citation_count,
-        metaInspire.citation_count_wo_self_citations,
-      );
-    }
-    extra = extra.replace(/\n\n/gm, "\n");
-    extra = reorderExtraFields(extra);
-    item.setField("extra", extra);
-
-    // Set arXiv category tag if enabled
-    setArxivCategoryTag(item);
-  }
-}
-
-function setArxivCategoryTag(item: Zotero.Item) {
-  const arxiv_tag_pref = getPref("arxiv_tag_enable");
-
-  if (!arxiv_tag_pref) {
-    return;
-  }
-
-  const extra = item.getField("extra") as string;
-
-  // Extract arXiv primary category from extra field
-  let primaryCategory = "";
-
-  // Pattern 1: New format arXiv:2503.05295 [nucl-th]
-  const newFormatMatch = extra.match(/arXiv:\d{4}\.\d{4,5}\s*\[([^\]]+)\]/i);
-  if (newFormatMatch) {
-    primaryCategory = newFormatMatch[1];
-  } else {
-    // Pattern 2: Old format arXiv:hep-ph/0703062
-    const oldFormatMatch = extra.match(/arXiv:([a-z-]+)\/\d{7}/i);
-    if (oldFormatMatch) {
-      primaryCategory = oldFormatMatch[1];
-    }
-  }
-
-  if (primaryCategory) {
-    // Check if tag already exists
-    if (!item.hasTag(primaryCategory)) {
-      item.addTag(primaryCategory);
-      item.saveTx();
-    }
-  }
-}
-
-type ItemWithPendingInspireNote = Zotero.Item & {
-  _zinspirePendingInspireNote?: string;
-};
-
-const INSPIRE_NOTE_HTML_ENTITIES: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
-
-async function queueOrUpsertInspireNote(
-  item: Zotero.Item,
-  noteText?: string,
-) {
-  const trimmed = noteText?.trim();
-  const itemWithPending = item as ItemWithPendingInspireNote;
-
-  if (!trimmed || trimmed === "[]") {
-    delete itemWithPending._zinspirePendingInspireNote;
-    return;
-  }
-
-  if (!item.id) {
-    itemWithPending._zinspirePendingInspireNote = trimmed;
-    return;
-  }
-
-  await upsertInspireNote(item, trimmed);
-  delete itemWithPending._zinspirePendingInspireNote;
-}
-
-async function flushPendingInspireNote(item: Zotero.Item) {
-  const itemWithPending = item as ItemWithPendingInspireNote;
-  if (item.id && itemWithPending._zinspirePendingInspireNote) {
-    await upsertInspireNote(item, itemWithPending._zinspirePendingInspireNote);
-    delete itemWithPending._zinspirePendingInspireNote;
-  }
-}
-
-async function saveItemWithPendingInspireNote(item: Zotero.Item) {
-  await item.saveTx();
-  await flushPendingInspireNote(item);
-}
-
-async function upsertInspireNote(item: Zotero.Item, noteText: string) {
-  if (!item.id) {
-    return;
-  }
-
-  const normalizedTarget = normalizeInspireNoteContent(noteText);
-  if (!normalizedTarget) {
-    return;
-  }
-
-  const noteIDs = item.getNotes();
-  let exactMatch: Zotero.Item | undefined;
-  let fallbackMatch: Zotero.Item | undefined;
-  const targetLooksLikeErratum = normalizedTarget.includes("erratum");
-
-  for (const id of noteIDs) {
-    const note = Zotero.Items.get(id);
-    const normalizedExisting = normalizeInspireNoteContent(note.getNote());
-    if (!normalizedExisting) {
-      continue;
-    }
-
-    if (normalizedExisting === normalizedTarget) {
-      exactMatch = note;
-      break;
-    }
-
-    if (
-      !fallbackMatch &&
-      targetLooksLikeErratum &&
-      normalizedExisting.includes("erratum")
-    ) {
-      fallbackMatch = note;
-    }
-  }
-
-  const noteToUpdate = exactMatch ?? fallbackMatch;
-  if (noteToUpdate) {
-    if (noteToUpdate.getNote() !== noteText) {
-      noteToUpdate.setNote(noteText);
-      await noteToUpdate.saveTx();
-    }
-    return;
-  }
-
-  const newNote = new Zotero.Item("note");
-  newNote.setNote(noteText);
-  newNote.parentID = item.id;
-  newNote.libraryID = item.libraryID;
-  await newNote.saveTx();
-}
-
-function normalizeInspireNoteContent(note?: string): string {
-  if (!note) {
-    return "";
-  }
-
-  const withoutTags = note
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<\/p>/gi, " ")
-    .replace(/<[^>]+>/g, " ");
-
-  const decoded = withoutTags.replace(
-    /&([a-z]+);/gi,
-    (_match, entity: string) =>
-      INSPIRE_NOTE_HTML_ENTITIES[entity.toLowerCase()] ?? " ",
-  );
-
-  return decoded
-    .replace(/[–—]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
-function setExtraCitations(extra: any, source: string, citation_count: any) {
-  const today = new Date(Date.now()).toLocaleDateString("zh-CN");
-
-  // Check if citation is already at the top with correct value
-  const topLineMatch = extra.match(/^(\d+)\scitations\s\([\w\s]+[\d/-]+\)\n/);
-
-  if (topLineMatch) {
-    const topCitation = Number(topLineMatch[1]);
-
-    // Citation is at top and value unchanged - no update needed
-    if (citation_count === topCitation) {
-      return extra;
-    }
-  }
-
-  // Extract existing citation count and date from anywhere in extra (before removing)
-  const temp = extra.match(/^\d+\scitations/gm);
-  let existingCitation = 0;
-  if (temp !== null && temp.length > 0) {
-    existingCitation = Number(temp[0].replace(" citations", ""));
-  }
-
-  // Extract existing date before removing
-  const dateMatch = extra.match(new RegExp(`${source}\\s([\\d/-]+)`));
-  const existingDate = dateMatch ? dateMatch[1] : today;
-
-  // Remove all existing citation lines (with or without trailing newline)
-  extra = extra.replace(/^.*citations.*$\n?/gm, "");
-
-  // Remove leading empty lines
-  extra = extra.replace(/^\n+/, "");
-
-  // Check if only position changed (value unchanged) - reuse existing date
-  if (citation_count === existingCitation) {
-    // Value unchanged, keep the existing date
-    extra = `${citation_count} citations (${source} ${existingDate})\n` + extra;
-  } else {
-    // Value changed, use today's date
-    extra = `${citation_count} citations (${source} ${today})\n` + extra;
-  }
-
-  return extra;
-}
-
-async function setCrossRefCitations(item: Zotero.Item) {
-  let extra = item.getField("extra");
-  let count_crossref = await getCrossrefCount(item);
-  if (count_crossref >= 0) {
-    extra = setExtraCitations(extra, "CrossRef", count_crossref) as string;
-    extra = extra.replace(/\n\n/gm, "\n");
-    extra = reorderExtraFields(extra);
-    item.setField("extra", extra);
-
-    // Set arXiv category tag if enabled
-    setArxivCategoryTag(item);
-  } else {
-    count_crossref = -1;
-  }
-  return count_crossref;
-}
-
-function reorderExtraFields(extra: string) {
-  const order_pref = getPref("extra_order");
-
-  if (order_pref === "citations_first") {
-    // For citations_first mode, setCitations has already placed citations at the top
-    // Just return without reordering to avoid duplication
-    return extra;
-  }
-
-  // For arxiv_first mode, we need to reorder
-  // Extract different parts
-  const citationLines: string[] = [];
-  const arxivLines: string[] = [];
-  const otherLines: string[] = [];
-
-  const lines = extra.split("\n");
-
-  for (const line of lines) {
-    if (line.match(/^\d+\scitations/)) {
-      citationLines.push(line);
-    } else if (line.match(/^(arXiv:|_eprint:)/i)) {
-      arxivLines.push(line);
-    } else if (line.trim() !== "") {
-      otherLines.push(line);
-    }
-  }
-
-  // Reorder: arXiv first, then others, then citations
-  const reordered = [...arxivLines, ...otherLines, ...citationLines];
-  return reordered.join("\n");
-}
-
-function setCitations(
-  extra: string,
-  citation_count: number,
-  citation_count_wo_self_citations: number,
-) {
-  const today = new Date(Date.now()).toLocaleDateString("zh-CN");
-
-  // Check if citations are already at the top with correct values
-  const topLinesMatch = extra.match(
-    /^(\d+)\scitations\s\(INSPIRE\s[\d/-]+\)\n(\d+)\scitations\sw\/o\sself\s\(INSPIRE\s[\d/-]+\)\n/,
-  );
-
-  if (topLinesMatch) {
-    const topCitation = Number(topLinesMatch[1]);
-    const topCitationWoSelf = Number(topLinesMatch[2]);
-
-    // Citations are at top and values unchanged - no update needed
-    if (
-      citation_count === topCitation &&
-      citation_count_wo_self_citations === topCitationWoSelf
-    ) {
-      return extra;
-    }
-  }
-
-  // Extract existing citation counts and date from anywhere in extra (before removing)
-  const temp = extra.match(/^\d+\scitations/gm);
-  let existingCitations: number[] = [0, 0];
-  if (temp !== null && temp.length >= 2) {
-    existingCitations = temp.map((e: any) =>
-      Number(e.replace(" citations", "")),
-    );
-  }
-
-  // Extract existing date before removing
-  const dateMatch = extra.match(/INSPIRE\s([\d/-]+)/);
-  const existingDate = dateMatch ? dateMatch[1] : today;
-
-  // Remove all existing citation lines (with or without trailing newline)
-  extra = extra.replace(/^.*citations.*$\n?/gm, "");
-
-  // Remove leading empty lines
-  extra = extra.replace(/^\n+/, "");
-
-  // Check if only position changed (values unchanged) - reuse existing date
-  if (
-    citation_count === existingCitations[0] &&
-    citation_count_wo_self_citations === existingCitations[1]
-  ) {
-    // Values unchanged, keep the existing date
-    extra =
-      `${citation_count} citations (INSPIRE ${existingDate})\n` +
-      `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${existingDate})\n` +
-      extra;
-  } else {
-    // Values changed, use today's date
-    extra =
-      `${citation_count} citations (INSPIRE ${today})\n` +
-      `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${today})\n` +
-      extra;
-  }
-
-  return extra;
-}
-
+// NOTE: ZInspire class, getInspireMeta, setInspireMeta, and other metadata functions
+// have been moved to inspire/itemUpdater.ts and inspire/metadataService.ts
+// Import them from "./inspire" instead of defining locally.
 // ─────────────────────────────────────────────────────────────────────────────
 // Re-exports from modularized files (for incremental migration)
 // ─────────────────────────────────────────────────────────────────────────────

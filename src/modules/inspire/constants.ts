@@ -25,12 +25,20 @@ export const DEFAULT_CITED_BY_SORT: InspireSortOption = "mostrecent";
 export const CITED_BY_PAGE_SIZE = 250; // Consistent page size for all pages
 export const CITED_BY_MAX_PAGES = 40;  // Max pages to fetch (40 * 250 = 10000)
 export const CITED_BY_MAX_RESULTS = 10000;
-export const CITED_BY_PARALLEL_BATCH_SIZE = 3; // Number of pages to fetch in parallel
+export const CITED_BY_PARALLEL_BATCH_SIZE = 5; // Number of pages to fetch in parallel (increased for faster loading)
 // Frontend pagination: render entries in chunks for better performance
 export const RENDER_PAGE_SIZE = 100; // Number of entries to render per "page"
 export const NAVIGATION_STACK_LIMIT = 20;
 // Large collaboration threshold: if authors > this, only show first author + et al.
 export const LARGE_COLLABORATION_THRESHOLD = 20;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Search History
+// ─────────────────────────────────────────────────────────────────────────────
+export const SEARCH_HISTORY_MAX_ENTRIES = 50;
+export const SEARCH_HISTORY_PREF_KEY = "inspireSearchHistory";
+export const SEARCH_HISTORY_DAYS_PREF_KEY = "search_history_days";
+export const SEARCH_HISTORY_DAYS_DEFAULT = 30;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Guards

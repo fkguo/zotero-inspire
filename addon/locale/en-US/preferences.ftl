@@ -36,7 +36,14 @@ pref-max-authors-desc = Number of authors shown before "et al." in the reference
 
 pref-chart-enable =
     .label = Enable statistics chart
-pref-chart-enable-desc = Show interactive statistics chart (by year/citations) at the top of the panel. Chart is collapsed by default.
+pref-chart-enable-desc = Show interactive statistics chart (by year/citations) at the top of the panel.
+pref-chart-default-collapsed =
+    .label = Collapsed by default
+
+pref-search-history-clear =
+    .label = Clear Search History
+pref-search-history-cleared = History cleared
+pref-search-history-days-label = Keep search history for (days):
 
 pref-reader-auto-reopen =
     .label = Reopen reader tab when navigating back/forward

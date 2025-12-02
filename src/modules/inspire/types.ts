@@ -40,6 +40,7 @@ export interface InspireReferenceEntry {
   localItemID?: number;
   isRelated?: boolean;
   citationCount?: number;
+  citationCountWithoutSelf?: number;  // Citation count excluding self-citations
   publicationInfo?: any;
   publicationInfoErrata?: Array<{ info: any; label: string }>;
   arxivDetails?: InspireArxivDetails | string | null;
@@ -99,7 +100,16 @@ export interface ChartBin {
 // View Mode Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type InspireViewMode = "references" | "citedBy" | "entryCited";
+export type InspireViewMode = "references" | "citedBy" | "entryCited" | "search";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Search History Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SearchHistoryItem {
+  query: string;
+  timestamp: number;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Generic JSON Type

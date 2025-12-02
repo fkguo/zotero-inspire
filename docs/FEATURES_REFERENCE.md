@@ -42,14 +42,19 @@ A statistics visualization chart is displayed at the top of the panel (between t
     - Intelligently merges early years to show at most 10 bars (dynamically adjusted based on container width)
     - Prioritizes recent years for detailed breakdown
     - Minimum 3 papers per bin, or merge adjacent bins
+    - **Summary display**: Shows total paper count in header (e.g., "45 papers")
   - **By Citations**: Shows distribution by citation count
     - Fixed bins: 0, 1-9, 10-49, 50-99, 100-249, 250-499, 500+
+    - **Summary display**: Shows total citations, h-index, and average citations (e.g., "1,234 cit. · h=15 · avg 27.4")
 - **Interactive filtering**:
   - Click a bar to filter entries in that bin
   - Hold Ctrl/Cmd to multi-select multiple bins
   - Click selected bar again to deselect
   - Chart filter combines with text filter using AND logic
 - **Collapse/Expand**: Toggle button to hide/show chart
+- **Auto-clear on collapse**: Collapsing the chart immediately clears all chart filters so hidden selections never affect list loading
+- **Default collapse preference**: Configurable via Preferences → References Panel → "Collapsed by default"
+- **Author count filter**: Toggle "≤10 Authors" button to show only papers with 10 or fewer authors (excludes large collaborations)
 - **Clear filter button**: Appears when any bins are selected, clears all chart filters
 
 #### Filter (Search)
@@ -235,5 +240,55 @@ updateRowStatus() / updateRowCitationCount()
 
 ---
 
-*Last updated: 2025-11-29 (v1.1.1)*
+## 6. INSPIRE Search Integration (v1.1.2)
+
+### 6.1 Search Bar Listener
+
+The plugin integrates with Zotero's main search bar to enable INSPIRE searches using the `inspire:` prefix.
+
+| Feature | Description |
+|---------|-------------|
+| **Trigger** | Type `inspire:` followed by query, press Enter |
+| **Syntax** | Native INSPIRE query syntax (e.g., `a Witten`, `t quark mass`) |
+| **Results** | Displayed in new "🔍 Search" tab in References Panel |
+
+### 6.2 Event Interception
+
+To prevent Zotero's default search from triggering:
+
+```typescript
+// Capture phase + stopImmediatePropagation
+searchBar.addEventListener("keydown", handler, { capture: true });
+searchBar.addEventListener("keypress", handler, { capture: true });
+
+// Triple protection
+event.preventDefault();
+event.stopPropagation();
+event.stopImmediatePropagation();
+
+// Focus transfer before clearing
+itemsView.focus();
+target.value = "";
+```
+
+### 6.3 Search History
+
+| Setting | Value |
+|---------|-------|
+| Max entries | 10 |
+| Storage | Zotero preferences (`inspireSearchHistory`) |
+| Format | JSON array of query strings |
+
+### 6.4 Search Mode UI
+
+When in search mode, the panel displays:
+
+- Dedicated search input field
+- Search button
+- History dropdown with recent searches
+- Clear history option
+
+---
+
+*Last updated: 2025-11-30 (v1.1.2)*
 

@@ -492,17 +492,7 @@ export function formatArxivTag(
 
 export function buildDisplayText(entry: InspireReferenceEntry): string {
   const label = entry.label ? `[${entry.label}] ` : "";
-  // Use cached string for performance (this function is called in loops)
-  const yearUnknown = getCachedStrings().yearUnknown;
-  const normalizedYear =
-    entry.year && entry.year !== yearUnknown ? entry.year : "";
-  const summaryContainsYear =
-    normalizedYear &&
-    entry.summary &&
-    entry.summary.includes(`(${normalizedYear})`);
-  const shouldShowYearInline = Boolean(normalizedYear && !summaryContainsYear);
-  const yearPart = shouldShowYearInline ? ` (${normalizedYear})` : "";
-  return `${label}${entry.authorText}${yearPart}: ${entry.title};`;
+  return `${label}${entry.authorText}: ${entry.title};`;
 }
 
 export function extractJournalName(entry: InspireReferenceEntry): string | undefined {

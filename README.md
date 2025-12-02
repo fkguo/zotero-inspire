@@ -18,6 +18,7 @@ This add-on for the excellent open-source reference manager [Zotero](https://git
     - [Interactions and importing](#interactions-and-importing)
     - [Cached data and toolbar controls](#cached-data-and-toolbar-controls)
     - [Back/Forward Navigation](#backforward-navigation)
+    - [INSPIRE Search from Search Bar (new in 1.1.2)](#inspire-search-from-search-bar-new-in-112)
   - [What's new in 1.1.x](#whats-new-in-11x)
   - [Installation](#installation)
     - [Pre-built binaries](#pre-built-binaries)
@@ -41,10 +42,11 @@ When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE Refe
 
 ### Panel tabs
 
-- **References** lists the current item’s bibliography using INSPIRE’s canonical order.
+- **References** lists the current item's bibliography using INSPIRE's canonical order.
 - **Cited by** (new in 1.1.0) runs the official `refersto:recid:<ID>` search to show every record that cites the current item.
 - **Entry Cited** appears when you click the citation count of a reference, letting you inspect who cites that specific entry.
 - **Author Papers** opens when you click an author name.
+- **🔍 Search** (new in 1.1.2) shows results when you search INSPIRE from Zotero's main search bar using the `inspire:` prefix; or you can search INSPIRE directly in the `Search tab` using usual INSPIRE syntax.
 
 ### Smart filtering and sorting
 
@@ -70,7 +72,9 @@ When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE Refe
 - Reference lists, citing records, abstract tooltips, and BibTeX payloads are cached for the session to reduce API calls.
 - The panel toolbar provides two convenient buttons:
   - **Refresh button**: Bypass the cache and fetch fresh data from INSPIRE for the current view.
-  - **Copy all BibTeX button**: Batch-copy BibTeX entries for all visible references to your clipboard using efficient batch queries.
+  - **Export button**: Click to open a menu with multiple export options:
+    - **Copy to Clipboard**: Copy all references in BibTeX, LaTeX (US), or LaTeX (EU) format to your clipboard.
+    - **Export to File**: Save all references to a `.bib` or `.tex` file for large reference lists that may exceed clipboard limits.
 
 ### Back/Forward Navigation
 
@@ -80,6 +84,17 @@ When you click `●` (green) to jump to an existing item in your library, the ad
 - Click **Back** to return directly to the original reader tab
 - If the reader tab was closed, you can optionally have it reopened automatically (configurable in Preferences)
 
+### INSPIRE Search from Search Bar (new in 1.1.2)
+
+Search INSPIRE directly from Zotero's main search bar by typing the `inspire:` prefix followed by your query:
+
+- Type `inspire: a Witten` to search for papers by author Witten
+- Type `inspire: t quark mass` to search for papers with "quark mass" in the title
+- Type `inspire: arXiv:2305.12345` to search for a specific arXiv paper
+- Press **Enter** to execute the search
+
+Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you can browse, filter, and import papers just like any other tab. Your last 10 searches are saved for quick re-access via the history dropdown.
+
 ![showcase](images/screenshot1.png)
 ![collectionwindow](images/screenshot2.png)
 
@@ -88,9 +103,10 @@ When you click `●` (green) to jump to an existing item in your library, the ad
 - The multi-tab INSPIRE panel described above, including the new Cited by, Entry Cited, and Author Papers views with shared filtering/sorting controls.
 - A richer import dialog that lets you pick personal or group libraries, select multiple collections, and prefill tags or notes before fetching items.
 - Reader-friendly navigation with Back/Forward history that can reopen closed PDF reader tabs when desired.
-- Inline abstract tooltips, BibTeX clipboard actions, and toolbar buttons (Refresh and Copy all BibTeX) so you can inspect, copy, or update entries entirely inside Zotero.
+- Inline abstract tooltips, BibTeX clipboard actions, and toolbar buttons (Refresh and Export with multiple format options) so you can inspect, copy, or update entries entirely inside Zotero.
 - Filter supports common journal abbreviations such as "prl", "epja", "cpc", "ctp" etc.
 - Statistics chart (by years or by citations): switched off by default.
+- **INSPIRE Search from Search Bar** (1.1.2): Type `inspire:` followed by your query in Zotero's main search bar to search INSPIRE directly. Results appear in a new Search tab with full filtering/sorting support and search history.
 
 ## Installation
 
@@ -233,7 +249,8 @@ Automatically add the arXiv primary category as a tag to items with arXiv IDs:
 Configure the INSPIRE References Panel behavior:
 
 - **Maximum authors to display**: Number of authors shown before "et al." in the references panel (range: 1-20, default: 3)
-- **Enable statistics chart**: Show interactive statistics chart (by year/citations) at the top of the panel. Chart is collapsed by default (disabled by default)
+- **Enable statistics chart**: Show interactive statistics chart (by year/citations) at the top of the panel (disabled by default)
+  - **Collapsed by default**: When enabled, the chart starts collapsed and can be expanded by clicking the toggle button (enabled by default)
 
 ### Reader View Navigation
 

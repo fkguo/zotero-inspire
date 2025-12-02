@@ -79,3 +79,15 @@ export {
   buildMetaFromMetadata,
 } from "./metadataService";
 
+// Re-export rate limiter
+export {
+  inspireFetch,
+  getRateLimiterStatus,
+  onRateLimiterStatusChange,
+  resetRateLimiter,
+  InspireRateLimiter,
+  RATE_LIMIT_MAX_REQUESTS,
+  RATE_LIMIT_WINDOW_MS,
+  type RateLimiterStatus,
+} from "./rateLimiter";
+

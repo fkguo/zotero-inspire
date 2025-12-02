@@ -7,6 +7,7 @@ import {
 } from "./constants";
 import type { jsobject } from "./types";
 import { recidLookupCache } from "./apiUtils";
+import { inspireFetch } from "./rateLimiter";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INSPIRE Metadata Fetching
@@ -85,7 +86,7 @@ export async function getInspireMeta(item: Zotero.Item, operation: string): Prom
   }
 
   let status: number | null = null;
-  const response = (await fetch(urlInspire)
+  const response = (await inspireFetch(urlInspire)
     .then((response) => {
       if (response.status !== 404) {
         status = 1;
@@ -162,7 +163,7 @@ export async function fetchInspireMetaByRecid(
   if (minimal) {
     url += "?fields=metadata.title,metadata.creators,metadata.date";
   }
-  const response = await fetch(url, { signal }).catch(() => null);
+  const response = await inspireFetch(url, { signal }).catch(() => null);
   if (!response || response.status === 404) {
     return -1;
   }
@@ -201,7 +202,7 @@ async function fetchAbstractDirect(
 ): Promise<string | null> {
   const url = `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}?fields=metadata.abstracts`;
   try {
-    const response = await fetch(url, { signal }).catch(() => null);
+    const response = await inspireFetch(url, { signal }).catch(() => null);
     if (!response || !response.ok) {
       return null;
     }
@@ -230,7 +231,7 @@ export async function fetchBibTeX(
 ): Promise<string | null> {
   const url = `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}?format=bibtex`;
   try {
-    const response = await fetch(url, { signal }).catch(() => null);
+    const response = await inspireFetch(url, { signal }).catch(() => null);
     if (!response || !response.ok) {
       return null;
     }

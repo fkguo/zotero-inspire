@@ -2,6 +2,53 @@
   background-color: tomato;
 }
 
+/* Hide autocomplete popup when inspire: prefix is being typed */
+/* This class is dynamically added to #zotero-tb-search when user types inspire: */
+.zinspire-hide-autocomplete .autocomplete-richlistbox,
+.zinspire-hide-autocomplete .autocomplete-popup,
+.zinspire-hide-autocomplete + .autocomplete-richlistbox,
+.zinspire-hide-autocomplete + .autocomplete-popup,
+#zotero-tb-search.zinspire-hide-autocomplete panel,
+#zotero-tb-search.zinspire-hide-autocomplete menupopup {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Also hide any panel that appears near the search bar when in inspire mode */
+#zotero-tb-search-textbox.zinspire-hide-autocomplete ~ panel,
+#zotero-tb-search-textbox.zinspire-hide-autocomplete ~ menupopup {
+  display: none !important;
+}
+
+/* Panel search input with inline hint */
+.zinspire-search-input-wrapper {
+  position: relative;
+  background: var(--zotero-gray-1, #ffffff);
+  border-radius: 4px;
+}
+
+.zinspire-search-input {
+  background-color: transparent !important;
+  background: none !important;
+}
+
+.zinspire-search-inline-hint {
+  color: #888 !important;
+  opacity: 1 !important;
+}
+
+/* Dark mode support for inline hint */
+@media (prefers-color-scheme: dark) {
+  .zinspire-search-input-wrapper {
+    background: var(--zotero-gray-8, #2a2a2e);
+  }
+  .zinspire-search-inline-hint {
+    color: #777 !important;
+  }
+}
+
 .zinspire-ref-panel {
   display: flex;
   flex-direction: column;
@@ -83,6 +130,11 @@
   font-size: 12px;
 }
 
+/* Add visual separation when search input container is visible (search mode) */
+.zinspire-ref-panel__search-input:not([style*="display: none"]) ~ .zinspire-ref-panel__filter {
+  margin-left: 8px;
+}
+
 .zinspire-ref-panel__sort {
   flex: 0 0 140px;
   min-width: 120px;
@@ -91,6 +143,32 @@
   border-radius: 4px;
   font-size: 12px;
   background: var(--zotero-gray-1, #ffffff);
+}
+
+/* Rate limiter status indicator */
+.zinspire-ref-panel__rate-status {
+  font-size: 11px;
+  color: #f59e0b;
+  padding: 2px 6px;
+  border: 1px solid #fbbf24;
+  border-radius: 4px;
+  background: #fef3c7;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .zinspire-ref-panel__rate-status {
+    color: #fbbf24;
+    border-color: #92400e;
+    background: #451a03;
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-ref-panel__rate-status,
+[data-color-scheme="dark"] .zinspire-ref-panel__rate-status {
+  color: #fbbf24;
+  border-color: #92400e;
+  background: #451a03;
 }
 
 .zinspire-ref-panel__list {
@@ -430,4 +508,176 @@
 .zinspire-chart-bar.selected {
   stroke: var(--zotero-blue-8, #1a3d99);
   stroke-width: 2;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   INSPIRE Search Styles
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.zinspire-search-container {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  position: relative;
+}
+
+.zinspire-search-input {
+  flex: 1 1 auto;
+  min-width: 150px;
+  padding: 4px 8px;
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--zotero-gray-1, #ffffff);
+  color: var(--zotero-gray-8, #1a1a1a);
+}
+
+.zinspire-search-input::placeholder {
+  color: var(--zotero-gray-5, #8e8e93);
+}
+
+.zinspire-search-button,
+.zinspire-history-button {
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--zotero-gray-7, #2b2b30);
+}
+
+.zinspire-search-button:hover,
+.zinspire-history-button:hover {
+  background: var(--zotero-gray-2, #f0f0f0);
+}
+
+.zinspire-search-history-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--zotero-gray-1, #ffffff);
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  margin-top: 2px;
+}
+
+.zinspire-search-history-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  border-bottom: 1px solid var(--zotero-gray-3, #e6e6e6);
+}
+
+.zinspire-search-history-item:hover {
+  background: var(--zotero-gray-2, #f0f0f0);
+}
+
+.zinspire-search-history-item:last-child {
+  border-bottom: none;
+}
+
+.zinspire-search-history-clear {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--zotero-gray-6, #666666);
+  text-align: center;
+  font-style: italic;
+}
+
+.zinspire-search-history-clear:hover {
+  background: var(--zotero-gray-2, #f0f0f0);
+}
+
+/* Dark mode support for search */
+@media (prefers-color-scheme: dark) {
+  .zinspire-search-input {
+    background: var(--zotero-gray-8, #1e1e1e);
+    border-color: var(--zotero-gray-6, #4a4a4f);
+    color: var(--zotero-gray-2, #f0f0f0);
+  }
+
+  .zinspire-search-button,
+  .zinspire-history-button {
+    border-color: var(--zotero-gray-6, #4a4a4f);
+    color: var(--zotero-gray-3, #e0e0e0);
+  }
+
+  .zinspire-search-button:hover,
+  .zinspire-history-button:hover {
+    background: var(--zotero-gray-7, #2b2b30);
+  }
+
+  .zinspire-search-history-dropdown {
+    background: var(--zotero-gray-8, #1e1e1e);
+    border-color: var(--zotero-gray-6, #4a4a4f);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+
+  .zinspire-search-history-item {
+    border-color: var(--zotero-gray-7, #2b2b30);
+  }
+
+  .zinspire-search-history-item:hover,
+  .zinspire-search-history-clear:hover {
+    background: var(--zotero-gray-7, #2b2b30);
+  }
+
+  .zinspire-search-history-clear {
+    color: var(--zotero-gray-5, #8e8e93);
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-search-input,
+[data-color-scheme="dark"] .zinspire-search-input {
+  background: var(--zotero-gray-8, #1e1e1e);
+  border-color: var(--zotero-gray-6, #4a4a4f);
+  color: var(--zotero-gray-2, #f0f0f0);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-search-button,
+:root[zotero-platform-darkmode="true"] .zinspire-history-button,
+[data-color-scheme="dark"] .zinspire-search-button,
+[data-color-scheme="dark"] .zinspire-history-button {
+  border-color: var(--zotero-gray-6, #4a4a4f);
+  color: var(--zotero-gray-3, #e0e0e0);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-search-button:hover,
+:root[zotero-platform-darkmode="true"] .zinspire-history-button:hover,
+[data-color-scheme="dark"] .zinspire-search-button:hover,
+[data-color-scheme="dark"] .zinspire-history-button:hover {
+  background: var(--zotero-gray-7, #2b2b30);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-search-history-dropdown,
+[data-color-scheme="dark"] .zinspire-search-history-dropdown {
+  background: var(--zotero-gray-8, #1e1e1e);
+  border-color: var(--zotero-gray-6, #4a4a4f);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-search-history-item,
+[data-color-scheme="dark"] .zinspire-search-history-item {
+  border-color: var(--zotero-gray-7, #2b2b30);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-search-history-item:hover,
+:root[zotero-platform-darkmode="true"] .zinspire-search-history-clear:hover,
+[data-color-scheme="dark"] .zinspire-search-history-item:hover,
+[data-color-scheme="dark"] .zinspire-search-history-clear:hover {
+  background: var(--zotero-gray-7, #2b2b30);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-search-history-clear,
+[data-color-scheme="dark"] .zinspire-search-history-clear {
+  color: var(--zotero-gray-5, #8e8e93);
 }

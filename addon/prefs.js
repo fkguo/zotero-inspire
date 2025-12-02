@@ -8,3 +8,5 @@ pref("__prefsPrefix__.arxiv_tag_enable", false);
 pref("__prefsPrefix__.max_authors", 3);
 pref("__prefsPrefix__.reader_auto_reopen", false);
 pref("__prefsPrefix__.chart_enable", true);
+pref("__prefsPrefix__.chart_default_collapsed", true);
+pref("__prefsPrefix__.search_history_days", 30);
