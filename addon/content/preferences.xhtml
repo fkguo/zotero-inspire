@@ -1,6 +1,20 @@
 <linkset>
   <html:link rel="localization" href="__addonRef__-preferences.ftl" />
 </linkset>
+<!-- Preferences -->
+<preferences>
+  <preference id="pref-meta" name="__prefsPrefix__.meta" type="string" />
+  <preference id="pref-citekey" name="__prefsPrefix__.citekey" type="string" />
+  <preference id="pref-extra_order" name="__prefsPrefix__.extra_order" type="string" />
+  <preference id="pref-arxiv_tag_enable" name="__prefsPrefix__.arxiv_tag_enable" type="bool" />
+  <preference id="pref-max_authors" name="__prefsPrefix__.max_authors" type="int" />
+  <preference id="pref-chart_enable" name="__prefsPrefix__.chart_enable" type="bool" />
+  <preference id="pref-chart_default_collapsed" name="__prefsPrefix__.chart_default_collapsed" type="bool" />
+  <preference id="pref-search_history_days" name="__prefsPrefix__.search_history_days" type="int" />
+  <preference id="pref-reader_auto_reopen" name="__prefsPrefix__.reader_auto_reopen" type="bool" />
+  <preference id="pref-tag_enable" name="__prefsPrefix__.tag_enable" type="bool" />
+  <preference id="pref-tag_norecid" name="__prefsPrefix__.tag_norecid" type="string" />
+</preferences>
 <groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window });" />
 <vbox id="zotero-prefpane-__addonRef__" style="padding: 8px;">
   <html:style>
@@ -60,7 +74,7 @@
   <!-- Metadata Fetching -->
   <vbox class="zinspire-pref-section">
     <html:h3 class="zinspire-pref-title" data-l10n-id="pref-meta"></html:h3>
-    <radiogroup id="zotero-prefpane-__addonRef__-meta" preference="extensions.zotero.__addonRef__.meta"
+    <radiogroup id="zotero-prefpane-__addonRef__-meta" preference="pref-meta"
       orient="vertical">
       <radio data-l10n-id="meta-full" value="full" />
       <radio data-l10n-id="meta-noabstract" value="noabstract" />
@@ -74,14 +88,14 @@
     <hbox class="zinspire-pref-hbox">
       <vbox class="zinspire-pref-hbox-item">
         <html:h3 class="zinspire-pref-title" data-l10n-id="pref-citekey"></html:h3>
-        <radiogroup id="zotero-prefpane-__addonRef__-citekey" preference="__prefsPrefix__.citekey" orient="vertical">
+        <radiogroup id="zotero-prefpane-__addonRef__-citekey" preference="pref-citekey" orient="vertical">
           <radio data-l10n-id="citekey-inspire" value="inspire" />
           <radio data-l10n-id="citekey-no" value="no" />
         </radiogroup>
       </vbox>
       <vbox class="zinspire-pref-hbox-item">
         <html:h3 class="zinspire-pref-title" data-l10n-id="pref-extra-order"></html:h3>
-        <radiogroup id="zotero-prefpane-__addonRef__-extra_order" preference="__prefsPrefix__.extra_order"
+        <radiogroup id="zotero-prefpane-__addonRef__-extra_order" preference="pref-extra_order"
           orient="vertical">
           <radio data-l10n-id="extra-order-citations-first" value="citations_first" />
           <radio data-l10n-id="extra-order-arxiv-first" value="arxiv_first" />
@@ -94,7 +108,7 @@
   <vbox class="zinspire-pref-section">
     <html:h3 class="zinspire-pref-title" data-l10n-id="pref-arxiv-tag"></html:h3>
     <vbox class="zinspire-pref-row">
-      <checkbox id="zotero-prefpane-__addonRef__-arxiv_tag_enable" preference="__prefsPrefix__.arxiv_tag_enable"
+      <checkbox id="zotero-prefpane-__addonRef__-arxiv_tag_enable" preference="pref-arxiv_tag_enable"
         data-l10n-id="pref-arxiv-tag1" />
     </vbox>
   </vbox>
@@ -105,18 +119,18 @@
     <vbox class="zinspire-pref-row">
       <hbox align="center">
         <label data-l10n-id="pref-max-authors-label" />
-        <html:input type="number" id="zotero-prefpane-__addonRef__-max_authors" preference="__prefsPrefix__.max_authors"
+        <html:input type="number" id="zotero-prefpane-__addonRef__-max_authors" preference="pref-max_authors"
           min="1" max="20" class="zinspire-pref-input" style="width: 60px; margin-left: 8px;" />
       </hbox>
       <html:p class="zinspire-pref-desc" data-l10n-id="pref-max-authors-desc"></html:p>
     </vbox>
     <vbox class="zinspire-pref-row" style="margin-top: 8px;">
-      <checkbox id="zotero-prefpane-__addonRef__-chart_enable" preference="__prefsPrefix__.chart_enable"
+      <checkbox id="zotero-prefpane-__addonRef__-chart_enable" preference="pref-chart_enable"
         data-l10n-id="pref-chart-enable" />
       <html:p class="zinspire-pref-desc" data-l10n-id="pref-chart-enable-desc"></html:p>
       <vbox style="margin-left: 20px; margin-top: 6px;">
         <checkbox id="zotero-prefpane-__addonRef__-chart_default_collapsed"
-          preference="__prefsPrefix__.chart_default_collapsed" data-l10n-id="pref-chart-default-collapsed" />
+          preference="pref-chart_default_collapsed" data-l10n-id="pref-chart-default-collapsed" />
       </vbox>
     </vbox>
     <vbox class="zinspire-pref-row" style="margin-top: 12px;">
@@ -126,7 +140,7 @@
         <label style="width: 20px;" />
         <label data-l10n-id="pref-search-history-days-label" />
         <html:input type="number" id="zotero-prefpane-__addonRef__-search_history_days"
-          preference="__prefsPrefix__.search_history_days" min="1" max="365"
+          preference="pref-search_history_days" min="1" max="365"
           class="zinspire-pref-input" style="width: 60px; margin-left: 8px;" />
       </hbox>
     </vbox>
@@ -136,7 +150,7 @@
   <vbox class="zinspire-pref-section">
     <html:h3 class="zinspire-pref-title" data-l10n-id="pref-reader-history"></html:h3>
     <vbox class="zinspire-pref-row">
-      <checkbox id="zotero-prefpane-__addonRef__-reader_auto_reopen" preference="__prefsPrefix__.reader_auto_reopen"
+      <checkbox id="zotero-prefpane-__addonRef__-reader_auto_reopen" preference="pref-reader_auto_reopen"
         data-l10n-id="pref-reader-auto-reopen" />
       <html:p class="zinspire-pref-desc" data-l10n-id="pref-reader-auto-reopen-desc"></html:p>
     </vbox>
@@ -146,13 +160,13 @@
   <vbox class="zinspire-pref-section">
     <html:h3 class="zinspire-pref-title" data-l10n-id="pref-nofound"></html:h3>
     <vbox class="zinspire-pref-row">
-      <checkbox id="zotero-prefpane-__addonRef__-tag_enable" preference="extensions.zotero.__addonRef__.tag_enable"
+      <checkbox id="zotero-prefpane-__addonRef__-tag_enable" preference="pref-tag_enable"
         data-l10n-id="pref-nofound-enable" />
     </vbox>
     <vbox class="zinspire-pref-row" style="margin-top: 6px;">
       <hbox align="center">
         <label data-l10n-id="pref-nofound-tag-label" />
-        <html:input type="text" id="zotero-prefpane-__addonRef__-tag_norecid" preference="__prefsPrefix__.tag_norecid"
+        <html:input type="text" id="zotero-prefpane-__addonRef__-tag_norecid" preference="pref-tag_norecid"
           class="zinspire-pref-input" style="flex: 1; margin-left: 8px;" />
       </hbox>
     </vbox>

@@ -42,7 +42,11 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
     `${rootURI}/content/scripts/__addonRef__.js`,
     ctx,
   );
-  Zotero.__addonInstance__.hooks.onStartup();
+  try {
+    await Zotero.__addonInstance__.hooks.onStartup();
+  } catch (e) {
+    Zotero.logError(e);
+  }
 }
 
 async function onMainWindowLoad({ window }, reason) {
@@ -69,7 +73,8 @@ function shutdown({ id, version, resourceURI, rootURI }, reason) {
     .getService(Components.interfaces.nsIStringBundleService)
     .flushBundles();
 
-  Cu.unload(`${rootURI}/content/scripts/__addonRef__.js`);
+  // Note: Cu.unload is not available in Zotero 7 (Firefox 115 ESR)
+  // and is not needed for scripts loaded via loadSubScript
 
   if (chromeHandle) {
     chromeHandle.destruct();

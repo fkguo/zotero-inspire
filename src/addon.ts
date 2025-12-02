@@ -24,11 +24,21 @@ class Addon {
   public api: object;
 
   constructor() {
+    let ztoolkit: ZToolkit;
+    try {
+      ztoolkit = createZToolkit();
+    } catch (e) {
+      Zotero.logError(e as Error);
+      // Fallback or partial initialization if needed, 
+      // though usually createZToolkit is essential.
+      // We log it so it doesn't crash the whole Addon constructor.
+    }
+    
     this.data = {
       alive: true,
       config,
       env: __env__,
-      ztoolkit: createZToolkit(),
+      ztoolkit: ztoolkit!,
     };
     this.hooks = hooks;
     this.api = {};
