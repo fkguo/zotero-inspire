@@ -5,12 +5,13 @@ import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   DOI_ORG_URL,
   INSPIRE_NOTE_HTML_ENTITIES,
+  INSPIRE_LITERATURE_URL,
 } from "./constants";
 import type { jsobject, ItemWithPendingInspireNote } from "./types";
-import { getInspireMeta, getCrossrefCount } from "./metadataService";
-import { deriveRecidFromItem } from "./apiUtils";
+import { getInspireMeta, getCrossrefCount, fetchBibTeX } from "./metadataService";
+import { deriveRecidFromItem, copyToClipboard } from "./apiUtils";
 import { localCache } from "./localCache";
-import { fetchReferencesEntries } from "./referencesService";
+import { fetchReferencesEntries, enrichReferencesEntries } from "./referencesService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -29,6 +30,7 @@ export class ZInspire {
   final_count_shown: boolean;
   progressWindow: ProgressWindowHelper;
   private isCancelled: boolean = false;
+  private escapeHandler?: (e: KeyboardEvent) => void;
 
   constructor(
     current: number = -1,
@@ -133,11 +135,46 @@ export class ZInspire {
 
   cancelUpdate() {
     this.isCancelled = true;
+    this.removeEscapeListener();
+  }
+
+  /**
+   * Setup global Escape key listener to cancel ongoing operations
+   */
+  private setupEscapeListener() {
+    this.removeEscapeListener(); // Clean up any existing listener
+    this.escapeHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.cancelUpdate();
+        Zotero.debug(`[${config.addonName}] Operation cancelled via Escape key`);
+      }
+    };
+    // Use Zotero main window for global key capture
+    const win = Zotero.getMainWindow();
+    if (win) {
+      win.addEventListener("keydown", this.escapeHandler, true);
+    }
+  }
+
+  /**
+   * Remove the Escape key listener
+   */
+  private removeEscapeListener() {
+    if (this.escapeHandler) {
+      const win = Zotero.getMainWindow();
+      if (win) {
+        win.removeEventListener("keydown", this.escapeHandler, true);
+      }
+      this.escapeHandler = undefined;
+    }
   }
 
   updateSelectedItems(operation: string) {
     this.resetState("initial");
     this.isCancelled = false;
+    this.setupEscapeListener();
     const items = ZoteroPane.getSelectedItems();
     this.toUpdate = items.length;
     this.itemsToUpdate = items;
@@ -147,44 +184,69 @@ export class ZInspire {
   updateSelectedCollection(operation: string) {
     this.resetState("initial");
     this.isCancelled = false;
+    this.setupEscapeListener();
     const collection = ZoteroPane.getSelectedCollection();
     if (collection) {
       this.itemsToUpdate = collection.getChildItems();
       this.toUpdate = this.itemsToUpdate.length;
       this.updateItemsConcurrent(operation);
+    } else {
+      this.removeEscapeListener();
     }
   }
 
   async downloadReferencesCacheForSelection() {
-    if (!localCache.isEnabled()) {
-      this.showCacheNotification(getString("download-cache-disabled"), "error");
-      return;
+    try {
+      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForSelection: starting`);
+      if (!localCache.isEnabled()) {
+        this.showCacheNotification(getString("download-cache-disabled"), "error");
+        return;
+      }
+      const items = ZoteroPane.getSelectedItems();
+      const regularItems = items.filter((item) => item?.isRegularItem());
+      if (!regularItems.length) {
+        this.showCacheNotification(getString("download-cache-no-selection"), "error");
+        return;
+      }
+      // Reset cancel state and setup Escape listener
+      this.isCancelled = false;
+      this.setupEscapeListener();
+      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForSelection: calling prefetch for ${regularItems.length} items`);
+      await this.prefetchReferencesCache(regularItems);
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForSelection: error: ${err}`);
+    } finally {
+      this.removeEscapeListener();
     }
-    const items = ZoteroPane.getSelectedItems();
-    const regularItems = items.filter((item) => item?.isRegularItem());
-    if (!regularItems.length) {
-      this.showCacheNotification(getString("download-cache-no-selection"), "error");
-      return;
-    }
-    await this.prefetchReferencesCache(regularItems);
   }
 
   async downloadReferencesCacheForCollection() {
-    if (!localCache.isEnabled()) {
-      this.showCacheNotification(getString("download-cache-disabled"), "error");
-      return;
+    try {
+      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForCollection: starting`);
+      if (!localCache.isEnabled()) {
+        this.showCacheNotification(getString("download-cache-disabled"), "error");
+        return;
+      }
+      const collection = ZoteroPane.getSelectedCollection();
+      if (!collection) {
+        this.showCacheNotification(getString("download-cache-no-selection"), "error");
+        return;
+      }
+      const items = collection.getChildItems().filter((item) => item?.isRegularItem());
+      if (!items.length) {
+        this.showCacheNotification(getString("download-cache-no-selection"), "error");
+        return;
+      }
+      // Reset cancel state and setup Escape listener
+      this.isCancelled = false;
+      this.setupEscapeListener();
+      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForCollection: calling prefetch for ${items.length} items`);
+      await this.prefetchReferencesCache(items);
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForCollection: error: ${err}`);
+    } finally {
+      this.removeEscapeListener();
     }
-    const collection = ZoteroPane.getSelectedCollection();
-    if (!collection) {
-      this.showCacheNotification(getString("download-cache-no-selection"), "error");
-      return;
-    }
-    const items = collection.getChildItems().filter((item) => item?.isRegularItem());
-    if (!items.length) {
-      this.showCacheNotification(getString("download-cache-no-selection"), "error");
-      return;
-    }
-    await this.prefetchReferencesCache(items);
   }
 
   async updateItems(items: Zotero.Item[], operation: string) {
@@ -285,6 +347,8 @@ export class ZInspire {
         this.progressWindow.close();
       } catch (_e) { /* ignore */ }
       this.numberOfUpdatedItems = this.toUpdate;
+    } finally {
+      this.removeEscapeListener();
     }
   }
 
@@ -306,6 +370,7 @@ export class ZInspire {
   }
 
   private async prefetchReferencesCache(items: Zotero.Item[]): Promise<void> {
+    Zotero.debug(`[${config.addonName}] prefetchReferencesCache: starting with ${items.length} items`);
     const recidSet = new Set<string>();
     for (const item of items) {
       const recid = deriveRecidFromItem(item);
@@ -313,6 +378,7 @@ export class ZInspire {
         recidSet.add(recid);
       }
     }
+    Zotero.debug(`[${config.addonName}] prefetchReferencesCache: found ${recidSet.size} unique recids`);
 
     if (!recidSet.size) {
       this.showCacheNotification(getString("download-cache-no-recid"), "error");
@@ -320,18 +386,27 @@ export class ZInspire {
     }
 
     const total = recidSet.size;
+    Zotero.debug(`[${config.addonName}] prefetchReferencesCache: creating progress window`);
     const progressWindow = new ProgressWindowHelper(getString("download-cache-progress-title"));
     progressWindow.createLine({
       text: getString("download-cache-start", { args: { total } }),
       progress: 0,
     });
-    progressWindow.show();
+    progressWindow.show(-1); // Disable auto-close timer during download
+    Zotero.debug(`[${config.addonName}] prefetchReferencesCache: progress window shown`);
 
     let processed = 0;
     let success = 0;
     let failed = 0;
 
     for (const recid of recidSet) {
+      // Check cancellation at start of each iteration
+      if (this.isCancelled) {
+        progressWindow.close();
+        this.showCacheCancelledStats(success, total);
+        return;
+      }
+
       processed++;
       progressWindow.changeLine({
         text: getString("download-cache-progress", { args: { done: processed, total } }),
@@ -340,6 +415,20 @@ export class ZInspire {
 
       try {
         const entries = await fetchReferencesEntries(recid);
+        // Check again after async operation
+        if (this.isCancelled) {
+          progressWindow.close();
+          this.showCacheCancelledStats(success, total);
+          return;
+        }
+        // Enrich entries with complete metadata (title, authors, citation count)
+        // This ensures cached data is complete and usable offline
+        await enrichReferencesEntries(entries);
+        if (this.isCancelled) {
+          progressWindow.close();
+          this.showCacheCancelledStats(success, total);
+          return;
+        }
         // Store without sort parameter (client-side sorting for references)
         // Pass total = entries.length since references data is always complete
         await localCache.set("refs", recid, entries, undefined, entries.length);
@@ -362,6 +451,23 @@ export class ZInspire {
       });
     }
     progressWindow.startCloseTimer(4000);
+  }
+
+  /**
+   * Show statistics when cache download was cancelled
+   */
+  private showCacheCancelledStats(completed: number, total: number) {
+    const statsWindow = new ztoolkit.ProgressWindow(config.addonName, {
+      closeOnClick: true,
+    });
+    statsWindow.changeHeadline(getString("download-cache-cancelled-title"));
+    const icon = "chrome://zotero/skin/warning.png";
+    statsWindow.createLine({
+      icon: icon,
+      text: getString("download-cache-cancelled", { args: { done: completed.toString(), total: total.toString() } }),
+    });
+    statsWindow.show();
+    statsWindow.startCloseTimer(5000);
   }
 
   private showCacheNotification(message: string, type: "info" | "error" = "info") {
@@ -474,6 +580,140 @@ export class ZInspire {
       this.updateNextItem(operation);
     } else {
       this.updateNextItem(operation);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Context Menu Copy Actions
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get the single selected regular item, or show an error notification.
+   * Returns null if selection is invalid.
+   */
+  private getSelectedSingleItem(): Zotero.Item | null {
+    const items = ZoteroPane.getSelectedItems();
+    const regularItems = items.filter((item) => item?.isRegularItem());
+    if (regularItems.length !== 1) {
+      this.showCopyNotification(getString("copy-error-no-selection"), "fail");
+      return null;
+    }
+    return regularItems[0];
+  }
+
+  /**
+   * Show a brief notification for copy actions.
+   */
+  private showCopyNotification(message: string, type: "success" | "fail" = "success") {
+    const window = new ProgressWindowHelper(config.addonName);
+    window.createLine({ text: message, type });
+    window.show();
+    window.startCloseTimer(2500);
+  }
+
+  /**
+   * Copy BibTeX from INSPIRE for the selected item.
+   */
+  async copyBibTeX() {
+    const item = this.getSelectedSingleItem();
+    if (!item) return;
+
+    const recid = deriveRecidFromItem(item);
+    if (!recid) {
+      this.showCopyNotification(getString("copy-error-no-recid"), "fail");
+      return;
+    }
+
+    try {
+      const bibtex = await fetchBibTeX(recid);
+      if (!bibtex) {
+        this.showCopyNotification(getString("copy-error-bibtex-failed"), "fail");
+        return;
+      }
+      const success = await copyToClipboard(bibtex);
+      if (success) {
+        this.showCopyNotification(getString("copy-success-bibtex"), "success");
+      } else {
+        this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+      }
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] copyBibTeX error: ${err}`);
+      this.showCopyNotification(getString("copy-error-bibtex-failed"), "fail");
+    }
+  }
+
+  /**
+   * Copy INSPIRE literature URL for the selected item.
+   */
+  async copyInspireLink() {
+    const item = this.getSelectedSingleItem();
+    if (!item) return;
+
+    const recid = deriveRecidFromItem(item);
+    if (!recid) {
+      this.showCopyNotification(getString("copy-error-no-recid"), "fail");
+      return;
+    }
+
+    const url = `${INSPIRE_LITERATURE_URL}/${recid}`;
+    const success = await copyToClipboard(url);
+    if (success) {
+      this.showCopyNotification(getString("copy-success-inspire-link"), "success");
+    } else {
+      this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+    }
+  }
+
+  /**
+   * Copy citation key for the selected item.
+   */
+  async copyCitationKey() {
+    const item = this.getSelectedSingleItem();
+    if (!item) return;
+
+    const citationKey = item.getField("citationKey") as string | undefined;
+    if (!citationKey?.trim()) {
+      this.showCopyNotification(getString("copy-error-no-citation-key"), "fail");
+      return;
+    }
+
+    const success = await copyToClipboard(citationKey.trim());
+    if (success) {
+      this.showCopyNotification(getString("copy-success-citation-key"), "success");
+    } else {
+      this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+    }
+  }
+
+  /**
+   * Copy Zotero select link for the selected item.
+   * Format: zotero://select/library/items/KEY or zotero://select/groups/GROUPID/items/KEY
+   */
+  async copyZoteroLink() {
+    const item = this.getSelectedSingleItem();
+    if (!item) return;
+
+    const libraryID = item.libraryID;
+    const key = item.key;
+    let link: string;
+
+    // Check if this is a group library
+    const library = Zotero.Libraries.get(libraryID);
+    if (library && library.libraryType === "group") {
+      // Group library format: zotero://select/groups/GROUPID/items/KEY
+      // TypeScript types don't include groupID but it exists at runtime for group libraries
+      const groupID = (library as any).groupID;
+      link = `zotero://select/groups/${groupID}/items/${key}`;
+    } else {
+      // Personal library format: zotero://select/library/items/KEY
+      link = `zotero://select/library/items/${key}`;
+    }
+
+    const success = await copyToClipboard(link);
+    if (success) {
+      this.showCopyNotification(getString("copy-success-zotero-link"), "success");
+    } else {
+      this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
     }
   }
 }

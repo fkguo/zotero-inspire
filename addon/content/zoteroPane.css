@@ -29,24 +29,76 @@
   border-radius: 4px;
 }
 
-.zinspire-search-input {
+.zinspire-search-input,
+.zinspire-filter-input-wrapper .zinspire-ref-panel__filter {
   background-color: transparent !important;
-  background: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+}
+
+/* Base inline hint style for all inputs (search and filter) */
+/* Uses higher z-index with pointer-events:none so hint shows above input but doesn't block interaction */
+.zinspire-inline-hint {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fill-secondary, #888);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: pre !important;
+  overflow: hidden;
+  z-index: 3;
+  display: none;
 }
 
 .zinspire-search-inline-hint {
   color: #888 !important;
   opacity: 1 !important;
+  white-space: pre !important;
+}
+
+.zinspire-search-hint {
+  white-space: pre !important;
+}
+
+/* Filter input wrapper for inline hint positioning */
+.zinspire-filter-input-wrapper {
+  position: relative;
+  background: var(--material-background, #ffffff);
+  border-radius: 4px;
+}
+
+/* Filter input needs transparent background for hint to show through */
+.zinspire-filter-input-wrapper .zinspire-ref-panel__filter {
+  background: transparent !important;
+  position: relative;
+  z-index: 2;
 }
 
 /* Dark mode support for inline hint */
 @media (prefers-color-scheme: dark) {
-  .zinspire-search-input-wrapper {
-    background: var(--zotero-gray-8, #2a2a2e);
+  .zinspire-search-input-wrapper,
+  .zinspire-filter-input-wrapper {
+    background: var(--material-background, var(--zotero-gray-8, #2a2a2e));
   }
-  .zinspire-search-inline-hint {
+  .zinspire-search-inline-hint,
+  .zinspire-inline-hint {
     color: #777 !important;
   }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-inline-hint,
+[data-color-scheme="dark"] .zinspire-inline-hint {
+  color: #777 !important;
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-search-input-wrapper,
+:root[zotero-platform-darkmode="true"] .zinspire-filter-input-wrapper,
+[data-color-scheme="dark"] .zinspire-search-input-wrapper,
+[data-color-scheme="dark"] .zinspire-filter-input-wrapper {
+  background: var(--material-background, var(--zotero-gray-8, #2a2a2e));
 }
 
 .zinspire-ref-panel {
@@ -121,13 +173,123 @@
   opacity: 0.5;
 }
 
+.zinspire-filter-group {
+  /* Core styles; layout enforced via inline styles in TS */
+  column-gap: 6px;
+  min-width: 220px;
+  max-width: 100%;
+}
+
 .zinspire-ref-panel__filter {
-  flex: 0 0 180px;
-  min-width: 140px;
   padding: 2px 6px;
   border: 1px solid var(--zotero-gray-4, #d1d1d5);
   border-radius: 4px;
   font-size: 12px;
+}
+
+.zinspire-quick-filters {
+  /* Core styles; layout enforced via inline styles in TS */
+}
+
+.zinspire-quick-filter-btn {
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  padding: 2px 10px;
+  background: var(--zotero-gray-1, #ffffff);
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.2;
+}
+
+.zinspire-quick-filter-btn.active {
+  background: var(--zotero-blue-5, #0060df);
+  color: #ffffff;
+  border-color: var(--zotero-blue-5, #0060df);
+}
+
+.zinspire-quick-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--zotero-blue-5, #0060df);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.zinspire-quick-filter-popup {
+  /* Inline flow layout - appears below filterGroup, wraps items */
+  display: none;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 6px 0;
+  align-items: center;
+  flex-basis: 100%;
+  background: transparent;
+}
+
+.zinspire-quick-filter-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--zotero-gray-7, #2b2b30);
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: var(--zotero-gray-2, #f5f5f5);
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+}
+
+.zinspire-quick-filter-item:hover {
+  background: var(--zotero-gray-3, #e5e5e5);
+}
+
+.zinspire-quick-filter-item input {
+  margin: 0;
+}
+
+.zinspire-quick-filter-item-emoji {
+  font-size: 12px;
+}
+
+.zinspire-quick-filter-item-label {
+  /* No flex: 1 needed for inline tag style */
+}
+
+@media (prefers-color-scheme: dark) {
+  .zinspire-quick-filter-btn {
+    border-color: var(--zotero-gray-6, #4a4a4f);
+    background: var(--zotero-gray-8, #2a2a2e);
+    color: var(--zotero-gray-1, #ffffff);
+  }
+
+  .zinspire-quick-filter-btn.active {
+    color: #ffffff;
+  }
+
+  .zinspire-quick-filter-popup {
+    background: transparent;
+  }
+
+  .zinspire-quick-filter-item {
+    color: var(--zotero-gray-1, #ffffff);
+    background: var(--zotero-gray-7, #38383d);
+    border-color: var(--zotero-gray-6, #4a4a4f);
+  }
+
+  .zinspire-quick-filter-item:hover {
+    background: var(--zotero-gray-6, #4a4a4f);
+  }
 }
 
 /* Add visual separation when search input container is visible (search mode) */
@@ -530,7 +692,7 @@
   border: 1px solid var(--zotero-gray-4, #d1d1d5);
   border-radius: 4px;
   font-size: 12px;
-  background: var(--zotero-gray-1, #ffffff);
+  background: transparent !important;
   color: var(--zotero-gray-8, #1a1a1a);
 }
 
@@ -600,7 +762,7 @@
 /* Dark mode support for search */
 @media (prefers-color-scheme: dark) {
   .zinspire-search-input {
-    background: var(--zotero-gray-8, #1e1e1e);
+    background: transparent !important;
     border-color: var(--zotero-gray-6, #4a4a4f);
     color: var(--zotero-gray-2, #f0f0f0);
   }
@@ -638,7 +800,7 @@
 
 :root[zotero-platform-darkmode="true"] .zinspire-search-input,
 [data-color-scheme="dark"] .zinspire-search-input {
-  background: var(--zotero-gray-8, #1e1e1e);
+  background: transparent !important;
   border-color: var(--zotero-gray-6, #4a4a4f);
   color: var(--zotero-gray-2, #f0f0f0);
 }
@@ -680,4 +842,308 @@
 :root[zotero-platform-darkmode="true"] .zinspire-search-history-clear,
 [data-color-scheme="dark"] .zinspire-search-history-clear {
   color: var(--zotero-gray-5, #8e8e93);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Batch Import Styles (FTR-BATCH-IMPORT)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Checkbox in entry row - aligned with marker */
+.zinspire-ref-entry__checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--zotero-blue-5, #0060df);
+  flex-shrink: 0;
+}
+
+/* Marker column container - holds marker and checkbox vertically */
+.zinspire-ref-entry__marker-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* Batch toolbar - shown when selection mode is active */
+.zinspire-batch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  flex-wrap: wrap;
+}
+
+.zinspire-batch-toolbar__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--zotero-blue-5, #0060df);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.zinspire-batch-toolbar__btn {
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  padding: 2px 10px;
+  background: var(--zotero-gray-1, #ffffff);
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--zotero-gray-7, #2b2b30);
+  transition: all 120ms ease-in-out;
+}
+
+.zinspire-batch-toolbar__btn:hover {
+  background: var(--zotero-gray-2, #f0f0f0);
+}
+
+.zinspire-batch-toolbar__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.zinspire-batch-toolbar__btn--primary {
+  background: var(--zotero-blue-5, #0060df);
+  color: #ffffff;
+  border-color: var(--zotero-blue-5, #0060df);
+}
+
+.zinspire-batch-toolbar__btn--primary:hover {
+  background: var(--zotero-blue-6, #0052cc);
+}
+
+.zinspire-batch-toolbar__btn--primary:disabled {
+  opacity: 0.5;
+}
+
+/* Duplicate detection dialog */
+.zinspire-duplicate-dialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.zinspire-duplicate-dialog__content {
+  background: var(--material-background, #ffffff);
+  border-radius: 8px;
+  padding: 16px;
+  max-width: 500px;
+  max-height: 70vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.zinspire-duplicate-dialog__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--fill-primary, #1a1a1a);
+}
+
+.zinspire-duplicate-dialog__message {
+  font-size: 12px;
+  color: var(--fill-secondary, #666);
+  margin-bottom: 12px;
+}
+
+.zinspire-duplicate-dialog__list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--fill-quinary, #e0e0e0);
+  border-radius: 4px;
+  margin-bottom: 12px;
+}
+
+.zinspire-duplicate-dialog__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--fill-quinary, #e0e0e0);
+  font-size: 12px;
+}
+
+.zinspire-duplicate-dialog__item:last-child {
+  border-bottom: none;
+}
+
+.zinspire-duplicate-dialog__item-checkbox {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.zinspire-duplicate-dialog__item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.zinspire-duplicate-dialog__item-title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fill-primary, #1a1a1a);
+}
+
+.zinspire-duplicate-dialog__item-match {
+  font-size: 10px;
+  color: var(--zotero-blue-6, #2554c7);
+  margin-top: 2px;
+}
+
+.zinspire-duplicate-dialog__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.zinspire-duplicate-dialog__btn {
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  padding: 6px 12px;
+  background: var(--zotero-gray-1, #ffffff);
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--zotero-gray-7, #2b2b30);
+}
+
+.zinspire-duplicate-dialog__btn:hover {
+  background: var(--zotero-gray-2, #f0f0f0);
+}
+
+.zinspire-duplicate-dialog__btn--primary {
+  background: var(--zotero-blue-5, #0060df);
+  color: #ffffff;
+  border-color: var(--zotero-blue-5, #0060df);
+}
+
+.zinspire-duplicate-dialog__btn--primary:hover {
+  background: var(--zotero-blue-6, #0052cc);
+}
+
+.zinspire-duplicate-dialog__btn--danger {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
+}
+
+.zinspire-duplicate-dialog__btn--danger:hover {
+  background: #b91c1c;
+}
+
+/* Dark mode support for batch features */
+@media (prefers-color-scheme: dark) {
+  .zinspire-batch-toolbar__btn {
+    border-color: var(--zotero-gray-6, #4a4a4f);
+    background: var(--zotero-gray-8, #2a2a2e);
+    color: var(--zotero-gray-1, #ffffff);
+  }
+  
+  .zinspire-batch-toolbar__btn:hover {
+    background: var(--zotero-gray-7, #38383d);
+  }
+  
+  .zinspire-batch-toolbar__btn--primary {
+    background: var(--zotero-blue-5, #0060df);
+    color: #ffffff;
+    border-color: var(--zotero-blue-5, #0060df);
+  }
+  
+  .zinspire-duplicate-dialog__content {
+    background: var(--material-background, var(--zotero-gray-8, #2a2a2e));
+  }
+  
+  .zinspire-duplicate-dialog__title {
+    color: var(--fill-primary, #ffffff);
+  }
+  
+  .zinspire-duplicate-dialog__list {
+    border-color: var(--fill-quinary, #4a4a4f);
+  }
+  
+  .zinspire-duplicate-dialog__item {
+    border-color: var(--fill-quinary, #4a4a4f);
+  }
+  
+  .zinspire-duplicate-dialog__item-title {
+    color: var(--fill-primary, #ffffff);
+  }
+  
+  .zinspire-duplicate-dialog__btn {
+    border-color: var(--zotero-gray-6, #4a4a4f);
+    background: var(--zotero-gray-7, #38383d);
+    color: var(--zotero-gray-1, #ffffff);
+  }
+  
+  .zinspire-duplicate-dialog__btn:hover {
+    background: var(--zotero-gray-6, #4a4a4f);
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-batch-toolbar__btn,
+[data-color-scheme="dark"] .zinspire-batch-toolbar__btn {
+  border-color: var(--zotero-gray-6, #4a4a4f);
+  background: var(--zotero-gray-8, #2a2a2e);
+  color: var(--zotero-gray-1, #ffffff);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-batch-toolbar__btn:hover,
+[data-color-scheme="dark"] .zinspire-batch-toolbar__btn:hover {
+  background: var(--zotero-gray-7, #38383d);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-batch-toolbar__btn--primary,
+[data-color-scheme="dark"] .zinspire-batch-toolbar__btn--primary {
+  background: var(--zotero-blue-5, #0060df);
+  color: #ffffff;
+  border-color: var(--zotero-blue-5, #0060df);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-duplicate-dialog__content,
+[data-color-scheme="dark"] .zinspire-duplicate-dialog__content {
+  background: var(--material-background, var(--zotero-gray-8, #2a2a2e));
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-duplicate-dialog__title,
+[data-color-scheme="dark"] .zinspire-duplicate-dialog__title {
+  color: var(--fill-primary, #ffffff);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-duplicate-dialog__list,
+:root[zotero-platform-darkmode="true"] .zinspire-duplicate-dialog__item,
+[data-color-scheme="dark"] .zinspire-duplicate-dialog__list,
+[data-color-scheme="dark"] .zinspire-duplicate-dialog__item {
+  border-color: var(--fill-quinary, #4a4a4f);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-duplicate-dialog__item-title,
+[data-color-scheme="dark"] .zinspire-duplicate-dialog__item-title {
+  color: var(--fill-primary, #ffffff);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-duplicate-dialog__btn,
+[data-color-scheme="dark"] .zinspire-duplicate-dialog__btn {
+  border-color: var(--zotero-gray-6, #4a4a4f);
+  background: var(--zotero-gray-7, #38383d);
+  color: var(--zotero-gray-1, #ffffff);
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-duplicate-dialog__btn:hover,
+[data-color-scheme="dark"] .zinspire-duplicate-dialog__btn:hover {
+  background: var(--zotero-gray-6, #4a4a4f);
 }

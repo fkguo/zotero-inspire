@@ -1,4 +1,5 @@
 import { config } from "../../../package.json";
+import { SEARCH_HISTORY_PREF_KEY } from "./constants";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LRUCache - Least Recently Used Cache with size limit
@@ -212,6 +213,22 @@ export class ReaderTabHelper {
       );
     }
     return undefined;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// History Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Clear all search history.
+ */
+export function clearAllHistoryPrefs(): void {
+  try {
+    Zotero.Prefs.set(`${config.addonRef}.${SEARCH_HISTORY_PREF_KEY}`, "[]", true);
+    Zotero.debug(`[${config.addonName}] Search history cleared`);
+  } catch (err) {
+    Zotero.debug(`[${config.addonName}] Failed to clear history: ${err}`);
   }
 }
 

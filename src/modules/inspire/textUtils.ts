@@ -1,7 +1,8 @@
 import {
   getJournalFullNames,
 } from "../../utils/journalAbbreviations";
-import type { ParsedFilterToken } from "./types";
+import type { ParsedFilterToken, InspireReferenceEntry } from "./types";
+import { buildEntrySearchText } from "./formatters";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Text Normalization Constants
@@ -132,4 +133,20 @@ export const parseFilterTokens = (value: string): ParsedFilterToken[] => {
   pushToken(inQuotes);
   return tokens;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Search Text Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lazily compute searchText for an entry if not already computed.
+ * This is a performance optimization - searchText is only computed when
+ * actually needed for filtering, not during initial data loading.
+ */
+export function ensureSearchText(entry: InspireReferenceEntry): string {
+  if (!entry.searchText) {
+    entry.searchText = buildEntrySearchText(entry);
+  }
+  return entry.searchText;
+}
 

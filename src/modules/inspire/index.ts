@@ -15,6 +15,7 @@ export {
   buildSearchIndexText,
   buildFilterTokenVariants,
   parseFilterTokens,
+  ensureSearchText,
 } from "./textUtils";
 
 // Re-export formatters
@@ -53,6 +54,10 @@ export {
   findItemByRecid,
   copyToClipboard,
   recidLookupCache,
+  // Batch query functions for duplicate detection (FTR-BATCH-IMPORT)
+  findItemsByRecids,
+  findItemsByArxivs,
+  findItemsByDOIs,
 } from "./apiUtils";
 
 // Re-export author utilities
@@ -64,7 +69,7 @@ export {
 } from "./authorUtils";
 
 // Re-export classes and utilities
-export { LRUCache, ZInsUtils, ReaderTabHelper } from "./utils";
+export { LRUCache, ZInsUtils, ReaderTabHelper, clearAllHistoryPrefs } from "./utils";
 export { ZInsMenu } from "./menu";
 export { ZInspire, setInspireMeta, setCrossRefCitations, saveItemWithPendingInspireNote } from "./itemUpdater";
 
@@ -95,5 +100,5 @@ export {
 export { localCache } from "./localCache";
 
 // Re-export reference services
-export { fetchReferencesEntries, buildReferenceEntry } from "./referencesService";
+export { fetchReferencesEntries, buildReferenceEntry, enrichReferencesEntries } from "./referencesService";
 

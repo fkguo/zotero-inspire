@@ -1,8 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Local Cache Service - Persistent storage for INSPIRE data
 // Uses IOUtils and PathUtils (Firefox 115 / Zotero 7)
+// Supports gzip compression via pako library
 // ─────────────────────────────────────────────────────────────────────────────
 
+import * as pako from "pako";
 import { config } from "../../../package.json";
 import { getPref } from "../../utils/prefs";
 import type { InspireReferenceEntry, LocalCacheFile, LocalCacheType } from "./types";
@@ -19,6 +21,31 @@ const CACHE_VERSION = 1;
 
 // Write queue delay (ms) - debounce rapid writes
 const WRITE_DEBOUNCE_MS = 500;
+
+// Compression settings
+const COMPRESSED_EXT = ".json.gz";        // Extension for gzip compressed files
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compression utilities using pako library (gzip)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compress string data to gzip format using pako.
+ * @param data - UTF-8 string to compress
+ * @returns Compressed data as Uint8Array
+ */
+function compressData(data: string): Uint8Array {
+  return pako.gzip(data);
+}
+
+/**
+ * Decompress gzip data to string using pako.
+ * @param data - Gzip compressed data as Uint8Array
+ * @returns Decompressed UTF-8 string
+ */
+function decompressData(data: Uint8Array): string {
+  return pako.ungzip(data, { to: "string" });
+}
 
 /**
  * Local cache service for persistent storage of INSPIRE data.
@@ -130,22 +157,192 @@ class InspireLocalCache {
   }
 
   /**
-   * Build cache file path for given type and key.
+   * Check if compression is enabled in preferences.
    */
-  private getFilePath(type: LocalCacheType, key: string, sort?: string): string | null {
+  isCompressionEnabled(): boolean {
+    return getPref("local_cache_compression") !== false; // Default true
+  }
+
+  /**
+   * Build cache file path for given type and key.
+   * @param compressed - If true, returns path with .json.gz extension
+   */
+  private getFilePath(type: LocalCacheType, key: string, sort?: string, compressed = false): string | null {
     if (!this.cacheDir) return null;
     
     // Sanitize key for filename safety
     const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_");
     const safeSuffix = sort ? `_${sort.replace(/[^a-zA-Z0-9]/g, "")}` : "";
+    const ext = compressed ? COMPRESSED_EXT : ".json";
     
-    return PathUtils.join(this.cacheDir, `${type}_${safeKey}${safeSuffix}.json`);
+    return PathUtils.join(this.cacheDir, `${type}_${safeKey}${safeSuffix}${ext}`);
+  }
+
+  /**
+   * Helper to check if a file path is a cache file (json or json.gz).
+   */
+  private isCacheFile(filePath: string): boolean {
+    return filePath.endsWith(".json") || filePath.endsWith(COMPRESSED_EXT);
+  }
+
+  /**
+   * Validate cache data and return result if valid.
+   * Performs structural checks including random sampling for data integrity.
+   * @returns Cache result or null if invalid/expired
+   */
+  private validateCache<T>(
+    cached: LocalCacheFile<T>,
+    filePath: string,
+  ): { data: T; fromCache: true; ageHours: number; total?: number } | null {
+    // Version check
+    if (cached.v !== CACHE_VERSION) {
+      Zotero.debug(`[${config.addonName}] Cache version mismatch: ${filePath}`);
+      return null;
+    }
+
+    // Complete flag check - reject incomplete or old-format caches
+    if (cached.c !== true) {
+      Zotero.debug(`[${config.addonName}] Cache incomplete: ${filePath}`);
+      IOUtils.remove(filePath, { ignoreAbsent: true }).catch(() => {});
+      return null;
+    }
+
+    // Data integrity check: verify array structure and sample entries have titles
+    // This catches corrupted data that may have passed the complete flag check
+    if (!this.validateDataIntegrity(cached.d, filePath)) {
+      IOUtils.remove(filePath, { ignoreAbsent: true }).catch(() => {});
+      return null;
+    }
+
+    const ageMs = Date.now() - cached.ts;
+    const ageHours = Math.round(ageMs / (60 * 60 * 1000));
+
+    // TTL check
+    if (cached.ttl > 0) {
+      const ttlMs = cached.ttl * 60 * 60 * 1000;
+      if (ageMs > ttlMs) {
+        Zotero.debug(`[${config.addonName}] Cache expired (${ageHours}h): ${filePath}`);
+        return null;
+      }
+    }
+
+    return { data: cached.d, fromCache: true, ageHours, total: cached.n };
+  }
+
+  /**
+   * Validate data integrity by checking structure and sampling entries.
+   * For array data (references/cited-by), randomly samples entries that have recid
+   * to verify they have expected fields (title, authors).
+   * 
+   * IMPORTANT: Only entries with recid are checked for completeness, because:
+   * - Entries without recid cannot be enriched from INSPIRE (they don't exist in the database)
+   * - For such entries, "Title unavailable" / empty authors is expected, not corruption
+   * 
+   * @returns true if data appears valid, false otherwise
+   */
+  private validateDataIntegrity<T>(data: T, filePath: string): boolean {
+    const validateStart = performance.now();
+    const validateLog = (msg: string) => {
+      Zotero.debug(`[${config.addonName}] [PERF] validateDataIntegrity: ${msg} (+${(performance.now() - validateStart).toFixed(1)}ms)`);
+    };
+
+    // Only validate array data (references, cited-by, author papers)
+    if (!Array.isArray(data)) {
+      return true; // Non-array data passes (future-proofing)
+    }
+
+    const entries = data as unknown[];
+    validateLog(`start (${entries.length} entries)`);
+    
+    // Empty array is valid (no references)
+    if (entries.length === 0) {
+      return true;
+    }
+
+    // Basic structure check: all entries must be objects with required base fields
+    for (let i = 0; i < Math.min(3, entries.length); i++) {
+      const entry = entries[i] as Record<string, unknown>;
+      if (!entry || typeof entry !== "object") {
+        Zotero.debug(`[${config.addonName}] Cache invalid: entry[${i}] is not an object: ${filePath}`);
+        return false;
+      }
+      // Must have authors array (even if empty)
+      if (!Array.isArray(entry.authors)) {
+        Zotero.debug(`[${config.addonName}] Cache invalid: entry[${i}] missing authors array: ${filePath}`);
+        return false;
+      }
+      // Must have title string (even if "Title unavailable")
+      if (typeof entry.title !== "string") {
+        Zotero.debug(`[${config.addonName}] Cache invalid: entry[${i}] missing title string: ${filePath}`);
+        return false;
+      }
+    }
+    validateLog("basic structure check done");
+
+    // For entries WITH recid, check if they have been enriched properly
+    // Only these entries can be enriched from INSPIRE, so only these should have complete data
+    // PERF: Use sampling instead of filtering all entries to avoid O(n) operation
+    validateLog("checking recid entries (sampling)...");
+    
+    // Find first, last, and a random middle entry with recid using early termination
+    let firstWithRecid: Record<string, unknown> | null = null;
+    let lastWithRecid: Record<string, unknown> | null = null;
+    let middleWithRecid: Record<string, unknown> | null = null;
+    const middleIdx = Math.floor(entries.length / 2);
+    
+    for (let i = 0; i < entries.length && !firstWithRecid; i++) {
+      const e = entries[i] as Record<string, unknown>;
+      if (e.recid) firstWithRecid = e;
+    }
+    for (let i = entries.length - 1; i >= 0 && !lastWithRecid; i--) {
+      const e = entries[i] as Record<string, unknown>;
+      if (e.recid) lastWithRecid = e;
+    }
+    // Check middle region
+    for (let i = middleIdx; i < Math.min(middleIdx + 100, entries.length) && !middleWithRecid; i++) {
+      const e = entries[i] as Record<string, unknown>;
+      if (e.recid) middleWithRecid = e;
+    }
+    
+    const sampled = [firstWithRecid, middleWithRecid, lastWithRecid].filter(Boolean) as Record<string, unknown>[];
+    validateLog(`found ${sampled.length} sampled entries with recid`);
+    
+    if (sampled.length === 0) {
+      // No entries have recid - this is valid (some papers have no INSPIRE-linked references)
+      validateLog("no entries with recid, returning true");
+      return true;
+    }
+
+    // Check sampled entries with recid for enriched fields
+    for (const entry of sampled) {
+      // Entries with recid should have been enriched with title
+      // "Title unavailable" or empty title indicates incomplete enrichment
+      const noTitleIndicators = ["Title unavailable", "title unavailable", ""];
+      if (noTitleIndicators.includes((entry.title as string).trim())) {
+        Zotero.debug(`[${config.addonName}] Cache incomplete: entry with recid=${entry.recid} has unenriched title: ${filePath}`);
+        return false;
+      }
+
+      // Entries with recid should have authors (unless it's a collaboration without individual authors)
+      const authors = entry.authors as unknown[];
+      const unknownAuthorIndicators = ["Unknown author", "unknown author"];
+      if (authors.length === 0 || 
+          (authors.length === 1 && unknownAuthorIndicators.includes(authors[0] as string))) {
+        Zotero.debug(`[${config.addonName}] Cache incomplete: entry with recid=${entry.recid} has unenriched authors: ${filePath}`);
+        return false;
+      }
+    }
+
+    validateLog("validation complete, returning true");
+    return true;
   }
 
   /**
    * Read cached data from local storage.
    * Returns null if cache miss, expired, or disabled.
    * Returns data with ageHours and total to avoid re-reading the file.
+   * 
+   * Tries compressed file first (.json.gz), then falls back to uncompressed (.json).
    * 
    * @returns Object with:
    *   - data: The cached data
@@ -160,67 +357,69 @@ class InspireLocalCache {
     key: string,
     sort?: string,
   ): Promise<{ data: T; fromCache: true; ageHours: number; total?: number } | null> {
-    if (!this.isEnabled()) return null;
-    
-    await this.init();
-    const filePath = this.getFilePath(type, key, sort);
-    if (!filePath) return null;
+    const getStart = performance.now();
+    const getLog = (msg: string) => {
+      Zotero.debug(`[${config.addonName}] [PERF] localCache.get: ${msg} (+${(performance.now() - getStart).toFixed(1)}ms)`);
+    };
+    getLog(`start (${type}/${key})`);
 
-    try {
-      const exists = await IOUtils.exists(filePath);
-      if (!exists) return null;
-
-      const cached = await IOUtils.readJSON(filePath) as LocalCacheFile<T>;
-      
-      // Version check
-      if (cached.v !== CACHE_VERSION) {
-        Zotero.debug(`[${config.addonName}] Cache version mismatch, ignoring: ${filePath}`);
-        return null;
-      }
-
-      // Complete flag check - reject incomplete or old-format caches
-      if (cached.c !== true) {
-        Zotero.debug(`[${config.addonName}] Cache incomplete (missing complete flag), deleting: ${filePath}`);
-        try {
-          await IOUtils.remove(filePath, { ignoreAbsent: true });
-        } catch {
-          // Ignore deletion errors
-        }
-        return null;
-      }
-
-      const ageMs = Date.now() - cached.ts;
-      const ageHours = Math.round(ageMs / (60 * 60 * 1000));
-
-      // TTL check
-      if (cached.ttl > 0) {
-        const ttlMs = cached.ttl * 60 * 60 * 1000;
-        if (ageMs > ttlMs) {
-          Zotero.debug(`[${config.addonName}] Cache expired (${ageHours}h old): ${filePath}`);
-          // Don't delete - might be useful as fallback
-          return null;
-        }
-      }
-
-      Zotero.debug(`[${config.addonName}] Cache hit: ${type}/${key}${cached.n !== undefined ? ` (total: ${cached.n})` : ""}`);
-      return { data: cached.d, fromCache: true, ageHours, total: cached.n };
-    } catch (e) {
-      Zotero.debug(`[${config.addonName}] Cache read error: ${e}`);
-      // Delete corrupted file to prevent repeated read errors
-      try {
-        await IOUtils.remove(filePath, { ignoreAbsent: true });
-        Zotero.debug(`[${config.addonName}] Removed corrupted cache file: ${filePath}`);
-      } catch {
-        // Ignore deletion errors
-      }
+    if (!this.isEnabled()) {
+      getLog("disabled, returning null");
       return null;
     }
+    
+    await this.init();
+    getLog("init done");
+    
+    const compressedPath = this.getFilePath(type, key, sort, true);
+    const jsonPath = this.getFilePath(type, key, sort, false);
+    if (!compressedPath || !jsonPath) return null;
+
+    // Try paths in order: compressed first (preferred), then uncompressed
+    const pathsToTry: Array<{ path: string; isCompressed: boolean }> = [
+      { path: compressedPath, isCompressed: true },
+      { path: jsonPath, isCompressed: false },
+    ];
+
+    for (const { path, isCompressed } of pathsToTry) {
+      try {
+        const exists = await IOUtils.exists(path);
+        if (!exists) continue;
+        getLog(`file exists (${isCompressed ? "gzip" : "json"}), reading...`);
+
+        const cached = await this.readCacheFile<T>(path);
+        getLog(`readCacheFile done (${cached ? (cached.d as any)?.length + ' entries' : 'null'})`);
+        if (!cached) {
+          // File corrupted, delete it
+          await IOUtils.remove(path, { ignoreAbsent: true }).catch(() => {});
+          continue;
+        }
+
+        getLog("validating cache...");
+        const result = this.validateCache(cached, path);
+        getLog(`validateCache done (${result ? 'valid' : 'invalid'})`);
+        if (result) {
+          const format = isCompressed ? " (gzip)" : "";
+          Zotero.debug(`[${config.addonName}] Cache hit${format}: ${type}/${key}${cached.n !== undefined ? ` (total: ${cached.n})` : ""}`);
+          getLog("returning result");
+          return result;
+        }
+      } catch (e) {
+        Zotero.debug(`[${config.addonName}] Cache read error (${isCompressed ? "gzip" : "json"}): ${e}`);
+        await IOUtils.remove(path, { ignoreAbsent: true }).catch(() => {});
+      }
+    }
+
+    getLog("no valid cache found");
+    return null;
   }
 
   /**
    * Write data to local cache (debounced).
    * Async and non-blocking - errors are logged but don't affect caller.
    * Uses debouncing to reduce disk I/O when data is updated multiple times.
+   * 
+   * Automatically compresses files when compression is enabled.
    * 
    * @param total - Optional total count from API. Used for smart caching:
    *   - If total <= data.length, data is complete and can be sorted client-side
@@ -236,16 +435,9 @@ class InspireLocalCache {
     if (!this.isEnabled()) return;
     
     await this.init();
-    const filePath = this.getFilePath(type, key, sort);
-    if (!filePath) return;
 
     // Determine TTL based on type
-    let ttl: number;
-    if (type === "refs") {
-      ttl = DEFAULT_TTL_REFS;
-    } else {
-      ttl = this.getTTLHours();
-    }
+    const ttl = type === "refs" ? DEFAULT_TTL_REFS : this.getTTLHours();
 
     const cacheData: LocalCacheFile<T> = {
       v: CACHE_VERSION,
@@ -258,24 +450,57 @@ class InspireLocalCache {
       n: total, // Total count from API (for smart caching)
     };
 
-    // Cancel existing timer for this file if any
-    const existing = this.writeQueue.get(filePath);
-    if (existing) {
-      clearTimeout(existing.timer);
+    const compressionEnabled = this.isCompressionEnabled();
+    const estimatedSize = JSON.stringify(cacheData).length;
+    const shouldCompress = compressionEnabled;
+    
+    // Debug: log compression decision based on estimated size
+    Zotero.debug(
+      `[${config.addonName}] Cache set: ${type}/${key}, estimatedSize=${estimatedSize}, compressionEnabled=${compressionEnabled}`,
+    );
+
+    const targetPath = this.getFilePath(type, key, sort, shouldCompress);
+    const altPath = this.getFilePath(type, key, sort, !shouldCompress);
+    if (!targetPath || !altPath) return;
+
+    // Cancel existing timers for both paths
+    for (const path of [targetPath, altPath]) {
+      const existing = this.writeQueue.get(path);
+      if (existing) {
+        clearTimeout(existing.timer);
+        this.writeQueue.delete(path);
+      }
     }
 
     // Schedule debounced write
     const timer = setTimeout(async () => {
-      this.writeQueue.delete(filePath);
+      this.writeQueue.delete(targetPath);
       try {
-        await IOUtils.writeJSON(filePath, cacheData);
-        Zotero.debug(`[${config.addonName}] Cache written: ${type}/${key}${total !== undefined ? ` (total: ${total})` : ""}`);
+        // Delete old format file if it exists
+        await IOUtils.remove(altPath, { ignoreAbsent: true });
+
+        const latestJsonStr = JSON.stringify(cacheData);
+        const latestSize = latestJsonStr.length;
+        Zotero.debug(
+          `[${config.addonName}] Cache write: ${type}/${key}, latestSize=${latestSize}, compressionEnabled=${compressionEnabled}`,
+        );
+
+        if (shouldCompress) {
+          const compressed = compressData(latestJsonStr);
+          Zotero.debug(`[${config.addonName}] Compressed to ${compressed.length} bytes, writing to ${targetPath}`);
+          await IOUtils.write(targetPath, compressed);
+          const ratio = Math.round((1 - compressed.length / latestSize) * 100);
+          Zotero.debug(`[${config.addonName}] Cache written (gzip ${ratio}%): ${type}/${key}${total !== undefined ? ` (total: ${total})` : ""}`);
+        } else {
+          await IOUtils.writeJSON(targetPath, cacheData);
+          Zotero.debug(`[${config.addonName}] Cache written: ${type}/${key}${total !== undefined ? ` (total: ${total})` : ""}`);
+        }
       } catch (e) {
-        Zotero.debug(`[${config.addonName}] Cache write error: ${e}`);
+        Zotero.debug(`[${config.addonName}] Cache write error for ${targetPath}: ${e}`);
       }
     }, WRITE_DEBOUNCE_MS);
 
-    this.writeQueue.set(filePath, { timer, data: cacheData });
+    this.writeQueue.set(targetPath, { timer, data: cacheData });
   }
 
   /**
@@ -289,7 +514,15 @@ class InspireLocalCache {
     const promises = pending.map(async ([filePath, { timer, data }]) => {
       clearTimeout(timer);
       try {
-        await IOUtils.writeJSON(filePath, data);
+        const jsonStr = JSON.stringify(data);
+        const isCompressed = filePath.endsWith(COMPRESSED_EXT);
+        
+        if (isCompressed) {
+          const compressed = compressData(jsonStr);
+          await IOUtils.write(filePath, compressed);
+        } else {
+          await IOUtils.writeJSON(filePath, data);
+        }
         Zotero.debug(`[${config.addonName}] Cache flushed: ${filePath}`);
       } catch (e) {
         Zotero.debug(`[${config.addonName}] Cache flush error: ${e}`);
@@ -300,15 +533,20 @@ class InspireLocalCache {
   }
 
   /**
-   * Delete specific cache entry.
+   * Delete specific cache entry (both compressed and uncompressed versions).
    */
   async delete(type: LocalCacheType, key: string, sort?: string): Promise<void> {
     await this.init();
-    const filePath = this.getFilePath(type, key, sort);
-    if (!filePath) return;
+    
+    const compressedPath = this.getFilePath(type, key, sort, true);
+    const jsonPath = this.getFilePath(type, key, sort, false);
 
     try {
-      await IOUtils.remove(filePath, { ignoreAbsent: true });
+      // Delete both formats to ensure complete cleanup
+      await Promise.all([
+        compressedPath ? IOUtils.remove(compressedPath, { ignoreAbsent: true }) : Promise.resolve(),
+        jsonPath ? IOUtils.remove(jsonPath, { ignoreAbsent: true }) : Promise.resolve(),
+      ]);
       Zotero.debug(`[${config.addonName}] Cache deleted: ${type}/${key}`);
     } catch (e) {
       Zotero.debug(`[${config.addonName}] Cache delete error: ${e}`);
@@ -316,7 +554,7 @@ class InspireLocalCache {
   }
 
   /**
-   * Clear all cache files.
+   * Clear all cache files (both .json and .json.gz).
    * Returns number of files deleted.
    */
   async clearAll(): Promise<number> {
@@ -329,9 +567,9 @@ class InspireLocalCache {
 
       const children = await IOUtils.getChildren(this.cacheDir);
       
-      // Parallel deletion
+      // Parallel deletion - filter for both .json and .json.gz files
       const promises = children
-        .filter(filePath => filePath.endsWith(".json"))
+        .filter(filePath => this.isCacheFile(filePath))
         .map(filePath => IOUtils.remove(filePath).then(() => 1).catch(() => 0));
         
       const results = await Promise.all(promises);
@@ -346,27 +584,39 @@ class InspireLocalCache {
   }
 
   /**
-   * Get cache statistics.
+   * Get cache statistics (includes both .json and .json.gz files).
+   * Returns file counts and sizes for both formats.
    */
-  async getStats(): Promise<{ fileCount: number; totalSize: number }> {
+  async getStats(): Promise<{
+    fileCount: number;
+    totalSize: number;
+    compressedCount: number;
+    compressedSize: number;
+  }> {
     await this.init();
-    if (!this.cacheDir) return { fileCount: 0, totalSize: 0 };
+    const emptyStats = { fileCount: 0, totalSize: 0, compressedCount: 0, compressedSize: 0 };
+    if (!this.cacheDir) return emptyStats;
 
     try {
       const exists = await IOUtils.exists(this.cacheDir);
-      if (!exists) return { fileCount: 0, totalSize: 0 };
+      if (!exists) return emptyStats;
 
       const children = await IOUtils.getChildren(this.cacheDir);
       
-      // Parallel stats gathering
+      // Parallel stats gathering - filter for both .json and .json.gz files
       const promises = children
-        .filter(filePath => filePath.endsWith(".json"))
+        .filter(filePath => this.isCacheFile(filePath))
         .map(async filePath => {
           try {
             const stat = await IOUtils.stat(filePath);
-            return { count: 1, size: stat.size ?? 0 };
+            const isCompressed = filePath.endsWith(COMPRESSED_EXT);
+            return {
+              count: 1,
+              size: stat.size ?? 0,
+              isCompressed,
+            };
           } catch {
-            return { count: 0, size: 0 };
+            return { count: 0, size: 0, isCompressed: false };
           }
         });
         
@@ -375,18 +625,41 @@ class InspireLocalCache {
       return results.reduce(
         (acc, curr) => ({
           fileCount: acc.fileCount + curr.count,
-          totalSize: acc.totalSize + curr.size
+          totalSize: acc.totalSize + curr.size,
+          compressedCount: acc.compressedCount + (curr.isCompressed ? curr.count : 0),
+          compressedSize: acc.compressedSize + (curr.isCompressed ? curr.size : 0),
         }),
-        { fileCount: 0, totalSize: 0 }
+        emptyStats
       );
     } catch (e) {
       Zotero.debug(`[${config.addonName}] Cache stats error: ${e}`);
-      return { fileCount: 0, totalSize: 0 };
+      return emptyStats;
     }
   }
 
   /**
-   * Purge expired cache files.
+   * Read and parse cache file (handles both compressed and uncompressed).
+   * @returns Parsed cache data or null if failed
+   */
+  private async readCacheFile<T>(filePath: string): Promise<LocalCacheFile<T> | null> {
+    try {
+      if (filePath.endsWith(COMPRESSED_EXT)) {
+        const compressedData = await IOUtils.read(filePath);
+        Zotero.debug(`[${config.addonName}] Reading compressed cache: ${filePath} (${compressedData.length} bytes)`);
+        const jsonStr = decompressData(compressedData);
+        Zotero.debug(`[${config.addonName}] Decompressed cache: ${jsonStr.length} chars`);
+        return JSON.parse(jsonStr) as LocalCacheFile<T>;
+      } else {
+        return await IOUtils.readJSON(filePath) as LocalCacheFile<T>;
+      }
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] readCacheFile error for ${filePath}: ${e}`);
+      return null;
+    }
+  }
+
+  /**
+   * Purge expired cache files (both .json and .json.gz).
    * Returns number of files deleted.
    */
   async purgeExpired(): Promise<number> {
@@ -401,10 +674,16 @@ class InspireLocalCache {
       const children = await IOUtils.getChildren(this.cacheDir);
       
       const promises = children
-        .filter(filePath => filePath.endsWith(".json"))
+        .filter(filePath => this.isCacheFile(filePath))
         .map(async filePath => {
           try {
-            const cached = await IOUtils.readJSON(filePath) as LocalCacheFile<unknown>;
+            const cached = await this.readCacheFile(filePath);
+            
+            if (!cached) {
+              // File is corrupted or unreadable, delete it
+              await IOUtils.remove(filePath);
+              return 1;
+            }
             
             // Check TTL
             if (cached.ttl > 0) {
@@ -443,25 +722,36 @@ class InspireLocalCache {
   /**
    * Get age of cached data in hours.
    * Returns -1 if not cached or error.
+   * Checks both compressed and uncompressed files.
    * Note: get() now returns ageHours directly, so this method is mainly for external use.
    */
   async getAge(type: LocalCacheType, key: string, sort?: string): Promise<number> {
     if (!this.isEnabled()) return -1;
     
     await this.init();
-    const filePath = this.getFilePath(type, key, sort);
-    if (!filePath) return -1;
+    
+    // Check both paths in order
+    const paths = [
+      this.getFilePath(type, key, sort, true),  // compressed first
+      this.getFilePath(type, key, sort, false), // then uncompressed
+    ].filter((p): p is string => p !== null);
 
-    try {
-      const exists = await IOUtils.exists(filePath);
-      if (!exists) return -1;
+    for (const path of paths) {
+      try {
+        const exists = await IOUtils.exists(path);
+        if (!exists) continue;
 
-      const cached = await IOUtils.readJSON(filePath) as LocalCacheFile<unknown>;
-      const ageMs = Date.now() - cached.ts;
-      return Math.round(ageMs / (60 * 60 * 1000)); // Convert to hours
-    } catch {
-      return -1;
+        const cached = await this.readCacheFile(path);
+        if (cached) {
+          const ageMs = Date.now() - cached.ts;
+          return Math.round(ageMs / (60 * 60 * 1000));
+        }
+      } catch {
+        // Continue to next path
+      }
     }
+
+    return -1;
   }
 }
 

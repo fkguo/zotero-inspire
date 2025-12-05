@@ -373,7 +373,14 @@ export function showTargetPickerUI(
     // Position relative to anchor
     const rect = anchor.getBoundingClientRect();
     const top = rect.bottom + 5;
-    const left = Math.max(10, rect.left - 20);
+    let left = Math.max(10, rect.left - 20);
+
+    const viewportWidth = doc.documentElement.clientWidth;
+    const panelWidth = 400; // Defined in style below
+
+    if (left + panelWidth > viewportWidth) {
+      left = Math.max(10, viewportWidth - panelWidth - 40);
+    }
 
     panel.style.top = `${top}px`;
     panel.style.left = `${left}px`;

@@ -55,7 +55,8 @@ A statistics visualization chart is displayed at the top of the panel (between t
 - **Auto-clear on collapse**: Collapsing the chart immediately clears all chart filters so hidden selections never affect list loading
 - **Default collapse preference**: Configurable via Preferences → References Panel → "Collapsed by default"
 - **Author count filter**: Toggle "≤10 Authors" button to show only papers with 10 or fewer authors (excludes large collaborations)
-- **Clear filter button**: Appears when any bins are selected, clears all chart filters
+- **Published filter**: Toggle "Published only" button to show only papers with journal information (formally published papers), excluding arXiv-only papers. Papers with both journal info and arXiv are included (they are published)
+- **Clear filter button**: Appears whenever any filter is active (text, chart selections, ≤10 Authors, Quick Filters, etc.) and clears all filters at once
 
 #### Filter (Search)
 
@@ -69,6 +70,10 @@ A statistics visualization chart is displayed at the top of the panel (between t
   - Supports common physics journal abbreviations: PRL, PRC,PRD, JHEP, NPA, NPB, PLB, EPJA, EPJC, CPC, CPL, etc.
 - Supports special characters (umlauts, accented characters) with normalization
 - Multi-token search (space-separated terms, all must match)
+- **Quick filters (Filters button)**:
+  - The toolbar `Filters` button opens a popup with presets (🔥 High citations, 📅 Recent 5y, 📅 Recent 1y, 📰 Published, 📝 Preprints, ⭐ Related items)
+  - Quick filters combine with text search, chart bins, and the ≤10 authors toggle (AND logic). The chart reuses the same filtering pipeline so bar counts match the list.
+  - The last selection is stored in `quick_filters_last_used` and restored automatically the next time the panel opens.
 
 #### Entry Display
 
@@ -100,6 +105,7 @@ A statistics visualization chart is displayed at the top of the panel (between t
 | Action                       | Behavior                                           |
 | ---------------------------- | -------------------------------------------------- |
 | Click local status (●/⊕)   | Open existing item in library, or add missing item |
+| Double-click local status (●) | Open PDF directly if available                     |
 | Click link icon              | Add/remove related item relationship               |
 | Click author name            | View all papers by that author                     |
 | Click title                  | Open in INSPIRE (or arXiv/DOI fallback)            |
@@ -132,6 +138,9 @@ All data caches use LRU (Least Recently Used) eviction to prevent unbounded memo
     - When total ≤ 10,000: stores a single unsorted cache file; sorting is done client-side (saves storage)
     - When total > 10,000: stores separate cache files per sort option (mostrecent/mostcited), as API returns different datasets
   - Cache files include `complete` flag and `total` field for integrity validation and smart decision-making
+- **Gzip compression (1.1.3+)**: Large cache files are automatically compressed via pako (`.json.gz`), shrinking disk usage by ~80%. A “Compress cache files (gzip)” preference allows opting out when raw JSON files are needed.
+- **Metadata enrichment throttle (1.1.4+)**: Preferences expose batch size (25–110 recids per request) and parallel request count (1–5) used when fetching missing titles/authors/citation counts. Increasing the limits speeds up enrichment but can hit INSPIRE limits (HTTP 400/502).
+- **Integrity sampling**: When reading from disk, the service randomly samples a few entries (title + identifier) to detect corruption; invalid files are deleted and refetched automatically.
 - The right-click **Download references cache** command (items or collections) uses the same helper to pre-populate the local cache and displays a progress window summarizing successes/failures. **Performance improved (v1.1.3+)**: reduces disk writes by 2/3 (writes once instead of three times). 
 
 ### 1.6 Performance Optimizations
@@ -160,22 +169,37 @@ All data caches use LRU (Least Recently Used) eviction to prevent unbounded memo
 
 ## 2. Right-Click Menu Operations
 
+All INSPIRE operations are organized in a unified **INSPIRE** submenu (v1.1.4+) for a cleaner interface.
+
 ### 2.1 Item Menu
 
-| Operation                                        | Description                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------------- |
-| **Update from INSPIRE (with abstract)**    | Full metadata update including abstract                           |
-| **Update from INSPIRE (without abstract)** | Metadata update excluding abstract                                |
-| **Update citation counts**                 | Only update citation counts                                       |
-| **Download references cache** (new in 1.1.3) | Prefetch INSPIRE references for the selected items into the local cache (shows progress and success/failure stats) |
+Right-click one or more items, then select **INSPIRE** to access:
+
+| Category | Operation | Description |
+|----------|-----------|-------------|
+| **Update Metadata** | `With abstracts` | Full metadata update including abstract |
+| | `Without abstracts` | Metadata update excluding abstract |
+| | `Citation counts only` | Only update citation counts (with/without self-citations; falls back to CrossRef if INSPIRE record not found) |
+| **Cache** | `Download references cache` (v1.1.3+) | Prefetch INSPIRE references for the selected items into the local cache (shows progress and success/failure stats) |
+| **Copy** (v1.1.4+) | `Copy BibTeX` | Fetch and copy BibTeX from INSPIRE |
+| | `Copy INSPIRE link` | Copy INSPIRE literature URL (`https://inspirehep.net/literature/{recid}`) |
+| | `Copy citation key` | Copy item's citation key |
+| | `Copy Zotero link` | Copy Zotero select link (`zotero://select/...`) |
+| **Actions** | `Cancel update` | Cancel any ongoing update operation |
 
 ### 2.2 Collection Menu
 
-| Operation                         | Description                                                                 |
-| --------------------------------- | --------------------------------------------------------------------------- |
-| **Update all from INSPIRE** | Update all items in collection                                             |
-| **Update citation counts**  | Update citation counts for all items                                       |
-| **Download references cache** (new in 1.1.3) | Prefetch references for every item in the collection into the local cache (same progress UI as the item command) |
+Right-click a collection, then select **INSPIRE** to access:
+
+| Category | Operation | Description |
+|----------|-----------|-------------|
+| **Update Metadata** | `With abstracts` | Update all items in collection with full metadata |
+| | `Without abstracts` | Update all items excluding abstracts |
+| | `Citation counts only` | Update citation counts for all items |
+| **Cache** | `Download references cache` (v1.1.3+) | Prefetch references for every item in the collection into the local cache (same progress UI as the item command) |
+| **Actions** | `Cancel update` | Cancel any ongoing update operation |
+
+**Note**: Copy actions are only available in the item menu, as they operate on individual items.
 
 ---
 
@@ -303,5 +327,53 @@ When in search mode, the panel displays:
 
 ---
 
-*Last updated: 2025-11-30 (v1.1.2)*
+## 7. Batch Import Feature (v1.1.4)
+
+### 7.1 Checkbox Selection
+
+- Checkboxes appear on the left side of each entry
+- Supports single selection, Shift+Click range selection, and Ctrl/Cmd+Click multi-selection
+- Selection state managed via `selectedEntryIDs: Set<string>`
+
+### 7.2 Batch Toolbar
+
+- Appears when entries are selected, showing:
+  - Selected count badge ("N selected")
+  - "Select All" button (selects all filtered entries)
+  - "Clear" button (clears all selections)
+  - "Import" button (executes batch import)
+
+### 7.3 Duplicate Detection
+
+- Before import, batch detection of duplicates in local library
+- Detection priority: recid > arXiv > DOI
+- Batch query functions:
+  - `findItemsByRecids()`: Batch query by recid (from `archiveLocation` field)
+  - `findItemsByArxivs()`: Batch query by arXiv ID (extracted from `Extra` field)
+  - `findItemsByDOIs()`: Batch query by DOI (from `DOI` or `Extra` field)
+
+### 7.4 Duplicate Dialog
+
+- Shows list of duplicate entries with match type (recid/arXiv/DOI)
+- Checkboxes default to unchecked (skip), user can select which duplicates to import
+- Quick actions: "Skip All" / "Import All"
+- Dialog uses `position: fixed` for proper centering
+
+### 7.5 Batch Import Execution
+
+- Single save target selection (library/collections/tags/notes)
+- Concurrent import with `CONCURRENCY = 3` limit
+- ProgressWindow shows "Importing N/M" with percentage
+- ESC key cancellation supported (with AbortController compatibility handling)
+- Error handling: individual failures don't affect other entries
+
+### 7.6 Export Enhancement
+
+- Export buttons (`showExportMenu()` / `exportEntries()`) detect `selectedEntryIDs.size`
+- When entries are selected: only export selected entries, menu header shows count
+- When no selection: export all visible entries (original behavior)
+
+---
+
+*Last updated: 2025-12-04 (v1.1.4)*
 

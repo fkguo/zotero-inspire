@@ -250,6 +250,140 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Batch Query Functions for Duplicate Detection (FTR-BATCH-IMPORT)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Find local items by arXiv IDs in batch.
+ * Searches the Extra field for patterns like "arXiv:2305.12345" or "_eprint:2305.12345".
+ * @param arxivIds Array of arXiv IDs (e.g., ["2305.12345", "hep-ph/0001234"])
+ * @returns Map of arXiv ID → local item ID
+ */
+export async function findItemsByArxivs(arxivIds: string[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (!arxivIds.length) return result;
+
+  const fieldID = Zotero.ItemFields.getID("extra");
+  if (!fieldID) return result;
+
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < arxivIds.length; i += CHUNK_SIZE) {
+    const chunk = arxivIds.slice(i, i + CHUNK_SIZE);
+    // Build LIKE patterns for arXiv IDs
+    const patterns = chunk.flatMap(id => [
+      `%arXiv:${id}%`,
+      `%_eprint:${id}%`,
+    ]);
+    const likeConditions = patterns.map(() => "value LIKE ?").join(" OR ");
+    const sql = `
+      SELECT itemID, value
+      FROM itemData
+        JOIN itemDataValues USING(valueID)
+      WHERE fieldID = ? AND (${likeConditions})
+    `;
+    try {
+      const rows = await Zotero.DB.queryAsync(sql, [fieldID, ...patterns]);
+      if (rows) {
+        for (const row of rows) {
+          const extra = row.value as string;
+          // Match arXiv ID from extra field
+          for (const arxivId of chunk) {
+            if (extra.includes(`arXiv:${arxivId}`) || extra.includes(`_eprint:${arxivId}`)) {
+              result.set(arxivId, Number(row.itemID));
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] Error querying items by arXiv: ${e}`);
+    }
+  }
+  return result;
+}
+
+/**
+ * Find local items by DOIs in batch.
+ * Searches the DOI field directly.
+ * @param dois Array of DOIs (e.g., ["10.1103/PhysRevD.100.123456"])
+ * @returns Map of DOI → local item ID
+ */
+export async function findItemsByDOIs(dois: string[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (!dois.length) return result;
+
+  const fieldID = Zotero.ItemFields.getID("DOI");
+  if (!fieldID) return result;
+
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < dois.length; i += CHUNK_SIZE) {
+    const chunk = dois.slice(i, i + CHUNK_SIZE);
+    // Normalize DOIs for comparison (lowercase)
+    const normalizedChunk = chunk.map(d => d.toLowerCase());
+    const placeholders = normalizedChunk.map(() => "LOWER(value) = ?").join(" OR ");
+    const sql = `
+      SELECT itemID, value
+      FROM itemData
+        JOIN itemDataValues USING(valueID)
+      WHERE fieldID = ? AND (${placeholders})
+    `;
+    try {
+      const rows = await Zotero.DB.queryAsync(sql, [fieldID, ...normalizedChunk]);
+      if (rows) {
+        for (const row of rows) {
+          const doiValue = (row.value as string).toLowerCase();
+          // Find original DOI (case-insensitive match)
+          const originalDoi = chunk.find(d => d.toLowerCase() === doiValue);
+          if (originalDoi) {
+            result.set(originalDoi, Number(row.itemID));
+          }
+        }
+      }
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] Error querying items by DOI: ${e}`);
+    }
+  }
+  return result;
+}
+
+/**
+ * Find local items by recids in batch.
+ * This is a batch version of findItemByRecid for efficiency.
+ * @param recids Array of INSPIRE recids
+ * @returns Map of recid → local item ID
+ */
+export async function findItemsByRecids(recids: string[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (!recids.length) return result;
+
+  const fieldID = Zotero.ItemFields.getID("archiveLocation");
+  if (!fieldID) return result;
+
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < recids.length; i += CHUNK_SIZE) {
+    const chunk = recids.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const sql = `
+      SELECT itemID, value
+      FROM itemData
+        JOIN itemDataValues USING(valueID)
+      WHERE fieldID = ? AND value IN (${placeholders})
+    `;
+    try {
+      const rows = await Zotero.DB.queryAsync(sql, [fieldID, ...chunk]);
+      if (rows) {
+        for (const row of rows) {
+          result.set(row.value as string, Number(row.itemID));
+        }
+      }
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] Error querying items by recid: ${e}`);
+    }
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recid Lookup Cache
 // ─────────────────────────────────────────────────────────────────────────────
 
