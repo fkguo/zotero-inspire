@@ -39,6 +39,8 @@ export const SEARCH_HISTORY_MAX_ENTRIES = 50;
 export const SEARCH_HISTORY_PREF_KEY = "inspireSearchHistory";
 export const SEARCH_HISTORY_DAYS_PREF_KEY = "search_history_days";
 export const SEARCH_HISTORY_DAYS_DEFAULT = 30;
+export const FILTER_HISTORY_MAX_ENTRIES = 50;
+export const FILTER_HISTORY_PREF_KEY = "inspireFilterHistory";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Guards
@@ -95,4 +97,93 @@ export const INSPIRE_NOTE_HTML_ENTITIES: Record<string, string> = {
   apos: "'",
   nbsp: " ",
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quick Filter Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type QuickFilterType =
+  | "highCitations"
+  | "recent5Years"
+  | "recent1Year"
+  | "publishedOnly"
+  | "preprintOnly"
+  | "relatedOnly"
+  | "localItems"
+  | "onlineItems";
+
+export const QUICK_FILTER_TYPES: QuickFilterType[] = [
+  "highCitations",
+  "recent5Years",
+  "recent1Year",
+  "publishedOnly",
+  "preprintOnly",
+  "relatedOnly",
+  "localItems",
+  "onlineItems",
+];
+
+export const QUICK_FILTER_PREF_KEY = "quick_filters_last_used";
+
+export function isQuickFilterType(value: unknown): value is QuickFilterType {
+  return typeof value === "string" && QUICK_FILTER_TYPES.includes(value as QuickFilterType);
+}
+
+export interface QuickFilterConfig {
+  type: QuickFilterType;
+  emoji: string;
+  labelKey: string;
+  tooltipKey?: string;
+}
+
+export const QUICK_FILTER_CONFIGS: QuickFilterConfig[] = [
+  {
+    type: "highCitations",
+    emoji: "🔥",
+    labelKey: "references-panel-quick-filter-high-citations",
+    tooltipKey: "references-panel-quick-filter-high-citations-tooltip",
+  },
+  {
+    type: "relatedOnly",
+    emoji: "🔗",
+    labelKey: "references-panel-quick-filter-related",
+    tooltipKey: "references-panel-quick-filter-related-tooltip",
+  },
+  {
+    type: "localItems",
+    emoji: "📚",
+    labelKey: "references-panel-quick-filter-local-items",
+    tooltipKey: "references-panel-quick-filter-local-items-tooltip",
+  },
+  {
+    type: "onlineItems",
+    emoji: "🌐",
+    labelKey: "references-panel-quick-filter-online-items",
+    tooltipKey: "references-panel-quick-filter-online-items-tooltip",
+  },
+  {
+    type: "recent5Years",
+    emoji: "📅",
+    labelKey: "references-panel-quick-filter-recent-5y",
+    tooltipKey: "references-panel-quick-filter-recent-5y-tooltip",
+  },
+  {
+    type: "recent1Year",
+    emoji: "📅",
+    labelKey: "references-panel-quick-filter-recent-1y",
+    tooltipKey: "references-panel-quick-filter-recent-1y-tooltip",
+  },
+  {
+    type: "publishedOnly",
+    emoji: "📰",
+    labelKey: "references-panel-quick-filter-published",
+    tooltipKey: "references-panel-quick-filter-published-tooltip",
+  },
+  {
+    type: "preprintOnly",
+    emoji: "📝",
+    labelKey: "references-panel-quick-filter-preprint",
+    tooltipKey: "references-panel-quick-filter-preprint-tooltip",
+  },
+];
 

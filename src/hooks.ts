@@ -3,6 +3,11 @@ import { initLocale, getString } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 import { ZInsMenu, ZInsUtils, ZInspireReferencePane } from "./modules/zinspire";
 import { localCache } from "./modules/inspire";
+import {
+  ENRICH_BATCH_RANGE,
+  ENRICH_PARALLEL_RANGE,
+  getEnrichmentSettings,
+} from "./modules/inspire/enrichConfig";
 import { getPref, setPref } from "./utils/prefs";
 import { registerPrefsScripts } from "./modules/prefScript";
 
@@ -106,6 +111,98 @@ async function updateCacheStatsDisplay(doc: Document) {
   }
 }
 
+function updateEnrichSettingsDisplay(doc: Document, forceValueSync = false) {
+  const infoEl = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_info"
+  );
+  if (!infoEl) return;
+
+  const batchInput = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_batch"
+  ) as HTMLInputElement | null;
+  const parallelInput = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_parallel"
+  ) as HTMLInputElement | null;
+  const settings = getEnrichmentSettings();
+
+  if (batchInput && forceValueSync) {
+    batchInput.value = String(settings.batchSize);
+  }
+  if (parallelInput && forceValueSync) {
+    parallelInput.value = String(settings.parallelBatches);
+  }
+
+  const batchValue = parseInputWithFallback(
+    batchInput,
+    settings.batchSize,
+    ENRICH_BATCH_RANGE.min,
+    ENRICH_BATCH_RANGE.max,
+  );
+  const parallelValue = parseInputWithFallback(
+    parallelInput,
+    settings.parallelBatches,
+    ENRICH_PARALLEL_RANGE.min,
+    ENRICH_PARALLEL_RANGE.max,
+  );
+
+  infoEl.textContent = getString("pref-local-cache-enrich-info", {
+    args: {
+      batch: batchValue,
+      parallel: parallelValue,
+      defaultBatch: settings.defaultBatch,
+      defaultParallel: settings.defaultParallel,
+    },
+  });
+}
+
+function parseInputWithFallback(
+  input: HTMLInputElement | null,
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  if (!input) return fallback;
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(value, min), max);
+}
+
+function updateLocalCacheControls(doc: Document, syncCheckbox = true) {
+  const enableCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-local_cache_enable"
+  ) as HTMLInputElement | null;
+  let enabled = getPref("local_cache_enable") as boolean;
+  if (enableCheckbox) {
+    if (syncCheckbox) {
+      enableCheckbox.checked = enabled;
+    } else {
+      enabled = enableCheckbox.checked;
+      setPref("local_cache_enable", enabled);
+    }
+  }
+  const controlIds = [
+    "zotero-prefpane-zoteroinspire-local_cache_show_source",
+    "zotero-prefpane-zoteroinspire-local_cache_compression",
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_batch",
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_parallel",
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_info",
+    "zotero-prefpane-zoteroinspire-local_cache_ttl_hours",
+    "zotero-prefpane-zoteroinspire-local_cache_custom_dir",
+    "zotero-prefpane-zoteroinspire-browse_cache_dir",
+    "zotero-prefpane-zoteroinspire-reset_cache_dir",
+    "zotero-prefpane-zoteroinspire-clear_cache",
+  ];
+  controlIds.forEach((id) => {
+    const el = doc.getElementById(id) as (HTMLInputElement | HTMLButtonElement | HTMLElement) | null;
+    if (!el || el === enableCheckbox) return;
+    if ("disabled" in el) {
+      (el as HTMLInputElement | HTMLButtonElement).disabled = !enabled;
+    } else {
+      el.classList.toggle("disabled", !enabled);
+    }
+  });
+}
+
 /**
  * This function is just an example of dispatcher for Preference UI events.
  * Any operations should be placed in a function to keep this funcion clear.
@@ -120,6 +217,25 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
       if (data.window) {
         const doc = data.window.document;
         updateCacheStatsDisplay(doc);
+        updateEnrichSettingsDisplay(doc, true);
+        setTimeout(() => updateEnrichSettingsDisplay(doc, true), 50);
+        updateLocalCacheControls(doc);
+        const enableCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-local_cache_enable"
+        ) as HTMLInputElement | null;
+        enableCheckbox?.addEventListener("command", () => {
+          updateLocalCacheControls(doc, false);
+          updateEnrichSettingsDisplay(doc, true);
+        });
+        const batchInput = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-local_cache_enrich_batch"
+        ) as HTMLInputElement | null;
+        const parallelInput = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-local_cache_enrich_parallel"
+        ) as HTMLInputElement | null;
+        const refresh = () => updateEnrichSettingsDisplay(doc);
+        batchInput?.addEventListener("input", refresh);
+        parallelInput?.addEventListener("input", refresh);
         // Show current cache directory (actual path being used)
         localCache.getCacheDir().then((dir) => {
           const input = doc.getElementById(

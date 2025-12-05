@@ -46,6 +46,7 @@ export interface InspireReferenceEntry {
   arxivDetails?: InspireArxivDetails | string | null;
   abstract?: string;
   abstractLoading?: boolean;
+  doi?: string;  // DOI for duplicate detection (FTR-BATCH-IMPORT)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

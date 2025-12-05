@@ -2,7 +2,7 @@ import { config } from "../../package.json";
 import { cleanMathTitle } from "../utils/mathTitle";
 import { getJournalAbbreviations } from "../utils/journalAbbreviations";
 import { getLocaleID, getString } from "../utils/locale";
-import { getPref } from "../utils/prefs";
+import { getPref, setPref } from "../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   showTargetPickerUI,
@@ -46,7 +46,15 @@ import {
   SEARCH_HISTORY_PREF_KEY,
   SEARCH_HISTORY_DAYS_PREF_KEY,
   SEARCH_HISTORY_DAYS_DEFAULT,
+  FILTER_HISTORY_PREF_KEY,
+  FILTER_HISTORY_MAX_ENTRIES,
   AUTHOR_IDS_EXTRACT_LIMIT,
+  // Quick Filter constants
+  QUICK_FILTER_TYPES,
+  QUICK_FILTER_PREF_KEY,
+  QUICK_FILTER_CONFIGS,
+  isQuickFilterType,
+  type QuickFilterType,
   // Types
   type ReferenceSortOption,
   type InspireSortOption,
@@ -67,11 +75,13 @@ import {
   buildSearchIndexText,
   buildFilterTokenVariants,
   parseFilterTokens,
+  ensureSearchText,
   // Classes and utilities
   LRUCache,
   ZInsUtils,
   ZInsMenu,
   ReaderTabHelper,
+  clearAllHistoryPrefs,
   // Rate limiter
   inspireFetch,
   getRateLimiterStatus,
@@ -106,6 +116,10 @@ import {
   extractArxivFromMetadata,
   findItemByRecid,
   copyToClipboard,
+  // Batch query functions (FTR-BATCH-IMPORT)
+  findItemsByRecids,
+  findItemsByArxivs,
+  findItemsByDOIs,
   // Author utilities
   extractAuthorNamesFromReference,
   extractAuthorNamesLimited,
@@ -126,6 +140,7 @@ import {
   saveItemWithPendingInspireNote,
   // Local cache
   fetchReferencesEntries,
+  enrichReferencesEntries,
   localCache,
   // Cache types
   type CacheSource,
@@ -134,18 +149,6 @@ import {
 
 // Re-export for external use
 export { ZInsUtils, ZInsMenu, ZInspire };
-
-/**
- * Clear all search history.
- */
-function clearAllHistoryPrefs(): void {
-  try {
-    Zotero.Prefs.set(`${config.addonRef}.${SEARCH_HISTORY_PREF_KEY}`, "[]", true);
-    Zotero.debug(`[${config.addonName}] Search history cleared`);
-  } catch (err) {
-    Zotero.debug(`[${config.addonName}] Failed to clear history: ${err}`);
-  }
-}
 
 export class ZInspireReferencePane {
   private static controllers = new WeakMap<
@@ -181,10 +184,8 @@ export class ZInspireReferencePane {
         darkIcon: paneIcon2x,
       },
       onInit: (args) => {
-        Zotero.debug(`[${config.addonName}] ZInspireReferencePane.onInit called`);
         try {
           args.setEnabled(true);
-          Zotero.debug(`[${config.addonName}] ZInspireReferencePane.onInit: pane enabled`);
         } catch (err) {
           Zotero.debug(
             `[${config.addonName}] Failed to enable INSPIRE pane: ${err}`,
@@ -192,7 +193,6 @@ export class ZInspireReferencePane {
         }
         const controller = new InspireReferencePanelController(args.body);
         this.controllers.set(args.body, controller);
-        Zotero.debug(`[${config.addonName}] ZInspireReferencePane.onInit: controller created, instances count=${InspireReferencePanelController.getInstances().size}`);
       },
       onRender: () => {
         // Required by Zotero 7 ItemPaneSection API even if we render manually
@@ -277,7 +277,6 @@ export class ZInspireReferencePane {
     // Try to find the main search bar
     const searchBar = mainWindow.document.getElementById("zotero-tb-search-textbox") as HTMLInputElement | null;
     if (!searchBar) {
-      Zotero.debug(`[${config.addonName}] Search bar not found, skipping listener registration`);
       return;
     }
 
@@ -336,7 +335,7 @@ export class ZInspireReferencePane {
         color: #999;
         font-family: inherit;
         font-size: inherit;
-        white-space: nowrap;
+        white-space: pre;
         overflow: hidden;
         opacity: 0.6;
         z-index: 1;
@@ -400,7 +399,8 @@ export class ZInspireReferencePane {
       }
 
       // Calculate the hint text (the part user hasn't typed yet)
-      const hintSuffix = matchingHint.slice(queryPart.length);
+      const hintSuffixRaw = matchingHint.slice(queryPart.length);
+      const hintSuffix = hintSuffixRaw.replace(/ /g, "\u00A0");
       currentHint = matchingHint;
 
       // Position hint overlay to appear after user's text
@@ -423,7 +423,7 @@ export class ZInspireReferencePane {
         letter-spacing: ${inputStyle.letterSpacing || "normal"};
         white-space: pre;
       `;
-      measureSpan.textContent = userInput;
+      measureSpan.textContent = userInput.replace(/ /g, "\u00A0");
       mainWindow.document.body.appendChild(measureSpan);
       const textWidth = measureSpan.offsetWidth;
       mainWindow.document.body.removeChild(measureSpan);
@@ -458,7 +458,6 @@ export class ZInspireReferencePane {
         const selected = pane.getSelectedItems?.();
         if (selected && selected.length > 0) {
           savedItemIds = selected.map((item: any) => item.id);
-          Zotero.debug(`[${config.addonName}] Saved selection: ${savedItemIds.length} items`);
         }
       }
     };
@@ -583,8 +582,6 @@ export class ZInspireReferencePane {
         const query = value.slice(8).trim();
 
         if (query) {
-          Zotero.debug(`[${config.addonName}] INSPIRE search triggered from search bar: query="${query}"`);
-
           // CRITICAL: Stop event propagation BEFORE any other processing
           // - preventDefault: Prevent default browser/form behavior
           // - stopPropagation: Prevent event from reaching parent elements
@@ -609,17 +606,15 @@ export class ZInspireReferencePane {
               const itemsView = (pane as any).itemsView;
               if (itemsView && typeof itemsView.focus === "function") {
                 itemsView.focus();
-                Zotero.debug(`[${config.addonName}] Focus transferred to itemsView`);
               } else {
                 // Fallback: try to focus on the item tree element directly
                 const itemTree = mainWindow?.document?.getElementById("zotero-items-tree");
                 if (itemTree) {
                   itemTree.focus();
-                  Zotero.debug(`[${config.addonName}] Focus transferred to zotero-items-tree`);
                 }
               }
             } catch (e) {
-              Zotero.debug(`[${config.addonName}] Failed to transfer focus: ${e}`);
+              // Silently ignore focus transfer errors
             }
           }
 
@@ -650,11 +645,9 @@ export class ZInspireReferencePane {
 
           // Restore item selection using saved IDs
           if (savedItemIds.length > 0 && pane) {
-            Zotero.debug(`[${config.addonName}] Restoring ${savedItemIds.length} saved items`);
             // Restore selection after a brief delay to let Zotero process the clear
             setTimeout(() => {
               pane.selectItems?.(savedItemIds);
-              Zotero.debug(`[${config.addonName}] Item selection restored`);
             }, 50);
           }
 
@@ -675,7 +668,6 @@ export class ZInspireReferencePane {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        Zotero.debug(`[${config.addonName}] Blocked keypress Enter event during INSPIRE search`);
         // Reset the flag after blocking
         handlingInspireSearch = false;
       }
@@ -710,8 +702,6 @@ export class ZInspireReferencePane {
     (this as any)._searchBarBlurListener = blurListener;
     (this as any)._searchBarInputListener = inputListener;
     (this as any)._searchBarKeypressListener = keypressListener;
-
-    Zotero.debug(`[${config.addonName}] Search bar listeners registered on element: ${searchBar.id}`);
   }
 
   /**
@@ -765,7 +755,6 @@ export class ZInspireReferencePane {
       }
       this.searchBarListener = undefined;
       this.searchBarElement = undefined;
-      Zotero.debug(`[${config.addonName}] Search bar listeners unregistered`);
     }
   }
 
@@ -773,12 +762,9 @@ export class ZInspireReferencePane {
    * Trigger an INSPIRE search in the first active panel controller.
    */
   private static triggerSearch(query: string) {
-    Zotero.debug(`[${config.addonName}] triggerSearch called with query="${query}"`);
     // Use the InspireReferencePanelController's static instances set
     const instances = InspireReferencePanelController.getInstances();
-    Zotero.debug(`[${config.addonName}] Active panel controller instances: ${instances.size}`);
     if (instances.size === 0) {
-      Zotero.debug(`[${config.addonName}] No active panel controllers available for search`);
       // Show a notification to the user
       const progressWindow = new ProgressWindowHelper("INSPIRE Search");
       progressWindow.createLine({
@@ -790,7 +776,6 @@ export class ZInspireReferencePane {
       return;
     }
     for (const controller of instances) {
-      Zotero.debug(`[${config.addonName}] Calling executeInspireSearch on controller`);
       controller.executeInspireSearch(query).catch((err: Error) => {
         Zotero.debug(`[${config.addonName}] Failed to trigger search: ${err}`);
       });
@@ -817,6 +802,9 @@ class InspireReferencePanelController {
   private statusEl: HTMLSpanElement;
   private listEl: HTMLDivElement;
   private filterInput: HTMLInputElement;
+  private filterInlineHint?: HTMLSpanElement;
+  private filterHistory: SearchHistoryItem[] = [];
+  private filterCurrentHintText = "";
   private sortSelect!: HTMLSelectElement;
   private tabButtons!: Record<InspireViewMode, HTMLButtonElement>;
   private filterText = "";
@@ -865,6 +853,7 @@ class InspireReferencePanelController {
   private loadMoreObserver?: IntersectionObserver;  // For infinite scroll
   private loadMoreContainer?: HTMLDivElement;  // Container being observed
   private currentFilteredEntries?: InspireReferenceEntry[];  // For infinite scroll loading
+  private currentPaginationBatchSize: number = RENDER_PAGE_SIZE;  // For infinite scroll batch size
   // Total count from API (may be larger than fetched entries due to limits)
   private totalApiCount: number | null = null;
   // Chart state for citation/year statistics visualization
@@ -912,24 +901,49 @@ class InspireReferencePanelController {
   private searchInput?: HTMLInputElement;  // Search query input field
   private searchHistoryDropdown?: HTMLDivElement;  // Search history dropdown
 
+  // Quick filters dropdown state
+  private quickFilters = new Set<QuickFilterType>();
+  private quickFiltersButton?: HTMLButtonElement;
+  private quickFiltersBadge?: HTMLSpanElement;
+  private quickFiltersPopup?: HTMLDivElement;
+  private quickFiltersPopupVisible = false;
+  private quickFiltersWrapper?: HTMLDivElement;
+  private quickFilterCheckboxes = new Map<QuickFilterType, HTMLInputElement>();
+
   // Author count filter for chart
   private authorFilterEnabled = false;  // Filter for papers with <= 10 authors
+  private authorFilterButton?: HTMLButtonElement;
   private excludeSelfCitations = false; // Use citation counts excluding self citations in chart
+  private publishedOnlyFilterEnabled = false; // Filter for papers with journal information only
+  private publishedOnlyButton?: HTMLButtonElement;
 
   // Event delegation handlers (PERF-14: single listener instead of per-row)
   private boundHandleListClick?: (e: MouseEvent) => void;
   private boundHandleListMouseOver?: (e: MouseEvent) => void;
   private boundHandleListMouseOut?: (e: MouseEvent) => void;
   private boundHandleListMouseMove?: (e: MouseEvent) => void;
+  private boundHandleListDoubleClick?: (e: MouseEvent) => void;
+  // Timer for handling click/double-click conflict on marker
+  private markerClickTimer?: ReturnType<typeof setTimeout>;
+
+  // Batch import state (FTR-BATCH-IMPORT)
+  private selectedEntryIDs = new Set<string>();
+  private lastSelectedEntryID?: string;  // For Shift+Click range selection
+  private batchToolbar?: HTMLDivElement;
+  private batchSelectedBadge?: HTMLSpanElement;
+  private batchImportButton?: HTMLButtonElement;
+  private batchImportAbort?: AbortController;
 
   constructor(body: HTMLDivElement) {
-    Zotero.debug(`[${config.addonName}] InspireReferencePanelController constructor called`);
     this.body = body;
     this.body.classList.add("zinspire-ref-panel");
     this.enableTextSelection();
 
     // Initialize chart collapsed state from preferences
     this.chartCollapsed = getPref("chart_default_collapsed") !== false;
+
+    // Initialize quick filters from preferences before building UI
+    this.loadQuickFiltersFromPrefs();
 
     const toolbar = ztoolkit.UI.appendElement(
       {
@@ -1047,6 +1061,41 @@ class InspireReferencePanelController {
     ) as HTMLButtonElement;
     this.forwardButton.disabled = true;
 
+    const filterGroup = ztoolkit.UI.appendElement(
+      {
+        tag: "div",
+        classList: ["zinspire-filter-group"],
+        styles: {
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: "6px",
+          flexWrap: "nowrap",
+        },
+      },
+      toolbar,
+    ) as HTMLDivElement;
+
+    this.createQuickFiltersControls(filterGroup);
+
+    const filterInputWrapper = ztoolkit.UI.appendElement(
+      {
+        tag: "div",
+        classList: ["zinspire-filter-input-wrapper"],
+        styles: {
+          display: "inline-flex",
+          flex: "1 1 auto",
+          minWidth: "120px",
+          width: "auto",
+          position: "relative",
+          alignItems: "center",
+          background: "var(--material-background, #ffffff)",
+          borderRadius: "4px",
+        },
+      },
+      filterGroup,
+    ) as HTMLDivElement;
+
     this.filterInput = ztoolkit.UI.appendElement(
       {
         tag: "input",
@@ -1054,27 +1103,106 @@ class InspireReferencePanelController {
         attributes: {
           type: "search",
           placeholder: getString("references-panel-filter-placeholder"),
+          autocomplete: "off",
+          autocorrect: "off",
+          autocapitalize: "off",
+          spellcheck: "false",
+        },
+        styles: {
+          display: "inline-block",
+          flex: "1 1 auto",
+          minWidth: "120px",
+          width: "100%",
+          padding: "4px 8px",
+          border: "1px solid var(--zotero-gray-4, #d1d1d5)",
+          borderRadius: "4px",
+          appearance: "none",
+          background: "transparent !important",
+          backgroundColor: "transparent !important",
+          position: "relative",
+          zIndex: "2",
+          fontFamily: "system-ui, -apple-system, sans-serif",
+          fontSize: "12px",
         },
         listeners: [
           {
             type: "input",
             listener: (event: Event) => {
               const target = event.target as HTMLInputElement;
-              this.filterText = target.value.trim();
-              // Debounce filter input to avoid excessive re-renders during fast typing
-              if (this.filterDebounceTimer) {
-                clearTimeout(this.filterDebounceTimer);
+              this.handleFilterInputChange(target.value);
+              this.updateFilterInlineHint();
+            },
+          },
+          {
+            type: "focus",
+            listener: () => {
+              this.updateFilterInlineHint();
+            },
+          },
+          {
+            type: "keydown",
+            listener: (event: Event) => {
+              const keyEvent = event as KeyboardEvent;
+              if ((keyEvent.key === "Tab" || keyEvent.key === "ArrowRight") && this.filterCurrentHintText) {
+                const input = event.target as HTMLInputElement;
+                const cursorAtEnd = input.selectionStart === input.value.length;
+                if (cursorAtEnd) {
+                  keyEvent.preventDefault();
+                  input.value = this.filterCurrentHintText;
+                  this.handleFilterInputChange(input.value);
+                  this.hideFilterInlineHint();
+                  this.addToFilterHistory(input.value);
+                }
+              } else if (keyEvent.key === "Escape") {
+                this.hideFilterInlineHint();
+              } else if (keyEvent.key === "Enter") {
+                this.addToFilterHistory((event.target as HTMLInputElement).value);
+                this.hideFilterInlineHint();
               }
-              this.filterDebounceTimer = setTimeout(() => {
-                this.renderChart();           // Update chart to reflect filtered data
-                this.renderReferenceList();   // Update list with filtered entries
-              }, this.filterDebounceDelay);
+            },
+          },
+          {
+            type: "blur",
+            listener: () => {
+              this.addToFilterHistory(this.filterInput?.value || "");
+              setTimeout(() => this.hideFilterInlineHint(), 150);
+            },
+          },
+          {
+            type: "search",
+            listener: (event: Event) => {
+              const target = event.target as HTMLInputElement;
+              this.handleFilterInputChange(target.value);
+              if (!target.value) {
+                this.hideFilterInlineHint();
+              }
             },
           },
         ],
       },
-      toolbar,
+      filterInputWrapper,
     ) as HTMLInputElement;
+
+    this.filterInlineHint = ztoolkit.UI.appendElement(
+      {
+        tag: "span",
+        classList: ["zinspire-inline-hint", "zinspire-filter-inline-hint"],
+        styles: {
+          position: "absolute",
+          left: "7px",
+          top: "50%",
+          transform: "translateY(-50%)",
+          color: "var(--fill-secondary, #888)",
+          fontSize: "12px",
+          pointerEvents: "none",
+          whiteSpace: "pre",
+          overflow: "hidden",
+          zIndex: "3",
+          display: "none",
+        },
+      },
+      filterInputWrapper,
+    ) as HTMLSpanElement;
 
     // Rate limiter status indicator
     this.rateLimiterStatusEl = ztoolkit.UI.appendElement(
@@ -1112,12 +1240,14 @@ class InspireReferencePanelController {
     `;
 
     // Create search input container (hidden by default, shown in search mode)
-    Zotero.debug(`[${config.addonName}] InspireReferencePanelController: creating search input container`);
     this.createSearchInputContainer(toolbar);
 
-    // Load search history from preferences
+    // FTR-BATCH-IMPORT: Create batch toolbar (hidden by default, shown when items selected)
+    this.createBatchToolbar();
+
+    // Load search & filter history from preferences
     this.loadSearchHistory();
-    Zotero.debug(`[${config.addonName}] InspireReferencePanelController: loaded search history, count=${this.searchHistory.length}`);
+    this.loadFilterHistory();
 
     // Create chart container (between toolbar and list)
     const chartContainer = this.createChartContainer();
@@ -1141,7 +1271,590 @@ class InspireReferencePanelController {
     this.registerNotifier();
     InspireReferencePanelController.instances.add(this);
     InspireReferencePanelController.syncBackButtonStates();
-    Zotero.debug(`[${config.addonName}] InspireReferencePanelController constructor completed, instances count=${InspireReferencePanelController.instances.size}`);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Quick Filters Helpers
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private loadQuickFiltersFromPrefs(): void {
+    this.quickFilters.clear();
+    const prefValue = getPref(QUICK_FILTER_PREF_KEY);
+    const parsedValues = this.parseQuickFilterPref(prefValue);
+    for (const value of parsedValues) {
+      this.quickFilters.add(value);
+    }
+    this.enforceQuickFilterConstraints();
+    this.updatePublishedOnlyStateFromQuickFilters();
+  }
+
+  private parseQuickFilterPref(prefValue: unknown): QuickFilterType[] {
+    if (Array.isArray(prefValue)) {
+      return prefValue.filter(isQuickFilterType);
+    }
+    if (typeof prefValue === "string" && prefValue.trim()) {
+      try {
+        const parsed = JSON.parse(prefValue);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(isQuickFilterType);
+        }
+      } catch (error) {
+        // Failed to parse, return empty array
+      }
+    }
+    return [];
+  }
+
+  private enforceQuickFilterConstraints(newlyEnabled?: QuickFilterType): void {
+    // publishedOnly and preprintOnly are mutually exclusive
+    if (this.quickFilters.has("publishedOnly") && this.quickFilters.has("preprintOnly")) {
+      if (newlyEnabled === "preprintOnly") {
+        this.quickFilters.delete("publishedOnly");
+      } else if (newlyEnabled === "publishedOnly") {
+        this.quickFilters.delete("preprintOnly");
+      } else {
+        this.quickFilters.delete("preprintOnly");
+      }
+    }
+
+    // recent1Year and recent5Years are mutually exclusive
+    if (this.quickFilters.has("recent1Year") && this.quickFilters.has("recent5Years")) {
+      if (newlyEnabled === "recent1Year") {
+        this.quickFilters.delete("recent5Years");
+      } else if (newlyEnabled === "recent5Years") {
+        this.quickFilters.delete("recent1Year");
+      } else {
+        this.quickFilters.delete("recent5Years");
+      }
+    }
+
+    // localItems and onlineItems are mutually exclusive
+    if (this.quickFilters.has("localItems") && this.quickFilters.has("onlineItems")) {
+      if (newlyEnabled === "onlineItems") {
+        this.quickFilters.delete("localItems");
+      } else if (newlyEnabled === "localItems") {
+        this.quickFilters.delete("onlineItems");
+      } else {
+        this.quickFilters.delete("onlineItems");
+      }
+    }
+  }
+
+  private persistQuickFiltersToPrefs(): void {
+    try {
+      setPref(QUICK_FILTER_PREF_KEY, JSON.stringify(Array.from(this.quickFilters)));
+    } catch (error) {
+      // Failed to persist, ignore
+    }
+  }
+
+  private updatePublishedOnlyStateFromQuickFilters(): void {
+    this.publishedOnlyFilterEnabled = this.quickFilters.has("publishedOnly");
+  }
+
+  private setQuickFilterState(
+    type: QuickFilterType,
+    enabled: boolean,
+    options?: { suppressRender?: boolean; skipPersist?: boolean },
+  ): void {
+    const currentlyEnabled = this.quickFilters.has(type);
+    if (enabled === currentlyEnabled) {
+      return;
+    }
+
+    if (enabled) {
+      this.quickFilters.add(type);
+      this.enforceQuickFilterConstraints(type);
+    } else {
+      this.quickFilters.delete(type);
+    }
+
+    this.updatePublishedOnlyStateFromQuickFilters();
+
+    if (!options?.skipPersist) {
+      this.persistQuickFiltersToPrefs();
+    }
+
+    this.updateQuickFiltersButtonState();
+    this.updatePublishedOnlyButtonStyle();
+    this.updateQuickFilterCheckboxStates();
+    this.cachedChartStats = undefined;
+    this.updateChartClearButton();
+
+    if (!options?.suppressRender) {
+      this.renderChart();
+      this.renderReferenceList();
+    }
+  }
+
+  private toggleQuickFilter(
+    type: QuickFilterType,
+    options?: { suppressRender?: boolean },
+  ): void {
+    const shouldEnable = !this.quickFilters.has(type);
+    this.setQuickFilterState(type, shouldEnable, options);
+  }
+
+  private updateQuickFiltersButtonState(): void {
+    if (!this.quickFiltersButton) {
+      return;
+    }
+
+    const activeCount = this.quickFilters.size;
+    this.quickFiltersButton.classList.toggle("active", activeCount > 0);
+
+    if (this.quickFiltersBadge) {
+      this.quickFiltersBadge.textContent = activeCount > 0 ? `${activeCount}` : "";
+      this.quickFiltersBadge.hidden = activeCount === 0;
+    }
+  }
+
+  private updatePublishedOnlyButtonStyle(): void {
+    if (!this.publishedOnlyButton) {
+      return;
+    }
+    if (this.publishedOnlyFilterEnabled) {
+      this.publishedOnlyButton.style.background = "#475569";
+      this.publishedOnlyButton.style.color = "white";
+    } else {
+      this.publishedOnlyButton.style.background = "#e2e8f0";
+      this.publishedOnlyButton.style.color = "#475569";
+    }
+  }
+
+  private updateAuthorFilterButtonStyle(): void {
+    if (!this.authorFilterButton) {
+      return;
+    }
+    if (this.authorFilterEnabled) {
+      this.authorFilterButton.style.background = "#475569";
+      this.authorFilterButton.style.color = "white";
+    } else {
+      this.authorFilterButton.style.background = "#e2e8f0";
+      this.authorFilterButton.style.color = "#475569";
+    }
+    this.updateChartClearButton();
+  }
+
+  private hasActiveFilters(): boolean {
+    return Boolean(
+      this.filterText ||
+        this.chartSelectedBins.size > 0 ||
+        this.authorFilterEnabled ||
+        this.quickFilters.size > 0,
+    );
+  }
+
+  private clearAllFilters(): void {
+    let didChange = false;
+
+    if (this.filterText) {
+      this.filterText = "";
+      if (this.filterInput) {
+        this.filterInput.value = "";
+      }
+      this.hideFilterInlineHint();
+      if (this.filterDebounceTimer) {
+        clearTimeout(this.filterDebounceTimer);
+        this.filterDebounceTimer = undefined;
+      }
+      didChange = true;
+    }
+
+    if (this.chartSelectedBins.size > 0) {
+      this.chartSelectedBins.clear();
+      this.lastChartClickedKey = undefined;
+      this.cachedChartStats = undefined;
+      didChange = true;
+    }
+
+    if (this.authorFilterEnabled) {
+      this.authorFilterEnabled = false;
+      this.updateAuthorFilterButtonStyle();
+      didChange = true;
+    }
+
+    if (this.quickFilters.size > 0) {
+      this.quickFilters.clear();
+      this.persistQuickFiltersToPrefs();
+      this.updatePublishedOnlyStateFromQuickFilters();
+      this.updateQuickFiltersButtonState();
+      this.updateQuickFilterCheckboxStates();
+      this.updatePublishedOnlyButtonStyle();
+      this.cachedChartStats = undefined;
+      didChange = true;
+    }
+
+    if (!didChange) {
+      this.updateChartClearButton();
+      return;
+    }
+
+    this.updateChartClearButton();
+    this.renderChart();
+    this.renderReferenceList();
+  }
+
+  private handleFilterInputChange(rawValue: string): void {
+    this.filterText = rawValue.trim();
+    if (this.filterDebounceTimer) {
+      clearTimeout(this.filterDebounceTimer);
+    }
+    this.filterDebounceTimer = setTimeout(() => {
+      this.renderChart();
+      this.renderReferenceList();
+    }, this.filterDebounceDelay);
+  }
+
+  private updateFilterInlineHint(): void {
+    if (!this.filterInput || !this.filterInlineHint || this.filterHistory.length === 0) {
+      this.hideFilterInlineHint();
+      return;
+    }
+
+    const inputValue = this.filterInput.value;
+    if (!inputValue) {
+      this.hideFilterInlineHint();
+      return;
+    }
+
+    const lowerValue = inputValue.toLowerCase();
+    let matchingItem: SearchHistoryItem | undefined;
+    for (const historyItem of this.filterHistory) {
+      if (
+        historyItem.query.toLowerCase().startsWith(lowerValue) &&
+        historyItem.query.length > inputValue.length
+      ) {
+        matchingItem = historyItem;
+        break;
+      }
+    }
+
+    if (!matchingItem) {
+      if (inputValue.trim() === "") {
+        matchingItem = this.filterHistory[0];
+      } else {
+        this.hideFilterInlineHint();
+        return;
+      }
+    }
+
+    if (!matchingItem || matchingItem.query.length <= inputValue.length) {
+      this.hideFilterInlineHint();
+      return;
+    }
+
+    const hintSuffixRaw = matchingItem.query.slice(inputValue.length);
+    if (!hintSuffixRaw) {
+      this.hideFilterInlineHint();
+      return;
+    }
+
+    const hintSuffix = hintSuffixRaw.replace(/ /g, "\u00A0");
+    this.filterCurrentHintText = matchingItem.query;
+
+    const doc = this.getOwnerDocument(this.filterInput);
+    const computedStyle = doc.defaultView?.getComputedStyle(this.filterInput);
+    const wrapper = this.filterInput?.parentElement;
+    
+    if (computedStyle && wrapper) {
+      // DEBUG: Log computed styles
+      Zotero.debug(`[ZInspire] Filter hint DEBUG - input: "${inputValue}", hint: "${hintSuffix}"`);
+      Zotero.debug(`[ZInspire] Filter hint DEBUG - font: ${computedStyle.font}`);
+      Zotero.debug(`[ZInspire] Filter hint DEBUG - fontSize: ${computedStyle.fontSize}, fontFamily: ${computedStyle.fontFamily}`);
+      Zotero.debug(`[ZInspire] Filter hint DEBUG - letterSpacing: ${computedStyle.letterSpacing}, wordSpacing: ${computedStyle.wordSpacing}`);
+      
+      // Use a hidden span in wrapper for accurate measurement
+      // Copy all text-related styles for accurate measurement
+      const measureSpan = doc.createElement("span");
+      measureSpan.style.cssText = `
+        position: absolute;
+        visibility: hidden;
+        white-space: pre;
+        font: ${computedStyle.font};
+        font-size: ${computedStyle.fontSize};
+        font-family: ${computedStyle.fontFamily};
+        font-weight: ${computedStyle.fontWeight};
+        font-style: ${computedStyle.fontStyle};
+        font-variant: ${computedStyle.fontVariant};
+        font-stretch: ${computedStyle.fontStretch};
+        letter-spacing: ${computedStyle.letterSpacing};
+        word-spacing: ${computedStyle.wordSpacing};
+        text-transform: ${computedStyle.textTransform};
+        text-rendering: ${computedStyle.textRendering};
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      `;
+      measureSpan.textContent = inputValue.replace(/ /g, "\u00A0");
+      wrapper.appendChild(measureSpan);
+      const textWidth = measureSpan.offsetWidth;
+      wrapper.removeChild(measureSpan);
+
+      // Get horizontal spacing
+      const paddingLeft = parseFloat(computedStyle.paddingLeft) || 8;
+      const borderLeft = parseFloat(computedStyle.borderLeftWidth) || 0;
+      
+      // Get vertical spacing for alignment
+      const paddingTop = parseFloat(computedStyle.paddingTop) || 4;
+      const borderTop = parseFloat(computedStyle.borderTopWidth) || 0;
+
+      // Calculate input position relative to wrapper
+      const inputRect = this.filterInput.getBoundingClientRect();
+      const wrapperRect = wrapper.getBoundingClientRect();
+      
+      const inputLeftOffset = inputRect.left - wrapperRect.left;
+      const inputTopOffset = inputRect.top - wrapperRect.top;
+      
+      // Correct horizontal position
+      const finalLeft = inputLeftOffset + borderLeft + paddingLeft + textWidth;
+      
+      // Correct vertical position: align with text top instead of centering
+      // This avoids issues where input text isn't perfectly centered vertically
+      const finalTop = inputTopOffset + borderTop + paddingTop;
+
+      this.filterInlineHint.style.font = computedStyle.font;
+      this.filterInlineHint.style.fontSize = computedStyle.fontSize;
+      this.filterInlineHint.style.fontFamily = computedStyle.fontFamily;
+      this.filterInlineHint.style.lineHeight = computedStyle.lineHeight;
+      this.filterInlineHint.style.letterSpacing = computedStyle.letterSpacing;
+      this.filterInlineHint.textContent = hintSuffix;
+      
+      this.filterInlineHint.style.left = `${finalLeft}px`;
+      // Use top alignment + remove transform for precise text baseline matching
+      this.filterInlineHint.style.top = `${finalTop}px`;
+      this.filterInlineHint.style.transform = "none";
+      
+      this.filterInlineHint.style.display = "block";
+    } else {
+      const textWidth = inputValue.length * 7;
+      this.filterInlineHint.textContent = hintSuffix;
+      this.filterInlineHint.style.left = `${9 + textWidth}px`;
+      this.filterInlineHint.style.display = "block";
+    }
+  }
+
+  private hideFilterInlineHint(): void {
+    if (this.filterInlineHint) {
+      this.filterInlineHint.style.display = "none";
+    }
+    this.filterCurrentHintText = "";
+  }
+
+  private getOwnerDocument(element?: Element | null): Document {
+    return (
+      element?.ownerDocument ||
+      this.body.ownerDocument ||
+      Zotero.getMainWindow().document
+    );
+  }
+
+  private createQuickFiltersControls(toolbar: HTMLDivElement): void {
+    const doc = this.getOwnerDocument(toolbar);
+    const wrapper = doc.createElement("div");
+    wrapper.className = "zinspire-quick-filters";
+    // Inline styles to ensure proper flex behavior in Zotero's XUL environment
+    wrapper.style.display = "inline-flex";
+    wrapper.style.flexShrink = "0";
+    wrapper.style.position = "relative";
+    toolbar.appendChild(wrapper);
+    this.quickFiltersWrapper = wrapper as HTMLDivElement;
+
+    const button = doc.createElement("button");
+    button.className = "zinspire-quick-filter-btn";
+    button.type = "button";
+    button.setAttribute("aria-haspopup", "true");
+    button.setAttribute("aria-expanded", "false");
+    const filtersLabel = getString("references-panel-quick-filters");
+    const filtersEmoji = "⭐⏳";
+    button.textContent = filtersEmoji;
+    button.setAttribute("aria-label", filtersLabel);
+    button.setAttribute("title", filtersLabel);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.toggleQuickFiltersPopup();
+    });
+
+    const badge = doc.createElement("span");
+    badge.className = "zinspire-quick-filter-badge";
+    badge.hidden = true;
+    button.appendChild(badge);
+
+    wrapper.appendChild(button);
+    this.quickFiltersButton = button as HTMLButtonElement;
+    this.quickFiltersBadge = badge as HTMLSpanElement;
+
+    // Create popup as a sibling after filterGroup (in toolbar) for inline flow layout
+    const popup = doc.createElement("div");
+    popup.className = "zinspire-quick-filter-popup";
+    popup.hidden = true;
+    // Inline styles for flow layout: full width, flex wrap, items don't break mid-option
+    popup.style.display = "none";
+    popup.style.flexBasis = "100%";
+    popup.style.flexWrap = "wrap";
+    popup.style.gap = "4px 8px";
+    popup.style.padding = "6px 0";
+    popup.style.alignItems = "center";
+    // Insert popup after the filterGroup (toolbar is filterGroup's parent)
+    const toolbarEl = toolbar.parentElement;
+    if (toolbarEl) {
+      // Insert as next sibling of filterGroup in toolbar
+      toolbar.insertAdjacentElement("afterend", popup);
+    } else {
+      // Fallback: append to toolbar (filterGroup) if no parent
+      toolbar.appendChild(popup);
+    }
+    this.quickFiltersPopup = popup as HTMLDivElement;
+
+    this.renderQuickFilterItems(popup as HTMLDivElement);
+    this.updateQuickFiltersButtonState();
+    this.updateQuickFilterCheckboxStates();
+    this.updateQuickFiltersButtonExpandedState();
+    // Note: No outside click handler - popup only closes via button toggle
+  }
+
+  private renderQuickFilterItems(container: HTMLDivElement): void {
+    this.quickFilterCheckboxes.clear();
+    container.replaceChildren();
+    const doc = this.getOwnerDocument(container);
+
+    for (const config of QUICK_FILTER_CONFIGS) {
+      const item = doc.createElement("label");
+      item.className = "zinspire-quick-filter-item";
+      // Inline styles to prevent mid-item line breaks and enable inline flow
+      item.style.display = "inline-flex";
+      item.style.alignItems = "center";
+      item.style.whiteSpace = "nowrap";
+      item.style.flexShrink = "0";
+      item.style.gap = "4px";
+      item.style.padding = "2px 8px";
+      item.style.borderRadius = "4px";
+      item.style.cursor = "pointer";
+      item.style.fontSize = "12px";
+      const labelText = getString(config.labelKey);
+      if (config.tooltipKey) {
+        item.title = getString(config.tooltipKey);
+      } else {
+        item.title = labelText;
+      }
+
+      const checkbox = doc.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = this.quickFilters.has(config.type);
+      checkbox.addEventListener("click", (event) => event.stopPropagation());
+      checkbox.addEventListener("change", (event) => {
+        event.stopPropagation();
+        this.setQuickFilterState(config.type, checkbox.checked);
+      });
+
+      const emojiSpan = doc.createElement("span");
+      emojiSpan.className = "zinspire-quick-filter-item-emoji";
+      emojiSpan.textContent = config.emoji;
+
+      const labelSpan = doc.createElement("span");
+      labelSpan.className = "zinspire-quick-filter-item-label";
+      labelSpan.textContent = labelText;
+
+      item.appendChild(checkbox);
+      item.appendChild(emojiSpan);
+      item.appendChild(labelSpan);
+
+      container.appendChild(item);
+      this.quickFilterCheckboxes.set(config.type, checkbox as HTMLInputElement);
+    }
+  }
+
+  private updateQuickFilterCheckboxStates(): void {
+    for (const [type, checkbox] of this.quickFilterCheckboxes.entries()) {
+      checkbox.checked = this.quickFilters.has(type);
+    }
+  }
+
+  private toggleQuickFiltersPopup(): void {
+    if (this.quickFiltersPopupVisible) {
+      this.closeQuickFiltersPopup();
+    } else {
+      this.openQuickFiltersPopup();
+    }
+  }
+
+  private openQuickFiltersPopup(): void {
+    if (!this.quickFiltersPopup) {
+      return;
+    }
+    this.quickFiltersPopup.hidden = false;
+    this.quickFiltersPopup.style.display = "flex";
+    this.quickFiltersPopupVisible = true;
+    this.updateQuickFiltersButtonExpandedState();
+    this.updateQuickFilterCheckboxStates();
+  }
+
+  private closeQuickFiltersPopup(): void {
+    if (!this.quickFiltersPopup) {
+      this.quickFiltersPopupVisible = false;
+      this.updateQuickFiltersButtonExpandedState();
+      return;
+    }
+    this.quickFiltersPopup.hidden = true;
+    this.quickFiltersPopup.style.display = "none";
+    this.quickFiltersPopupVisible = false;
+    this.updateQuickFiltersButtonExpandedState();
+  }
+
+  private updateQuickFiltersButtonExpandedState(): void {
+    if (!this.quickFiltersButton) {
+      return;
+    }
+    this.quickFiltersButton.setAttribute(
+      "aria-expanded",
+      this.quickFiltersPopupVisible ? "true" : "false",
+    );
+  }
+
+  private applyQuickFilters(entries: InspireReferenceEntry[]): InspireReferenceEntry[] {
+    if (!this.quickFilters.size) {
+      return entries;
+    }
+    return entries.filter((entry) => this.matchesQuickFilters(entry));
+  }
+
+  private matchesQuickFilters(entry: InspireReferenceEntry): boolean {
+    if (!this.quickFilters.size) {
+      return true;
+    }
+
+    for (const filter of this.quickFilters) {
+      switch (filter) {
+        case "highCitations":
+          if (!this.matchesHighCitationsFilter(entry)) return false;
+          break;
+        case "recent5Years":
+          if (!this.matchesRecentYearsFilter(entry, 5)) return false;
+          break;
+        case "recent1Year":
+          if (!this.matchesRecentYearsFilter(entry, 1)) return false;
+          break;
+        case "publishedOnly":
+          if (!this.matchesPublishedOnlyFilter(entry)) return false;
+          break;
+        case "preprintOnly":
+          if (!this.matchesPreprintOnlyFilter(entry)) return false;
+          break;
+        case "relatedOnly":
+          if (!this.matchesRelatedOnlyFilter(entry)) return false;
+          break;
+        case "localItems":
+          if (!this.matchesLocalItemsFilter(entry)) return false;
+          break;
+        case "onlineItems":
+          if (!this.matchesOnlineItemsFilter(entry)) return false;
+          break;
+        default:
+          break;
+      }
+    }
+
+    return true;
   }
 
   private enableTextSelection() {
@@ -1188,11 +1901,26 @@ class InspireReferencePanelController {
       const entry = entryId ? this.findEntryById(entryId) : null;
       if (!entry) return;
 
+      // FTR-BATCH-IMPORT: Checkbox click (batch selection)
+      if (target.closest(".zinspire-ref-entry__checkbox")) {
+        Zotero.debug(`[${config.addonName}] Event delegation: checkbox click detected`);
+        // Don't prevent default - let checkbox toggle naturally
+        this.handleCheckboxClick(entry, event);
+        return;
+      }
+
       // Marker click (add/show item)
       if (target.closest(".zinspire-ref-entry__dot")) {
         event.preventDefault();
         const marker = target.closest(".zinspire-ref-entry__dot") as HTMLElement;
-        this.handleMarkerClick(entry, marker).catch(() => void 0);
+        // Delay click handling to allow double-click detection
+        if (this.markerClickTimer) {
+          clearTimeout(this.markerClickTimer);
+        }
+        this.markerClickTimer = setTimeout(() => {
+          this.handleMarkerClick(entry, marker).catch(() => void 0);
+          this.markerClickTimer = undefined;
+        }, 250);
         return;
       }
 
@@ -1201,9 +1929,7 @@ class InspireReferencePanelController {
         event.preventDefault();
         const linkButton = target.closest(".zinspire-ref-entry__link") as HTMLElement;
         this.handleLinkAction(entry, linkButton).catch((err) => {
-          if ((err as any)?.name !== "AbortError") {
-            Zotero.debug(`[${config.addonName}] Unable to link reference: ${err}`);
-          }
+          // Silently ignore aborted requests
         });
         return;
       }
@@ -1301,11 +2027,35 @@ class InspireReferencePanelController {
       }
     };
 
+    // Double-click handler for marker (open PDF)
+    this.boundHandleListDoubleClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const row = target.closest(".zinspire-ref-entry") as HTMLElement | null;
+      if (!row) return;
+
+      const entryId = row.dataset.entryId;
+      const entry = entryId ? this.findEntryById(entryId) : null;
+      if (!entry) return;
+
+      // Marker double-click (open PDF)
+      if (target.closest(".zinspire-ref-entry__dot")) {
+        event.preventDefault();
+        // Cancel pending click handler
+        if (this.markerClickTimer) {
+          clearTimeout(this.markerClickTimer);
+          this.markerClickTimer = undefined;
+        }
+        this.handleMarkerDoubleClick(entry).catch(() => void 0);
+        return;
+      }
+    };
+
     // Attach listeners to listEl
     this.listEl.addEventListener("click", this.boundHandleListClick);
     this.listEl.addEventListener("mouseover", this.boundHandleListMouseOver);
     this.listEl.addEventListener("mouseout", this.boundHandleListMouseOut);
     this.listEl.addEventListener("mousemove", this.boundHandleListMouseMove);
+    this.listEl.addEventListener("dblclick", this.boundHandleListDoubleClick);
   }
 
   /**
@@ -1327,6 +2077,15 @@ class InspireReferencePanelController {
     if (this.boundHandleListMouseMove) {
       this.listEl.removeEventListener("mousemove", this.boundHandleListMouseMove);
       this.boundHandleListMouseMove = undefined;
+    }
+    if (this.boundHandleListDoubleClick) {
+      this.listEl.removeEventListener("dblclick", this.boundHandleListDoubleClick);
+      this.boundHandleListDoubleClick = undefined;
+    }
+    // Clear any pending click timer
+    if (this.markerClickTimer) {
+      clearTimeout(this.markerClickTimer);
+      this.markerClickTimer = undefined;
     }
   }
 
@@ -1517,9 +2276,7 @@ class InspireReferencePanelController {
       font-weight: 500;
     `;
     clearBtn.onclick = () => {
-      this.chartSelectedBins.clear();
-      this.renderChart();
-      this.renderReferenceList();
+      this.clearAllFilters();
     };
 
     // Author filter button (filter papers with <= 10 authors, i.e., non-large-collaboration)
@@ -1539,22 +2296,14 @@ class InspireReferencePanelController {
       flex-shrink: 0;
       font-weight: 500;
     `;
-    const updateAuthorFilterStyle = () => {
-      if (this.authorFilterEnabled) {
-        authorFilterBtn.style.background = "#475569";
-        authorFilterBtn.style.color = "white";
-      } else {
-        authorFilterBtn.style.background = "#e2e8f0";
-        authorFilterBtn.style.color = "#475569";
-      }
-    };
+    this.authorFilterButton = authorFilterBtn as HTMLButtonElement;
     authorFilterBtn.onclick = () => {
       this.authorFilterEnabled = !this.authorFilterEnabled;
-      updateAuthorFilterStyle();
+      this.updateAuthorFilterButtonStyle();
       this.renderChart();
       this.renderReferenceList();
     };
-    updateAuthorFilterStyle();
+    this.updateAuthorFilterButtonStyle();
 
     // Self-citation exclusion toggle
     const selfCiteBtn = doc.createElement("button");
@@ -1599,6 +2348,29 @@ class InspireReferencePanelController {
     };
     updateSelfCiteStyle();
 
+    // Published only filter button (filter papers with journal information)
+    const publishedOnlyBtn = doc.createElement("button");
+    publishedOnlyBtn.className = "zinspire-chart-published-filter-btn";
+    publishedOnlyBtn.type = "button";
+    publishedOnlyBtn.textContent = getString("references-panel-chart-published-only");
+    publishedOnlyBtn.title = getString("references-panel-chart-published-only-tooltip");
+    publishedOnlyBtn.style.cssText = `
+      border: none;
+      border-radius: 5px;
+      padding: 3px 10px;
+      background: #e2e8f0;
+      font-size: 11px;
+      cursor: pointer;
+      color: #475569;
+      flex-shrink: 0;
+      font-weight: 500;
+    `;
+    publishedOnlyBtn.onclick = () => {
+      this.toggleQuickFilter("publishedOnly");
+    };
+    this.publishedOnlyButton = publishedOnlyBtn as HTMLButtonElement;
+    this.updatePublishedOnlyButtonStyle();
+
     // Spacer to push stats to the right
     const spacer = doc.createElement("div");
     spacer.style.cssText = `flex: 1;`;
@@ -1636,6 +2408,7 @@ class InspireReferencePanelController {
     // Add filter buttons to subheader
     subHeader.appendChild(authorFilterBtn);
     subHeader.appendChild(selfCiteBtn);
+    subHeader.appendChild(publishedOnlyBtn);
 
     // Add spacer before bottom stats to align with top line
     const subHeaderSpacer = doc.createElement("div");
@@ -1926,6 +2699,11 @@ class InspireReferencePanelController {
 
   private renderChartLoading() {
     if (!this.chartSvgWrapper) return;
+    // Cancel any pending chart render to avoid processing stale data
+    if (this.chartRenderTimer) {
+      clearTimeout(this.chartRenderTimer);
+      this.chartRenderTimer = undefined;
+    }
     this.chartSvgWrapper.textContent = "";
     const loadingMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
     loadingMsg.className = "zinspire-chart-no-data";
@@ -2012,11 +2790,10 @@ class InspireReferencePanelController {
     // Clear previous content
     this.chartSvgWrapper.textContent = "";
 
-    // Get entries to analyze (apply author filter if enabled)
-    // Use allEntries as base, then apply authorFilterEnabled if active
-    const entries = this.authorFilterEnabled
-      ? this.allEntries.filter((entry) => this.matchesAuthorFilter(entry))
-      : this.allEntries;
+    // Apply all global filters except for chart bin selection (handled separately)
+    const entries = this.getFilteredEntries(this.allEntries, {
+      skipChartFilter: true,
+    });
     if (!entries.length) {
       const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
       noDataMsg.className = "zinspire-chart-no-data";
@@ -2289,7 +3066,7 @@ class InspireReferencePanelController {
     if (!this.chartContainer) return;
     const clearBtn = this.chartContainer.querySelector(".zinspire-chart-clear-btn") as HTMLButtonElement;
     if (clearBtn) {
-      clearBtn.style.display = this.chartSelectedBins.size > 0 ? "inline-block" : "none";
+      clearBtn.style.display = this.hasActiveFilters() ? "inline-block" : "none";
     }
   }
 
@@ -2418,6 +3195,66 @@ class InspireReferencePanelController {
     return authorCount > 0 && authorCount <= 10;
   }
 
+  private matchesHighCitationsFilter(entry: InspireReferenceEntry): boolean {
+    const citationCount = this.getCitationValue(entry);
+    return citationCount > 50;
+  }
+
+  private matchesRecentYearsFilter(entry: InspireReferenceEntry, years: number): boolean {
+    const normalizedYears = Math.max(1, years);
+    const currentYear = new Date().getFullYear();
+    const thresholdYear = currentYear - (normalizedYears - 1);
+    const entryYear = Number.parseInt(entry.year ?? "", 10);
+    if (Number.isNaN(entryYear)) {
+      return false;
+    }
+    return entryYear >= thresholdYear;
+  }
+
+  private matchesPreprintOnlyFilter(entry: InspireReferenceEntry): boolean {
+    return this.hasArxivIdentifier(entry) && !this.matchesPublishedOnlyFilter(entry);
+  }
+
+  private matchesRelatedOnlyFilter(entry: InspireReferenceEntry): boolean {
+    return entry.isRelated === true;
+  }
+
+  private matchesLocalItemsFilter(entry: InspireReferenceEntry): boolean {
+    return typeof entry.localItemID === "number" && entry.localItemID > 0;
+  }
+
+  private matchesOnlineItemsFilter(entry: InspireReferenceEntry): boolean {
+    return typeof entry.localItemID !== "number" || entry.localItemID <= 0;
+  }
+
+  /**
+   * Check if entry has journal information (formally published).
+   * Returns true if the paper has journal_title or journal_title_abbrev.
+   * Papers with both journal info and arXiv are included (they are published).
+   */
+  private matchesPublishedOnlyFilter(entry: InspireReferenceEntry): boolean {
+    const info = entry.publicationInfo;
+    return !!(info?.journal_title || info?.journal_title_abbrev);
+  }
+
+  private hasArxivIdentifier(entry: InspireReferenceEntry): boolean {
+    if (!entry.arxivDetails) {
+      return false;
+    }
+    if (typeof entry.arxivDetails === "string") {
+      return entry.arxivDetails.trim().length > 0;
+    }
+    if (typeof entry.arxivDetails === "object") {
+      if (typeof entry.arxivDetails.id === "string" && entry.arxivDetails.id.trim()) {
+        return true;
+      }
+      if (Array.isArray(entry.arxivDetails.categories) && entry.arxivDetails.categories.length) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   destroy() {
     this.unregisterNotifier();
     this.cancelActiveRequest();
@@ -2464,6 +3301,7 @@ class InspireReferencePanelController {
       this.rateLimiterUnsubscribe();
       this.rateLimiterUnsubscribe = undefined;
     }
+    // Note: No outside click handler cleanup needed - popup only closes via button toggle
     InspireReferencePanelController.instances.delete(this);
     if (!InspireReferencePanelController.instances.size) {
       InspireReferencePanelController.navigationStack = [];
@@ -2613,21 +3451,21 @@ class InspireReferencePanelController {
       case "references":
         this.referencesCache.delete(this.currentRecid);
         // References only use unsorted cache
-        localCache.delete("refs", this.currentRecid).catch(() => {});
+        localCache.delete("refs", this.currentRecid).catch(() => { });
         break;
       case "citedBy":
         this.citedByCache.delete(this.currentRecid);
         // Delete both unsorted (if data was complete) and sorted cache
-        localCache.delete("cited", this.currentRecid).catch(() => {});
-        localCache.delete("cited", this.currentRecid, this.citedBySort).catch(() => {});
+        localCache.delete("cited", this.currentRecid).catch(() => { });
+        localCache.delete("cited", this.currentRecid, this.citedBySort).catch(() => { });
         break;
       case "entryCited":
         if (this.entryCitedSource?.recid) {
           const cacheKey = this.entryCitedSource.recid;
           this.entryCitedCache.delete(cacheKey);
           // Delete both unsorted and sorted cache
-          localCache.delete("cited", cacheKey).catch(() => {});
-          localCache.delete("cited", cacheKey, this.entryCitedSort).catch(() => {});
+          localCache.delete("cited", cacheKey).catch(() => { });
+          localCache.delete("cited", cacheKey, this.entryCitedSort).catch(() => { });
         } else if (this.entryCitedSource?.authorSearchInfo) {
           // Author papers mode: clear cache using author query as key
           const authorKey =
@@ -2636,8 +3474,8 @@ class InspireReferencePanelController {
           if (authorKey) {
             this.entryCitedCache.delete(authorKey);
             // Delete both unsorted and sorted cache
-            localCache.delete("author", authorKey).catch(() => {});
-            localCache.delete("author", authorKey, this.entryCitedSort).catch(() => {});
+            localCache.delete("author", authorKey).catch(() => { });
+            localCache.delete("author", authorKey, this.entryCitedSort).catch(() => { });
           }
         }
         break;
@@ -2768,7 +3606,14 @@ class InspireReferencePanelController {
    * User can choose to copy to clipboard or export to file.
    */
   showExportMenu(event: Event) {
-    const entriesWithRecid = this.allEntries.filter((e) => e.recid);
+    // Determine which entries to export
+    const hasSelection = this.selectedEntryIDs.size > 0;
+    const targetEntries = hasSelection
+      ? this.allEntries.filter((e) => this.selectedEntryIDs.has(e.id))
+      : this.allEntries;
+
+    const entriesWithRecid = targetEntries.filter((e) => e.recid);
+    
     if (!entriesWithRecid.length) {
       const strings = getCachedStrings();
       new ztoolkit.ProgressWindow(config.addonName)
@@ -2797,7 +3642,8 @@ class InspireReferencePanelController {
 
     // Copy to clipboard section header
     const copyHeader = doc.createXULElement("menuitem");
-    copyHeader.setAttribute("label", getString("references-panel-export-copy-header"));
+    const copyLabel = getString("references-panel-export-copy-header");
+    copyHeader.setAttribute("label", hasSelection ? `${copyLabel} (${entriesWithRecid.length})` : copyLabel);
     copyHeader.setAttribute("disabled", "true");
     popup.appendChild(copyHeader);
 
@@ -2815,7 +3661,8 @@ class InspireReferencePanelController {
 
     // Export to file section header
     const exportHeader = doc.createXULElement("menuitem");
-    exportHeader.setAttribute("label", getString("references-panel-export-file-header"));
+    const exportLabel = getString("references-panel-export-file-header");
+    exportHeader.setAttribute("label", hasSelection ? `${exportLabel} (${entriesWithRecid.length})` : exportLabel);
     exportHeader.setAttribute("disabled", "true");
     popup.appendChild(exportHeader);
 
@@ -2851,7 +3698,13 @@ class InspireReferencePanelController {
     target: "clipboard" | "file",
     fileExt: string = ".bib"
   ) {
-    const entriesWithRecid = this.allEntries.filter((e) => e.recid);
+    // Determine which entries to export
+    const hasSelection = this.selectedEntryIDs.size > 0;
+    const targetEntries = hasSelection
+      ? this.allEntries.filter((e) => this.selectedEntryIDs.has(e.id))
+      : this.allEntries;
+
+    const entriesWithRecid = targetEntries.filter((e) => e.recid);
     const strings = getCachedStrings();
 
     const BATCH_SIZE = 50;
@@ -3025,6 +3878,11 @@ class InspireReferencePanelController {
       }
 
       if (itemChanged) {
+        // FTR-BATCH-IMPORT: Clear selection when item changes
+        this.selectedEntryIDs.clear();
+        this.lastSelectedEntryID = undefined;
+        this.updateBatchToolbarVisibility();
+
         // In search mode, don't clear entries - preserve search results
         if (this.viewMode !== "search") {
           this.clearEntryCitedContext();
@@ -3038,10 +3896,16 @@ class InspireReferencePanelController {
           if (this.filterInput) {
             this.filterInput.value = "";
           }
+          this.hideFilterInlineHint();
           this.renderChartLoading(); // Show loading state in chart
           this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
         } else {
-          Zotero.debug(`[${config.addonName}] handleItemChange: in search mode, preserving search results`);
+          // Search mode: preserve search results but still restore scroll position
+          // when navigating back (e.g., after clicking green dot to jump to a local item).
+          // This ensures Back navigation works the same as References/Cited By tabs.
+          setTimeout(() => {
+            this.restoreScrollPositionIfNeeded();
+          }, 0);
         }
       } else {
         // Check if we need to restore scroll position when switching back to original item
@@ -3082,6 +3946,13 @@ class InspireReferencePanelController {
         this.renderChartImmediate();
         this.renderReferenceList({ preserveScroll: true });
         // Restore scroll position after rendering if needed
+        setTimeout(() => {
+          this.restoreScrollPositionIfNeeded();
+        }, 0);
+      } else {
+        // Search mode with same recid: just restore scroll position if pending.
+        // Search results are independent of the current item, so we don't re-render,
+        // but we need to restore scroll when navigating back via Back button.
         setTimeout(() => {
           this.restoreScrollPositionIfNeeded();
         }, 0);
@@ -3597,6 +4468,7 @@ class InspireReferencePanelController {
             this.restoreScrollPositionIfNeeded();
           }, 0);
         }
+        this.setRefreshButtonLoading(false);
       }
       return;
     }
@@ -3654,6 +4526,40 @@ class InspireReferencePanelController {
               }, 0);
             }
             this.setRefreshButtonLoading(false);
+
+            // Local cache data is already enriched (complete with titles, authors, etc.)
+            // Only run enrichLocalStatus to update local item status (may have changed since cache)
+            const localCacheToken = `${mode}-${cacheKey}-local-${performance.now()}`;
+            this.pendingToken = localCacheToken;
+            const localSupportsAbort =
+              typeof AbortController !== "undefined" &&
+              typeof AbortController === "function";
+            const localEnrichController = localSupportsAbort
+              ? new AbortController()
+              : null;
+            this.activeAbort = localEnrichController ?? undefined;
+            setTimeout(async () => {
+              if (this.pendingToken !== localCacheToken) {
+                return;
+              }
+              try {
+                await this.enrichLocalStatus(
+                  localResult.data,
+                  localEnrichController?.signal,
+                );
+              } catch (err) {
+                // Silently ignore errors
+                if ((err as any)?.name !== "AbortError") {
+                  Zotero.debug(
+                    `[${config.addonName}] Local status enrichment error: ${err}`,
+                  );
+                }
+              } finally {
+                if (this.activeAbort === localEnrichController) {
+                  this.activeAbort = undefined;
+                }
+              }
+            }, 0);
           }
           return;
         }
@@ -3772,24 +4678,8 @@ class InspireReferencePanelController {
       }
       cache.set(cacheKey, entries);
 
-      // Write to local cache (async, non-blocking)
-      // Smart caching strategy:
-      // - References: always store without sort (client-side sorting)
-      // - Cited By/Author: if total <= CITED_BY_MAX_RESULTS, store without sort; otherwise by sort
-      const localCacheType = this.getLocalCacheType(mode);
-      if (localCacheType) {
-        const totalFromApi = this.totalApiCount ?? entries.length;
-        if (mode === "references") {
-          // References: store without sort (client-side sorting)
-          localCache.set(localCacheType, recid, entries, undefined, entries.length).catch(() => {});
-        } else if (totalFromApi <= CITED_BY_MAX_RESULTS) {
-          // Data is complete - store without sort for client-side sorting
-          localCache.set(localCacheType, recid, entries, undefined, totalFromApi).catch(() => {});
-        } else {
-          // Data is truncated - store with sort parameter
-          localCache.set(localCacheType, recid, entries, sortOption, totalFromApi).catch(() => {});
-        }
-      }
+      // Local cache write is deferred until after enrichment completes
+      // to ensure complete data (with titles, authors, citation counts) is stored
 
       if (this.pendingToken === token && this.viewMode === mode) {
         const entriesForDisplay =
@@ -3814,18 +4704,40 @@ class InspireReferencePanelController {
       // Non-blocking enrichment: run after rendering to improve perceived performance
       // Use setTimeout(0) to ensure DOM is fully updated before starting enrichment
       // enrichLocalStatus checks which entries exist in local library
-      // enrichCitationCounts fetches citation counts for references mode
+      // enrichReferencesEntries fetches missing metadata for references mode
       // enrichEntries fetches missing metadata for citedBy/entryCited modes
       const enrichToken = token;
       const enrichSignal = controller?.signal;
+      const enrichRecid = recid;
+      const enrichMode = mode;
+      const enrichSortOption = sortOption;
       setTimeout(async () => {
         // Skip if request was cancelled or mode changed
-        if (this.pendingToken !== enrichToken) return;
+        if (this.pendingToken !== enrichToken) {
+          Zotero.debug(`[${config.addonName}] Enrichment skipped: token mismatch (expected ${enrichToken}, got ${this.pendingToken})`);
+          return;
+        }
         try {
+          Zotero.debug(`[${config.addonName}] Starting enrichment for ${enrichMode}/${enrichRecid} (${entries.length} entries)`);
           if (mode === "references") {
             await Promise.allSettled([
               this.enrichLocalStatus(entries, enrichSignal),
-              this.enrichCitationCounts(entries, enrichSignal),
+              enrichReferencesEntries(entries, {
+                signal: enrichSignal,
+                onBatchComplete: (processedRecids) => {
+                  if (this.pendingToken !== enrichToken) {
+                    return;
+                  }
+                  for (const recid of processedRecids) {
+                    for (const entry of entries) {
+                      if (entry.recid === recid) {
+                        this.updateRowMetadata(entry);
+                        this.updateRowCitationCount(entry);
+                      }
+                    }
+                  }
+                },
+              }),
             ]);
           } else {
             await Promise.allSettled([
@@ -3833,6 +4745,12 @@ class InspireReferencePanelController {
               this.enrichEntries(entries, enrichSignal),
             ]);
           }
+          Zotero.debug(`[${config.addonName}] Enrichment completed for ${enrichMode}/${enrichRecid}`);
+
+          // After enrichment completes, persist enriched data to local cache
+          // ALWAYS write to cache after enrichment, even if user switched to another item
+          // This ensures the enriched data is saved for future use
+          await this.persistEnrichedCache(entries, enrichMode, enrichRecid, enrichSortOption);
         } catch (err) {
           // Silently ignore enrichment errors - they don't affect core functionality
           if ((err as any)?.name !== "AbortError") {
@@ -4146,7 +5064,17 @@ class InspireReferencePanelController {
       return;
     }
 
+    // Check signal periodically during iteration to allow early abort
+    const CHECK_INTERVAL = 200;
+    let checkCounter = 0;
     for (const entry of entries) {
+      // Periodic signal check to allow early abort on large datasets
+      if (++checkCounter >= CHECK_INTERVAL) {
+        checkCounter = 0;
+        if (signal?.aborted) {
+          return;
+        }
+      }
       if (entry.recid && recidMap.has(entry.recid)) {
         const itemID = recidMap.get(entry.recid)!;
         if (entry.localItemID !== itemID) {
@@ -4157,126 +5085,6 @@ class InspireReferencePanelController {
           }
           this.updateRowStatus(entry);
         }
-      }
-    }
-  }
-
-  /**
-   * Enrich citation counts for references entries.
-   * Uses batch INSPIRE API queries to fetch citation counts efficiently.
-   * Parallel fetching: processes multiple batches concurrently for better performance.
-   */
-  private async enrichCitationCounts(
-    entries: InspireReferenceEntry[],
-    signal?: AbortSignal,
-  ) {
-    const strings = getCachedStrings();
-    // Filter entries that have recid but are missing citation count or essential metadata
-    const needsDetails = entries.filter(
-      (entry) =>
-        entry.recid &&
-        (
-          typeof entry.citationCount !== "number" ||
-          !entry.title ||
-          entry.title === strings.noTitle ||
-          !entry.authors.length ||
-          (entry.authors.length === 1 && entry.authors[0] === strings.unknownAuthor)
-        ),
-    );
-
-    if (!needsDetails.length || signal?.aborted) {
-      return;
-    }
-
-    Zotero.debug(
-      `[${config.addonName}] Enriching citation counts for ${needsDetails.length} references`
-    );
-
-    // Batch query INSPIRE API for citation counts
-    // Use chunks of 50 recids to avoid URL length limits
-    const BATCH_SIZE = 50;
-    const PARALLEL_BATCHES = 3; // Number of batches to fetch in parallel
-    const recidToEntry = new Map<string, InspireReferenceEntry[]>();
-
-    // Group entries by recid (some might have the same recid)
-    for (const entry of needsDetails) {
-      const existing = recidToEntry.get(entry.recid!) || [];
-      existing.push(entry);
-      recidToEntry.set(entry.recid!, existing);
-    }
-
-    const uniqueRecids = Array.from(recidToEntry.keys());
-
-    // Split into batches
-    const batches: string[][] = [];
-    for (let i = 0; i < uniqueRecids.length; i += BATCH_SIZE) {
-      batches.push(uniqueRecids.slice(i, i + BATCH_SIZE));
-    }
-
-    // Process batches in parallel groups
-    for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
-      if (signal?.aborted) return;
-
-      const parallelBatches = batches.slice(i, i + PARALLEL_BATCHES);
-      await Promise.all(
-        parallelBatches.map(batch =>
-          this.fetchBatchCitationCounts(batch, recidToEntry, signal)
-        )
-      );
-    }
-  }
-
-  /**
-   * Fetch citation counts for a single batch of recids.
-   * Extracted from enrichCitationCounts to enable parallel fetching.
-   */
-  private async fetchBatchCitationCounts(
-    batchRecids: string[],
-    recidToEntry: Map<string, InspireReferenceEntry[]>,
-    signal?: AbortSignal,
-  ) {
-    if (signal?.aborted || !batchRecids.length) return;
-
-    const query = batchRecids.map(r => `recid:${r}`).join(" OR ");
-    const fieldsParam = "&fields=control_number,citation_count,citation_count_without_self_citations,titles.title,authors.full_name,author_count,publication_info,earliest_date,arxiv_eprints";
-    const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batchRecids.length}${fieldsParam}`;
-
-    try {
-      const response = await inspireFetch(url, signal ? { signal } : undefined).catch(() => null);
-      if (!response || response.status !== 200) return;
-
-      const payload: any = await response.json();
-      const hits = payload?.hits?.hits ?? [];
-
-      // Map results back to entries
-      for (const hit of hits) {
-        const recid = String(hit?.metadata?.control_number || hit?.id);
-        const metadata = hit?.metadata ?? {};
-        const citationCount = metadata?.citation_count;
-
-        if (recid && typeof citationCount === "number") {
-          const matchingEntries = recidToEntry.get(recid);
-          if (matchingEntries) {
-            for (const entry of matchingEntries) {
-              entry.citationCount = citationCount;
-              this.updateRowCitationCount(entry);
-            }
-          }
-        }
-
-        if (recid) {
-          const matchingEntries = recidToEntry.get(recid);
-          if (matchingEntries) {
-            for (const entry of matchingEntries) {
-              this.applySearchMetadataToEntry(entry, metadata);
-              this.updateRowMetadata(entry);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      if ((err as any)?.name !== "AbortError") {
-        Zotero.debug(`[${config.addonName}] Error fetching citation counts batch: ${err}`);
       }
     }
   }
@@ -4593,99 +5401,6 @@ class InspireReferencePanelController {
   /**
    * Apply metadata returned from INSPIRE search hits (used in batch enrichment).
    */
-  private applySearchMetadataToEntry(
-    entry: InspireReferenceEntry,
-    metadata: jsobject,
-  ) {
-    if (!metadata) {
-      return;
-    }
-    const strings = getCachedStrings();
-
-    // Citation count update (including self-citation exclusion)
-    if (typeof metadata.citation_count === "number") {
-      entry.citationCount = metadata.citation_count;
-    }
-    if (typeof metadata.citation_count_without_self_citations === "number") {
-      entry.citationCountWithoutSelf = metadata.citation_count_without_self_citations;
-    }
-
-    // Title update
-    if (
-      (!entry.title || entry.title === strings.noTitle) &&
-      Array.isArray(metadata.titles)
-    ) {
-      const titleObj = metadata.titles.find(
-        (item: any) => typeof item?.title === "string" && item.title.trim(),
-      );
-      if (titleObj?.title) {
-        entry.title = cleanMathTitle(titleObj.title);
-      }
-    }
-
-    // Authors update
-    const hasUnknownAuthor =
-      entry.authors.length === 0 ||
-      (entry.authors.length === 1 && entry.authors[0] === strings.unknownAuthor);
-    if (hasUnknownAuthor && Array.isArray(metadata.authors)) {
-      const authors = metadata.authors
-        .map((author: any) => author?.full_name || author?.name || "")
-        .filter(Boolean);
-      if (authors.length) {
-        entry.totalAuthors =
-          typeof metadata.author_count === "number"
-            ? metadata.author_count
-            : authors.length;
-        entry.authors = authors.slice(0, AUTHOR_IDS_EXTRACT_LIMIT);
-        entry.authorText = formatAuthors(entry.authors, entry.totalAuthors);
-      }
-    }
-    const metadataAuthorCount =
-      typeof metadata.author_count === "number"
-        ? metadata.author_count
-        : Array.isArray(metadata.authors)
-          ? metadata.authors.length
-          : undefined;
-    this.updateEntryAuthorCount(entry, metadataAuthorCount);
-
-    // Year update
-    if (
-      (!entry.year || entry.year === strings.yearUnknown) &&
-      metadata.earliest_date
-    ) {
-      entry.year = `${metadata.earliest_date}`.slice(0, 4);
-    }
-
-    // Extract arXiv details from metadata if not already present
-    if (!entry.arxivDetails && metadata.arxiv_eprints) {
-      const arxiv = extractArxivFromMetadata(metadata);
-      if (arxiv) {
-        entry.arxivDetails = arxiv;
-      }
-    }
-
-    // Publication summary update
-    const { primary: publicationInfo, errata } = splitPublicationInfo(
-      metadata.publication_info,
-    );
-    if (publicationInfo || entry.arxivDetails || errata?.length) {
-      entry.publicationInfo = publicationInfo ?? entry.publicationInfo;
-      entry.publicationInfoErrata = errata;
-      const fallbackYear =
-        entry.year && entry.year !== strings.yearUnknown ? entry.year : undefined;
-      entry.summary = buildPublicationSummary(
-        entry.publicationInfo,
-        entry.arxivDetails,
-        fallbackYear,
-        entry.publicationInfoErrata,
-      );
-    }
-
-    // Update derived text fields
-    entry.displayText = buildDisplayText(entry);
-    // Invalidate searchText so it will be recalculated on next filter
-    entry.searchText = "";
-  }
 
   private updateEntryAuthorCount(
     entry: InspireReferenceEntry,
@@ -4767,7 +5482,12 @@ class InspireReferencePanelController {
    * This is used by both renderReferenceList and doRenderChart for consistency.
    * Ensures chart stats always match the filtered list view.
    */
-  private getFilteredEntries(entries: InspireReferenceEntry[]): InspireReferenceEntry[] {
+  private getFilteredEntries(
+    entries: InspireReferenceEntry[],
+    options: { skipChartFilter?: boolean } = {},
+  ): InspireReferenceEntry[] {
+    const { skipChartFilter = false } = options;
+
     // Parse and apply text filter
     const filterGroups = parseFilterTokens(this.filterText)
       .map(({ text, quoted }) =>
@@ -4784,20 +5504,28 @@ class InspireReferencePanelController {
       : entries;
 
     // Apply chart filter (AND logic with text filter)
-    const chartFiltered = this.chartSelectedBins.size > 0
+    const shouldApplyChartFilter = this.chartSelectedBins.size > 0 && !skipChartFilter;
+    const chartFiltered = shouldApplyChartFilter
       ? textFiltered.filter((entry) => this.matchesChartFilter(entry))
       : textFiltered;
 
     // Apply author count filter (AND logic with previous filters)
-    const filtered = this.authorFilterEnabled
+    const authorFiltered = this.authorFilterEnabled
       ? chartFiltered.filter((entry) => this.matchesAuthorFilter(entry))
       : chartFiltered;
 
-    return filtered;
+    // Apply published only filter (AND logic with previous filters)
+    const publishedFiltered = this.publishedOnlyFilterEnabled
+      ? authorFiltered.filter((entry) => this.matchesPublishedOnlyFilter(entry))
+      : authorFiltered;
+
+    // Apply quick filters (high citations, recency, etc.)
+    return this.applyQuickFilters(publishedFiltered);
   }
 
   private renderReferenceList(options: { preserveScroll?: boolean; resetPagination?: boolean } = {}) {
     const { preserveScroll = false, resetPagination = true } = options;
+    this.updateChartClearButton();
 
     // Save list scroll position for potential restoration
     const previousScrollTop = preserveScroll ? this.listEl.scrollTop : 0;
@@ -4841,7 +5569,23 @@ class InspireReferencePanelController {
 
     // Recycle existing rows to pool before clearing
     this.recycleRowsToPool();
-    this.listEl.textContent = "";
+    // PERF FIX: Async removal of old container to avoid blocking UI
+    this.cleanupEventDelegation();
+    const doc = this.listEl.ownerDocument;
+    const oldListEl = this.listEl;
+    const newListEl = doc.createElement("div");
+    newListEl.className = oldListEl.className;
+    if (oldListEl.id) newListEl.id = oldListEl.id;
+    // Hide old container immediately
+    oldListEl.style.display = "none";
+    // Insert new container after old one
+    oldListEl.parentNode?.insertBefore(newListEl, oldListEl.nextSibling);
+    this.listEl = newListEl;
+    this.setupEventDelegation();
+    // Remove old container asynchronously
+    setTimeout(() => {
+      oldListEl.remove();
+    }, 0);
     this.rowCache.clear();
     this.loadMoreButton = undefined;
 
@@ -4866,12 +5610,19 @@ class InspireReferencePanelController {
     } else {
       // Enable pagination for ALL modes when there are many entries
       // This improves perceived performance for references with 100+ entries
-      // However, when filtering, show all matching results for better UX
-      // (filtered results are usually smaller and users expect to see all matches)
-      const hasFilter = filterGroups.length > 0 || this.chartSelectedBins.size > 0 || this.authorFilterEnabled;
-      const usePagination = !hasFilter && filtered.length > RENDER_PAGE_SIZE;
+      // PERF FIX: Always use pagination when there are many entries, even with filters
+      // Without this, DOM operations (clearing 10000+ elements) can take seconds
+      // Use higher threshold (500) when filtering for better UX with smaller result sets
+      const hasFilter =
+        filterGroups.length > 0 ||
+        this.chartSelectedBins.size > 0 ||
+        this.authorFilterEnabled ||
+        this.publishedOnlyFilterEnabled ||
+        this.quickFilters.size > 0;
+      const paginationThreshold = hasFilter ? 500 : RENDER_PAGE_SIZE;
+      const usePagination = filtered.length > paginationThreshold;
       const entriesToRender = usePagination
-        ? filtered.slice(0, RENDER_PAGE_SIZE)
+        ? filtered.slice(0, paginationThreshold)
         : filtered;
 
       const fragment = this.listEl.ownerDocument.createDocumentFragment();
@@ -4883,9 +5634,10 @@ class InspireReferencePanelController {
 
       // Add "Load More" button with infinite scroll if there are more entries
       if (usePagination && filtered.length > this.renderedCount) {
-        // Store filtered entries for infinite scroll
+        // Store filtered entries and batch size for infinite scroll
         this.currentFilteredEntries = filtered;
-        this.renderLoadMoreButton(filtered);
+        this.currentPaginationBatchSize = paginationThreshold;
+        this.renderLoadMoreButton(filtered, paginationThreshold);
       } else {
         this.currentFilteredEntries = undefined;
       }
@@ -4899,7 +5651,14 @@ class InspireReferencePanelController {
       : this.allEntries.length;
     const fetchedCount = this.allEntries.length;
 
-    if (filterGroups.length) {
+    // Check if any filter is active (text, chart, author, or published only)
+    const anyFilterActive = filterGroups.length > 0 ||
+      this.chartSelectedBins.size > 0 ||
+      this.authorFilterEnabled ||
+      this.publishedOnlyFilterEnabled ||
+      this.quickFilters.size > 0;
+
+    if (anyFilterActive) {
       // For filter mode, show matches and indicate if searching in partial data
       const isPartialData = this.viewMode !== "references" &&
         this.totalApiCount !== null &&
@@ -4962,10 +5721,10 @@ class InspireReferencePanelController {
    * - Uses IntersectionObserver to auto-load when button becomes visible
    * - Falls back to manual click if observer not supported
    */
-  private renderLoadMoreButton(allFiltered: InspireReferenceEntry[]) {
+  private renderLoadMoreButton(allFiltered: InspireReferenceEntry[], batchSize: number = RENDER_PAGE_SIZE) {
     const doc = this.listEl.ownerDocument;
     const remaining = allFiltered.length - this.renderedCount;
-    const nextBatch = Math.min(remaining, RENDER_PAGE_SIZE);
+    const nextBatch = Math.min(remaining, batchSize);
 
     const container = doc.createElement("div");
     container.classList.add("zinspire-load-more-container");
@@ -5057,9 +5816,10 @@ class InspireReferencePanelController {
     }
     this.loadMoreButton = undefined;
 
-    // Calculate next batch
+    // Calculate next batch using the stored batch size
+    const batchSize = this.currentPaginationBatchSize || RENDER_PAGE_SIZE;
     const startIndex = this.renderedCount;
-    const endIndex = Math.min(startIndex + RENDER_PAGE_SIZE, allFiltered.length);
+    const endIndex = Math.min(startIndex + batchSize, allFiltered.length);
     const nextBatch = allFiltered.slice(startIndex, endIndex);
 
     // Render next batch
@@ -5072,7 +5832,7 @@ class InspireReferencePanelController {
 
     // Add new "Load More" button with infinite scroll if there are still more entries
     if (allFiltered.length > this.renderedCount) {
-      this.renderLoadMoreButton(allFiltered);
+      this.renderLoadMoreButton(allFiltered, batchSize);
     } else {
       // All entries rendered, clear filtered entries reference
       this.currentFilteredEntries = undefined;
@@ -5682,6 +6442,8 @@ class InspireReferencePanelController {
       min-width: 150px;
       display: flex;
       align-items: center;
+      background: var(--material-background, #ffffff);
+      border-radius: 4px;
     `;
 
     // Search input field - needs transparent background for hint to show through
@@ -5701,27 +6463,29 @@ class InspireReferencePanelController {
       border-radius: 4px;
       font-size: 12px;
       background-color: transparent !important;
-      background: none !important;
+      background: transparent !important;
+      -moz-appearance: none !important;
+      appearance: none !important;
       position: relative;
       z-index: 2;
       font-family: system-ui, -apple-system, sans-serif;
     `;
 
     // Create inline hint overlay (gray text showing suggestion)
-    // This sits behind the input but shows through the transparent background
+    // Uses higher z-index with pointer-events:none so hint shows above input but doesn't block interaction
     const inlineHint = doc.createElement("span");
-    inlineHint.className = "zinspire-search-inline-hint";
+    inlineHint.className = "zinspire-search-inline-hint zinspire-inline-hint";
     inlineHint.style.cssText = `
       position: absolute;
       left: 9px;
       top: 50%;
       transform: translateY(-50%);
-      color: #999;
+      color: var(--fill-secondary, #888);
       font-size: 12px;
       pointer-events: none;
       white-space: pre;
       overflow: hidden;
-      z-index: 1;
+      z-index: 3;
       display: none;
       font-family: system-ui, -apple-system, sans-serif;
       line-height: 1;
@@ -5762,46 +6526,81 @@ class InspireReferencePanelController {
       const hintSuffix = rawSuffix.replace(/ /g, '\u00A0');
       currentHintText = matchingHint;
 
-      // Calculate position based on input text width using canvas for accurate measurement
-      const canvas = doc.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      if (ctx && this.searchInput) {
-        // Match the input font and styling exactly
-        const computedStyle = this.searchInput.ownerDocument.defaultView?.getComputedStyle(this.searchInput);
-        if (computedStyle) {
-          const font = computedStyle.font ||
-            `${computedStyle.fontWeight} ${computedStyle.fontSize} ${computedStyle.fontFamily}`;
-          ctx.font = font;
+      // Calculate position based on input text width using hidden span in wrapper
+      const computedStyle = this.searchInput?.ownerDocument.defaultView?.getComputedStyle(this.searchInput);
+      const wrapper = this.searchInput?.parentElement;
+      if (computedStyle && this.searchInput && wrapper) {
+        // DEBUG: Log computed styles and input layout
+        Zotero.debug(`[ZInspire] Search hint DEBUG - input: "${inputValue}", hint: "${hintSuffix}"`);
+        Zotero.debug(`[ZInspire] Search hint DEBUG - font: ${computedStyle.font}`);
+        Zotero.debug(`[ZInspire] Search hint DEBUG - fontSize: ${computedStyle.fontSize}, fontFamily: ${computedStyle.fontFamily}`);
+        Zotero.debug(`[ZInspire] Search hint DEBUG - letterSpacing: ${computedStyle.letterSpacing}, wordSpacing: ${computedStyle.wordSpacing}`);
+        Zotero.debug(`[ZInspire] Search hint DEBUG - input.scrollLeft: ${this.searchInput.scrollLeft}, input.clientLeft: ${this.searchInput.clientLeft}`);
+        Zotero.debug(`[ZInspire] Search hint DEBUG - input.offsetLeft: ${this.searchInput.offsetLeft}, input.clientWidth: ${this.searchInput.clientWidth}`);
+        
+        // Use a hidden span in wrapper for accurate measurement
+        // Copy all text-related styles for accurate measurement
+        const measureSpan = doc.createElement("span");
+        measureSpan.style.cssText = `
+          position: absolute;
+          visibility: hidden;
+          white-space: pre;
+          font: ${computedStyle.font};
+          font-size: ${computedStyle.fontSize};
+          font-family: ${computedStyle.fontFamily};
+          font-weight: ${computedStyle.fontWeight};
+          font-style: ${computedStyle.fontStyle};
+          font-variant: ${computedStyle.fontVariant};
+          font-stretch: ${computedStyle.fontStretch};
+          letter-spacing: ${computedStyle.letterSpacing};
+          word-spacing: ${computedStyle.wordSpacing};
+          text-transform: ${computedStyle.textTransform};
+          text-rendering: ${computedStyle.textRendering};
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+        `;
+        measureSpan.textContent = inputValue.replace(/ /g, '\u00A0');
+        wrapper.appendChild(measureSpan);
+        const textWidth = measureSpan.offsetWidth;
+        wrapper.removeChild(measureSpan);
 
-          // Replace spaces with NBSP for measurement, as measureText often ignores trailing spaces
-          const textToMeasure = inputValue.replace(/ /g, '\u00A0');
-          const textWidth = ctx.measureText(textToMeasure).width;
+        // Get horizontal spacing
+        const paddingLeft = parseFloat(computedStyle.paddingLeft) || 8;
+        const borderLeft = parseFloat(computedStyle.borderLeftWidth) || 0;
 
-          // Get padding and border width
-          const paddingLeft = parseFloat(computedStyle.paddingLeft) || 9;
-          const borderLeft = parseFloat(computedStyle.borderLeftWidth) || 0;
-          const startOffset = paddingLeft + borderLeft;
+        // Get vertical spacing for alignment
+        const paddingTop = parseFloat(computedStyle.paddingTop) || 4;
+        const borderTop = parseFloat(computedStyle.borderTopWidth) || 0;
 
-          inlineHint.textContent = hintSuffix;
-          inlineHint.style.left = `${startOffset + textWidth}px`;
-          inlineHint.style.display = "block";
+        // Calculate input position relative to wrapper
+        const inputRect = this.searchInput.getBoundingClientRect();
+        const wrapperRect = wrapper.getBoundingClientRect();
+        const inputLeftOffset = inputRect.left - wrapperRect.left;
+        const inputTopOffset = inputRect.top - wrapperRect.top;
+        
+        // Correct position: inputLeftOffset + borderLeft + paddingLeft + textWidth
+        const finalLeft = inputLeftOffset + borderLeft + paddingLeft + textWidth;
+        
+        // Correct vertical position: align with text top instead of centering
+        const finalTop = inputTopOffset + borderTop + paddingTop;
 
-          // Match font style of input
-          inlineHint.style.font = font;
-          inlineHint.style.fontSize = computedStyle.fontSize;
-          inlineHint.style.fontFamily = computedStyle.fontFamily;
-          inlineHint.style.lineHeight = computedStyle.lineHeight;
+        inlineHint.textContent = hintSuffix;
+        inlineHint.style.left = `${finalLeft}px`;
+        
+        // Use top alignment + remove transform for precise text baseline matching
+        inlineHint.style.top = `${finalTop}px`;
+        inlineHint.style.transform = "none";
+        
+        inlineHint.style.display = "block";
 
-          Zotero.debug(`[${config.addonName}] Inline hint: "${hintSuffix}" at ${startOffset + textWidth}px`);
-        } else {
-          // Fallback if computed style fails
-          ctx.font = "12px system-ui, -apple-system, sans-serif";
-          const textToMeasure = inputValue.replace(/ /g, '\u00A0');
-          const textWidth = ctx.measureText(textToMeasure).width;
-          inlineHint.textContent = hintSuffix;
-          inlineHint.style.left = `${9 + textWidth}px`;
-          inlineHint.style.display = "block";
-        }
+        // Match font style of input
+        inlineHint.style.font = computedStyle.font;
+        inlineHint.style.fontSize = computedStyle.fontSize;
+        inlineHint.style.fontFamily = computedStyle.fontFamily;
+        inlineHint.style.lineHeight = computedStyle.lineHeight;
+        inlineHint.style.letterSpacing = computedStyle.letterSpacing;
+
+        Zotero.debug(`[${config.addonName}] Inline hint: "${hintSuffix}" at ${finalLeft}px`);
       } else {
         // Fallback: use approximate character width
         const charWidth = 7; // approximate width per character
@@ -6135,6 +6934,62 @@ class InspireReferencePanelController {
     this.saveSearchHistory();
   }
 
+  private loadFilterHistory() {
+    try {
+      const stored = Zotero.Prefs.get(`${config.addonRef}.${FILTER_HISTORY_PREF_KEY}`, true) as string | undefined;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "string") {
+          this.filterHistory = (parsed as unknown as string[]).map((query) => ({
+            query,
+            timestamp: Date.now(),
+          }));
+          this.saveFilterHistory();
+        } else if (Array.isArray(parsed)) {
+          this.filterHistory = parsed as SearchHistoryItem[];
+        } else {
+          this.filterHistory = [];
+        }
+      } else {
+        this.filterHistory = [];
+      }
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] Failed to load filter history: ${err}`);
+      this.filterHistory = [];
+    }
+  }
+
+  private saveFilterHistory() {
+    try {
+      Zotero.Prefs.set(
+        `${config.addonRef}.${FILTER_HISTORY_PREF_KEY}`,
+        JSON.stringify(this.filterHistory),
+        true,
+      );
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] Failed to save filter history: ${err}`);
+    }
+  }
+
+  private addToFilterHistory(query: string) {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return;
+    }
+    const existingIndex = this.filterHistory.findIndex((item) => item.query === trimmed);
+    if (existingIndex !== -1) {
+      this.filterHistory.splice(existingIndex, 1);
+    }
+    this.filterHistory.unshift({
+      query: trimmed,
+      timestamp: Date.now(),
+    });
+    if (this.filterHistory.length > FILTER_HISTORY_MAX_ENTRIES) {
+      this.filterHistory = this.filterHistory.slice(0, FILTER_HISTORY_MAX_ENTRIES);
+    }
+    this.saveFilterHistory();
+  }
+
   /**
    * Clear search history.
    */
@@ -6304,8 +7159,6 @@ class InspireReferencePanelController {
     signal?: AbortSignal,
     onProgress?: (entries: InspireReferenceEntry[], total: number | null) => void,
   ): Promise<InspireReferenceEntry[]> {
-    const startTime = performance.now();
-    Zotero.debug(`[${config.addonName}] fetchInspireSearch: starting for query="${query}", sort=${sort}`);
     const entries: InspireReferenceEntry[] = [];
     const encodedQuery = encodeURIComponent(query);
     const sortParam = `&sort=${sort}`;
@@ -6313,23 +7166,17 @@ class InspireReferencePanelController {
 
     // Fetch first page to get total count
     const firstUrl = `${INSPIRE_API_BASE}/literature?q=${encodedQuery}&size=${CITED_BY_PAGE_SIZE}&page=1${sortParam}${fieldsParam}`;
-    Zotero.debug(`[${config.addonName}] fetchInspireSearch: fetching first page from ${firstUrl}`);
-    const firstFetchStart = performance.now();
     const firstResponse = await inspireFetch(firstUrl, signal ? { signal } : undefined).catch((err) => {
       Zotero.debug(`[${config.addonName}] fetchInspireSearch: first page fetch failed: ${err}`);
       return null;
     });
-    Zotero.debug(`[${config.addonName}] fetchInspireSearch: first page fetch took ${(performance.now() - firstFetchStart).toFixed(0)}ms`);
     if (!firstResponse || firstResponse.status === 404) {
-      Zotero.debug(`[${config.addonName}] fetchInspireSearch: first response failed, status=${firstResponse?.status}`);
       throw new Error("Search failed");
     }
 
     const firstPayload: any = await firstResponse.json();
     const totalHits = firstPayload?.hits?.total ?? 0;
     const firstHits = Array.isArray(firstPayload?.hits?.hits) ? firstPayload.hits.hits : [];
-
-    Zotero.debug(`[${config.addonName}] fetchInspireSearch: found ${totalHits} total results, first page has ${firstHits.length} hits`);
 
     if (totalHits === 0) {
       return [];
@@ -6386,7 +7233,6 @@ class InspireReferencePanelController {
       }
     }
 
-    Zotero.debug(`[${config.addonName}] fetchInspireSearch: completed in ${(performance.now() - startTime).toFixed(0)}ms, ${entries.length} entries`);
     return entries;
   }
 
@@ -6408,6 +7254,12 @@ class InspireReferencePanelController {
     const earliestDate = meta?.earliest_date ?? "";
     const year = earliestDate ? earliestDate.slice(0, 4) : publicationInfo?.year ?? "";
     const citationCount = typeof meta?.citation_count === "number" ? meta.citation_count : null;
+    const citationCountWithoutSelf =
+      typeof meta?.citation_count_without_self_citations === "number"
+        ? meta.citation_count_without_self_citations
+        : typeof meta?.citation_count_wo_self_citations === "number"
+          ? meta.citation_count_wo_self_citations
+          : null;
 
     const { names: authorNames, total: totalAuthors } = extractAuthorNamesLimited(authors, 3);
     const authorText = formatAuthors(authorNames, totalAuthors);
@@ -6429,6 +7281,7 @@ class InspireReferencePanelController {
       year: year || strings.yearUnknown,
       summary,
       citationCount,
+      citationCountWithoutSelf: citationCountWithoutSelf ?? undefined,
       inspireUrl,
       fallbackUrl,
       searchText: "",
@@ -6478,6 +7331,47 @@ class InspireReferencePanelController {
         return null;
       default:
         return null;
+    }
+  }
+
+  /**
+   * Persist enriched entries to local cache after enrichment completes.
+   * Smart caching strategy:
+   * - References: always store without sort (client-side sorting)
+   * - Cited By/Author: if total <= CITED_BY_MAX_RESULTS, store without sort; otherwise by sort
+   * 
+   * @param entries - Enriched entries to persist
+   * @param mode - Current view mode
+   * @param recid - Record ID or author key
+   * @param sortOption - Sort option (for cited-by/author modes)
+   */
+  private async persistEnrichedCache(
+    entries: InspireReferenceEntry[],
+    mode: InspireViewMode,
+    recid: string,
+    sortOption?: ReferenceSortOption | InspireSortOption,
+  ): Promise<void> {
+    const localCacheType = this.getLocalCacheType(mode);
+    if (!localCacheType) return;
+
+    try {
+      const totalFromApi = this.totalApiCount ?? entries.length;
+
+      if (mode === "references") {
+        // References: store without sort (client-side sorting)
+        await localCache.set(localCacheType, recid, entries, undefined, entries.length);
+        Zotero.debug(`[${config.addonName}] Persisted enriched references cache: ${recid} (${entries.length} entries)`);
+      } else if (totalFromApi <= CITED_BY_MAX_RESULTS) {
+        // Data is complete - store without sort for client-side sorting
+        await localCache.set(localCacheType, recid, entries, undefined, totalFromApi);
+        Zotero.debug(`[${config.addonName}] Persisted enriched cache (unsorted): ${recid} (${entries.length}/${totalFromApi})`);
+      } else {
+        // Data is truncated - store with sort parameter
+        await localCache.set(localCacheType, recid, entries, sortOption as string, totalFromApi);
+        Zotero.debug(`[${config.addonName}] Persisted enriched cache (sorted by ${sortOption}): ${recid} (${entries.length}/${totalFromApi})`);
+      }
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] Error persisting enriched cache: ${err}`);
     }
   }
 
@@ -6558,7 +7452,7 @@ class InspireReferencePanelController {
     const row = doc.createElement("div");
     row.classList.add("zinspire-ref-entry");
 
-    // Use innerHTML for non-button elements (Zotero XHTML removes buttons via innerHTML)
+    // Use innerHTML for static elements only (Zotero XHTML removes input/button via innerHTML)
     row.innerHTML = `
       <div class="zinspire-ref-entry__text">
         <span class="zinspire-ref-entry__dot is-clickable"></span>
@@ -6584,6 +7478,19 @@ class InspireReferencePanelController {
     }
     if (content) applyRefEntryContentStyle(content);
 
+    // FTR-BATCH-IMPORT: Create checkbox via createElement (required for Zotero XHTML security)
+    // Input elements cannot be created via innerHTML in Zotero's XHTML environment
+    const checkbox = doc.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.classList.add("zinspire-ref-entry__checkbox");
+    // Apply inline styles since CSS class may not be enough
+    checkbox.style.width = "14px";
+    checkbox.style.height = "14px";
+    checkbox.style.margin = "0";
+    checkbox.style.cursor = "pointer";
+    checkbox.style.flexShrink = "0";
+    Zotero.debug(`[${config.addonName}] createRowTemplate: checkbox created`);
+
     // Create buttons via createElement (required for Zotero XHTML security)
     const linkButton = doc.createElement("button");
     linkButton.type = "button";
@@ -6599,8 +7506,11 @@ class InspireReferencePanelController {
     statsButton.type = "button";
     statsButton.classList.add("zinspire-ref-entry__stats", "zinspire-ref-entry__stats-button");
 
-    // Insert buttons at correct positions
+    // Insert elements at correct positions
     if (textContainer && marker && content) {
+      // FTR-BATCH-IMPORT: Insert checkbox before marker (leftmost position)
+      textContainer.insertBefore(checkbox, marker);
+      // Insert link and bibtex buttons before content
       textContainer.insertBefore(bibtexButton, content);
       textContainer.insertBefore(linkButton, bibtexButton);
       content.appendChild(statsButton);
@@ -6637,12 +7547,20 @@ class InspireReferencePanelController {
   }
 
   /**
-   * Recycle all current rows in the list to the pool before clearing.
+   * Recycle rows from the list to the pool before clearing.
+   * PERF FIX: Only recycle up to maxRowPoolSize elements, since we can't use more anyway.
+   * This avoids iterating through 10000+ elements when only 150 can be pooled.
    */
   private recycleRowsToPool() {
+    // Skip if pool is already full
+    const slotsAvailable = this.maxRowPoolSize - this.rowPool.length;
+    if (slotsAvailable <= 0) return;
+
+    // Only query and process the number of elements we can actually pool
     const rows = this.listEl.querySelectorAll(".zinspire-ref-entry");
-    for (const row of rows) {
-      this.returnRowToPool(row as HTMLDivElement);
+    const limit = Math.min(rows.length, slotsAvailable);
+    for (let i = 0; i < limit; i++) {
+      this.returnRowToPool(rows[i] as HTMLDivElement);
     }
   }
 
@@ -6655,6 +7573,15 @@ class InspireReferencePanelController {
 
     // Store entry ID for event delegation (PERF-14)
     row.dataset.entryId = entry.id;
+
+    // FTR-BATCH-IMPORT: Update checkbox state
+    const checkbox = row.querySelector(".zinspire-ref-entry__checkbox") as HTMLInputElement;
+    if (checkbox) {
+      checkbox.checked = this.selectedEntryIDs.has(entry.id);
+      checkbox.dataset.entryId = entry.id;
+    } else {
+      Zotero.debug(`[${config.addonName}] updateRowContent: checkbox NOT found in row for entry ${entry.id}`);
+    }
 
     // Update marker
     const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
@@ -6966,6 +7893,9 @@ class InspireReferencePanelController {
     entry: InspireReferenceEntry,
     anchor?: HTMLElement,
   ) {
+    // Clear timer reference since we're executing now
+    this.markerClickTimer = undefined;
+
     if (entry.localItemID) {
       const pane = Zotero.getActiveZoteroPane();
       if (
@@ -6982,6 +7912,82 @@ class InspireReferencePanelController {
     }
     const target = anchor ?? this.body;
     await this.handleAddAction(entry, target);
+  }
+
+  /**
+   * Get the first PDF attachment ID for a parent item.
+   * Returns the attachment ID if found, null otherwise.
+   */
+  private getFirstPdfAttachmentID(parentItemID: number): number | null {
+    const parentItem = Zotero.Items.get(parentItemID);
+    if (!parentItem) {
+      return null;
+    }
+    const attachmentIDs = parentItem.getAttachments?.() || [];
+    // Find the first PDF attachment
+    for (const id of attachmentIDs) {
+      const attachment = Zotero.Items.get(id);
+      if (attachment?.isPDFAttachment?.()) {
+        return id;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Open PDF for a local item.
+   * Returns true if PDF was opened successfully, false otherwise.
+   */
+  private async openPdfForLocalItem(itemID: number): Promise<boolean> {
+    if (!Zotero.Reader || typeof Zotero.Reader.open !== "function") {
+      return false;
+    }
+    try {
+      const attachmentID = this.getFirstPdfAttachmentID(itemID);
+      if (!attachmentID) {
+        return false;
+      }
+      const reader =
+        (await Zotero.Reader.open(attachmentID, undefined, {
+          allowDuplicate: false,
+        })) || null;
+      if (reader) {
+        ReaderTabHelper.focusReader(reader as _ZoteroTypes.ReaderInstance);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] Failed to open PDF for item ${itemID}: ${err}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Handle double-click on marker: open PDF if available.
+   */
+  private async handleMarkerDoubleClick(entry: InspireReferenceEntry) {
+    // Only handle double-click for entries with local items
+    if (!entry.localItemID) {
+      return;
+    }
+
+    // Check for PDF presence first
+    const pdfID = this.getFirstPdfAttachmentID(entry.localItemID);
+
+    // If PDF exists, save current state to history before navigation
+    if (pdfID) {
+      this.rememberCurrentItemForNavigation();
+    }
+
+    // Attempt to open
+    const opened = await this.openPdfForLocalItem(entry.localItemID);
+
+    // If not opened and strictly because no PDF existed, show toast
+    if (!opened && !pdfID) {
+      this.showToast(getString("references-panel-toast-no-pdf"));
+    }
   }
 
   private async handleTitleClick(entry: InspireReferenceEntry) {
@@ -7274,14 +8280,39 @@ class InspireReferencePanelController {
   }
 
   private renderMessage(message: string) {
-    // Recycle existing rows to pool before clearing
+    // Recycle existing rows to pool before clearing (only up to pool capacity)
     this.recycleRowsToPool();
-    this.listEl.textContent = "";
+
+    // PERF FIX: Async removal of old container to avoid blocking UI
+    // Instead of synchronous replaceChild (which blocks while detaching 10000+ nodes),
+    // we hide the old container, insert new one, then remove old one asynchronously
+    // Clean up old event listeners first
+    this.cleanupEventDelegation();
+    const doc = this.listEl.ownerDocument;
+    const oldListEl = this.listEl;
+    const newListEl = doc.createElement("div");
+    newListEl.className = oldListEl.className;
+    // Copy essential attributes
+    if (oldListEl.id) newListEl.id = oldListEl.id;
+    // Hide old container immediately (no reflow)
+    oldListEl.style.display = "none";
+    // Insert new container after old one
+    oldListEl.parentNode?.insertBefore(newListEl, oldListEl.nextSibling);
+    this.listEl = newListEl;
+    // Re-register event delegation on new container
+    this.setupEventDelegation();
+    // Remove old container asynchronously (doesn't block UI)
+    setTimeout(() => {
+      oldListEl.remove();
+    }, 0);
+
     const empty = this.listEl.ownerDocument.createElement("div");
     empty.classList.add("zinspire-ref-panel__empty");
     empty.textContent = message;
     this.listEl.appendChild(empty);
+
     this.setStatus(message);
+
     this.chartNeedsRefresh = true;
     this.lastRenderedEntries = [];
   }
@@ -7685,7 +8716,7 @@ class InspireReferencePanelController {
     }
     // Cancel any pending RAF for tooltip position update
     if (this.tooltipRAF) {
-      const win = this.body.ownerDocument?.defaultView || window;
+      const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
       const caf = win.cancelAnimationFrame || win.clearTimeout;
       caf(this.tooltipRAF);
       this.tooltipRAF = undefined;
@@ -7707,7 +8738,7 @@ class InspireReferencePanelController {
     if (this.tooltipRAF) {
       return; // Skip if previous frame hasn't rendered yet
     }
-    const win = this.body.ownerDocument?.defaultView || window;
+    const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
     const raf = win.requestAnimationFrame || ((cb: FrameRequestCallback) => win.setTimeout(cb, 16));
     this.tooltipRAF = raf(() => {
       this.tooltipRAF = undefined;
@@ -7749,27 +8780,624 @@ class InspireReferencePanelController {
     this.abstractTooltip.style.left = `${left}px`;
     this.abstractTooltip.style.top = `${top}px`;
   }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Utility Functions (use imports from ./inspire for most functions)
-// ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Batch Import Methods (FTR-BATCH-IMPORT)
+  // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Lazily compute searchText for an entry if not already computed.
- * This is a performance optimization - searchText is only computed when
- * actually needed for filtering, not during initial data loading.
- */
-function ensureSearchText(entry: InspireReferenceEntry): string {
-  if (!entry.searchText) {
-    entry.searchText = buildEntrySearchText(entry);
+  /**
+   * Create the batch toolbar UI (hidden by default).
+   */
+  private createBatchToolbar() {
+    Zotero.debug(`[${config.addonName}] createBatchToolbar: creating batch toolbar`);
+    const doc = this.body.ownerDocument;
+    this.batchToolbar = doc.createElement("div");
+    this.batchToolbar.className = "zinspire-batch-toolbar";
+    this.batchToolbar.style.display = "none";
+
+    // Selection badge
+    this.batchSelectedBadge = doc.createElement("span");
+    this.batchSelectedBadge.className = "zinspire-batch-toolbar__badge";
+    this.batchSelectedBadge.textContent = getString("references-panel-batch-selected", { args: { count: 0 } });
+    this.batchToolbar.appendChild(this.batchSelectedBadge);
+
+    // Select All button
+    const selectAllBtn = doc.createElement("button");
+    selectAllBtn.className = "zinspire-batch-toolbar__btn";
+    selectAllBtn.textContent = getString("references-panel-batch-select-all");
+    selectAllBtn.addEventListener("click", () => this.selectAllEntries());
+    this.batchToolbar.appendChild(selectAllBtn);
+
+    // Clear button
+    const clearBtn = doc.createElement("button");
+    clearBtn.className = "zinspire-batch-toolbar__btn";
+    clearBtn.textContent = getString("references-panel-batch-clear");
+    clearBtn.addEventListener("click", () => this.clearSelection());
+    this.batchToolbar.appendChild(clearBtn);
+
+    // Import button
+    this.batchImportButton = doc.createElement("button");
+    this.batchImportButton.className = "zinspire-batch-toolbar__btn zinspire-batch-toolbar__btn--primary";
+    this.batchImportButton.textContent = getString("references-panel-batch-import");
+    this.batchImportButton.addEventListener("click", () => {
+      Zotero.debug(`[${config.addonName}] Import button clicked`);
+      this.handleBatchImport().catch(err => {
+        Zotero.debug(`[${config.addonName}] handleBatchImport error: ${err}`);
+      });
+    });
+    this.batchToolbar.appendChild(this.batchImportButton);
+
+    // Insert batch toolbar after main toolbar, before chart
+    const chartContainer = this.body.querySelector(".zinspire-chart-container");
+    if (chartContainer) {
+      this.body.insertBefore(this.batchToolbar, chartContainer);
+      Zotero.debug(`[${config.addonName}] createBatchToolbar: inserted before chart container`);
+    } else {
+      this.body.insertBefore(this.batchToolbar, this.listEl);
+      Zotero.debug(`[${config.addonName}] createBatchToolbar: inserted before list element`);
+    }
   }
-  return entry.searchText;
+
+  /**
+   * Update batch toolbar visibility and badge.
+   */
+  private updateBatchToolbarVisibility() {
+    if (!this.batchToolbar) {
+      Zotero.debug(`[${config.addonName}] updateBatchToolbarVisibility: batchToolbar is null`);
+      return;
+    }
+
+    const count = this.selectedEntryIDs.size;
+    Zotero.debug(`[${config.addonName}] updateBatchToolbarVisibility: count=${count}`);
+    if (count > 0) {
+      this.batchToolbar.style.display = "flex";
+      if (this.batchSelectedBadge) {
+        this.batchSelectedBadge.textContent = getString("references-panel-batch-selected", { args: { count } });
+      }
+      if (this.batchImportButton) {
+        this.batchImportButton.disabled = false;
+      }
+    } else {
+      this.batchToolbar.style.display = "none";
+    }
+  }
+
+  /**
+   * Handle checkbox click with Shift+Click range selection support.
+   */
+  private handleCheckboxClick(entry: InspireReferenceEntry, event: MouseEvent) {
+    Zotero.debug(`[${config.addonName}] handleCheckboxClick: entry.id=${entry.id}`);
+    const checkbox = event.target as HTMLInputElement;
+    const isChecked = checkbox.checked;
+    Zotero.debug(`[${config.addonName}] handleCheckboxClick: isChecked=${isChecked}`);
+
+    if (event.shiftKey && this.lastSelectedEntryID) {
+      // Shift+Click: select range
+      const filteredEntries = this.getFilteredEntries(this.allEntries);
+      const lastIndex = filteredEntries.findIndex(e => e.id === this.lastSelectedEntryID);
+      const currentIndex = filteredEntries.findIndex(e => e.id === entry.id);
+
+      if (lastIndex >= 0 && currentIndex >= 0) {
+        const start = Math.min(lastIndex, currentIndex);
+        const end = Math.max(lastIndex, currentIndex);
+
+        for (let i = start; i <= end; i++) {
+          const e = filteredEntries[i];
+          if (isChecked) {
+            this.selectedEntryIDs.add(e.id);
+          } else {
+            this.selectedEntryIDs.delete(e.id);
+          }
+        }
+
+        // Update all checkboxes in the range
+        this.updateAllCheckboxes();
+      }
+    } else {
+      // Regular click: toggle single item
+      if (isChecked) {
+        this.selectedEntryIDs.add(entry.id);
+      } else {
+        this.selectedEntryIDs.delete(entry.id);
+      }
+    }
+
+    // Update last selected for Shift+Click
+    this.lastSelectedEntryID = entry.id;
+    this.updateBatchToolbarVisibility();
+  }
+
+  /**
+   * Update all visible checkboxes to match selection state.
+   */
+  private updateAllCheckboxes() {
+    const checkboxes = this.listEl.querySelectorAll(".zinspire-ref-entry__checkbox");
+    for (let i = 0; i < checkboxes.length; i++) {
+      const checkbox = checkboxes[i] as HTMLInputElement;
+      const entryId = checkbox.dataset?.entryId;
+      if (entryId) {
+        checkbox.checked = this.selectedEntryIDs.has(entryId);
+      }
+    }
+  }
+
+  /**
+   * Select all entries in the current filtered view.
+   */
+  private selectAllEntries() {
+    const filteredEntries = this.getFilteredEntries(this.allEntries);
+    for (const entry of filteredEntries) {
+      this.selectedEntryIDs.add(entry.id);
+    }
+    this.updateAllCheckboxes();
+    this.updateBatchToolbarVisibility();
+  }
+
+  /**
+   * Clear all selections.
+   */
+  private clearSelection() {
+    this.selectedEntryIDs.clear();
+    this.lastSelectedEntryID = undefined;
+    this.updateAllCheckboxes();
+    this.updateBatchToolbarVisibility();
+  }
+
+  /**
+   * Handle batch import button click.
+   */
+  private async handleBatchImport() {
+    Zotero.debug(`[${config.addonName}] handleBatchImport: started, selectedEntryIDs.size=${this.selectedEntryIDs.size}`);
+    if (this.selectedEntryIDs.size === 0) {
+      this.showToast(getString("references-panel-batch-no-selection"));
+      return;
+    }
+
+    // Get selected entries
+    const selectedEntries = this.allEntries.filter(e => this.selectedEntryIDs.has(e.id) && e.recid);
+    Zotero.debug(`[${config.addonName}] handleBatchImport: selectedEntries.length=${selectedEntries.length}`);
+    if (selectedEntries.length === 0) {
+      this.showToast(getString("references-panel-batch-no-selection"));
+      return;
+    }
+
+    // Detect duplicates
+    Zotero.debug(`[${config.addonName}] handleBatchImport: detecting duplicates...`);
+    const duplicates = await this.detectDuplicates(selectedEntries);
+    Zotero.debug(`[${config.addonName}] handleBatchImport: duplicates.size=${duplicates.size}`);
+
+    // If there are duplicates, show dialog
+    let entriesToImport = selectedEntries;
+    if (duplicates.size > 0) {
+      const result = await this.showDuplicateDialog(selectedEntries, duplicates);
+      if (!result) {
+        // User cancelled
+        return;
+      }
+      entriesToImport = result;
+    }
+
+    if (entriesToImport.length === 0) {
+      this.showToast(getString("references-panel-batch-no-selection"));
+      return;
+    }
+
+    // Prompt for save target once
+    Zotero.debug(`[${config.addonName}] handleBatchImport: prompting for save target...`);
+    const anchor = this.batchImportButton || this.body;
+    const target = await this.promptForSaveTarget(anchor);
+    Zotero.debug(`[${config.addonName}] handleBatchImport: target=${target ? 'selected' : 'cancelled'}`);
+    if (!target) {
+      return;
+    }
+
+    // Run batch import
+    Zotero.debug(`[${config.addonName}] handleBatchImport: starting batch import for ${entriesToImport.length} entries`);
+    await this.runBatchImportWithProgress(entriesToImport, target);
+  }
+
+  /**
+   * Detect duplicates for selected entries.
+   * Returns a map of entry.id -> { localItemID, matchType }
+   */
+  private async detectDuplicates(
+    entries: InspireReferenceEntry[],
+  ): Promise<Map<string, { localItemID: number; matchType: "recid" | "arxiv" | "doi" }>> {
+    const duplicates = new Map<string, { localItemID: number; matchType: "recid" | "arxiv" | "doi" }>();
+
+    // Skip entries that already have localItemID (already detected as local)
+    const entriesToCheck = entries.filter(e => !e.localItemID);
+    if (entriesToCheck.length === 0) {
+      // All entries already have localItemID, mark them as duplicates
+      for (const entry of entries) {
+        if (entry.localItemID) {
+          duplicates.set(entry.id, { localItemID: entry.localItemID, matchType: "recid" });
+        }
+      }
+      return duplicates;
+    }
+
+    // Collect identifiers for batch queries
+    const recids: string[] = [];
+    const arxivIds: string[] = [];
+    const dois: string[] = [];
+    const entryByRecid = new Map<string, InspireReferenceEntry>();
+    const entryByArxiv = new Map<string, InspireReferenceEntry>();
+    const entryByDOI = new Map<string, InspireReferenceEntry>();
+
+    for (const entry of entriesToCheck) {
+      if (entry.recid) {
+        recids.push(entry.recid);
+        entryByRecid.set(entry.recid, entry);
+      }
+      const arxivId = typeof entry.arxivDetails === "object" ? entry.arxivDetails?.id : undefined;
+      if (arxivId) {
+        arxivIds.push(arxivId);
+        entryByArxiv.set(arxivId, entry);
+      }
+      if (entry.doi) {
+        dois.push(entry.doi);
+        entryByDOI.set(entry.doi, entry);
+      }
+    }
+
+    // Batch query for each identifier type (priority: recid > arXiv > DOI)
+    const [recidMatches, arxivMatches, doiMatches] = await Promise.all([
+      recids.length > 0 ? findItemsByRecids(recids) : Promise.resolve(new Map<string, number>()),
+      arxivIds.length > 0 ? findItemsByArxivs(arxivIds) : Promise.resolve(new Map<string, number>()),
+      dois.length > 0 ? findItemsByDOIs(dois) : Promise.resolve(new Map<string, number>()),
+    ]);
+
+    // Add already-local entries to duplicates
+    for (const entry of entries) {
+      if (entry.localItemID) {
+        duplicates.set(entry.id, { localItemID: entry.localItemID, matchType: "recid" });
+      }
+    }
+
+    // Process matches in priority order
+    for (const [recid, localItemID] of recidMatches) {
+      const entry = entryByRecid.get(recid);
+      if (entry && !duplicates.has(entry.id)) {
+        duplicates.set(entry.id, { localItemID, matchType: "recid" });
+      }
+    }
+
+    for (const [arxivId, localItemID] of arxivMatches) {
+      const entry = entryByArxiv.get(arxivId);
+      if (entry && !duplicates.has(entry.id)) {
+        duplicates.set(entry.id, { localItemID, matchType: "arxiv" });
+      }
+    }
+
+    for (const [doi, localItemID] of doiMatches) {
+      const entry = entryByDOI.get(doi);
+      if (entry && !duplicates.has(entry.id)) {
+        duplicates.set(entry.id, { localItemID, matchType: "doi" });
+      }
+    }
+
+    return duplicates;
+  }
+
+  /**
+   * Show duplicate detection dialog.
+   * Returns the entries to import (user-selected), or null if cancelled.
+   */
+  private async showDuplicateDialog(
+    entries: InspireReferenceEntry[],
+    duplicates: Map<string, { localItemID: number; matchType: "recid" | "arxiv" | "doi" }>,
+  ): Promise<InspireReferenceEntry[] | null> {
+    return new Promise((resolve) => {
+      // Use the panel's own document for creating elements
+      const doc = this.body.ownerDocument;
+      Zotero.debug(`[${config.addonName}] showDuplicateDialog: duplicates.size=${duplicates.size}`);
+
+      // Create overlay - append to panel body instead of document.body
+      const overlay = doc.createElement("div");
+      overlay.className = "zinspire-duplicate-dialog";
+      // Make overlay cover the panel area
+      overlay.style.position = "fixed";
+      overlay.style.top = "0";
+      overlay.style.left = "0";
+      overlay.style.right = "0";
+      overlay.style.bottom = "0";
+      overlay.style.background = "rgba(0, 0, 0, 0.5)";
+      overlay.style.display = "flex";
+      overlay.style.alignItems = "center";
+      overlay.style.justifyContent = "center";
+      overlay.style.zIndex = "10000";
+
+      // Create content
+      const content = doc.createElement("div");
+      content.className = "zinspire-duplicate-dialog__content";
+      content.style.background = "var(--material-background, #ffffff)";
+      content.style.borderRadius = "8px";
+      content.style.padding = "16px";
+      content.style.maxWidth = "90%";
+      content.style.maxHeight = "70%";
+      content.style.overflowY = "auto";
+      content.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.3)";
+
+      // Title
+      const title = doc.createElement("div");
+      title.className = "zinspire-duplicate-dialog__title";
+      title.style.fontSize = "14px";
+      title.style.fontWeight = "600";
+      title.style.marginBottom = "8px";
+      title.textContent = getString("references-panel-batch-duplicate-title");
+      content.appendChild(title);
+
+      // Message
+      const message = doc.createElement("div");
+      message.className = "zinspire-duplicate-dialog__message";
+      message.style.fontSize = "12px";
+      message.style.marginBottom = "12px";
+      message.textContent = getString("references-panel-batch-duplicate-message", { args: { count: duplicates.size } });
+      content.appendChild(message);
+
+      // List of duplicates
+      const list = doc.createElement("div");
+      list.className = "zinspire-duplicate-dialog__list";
+      list.style.maxHeight = "150px";
+      list.style.overflowY = "auto";
+      list.style.border = "1px solid var(--fill-quinary, #e0e0e0)";
+      list.style.borderRadius = "4px";
+      list.style.marginBottom = "12px";
+
+      const duplicateEntries = entries.filter(e => duplicates.has(e.id));
+      const checkboxMap = new Map<string, HTMLInputElement>();
+
+      for (const entry of duplicateEntries) {
+        const match = duplicates.get(entry.id)!;
+        const item = doc.createElement("div");
+        item.className = "zinspire-duplicate-dialog__item";
+        item.style.display = "flex";
+        item.style.alignItems = "flex-start";
+        item.style.gap = "8px";
+        item.style.padding = "8px";
+        item.style.borderBottom = "1px solid var(--fill-quinary, #e0e0e0)";
+        item.style.fontSize = "12px";
+
+        const checkbox = doc.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.style.marginTop = "2px";
+        checkbox.style.flexShrink = "0";
+        checkbox.checked = false; // Default: skip duplicates
+        checkboxMap.set(entry.id, checkbox);
+        item.appendChild(checkbox);
+
+        const info = doc.createElement("div");
+        info.style.flex = "1";
+        info.style.minWidth = "0";
+
+        const titleEl = doc.createElement("div");
+        titleEl.style.fontWeight = "500";
+        titleEl.style.whiteSpace = "nowrap";
+        titleEl.style.overflow = "hidden";
+        titleEl.style.textOverflow = "ellipsis";
+        titleEl.textContent = entry.title;
+        titleEl.title = entry.title;
+        info.appendChild(titleEl);
+
+        const matchEl = doc.createElement("div");
+        matchEl.style.fontSize = "10px";
+        matchEl.style.color = "var(--zotero-blue-6, #2554c7)";
+        matchEl.style.marginTop = "2px";
+        const matchKey = `references-panel-batch-duplicate-match-${match.matchType}`;
+        matchEl.textContent = getString(matchKey);
+        info.appendChild(matchEl);
+
+        item.appendChild(info);
+        list.appendChild(item);
+      }
+      content.appendChild(list);
+
+      // Actions
+      const actions = doc.createElement("div");
+      actions.style.display = "flex";
+      actions.style.gap = "8px";
+      actions.style.flexWrap = "wrap";
+      actions.style.justifyContent = "flex-end";
+
+      const createBtn = (text: string, primary = false) => {
+        const btn = doc.createElement("button");
+        btn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+        btn.style.borderRadius = "4px";
+        btn.style.padding = "6px 12px";
+        btn.style.fontSize = "12px";
+        btn.style.cursor = "pointer";
+        if (primary) {
+          btn.style.background = "var(--zotero-blue-5, #0060df)";
+          btn.style.color = "#ffffff";
+          btn.style.borderColor = "var(--zotero-blue-5, #0060df)";
+        } else {
+          btn.style.background = "var(--zotero-gray-1, #ffffff)";
+          btn.style.color = "var(--zotero-gray-7, #2b2b30)";
+        }
+        btn.textContent = text;
+        return btn;
+      };
+
+      // Skip All button
+      const skipAllBtn = createBtn(getString("references-panel-batch-duplicate-skip-all"));
+      skipAllBtn.addEventListener("click", () => {
+        for (const cb of checkboxMap.values()) {
+          cb.checked = false;
+        }
+      });
+      actions.appendChild(skipAllBtn);
+
+      // Import All button
+      const importAllBtn = createBtn(getString("references-panel-batch-duplicate-import-all"));
+      importAllBtn.addEventListener("click", () => {
+        for (const cb of checkboxMap.values()) {
+          cb.checked = true;
+        }
+      });
+      actions.appendChild(importAllBtn);
+
+      // Cancel button
+      const cancelBtn = createBtn(getString("references-panel-batch-duplicate-cancel"));
+      cancelBtn.addEventListener("click", () => {
+        overlay.remove();
+        resolve(null);
+      });
+      actions.appendChild(cancelBtn);
+
+      // Confirm button
+      const confirmBtn = createBtn(getString("references-panel-batch-duplicate-confirm"), true);
+      confirmBtn.addEventListener("click", () => {
+        // Get entries to import (non-duplicates + selected duplicates)
+        const result: InspireReferenceEntry[] = [];
+        for (const entry of entries) {
+          if (!duplicates.has(entry.id)) {
+            result.push(entry);
+          } else if (checkboxMap.get(entry.id)?.checked) {
+            result.push(entry);
+          }
+        }
+        overlay.remove();
+        resolve(result);
+      });
+      actions.appendChild(confirmBtn);
+
+      content.appendChild(actions);
+      overlay.appendChild(content);
+
+      // Add to panel body (not document.body)
+      // Make panel body position relative for overlay positioning
+      this.body.appendChild(overlay);
+
+      // Close on overlay click
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) {
+          overlay.remove();
+          resolve(null);
+        }
+      });
+
+      // Close on Escape
+      const escapeHandler = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          overlay.remove();
+          resolve(null);
+          doc.removeEventListener("keydown", escapeHandler);
+        }
+      };
+      doc.addEventListener("keydown", escapeHandler);
+    });
+  }
+
+  /**
+   * Run batch import with progress display.
+   */
+  private async runBatchImportWithProgress(
+    entries: InspireReferenceEntry[],
+    target: SaveTargetSelection,
+  ) {
+    const total = entries.length;
+    let done = 0;
+    let success = 0;
+    let failed = 0;
+
+    // Setup cancellation
+    let AbortControllerClass = typeof AbortController !== "undefined" ? AbortController : null;
+    if (!AbortControllerClass) {
+      const win = Zotero.getMainWindow();
+      if (win && (win as any).AbortController) {
+        AbortControllerClass = (win as any).AbortController;
+      }
+    }
+
+    this.batchImportAbort = AbortControllerClass ? new AbortControllerClass() : undefined;
+    const signal = this.batchImportAbort?.signal || { aborted: false, addEventListener: () => {}, removeEventListener: () => {} }; // Mock signal if not supported
+
+    // Escape key listener for cancellation
+    const escapeHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.batchImportAbort?.abort();
+      }
+    };
+    const mainWindow = Zotero.getMainWindow();
+    mainWindow?.addEventListener("keydown", escapeHandler, true);
+
+    // Progress window
+    const progressWindow = new ProgressWindowHelper(config.addonName);
+    progressWindow.createLine({
+      text: getString("references-panel-batch-importing", { args: { done: 0, total } }),
+      progress: 0,
+    });
+    progressWindow.show(-1); // Keep open
+
+    // Concurrency limiter
+    const CONCURRENCY = 3;
+    let index = 0;
+
+    const worker = async () => {
+      while (index < entries.length && !signal.aborted) {
+        const currentIndex = index++;
+        const entry = entries[currentIndex];
+
+        try {
+          const newItem = await this.importReference(entry.recid!, target);
+          if (newItem) {
+            entry.localItemID = newItem.id;
+            entry.displayText = buildDisplayText(entry);
+            entry.searchText = "";
+            this.selectedEntryIDs.delete(entry.id);
+            this.updateRowStatus(entry);
+            success++;
+          } else {
+            failed++;
+          }
+        } catch (err) {
+          Zotero.debug(`[${config.addonName}] Batch import error: ${err}`);
+          failed++;
+        }
+
+        done++;
+        const percent = Math.round((done / total) * 100);
+        progressWindow.changeLine({
+          text: getString("references-panel-batch-importing", { args: { done, total } }),
+          progress: percent,
+        });
+      }
+    };
+
+    try {
+      // Start workers
+      const workers: Promise<void>[] = [];
+      for (let i = 0; i < Math.min(CONCURRENCY, entries.length); i++) {
+        workers.push(worker());
+      }
+      await Promise.all(workers);
+    } finally {
+      // Clean up
+      mainWindow?.removeEventListener("keydown", escapeHandler, true);
+      this.batchImportAbort = undefined;
+
+      // Close progress and show result
+      progressWindow.close();
+
+      // Show result toast
+      if (signal.aborted) {
+        this.showToast(getString("references-panel-batch-import-cancelled", { args: { done, total } }));
+      } else if (failed > 0) {
+        this.showToast(getString("references-panel-batch-import-partial", { args: { success, total, failed } }));
+      } else {
+        this.showToast(getString("references-panel-batch-import-success", { args: { count: success } }));
+      }
+
+      // Update UI
+      this.updateAllCheckboxes();
+      this.updateBatchToolbarVisibility();
+    }
+  }
 }
 
-// NOTE: ZInspire class, getInspireMeta, setInspireMeta, and other metadata functions
-// have been moved to inspire/itemUpdater.ts and inspire/metadataService.ts
-// Import them from "./inspire" instead of defining locally.
 // ─────────────────────────────────────────────────────────────────────────────
 // Re-exports from modularized files (for incremental migration)
 // ─────────────────────────────────────────────────────────────────────────────

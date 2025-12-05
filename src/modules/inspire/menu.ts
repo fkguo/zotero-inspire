@@ -7,57 +7,12 @@ export class ZInsMenu {
       tag: "menuseparator",
     });
     const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
-    ztoolkit.Menu.register(
-      "item",
-      {
-        tag: "menu",
-        label: getString("menupopup-label"),
-        children: [
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel0"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("full");
-            },
-          },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel1"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("noabstract");
-            },
-          },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel2"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedItems("citations");
-            },
-          },
-          {
-            tag: "menuseparator",
-          },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-download-cache"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.downloadReferencesCacheForSelection();
-            },
-          },
-          {
-            tag: "menuseparator",
-          },
-          {
-            tag: "menuitem",
-            label: "Cancel Update",
-            commandListener: (_ev) => {
-              _globalThis.inspire.cancelUpdate();
-            },
-          },
-        ],
-        icon: menuIcon,
-      },
-    );
+    ztoolkit.Menu.register("item", {
+      tag: "menu",
+      label: getString("menupopup-label"),
+      children: this.buildMenuChildren("item") as any,
+      icon: menuIcon,
+    });
   }
 
   static registerRightClickCollectionMenu() {
@@ -65,57 +20,97 @@ export class ZInsMenu {
       tag: "menuseparator",
     });
     const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
-    ztoolkit.Menu.register(
-      "collection",
+    ztoolkit.Menu.register("collection", {
+      tag: "menu",
+      label: getString("menupopup-label"),
+      children: this.buildMenuChildren("collection") as any,
+      icon: menuIcon,
+    });
+  }
+
+  private static buildMenuChildren(
+    context: "item" | "collection",
+  ): Array<Record<string, any>> {
+    const isItem = context === "item";
+    const updateHandler = isItem
+      ? (operation: string) =>
+          _globalThis.inspire.updateSelectedItems(operation)
+      : (operation: string) =>
+          _globalThis.inspire.updateSelectedCollection(operation);
+    const cacheHandler = isItem
+      ? () => _globalThis.inspire.downloadReferencesCacheForSelection()
+      : () => _globalThis.inspire.downloadReferencesCacheForCollection();
+
+    const children: Array<Record<string, any>> = [
       {
-        tag: "menu",
-        label: getString("menupopup-label"),
-        children: [
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel0"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("full");
-            },
+        tag: "menuitem",
+        label: getString("menuitem-submenulabel0"),
+        commandListener: () => updateHandler("full"),
+      },
+      {
+        tag: "menuitem",
+        label: getString("menuitem-submenulabel1"),
+        commandListener: () => updateHandler("noabstract"),
+      },
+      {
+        tag: "menuitem",
+        label: getString("menuitem-submenulabel2"),
+        commandListener: () => updateHandler("citations"),
+      },
+      { tag: "menuseparator" },
+      {
+        tag: "menuitem",
+        label: getString("menuitem-download-cache"),
+        commandListener: () => cacheHandler(),
+      },
+    ];
+
+    if (isItem) {
+      children.push(
+        { tag: "menuseparator" },
+        {
+          tag: "menuitem",
+          label: getString("menuitem-copy-bibtex"),
+          commandListener: () => {
+            _globalThis.inspire.copyBibTeX();
           },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel1"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("noabstract");
-            },
+        },
+        {
+          tag: "menuitem",
+          label: getString("menuitem-copy-inspire-link"),
+          commandListener: () => {
+            _globalThis.inspire.copyInspireLink();
           },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-submenulabel2"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.updateSelectedCollection("citations");
-            },
+        },
+        {
+          tag: "menuitem",
+          label: getString("menuitem-copy-citation-key"),
+          commandListener: () => {
+            _globalThis.inspire.copyCitationKey();
           },
-          {
-            tag: "menuseparator",
+        },
+        {
+          tag: "menuitem",
+          label: getString("menuitem-copy-zotero-link"),
+          commandListener: () => {
+            _globalThis.inspire.copyZoteroLink();
           },
-          {
-            tag: "menuitem",
-            label: getString("menuitem-download-cache"),
-            commandListener: (_ev) => {
-              _globalThis.inspire.downloadReferencesCacheForCollection();
-            },
-          },
-          {
-            tag: "menuseparator",
-          },
-          {
-            tag: "menuitem",
-            label: "Cancel Update",
-            commandListener: (_ev) => {
-              _globalThis.inspire.cancelUpdate();
-            },
-          },
-        ],
-        icon: menuIcon,
+        },
+      );
+    }
+
+    children.push(
+      { tag: "menuseparator" },
+      {
+        tag: "menuitem",
+        label: getString("menuitem-cancel-update"),
+        commandListener: () => {
+          _globalThis.inspire.cancelUpdate();
+        },
       },
     );
+
+    return children;
   }
 }
 

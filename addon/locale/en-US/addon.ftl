@@ -1,11 +1,12 @@
 startup-begin = Addon is loading
 startup-finish = Addon is ready
 menuitem-label = Addon Template: Helper Examples
-menupopup-label = Update Inspire Metadata
+menupopup-label = INSPIRE
 menuitem-submenulabel0 = With abstracts
 menuitem-submenulabel1 = Without abstracts
 menuitem-submenulabel2 = Citation counts only
 menuitem-download-cache = Download references cache
+menuitem-cancel-update = Cancel update
 
 download-cache-progress-title = Downloading references cache
 download-cache-start =
@@ -27,6 +28,8 @@ download-cache-failed =
 download-cache-no-selection = Select at least one regular item to download references cache
 download-cache-no-recid = Unable to find INSPIRE IDs for the selected items
 download-cache-disabled = Enable local cache in Preferences → INSPIRE to use this feature
+download-cache-cancelled-title = Cache download cancelled
+download-cache-cancelled = Cached { $done } / { $total } items before cancellation
 
 pane-item-references-header = INSPIRE References
     .label = INSPIRE References
@@ -59,6 +62,23 @@ references-panel-forward-tooltip = Go forward to the next Zotero item
 references-panel-entry-back = Back to { $tab }
 references-panel-entry-back-tooltip = Return to the previous view
 references-panel-filter-placeholder = Filter entries
+references-panel-quick-filters = Filters
+references-panel-quick-filter-high-citations = High citations (>50)
+references-panel-quick-filter-high-citations-tooltip = Show papers with more than 50 citations
+references-panel-quick-filter-recent-5y = Recent 5 years
+references-panel-quick-filter-recent-5y-tooltip = Only show papers published within the last 5 calendar years
+references-panel-quick-filter-recent-1y = Recent 1 year
+references-panel-quick-filter-recent-1y-tooltip = Only show papers published in the current calendar year
+references-panel-quick-filter-published = Published
+references-panel-quick-filter-published-tooltip = Show papers with journal information (formally published)
+references-panel-quick-filter-preprint = arXiv only
+references-panel-quick-filter-preprint-tooltip = Show arXiv-only papers without journal information
+references-panel-quick-filter-related = Related items
+references-panel-quick-filter-related-tooltip = Show references already linked to the current Zotero item
+references-panel-quick-filter-local-items = Local items
+references-panel-quick-filter-local-items-tooltip = Show references that already exist in your Zotero library
+references-panel-quick-filter-online-items = Online items
+references-panel-quick-filter-online-items-tooltip = Show references not yet in your Zotero library
 references-panel-sort-label = Sort entries
 references-panel-sort-default = INSPIRE order
 references-panel-sort-mostrecent = Most recent
@@ -98,6 +118,7 @@ references-panel-link-missing = Link as related item
 references-panel-toast-linked = Related item linked successfully
 references-panel-toast-added = Reference added to your library
 references-panel-toast-missing = Article not found in INSPIRE-HEP
+references-panel-toast-no-pdf = This item has no PDF attachment
 references-panel-unknown-author = Unknown author
 references-panel-year-unknown = n.d.
 references-panel-no-title = Title unavailable
@@ -152,20 +173,22 @@ references-panel-chart-expand = Expand chart
 references-panel-chart-by-year = By Year
 references-panel-chart-by-citation = By Citations
 references-panel-chart-no-data = No data to display
-references-panel-chart-clear-filter = Clear chart filter
+references-panel-chart-clear-filter = Clear filters
 references-panel-chart-disabled-title = Chart Disabled
 references-panel-chart-disabled-message = Statistics chart is disabled. Enable it in Zotero Preferences → INSPIRE.
 references-panel-chart-author-filter = ≤10 Authors
 references-panel-chart-author-filter-tooltip = Filter: only show papers with 10 or fewer authors (excludes large collaborations)
 references-panel-chart-selfcite-filter = Excl. self-cit.
 references-panel-chart-selfcite-filter-tooltip = Use citation counts without self-citations when in "By Citations" mode.
+references-panel-chart-published-only = Published
+references-panel-chart-published-only-tooltip = Filter: only show papers with journal information (excludes arXiv-only papers)
 
 # Rate limiter localization strings
 references-panel-rate-limit-tooltip = INSPIRE API rate limit status
 references-panel-rate-limit-queued = { $count } requests queued (rate limiting active)
 
 # Search feature localization strings
-references-panel-tab-search = Search
+references-panel-tab-search = 🔍 Search
 references-panel-search-placeholder = INSPIRE search query...
 references-panel-search-button-tooltip = Execute INSPIRE search
 references-panel-search-history-tooltip = Show search history
@@ -186,3 +209,50 @@ references-panel-filter-count-search =
 references-panel-cache-source-api = From INSPIRE
 references-panel-cache-source-memory = From memory cache
 references-panel-cache-source-local = From local cache ({ $age }h ago)
+
+# Context menu copy actions
+menuitem-copy-bibtex = Copy BibTeX
+menuitem-copy-inspire-link = Copy INSPIRE link
+menuitem-copy-citation-key = Copy citation key
+menuitem-copy-zotero-link = Copy Zotero link
+copy-success-bibtex = BibTeX copied to clipboard
+copy-success-inspire-link = INSPIRE link copied to clipboard
+copy-success-citation-key = Citation key copied to clipboard
+copy-success-zotero-link = Zotero link copied to clipboard
+copy-error-no-selection = Select exactly one item to copy
+copy-error-no-recid = INSPIRE record ID not found for this item
+copy-error-no-citation-key = No citation key set for this item
+copy-error-clipboard-failed = Failed to copy to clipboard
+copy-error-bibtex-failed = Failed to fetch BibTeX from INSPIRE
+
+# Batch import feature localization strings (FTR-BATCH-IMPORT)
+references-panel-batch-selected =
+  { $count ->
+    [one] 1 selected
+   *[other] { $count } selected
+  }
+references-panel-batch-select-all = Select all
+references-panel-batch-clear = Clear
+references-panel-batch-import = Import
+references-panel-batch-importing = Importing { $done } / { $total }...
+references-panel-batch-import-success =
+  { $count ->
+    [one] Imported 1 reference
+   *[other] Imported { $count } references
+  }
+references-panel-batch-import-partial = Imported { $success } / { $total } references ({ $failed } failed)
+references-panel-batch-import-cancelled = Import cancelled ({ $done } / { $total } completed)
+references-panel-batch-no-selection = Select at least one reference to import
+references-panel-batch-duplicate-title = Duplicate Detection
+references-panel-batch-duplicate-message =
+  { $count ->
+    [one] 1 reference already exists in your library:
+   *[other] { $count } references already exist in your library:
+  }
+references-panel-batch-duplicate-match-recid = (matched by INSPIRE ID)
+references-panel-batch-duplicate-match-arxiv = (matched by arXiv ID)
+references-panel-batch-duplicate-match-doi = (matched by DOI)
+references-panel-batch-duplicate-skip-all = Skip all duplicates
+references-panel-batch-duplicate-import-all = Import all anyway
+references-panel-batch-duplicate-confirm = Confirm selection
+references-panel-batch-duplicate-cancel = Cancel

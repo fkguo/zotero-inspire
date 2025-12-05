@@ -19,7 +19,7 @@ This add-on for the excellent open-source reference manager [Zotero](https://git
     - [Cached data and toolbar controls](#cached-data-and-toolbar-controls)
     - [Back/Forward Navigation](#backforward-navigation)
     - [INSPIRE Search from Search Bar (new in 1.1.2)](#inspire-search-from-search-bar-new-in-112)
-  - [What's new in 1.1.x](#whats-new-in-11x)
+  - [What&#39;s new in 1.1.x](#whats-new-in-11x)
   - [Installation](#installation)
     - [Pre-built binaries](#pre-built-binaries)
     - [Building from source](#building-from-source)
@@ -62,7 +62,12 @@ When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE Refe
 
 ### Interactions and importing
 
-- Clicking `●` (green) jumps straight to the local item; clicking `⊕` (red) opens the import dialog where you can select the target library (personal or group), drop the item into one or more collections, resize the picker, and prefill tags or notes (the tag field supports auto-complete from existing tags).
+- Clicking `●` (green) jumps straight to the local item; **double-clicking `●` (green) opens the PDF directly** if available; clicking `⊕` (red) opens the import dialog where you can select the target library (personal or group), drop the item into one or more collections, resize the picker, and prefill tags or notes (the tag field supports auto-complete from existing tags).
+- **Batch import (new in 1.1.4)**: Use checkboxes on the left side of entries to select multiple references, then click the **Import** button in the batch toolbar to import them all at once. The add-on will:
+  - Detect duplicates before importing (based on recid, arXiv ID, or DOI)
+  - Show a dialog listing duplicates where you can choose which ones to import or skip
+  - Import all selected entries to the same target (library/collections/tags/notes) with progress tracking
+  - Support cancellation via ESC key during import
 - Use the link icon to relate or unlink items, or the clipboard icon to copy curated BibTeX snippets.
 - Hover over a title to load its abstract tooltip; click the title to open the INSPIRE record in your browser.
 - Clicking any citation count opens the Entry Cited tab, and clicking an author name opens Author Papers, so you can continue exploring and importing without leaving the panel.
@@ -73,8 +78,9 @@ When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE Refe
 - The panel toolbar provides two convenient buttons:
   - **Refresh button**: Bypass the cache and fetch fresh data from INSPIRE for the current view.
   - **Export button**: Click to open a menu with multiple export options:
-    - **Copy to Clipboard**: Copy all references in BibTeX, LaTeX (US), or LaTeX (EU) format to your clipboard.
-    - **Export to File**: Save all references to a `.bib` or `.tex` file for large reference lists that may exceed clipboard limits.
+    - **Copy to Clipboard**: Copy all references (or selected entries if any are checked) in BibTeX, LaTeX (US), or LaTeX (EU) format to your clipboard.
+    - **Export to File**: Save all references (or selected entries if any are checked) to a `.bib` or `.tex` file for large reference lists that may exceed clipboard limits.
+    - **Smart selection detection (new in 1.1.4)**: If you have selected entries using checkboxes, the export menu will show the count and only export selected entries; otherwise, it exports all visible entries.
 - **Automatic local caching (new in 1.1.3)**: When persistent cache is enabled in Preferences, every time you open a recid the References list is written to disk (cited-by / author tabs honor the configurable TTL), so subsequent loads—or offline sessions—reuse the cached payload instantly.
 - **Offline cache prefetch (new in 1.1.3)**: Right-click selected items or an entire collection, then choose `Download references cache` to pre-fetch the INSPIRE references into the local persistent cache (with a progress window and success/failure stats) so the panel can render instantly even when offline.
 
@@ -109,7 +115,9 @@ Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you ca
 - Filter supports common journal abbreviations such as "prl", "epja", "cpc", "ctp" etc.
 - Statistics chart (by years or by citations): switched off by default.
 - **INSPIRE Search from Search Bar** (1.1.2): Type `inspire:` followed by your query in Zotero's main search bar to search INSPIRE directly. Results appear in a new Search tab with full filtering/sorting support and search history.
-- **Right-click cache download** (1.1.3): Right-click items or collections and choose `Download references cache` to prefetch the long-lived References cache for offline use; the command reuses the same parsing logic as the References panel and reports success/failure counts.
+- **Right-click cache download** (1.1.3): Right-click items or collections and choose `INSPIRE` → `Download references cache` to prefetch the long-lived References cache for offline use; the command reuses the same parsing logic as the References panel and reports success/failure counts.
+- **Copy links in context menu** (1.1.4): Copy INSPIRE/zoteto links, BibTeX of selected item in the right-click `INSPIRE` submenu.
+- **Batch import with duplicate detection** (1.1.4): Select multiple references using checkboxes, then import them all at once with automatic duplicate detection (recid/arXiv/DOI). The export button also respects checkbox selections—export only selected entries when any are checked, or export all when none are selected.
 
 ## Installation
 
@@ -127,9 +135,20 @@ Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you ca
 
 ## Usage
 
-- Right click a selected item or multiple selected items, click `Update INSPIRE Metadata`, then choose one of the three options: fetch the metadata with or without abstracts, or update only the citations with and w/o self citations (if the paper is not in the INSPIRE database, then update the [CrossRef](https://www.crossref.org/) citation counts).
-- Right click a selected item or multiple selected items, click `Update INSPIRE Metadata`, then choose one of the three options: fetch the metadata with or without abstracts, or update only the citations with and w/o self citations.
-- Right click a selected collection, then click one of the three options.
+- **Right-click a selected item or multiple selected items**, then click `INSPIRE` to access:
+
+  - **Update Metadata**: Choose from three options:
+    - `With abstracts` - Fetch full metadata including abstracts
+    - `Without abstracts` - Fetch metadata excluding abstracts
+    - `Citation counts only` - Only update citation counts (with/without self-citations; falls back to [CrossRef](https://www.crossref.org/) if INSPIRE record not found)
+  - **Download references cache** (v1.1.3+): Prefetch INSPIRE references into local cache for offline use
+  - **Copy actions** (v1.1.4+, item menu only):
+    - `Copy BibTeX` - Fetch and copy BibTeX from INSPIRE
+    - `Copy INSPIRE link` - Copy INSPIRE literature URL
+    - `Copy citation key` - Copy item's citation key
+    - `Copy Zotero link` - Copy Zotero select link
+  - **Cancel update**: Cancel any ongoing update operation
+- **Right-click a selected collection**, then click `INSPIRE` to access update and cache options for all items in the collection.
 - Automatically retrieve the metadata from INSPIRE when adding a new item to the Zotero library. Options with or without getting abstracts can be set through the `Preferences` panel
 - Metadata can be fetched as long as one of the following is provided:
 
@@ -262,6 +281,7 @@ Control the persistent cache used for offline viewing:
 - **Enable local cache**: Master toggle; when disabled only in-memory caches are used.
 - **Show cache source indicator**: Displays whether the current view came from INSPIRE, memory, or local disk.
 - **Cache TTL (hours)**: Applies to Cited-by and Author tabs; References are always permanent.
+- **Compress cache files (gzip)**: Enabled by default. Uses the pako library to shrink large cache files by ~80% while keeping read/write transparent. Disable if you need raw JSON files.
 - **Custom cache directory**: Leave empty to use the Zotero data directory or click “Browse…” / “Reset” to manage a custom folder.
 - **Clear cache**: Removes all on-disk cache files and reports the number of entries deleted.
 
