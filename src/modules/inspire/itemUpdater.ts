@@ -4,6 +4,7 @@ import { getPref } from "../../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   DOI_ORG_URL,
+  INSPIRE_API_BASE,
   INSPIRE_NOTE_HTML_ENTITIES,
   INSPIRE_LITERATURE_URL,
 } from "./constants";
@@ -12,6 +13,7 @@ import { getInspireMeta, getCrossrefCount, fetchBibTeX } from "./metadataService
 import { deriveRecidFromItem, copyToClipboard } from "./apiUtils";
 import { localCache } from "./localCache";
 import { fetchReferencesEntries, enrichReferencesEntries } from "./referencesService";
+import { inspireFetch } from "./rateLimiter";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -602,6 +604,18 @@ export class ZInspire {
   }
 
   /**
+   * Get all selected regular items. Shows an error if none are selected.
+   */
+  private getSelectedRegularItems(): Zotero.Item[] {
+    const items = ZoteroPane.getSelectedItems();
+    const regularItems = items.filter((item) => item?.isRegularItem());
+    if (!regularItems.length) {
+      this.showCopyNotification(getString("copy-error-no-selection"), "fail");
+    }
+    return regularItems;
+  }
+
+  /**
    * Show a brief notification for copy actions.
    */
   private showCopyNotification(message: string, type: "success" | "fail" = "success") {
@@ -615,24 +629,35 @@ export class ZInspire {
    * Copy BibTeX from INSPIRE for the selected item.
    */
   async copyBibTeX() {
-    const item = this.getSelectedSingleItem();
-    if (!item) return;
+    const items = this.getSelectedRegularItems();
+    if (!items.length) return;
 
-    const recid = deriveRecidFromItem(item);
-    if (!recid) {
+    const recids = Array.from(
+      new Set(
+        items
+          .map((item) => deriveRecidFromItem(item))
+          .filter((recid): recid is string => !!recid),
+      ),
+    );
+
+    if (!recids.length) {
       this.showCopyNotification(getString("copy-error-no-recid"), "fail");
       return;
     }
 
     try {
-      const bibtex = await fetchBibTeX(recid);
+      const bibtex = recids.length === 1 ? await fetchBibTeX(recids[0]) : await this.fetchBibTeXBatch(recids);
       if (!bibtex) {
         this.showCopyNotification(getString("copy-error-bibtex-failed"), "fail");
         return;
       }
+      const entryCount = this.countBibTeXEntries(bibtex) || recids.length;
       const success = await copyToClipboard(bibtex);
       if (success) {
-        this.showCopyNotification(getString("copy-success-bibtex"), "success");
+        this.showCopyNotification(
+          getString("copy-success-bibtex", { args: { count: entryCount } }),
+          "success",
+        );
       } else {
         this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
       }
@@ -668,18 +693,25 @@ export class ZInspire {
    * Copy citation key for the selected item.
    */
   async copyCitationKey() {
-    const item = this.getSelectedSingleItem();
-    if (!item) return;
+    const items = this.getSelectedRegularItems();
+    if (!items.length) return;
 
-    const citationKey = item.getField("citationKey") as string | undefined;
-    if (!citationKey?.trim()) {
+    const citationKeys = items
+      .map((item) => (item.getField("citationKey") as string | undefined)?.trim())
+      .filter((key): key is string => !!key);
+
+    if (!citationKeys.length) {
       this.showCopyNotification(getString("copy-error-no-citation-key"), "fail");
       return;
     }
 
-    const success = await copyToClipboard(citationKey.trim());
+    const copiedCount = citationKeys.length;
+    const success = await copyToClipboard(citationKeys.join(", "));
     if (success) {
-      this.showCopyNotification(getString("copy-success-citation-key"), "success");
+      this.showCopyNotification(
+        getString("copy-success-citation-key", { args: { count: copiedCount } }),
+        "success",
+      );
     } else {
       this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
     }
@@ -715,6 +747,48 @@ export class ZInspire {
     } else {
       this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
     }
+  }
+
+  /**
+   * Fetch BibTeX for multiple recids in batches and concatenate results.
+   */
+  private async fetchBibTeXBatch(recids: string[]): Promise<string | null> {
+    const BATCH_SIZE = 50;
+    const allContent: string[] = [];
+
+    for (let i = 0; i < recids.length; i += BATCH_SIZE) {
+      const batch = recids.slice(i, i + BATCH_SIZE);
+      const query = batch.map((r) => `recid:${r}`).join(" OR ");
+      const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batch.length}&format=bibtex`;
+
+      try {
+        const response = await inspireFetch(url).catch(() => null);
+        if (!response || !response.ok) {
+          continue;
+        }
+        const content = (await response.text())?.trim();
+        if (content) {
+          allContent.push(content);
+        }
+      } catch (_err) {
+        // Continue to next batch on failure
+      }
+    }
+
+    if (!allContent.length) {
+      return null;
+    }
+
+    // If some batches failed, still return what we have; caller decides success/failure display.
+    return allContent.join("\n\n");
+  }
+
+  /**
+   * Count BibTeX entries in a blob of BibTeX text.
+   */
+  private countBibTeXEntries(content: string): number {
+    const matches = content.match(/@\w+\s*\{/g);
+    return matches ? matches.length : 0;
   }
 }
 

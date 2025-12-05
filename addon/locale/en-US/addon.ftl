@@ -215,9 +215,17 @@ menuitem-copy-bibtex = Copy BibTeX
 menuitem-copy-inspire-link = Copy INSPIRE link
 menuitem-copy-citation-key = Copy citation key
 menuitem-copy-zotero-link = Copy Zotero link
-copy-success-bibtex = BibTeX copied to clipboard
+copy-success-bibtex =
+  { $count ->
+    [one] Copied 1 BibTeX entry
+   *[other] Copied { $count } BibTeX entries
+  }
 copy-success-inspire-link = INSPIRE link copied to clipboard
-copy-success-citation-key = Citation key copied to clipboard
+copy-success-citation-key =
+  { $count ->
+    [one] Copied 1 citation key
+   *[other] Copied { $count } citation keys
+  }
 copy-success-zotero-link = Zotero link copied to clipboard
 copy-error-no-selection = Select exactly one item to copy
 copy-error-no-recid = INSPIRE record ID not found for this item
