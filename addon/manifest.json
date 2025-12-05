@@ -6,8 +6,8 @@
   "homepage_url": "__homepage__",
   "author": "__author__",
   "icons": {
-    "48": "content/icons/inspire.png",
-    "96": "content/icons/inspire@2x.png"
+    "48": "content/icons/inspire.svg",
+    "96": "content/icons/inspire.svg"
   },
   "applications": {
     "zotero": {

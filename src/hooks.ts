@@ -2,7 +2,7 @@ import { config } from "../package.json";
 import { initLocale, getString } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 import { ZInsMenu, ZInsUtils, ZInspireReferencePane } from "./modules/zinspire";
-import { localCache } from "./modules/inspire";
+import { localCache, getReaderIntegration } from "./modules/inspire";
 import {
   ENRICH_BATCH_RANGE,
   ENRICH_PARALLEL_RANGE,
@@ -42,6 +42,9 @@ async function onMainWindowLoad(_win: Window): Promise<void> {
 
   ZInsMenu.registerRightClickMenuPopup();
   ZInsMenu.registerRightClickCollectionMenu();
+
+  // FTR-PDF-ANNOTATE: Initialize Reader integration for citation detection
+  getReaderIntegration().initialize();
 }
 
 async function onMainWindowUnload(_win: Window): Promise<void> {
@@ -53,6 +56,8 @@ function onShutdown(): void {
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   ZInspireReferencePane.unregisterPanel();
+  // FTR-PDF-ANNOTATE: Cleanup Reader integration
+  getReaderIntegration().cleanup();
   // Flush pending cache writes before shutdown
   localCache.flushWrites().catch(() => {
     // Ignore flush errors during shutdown

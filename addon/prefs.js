@@ -10,6 +10,7 @@ pref("__prefsPrefix__.reader_auto_reopen", false);
 pref("__prefsPrefix__.chart_enable", true);
 pref("__prefsPrefix__.chart_default_collapsed", true);
 pref("__prefsPrefix__.search_history_days", 30);
+pref("__prefsPrefix__.pdf_fuzzy_citation", false);  // Aggressive citation detection for broken PDF text layers
 pref("__prefsPrefix__.quick_filters_last_used", "[]");
 // Local cache settings
 pref("__prefsPrefix__.local_cache_enable", true);

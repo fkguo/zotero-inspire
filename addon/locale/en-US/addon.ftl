@@ -264,3 +264,8 @@ references-panel-batch-duplicate-skip-all = Skip all duplicates
 references-panel-batch-duplicate-import-all = Import all anyway
 references-panel-batch-duplicate-confirm = Confirm selection
 references-panel-batch-duplicate-cancel = Cancel
+
+# PDF Citation Lookup (FTR-PDF-ANNOTATE)
+pdf-annotate-lookup-button = Look up in References
+pdf-annotate-not-found = Reference [{ $label }] not found in this paper
+pdf-annotate-no-text-layer = This PDF has no text layer. Citations cannot be detected.

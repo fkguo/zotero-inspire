@@ -77,7 +77,7 @@ export class ZInsUtils {
     const prefOptions = {
       pluginID: config.addonID,
       src: rootURI + "content/preferences.xhtml",
-      image: `chrome://${config.addonRef}/content/icons/inspire@2x.png`,
+      image: `chrome://${config.addonRef}/content/icons/inspire.svg`,
       defaultXUL: true,
     };
     Zotero.PreferencePanes.register(prefOptions);

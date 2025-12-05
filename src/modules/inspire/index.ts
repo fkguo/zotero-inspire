@@ -102,3 +102,24 @@ export { localCache } from "./localCache";
 // Re-export reference services
 export { fetchReferencesEntries, buildReferenceEntry, enrichReferencesEntries } from "./referencesService";
 
+// Re-export PDF annotate module (FTR-PDF-ANNOTATE)
+export {
+  // Types
+  type CitationType,
+  type ParsedCitation,
+  type CitationPosition,
+  type MatchResult,
+  type AlignmentIssue,
+  type AlignmentReport,
+  type ScanResult,
+  type CitationLookupEvent,
+  type PageScanCompleteEvent,
+  type ReaderState,
+  // Classes
+  CitationParser,
+  getCitationParser,
+  LabelMatcher,
+  ReaderIntegration,
+  getReaderIntegration,
+} from "./pdfAnnotate";
+

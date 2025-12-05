@@ -6,7 +6,7 @@ export class ZInsMenu {
     ztoolkit.Menu.register("item", {
       tag: "menuseparator",
     });
-    const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
+    const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.svg`;
     ztoolkit.Menu.register("item", {
       tag: "menu",
       label: getString("menupopup-label"),
@@ -19,7 +19,7 @@ export class ZInsMenu {
     ztoolkit.Menu.register("collection", {
       tag: "menuseparator",
     });
-    const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.png`;
+    const menuIcon = `chrome://${config.addonRef}/content/icons/inspire.svg`;
     ztoolkit.Menu.register("collection", {
       tag: "menu",
       label: getString("menupopup-label"),

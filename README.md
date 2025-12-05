@@ -106,7 +106,19 @@ Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you ca
 ![showcase](images/screenshot1.png)
 ![collectionwindow](images/screenshot2.png)
 
-## What's new in 1.1.x
+## What's new in 2.0
+
+### 🆕 PDF Reader Citation Detection (v2.0.0)
+
+A major new feature: **automatic citation detection in the PDF reader**!
+
+- **Select text containing citations** (e.g., "see Refs. [1,2,3]") in the PDF reader
+- The add-on **automatically detects citation patterns** and shows "INSPIRE Refs. [n]" buttons
+- **Click to jump** to the corresponding reference in the References Panel
+- **Supports multiple formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, `[arXiv:2301.12345]`, superscript digits
+- **Optional fuzzy detection** for PDFs with broken text layers (e.g., truncated brackets)
+
+### Previous releases (1.1.x)
 
 - The multi-tab INSPIRE panel described above, including the new Cited by, Entry Cited, and Author Papers views with shared filtering/sorting controls.
 - A richer import dialog that lets you pick personal or group libraries, select multiple collections, and prefill tags or notes before fetching items.

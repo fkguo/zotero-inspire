@@ -1147,3 +1147,117 @@
 [data-color-scheme="dark"] .zinspire-duplicate-dialog__btn:hover {
   background: var(--zotero-gray-6, #4a4a4f);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   PDF Citation Lookup Styles (FTR-PDF-ANNOTATE)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Entry highlight animation for PDF citation lookup */
+.zinspire-entry-highlight {
+  animation: zinspire-highlight-pulse 0.6s ease-in-out;
+  background-color: var(--zotero-blue-1, #e0f0ff) !important;
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--zotero-blue-5, #0060df);
+}
+
+@keyframes zinspire-highlight-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 var(--zotero-blue-5, #0060df);
+    background-color: transparent;
+  }
+  15% {
+    transform: scale(1.005);
+    box-shadow: 0 0 0 4px rgba(0, 96, 223, 0.4);
+    background-color: var(--zotero-blue-1, #e0f0ff);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 2px var(--zotero-blue-5, #0060df);
+    background-color: var(--zotero-blue-1, #e0f0ff);
+  }
+}
+
+/* Dark mode support for highlight */
+@media (prefers-color-scheme: dark) {
+  .zinspire-entry-highlight {
+    background-color: rgba(0, 96, 223, 0.25) !important;
+    box-shadow: 0 0 0 2px var(--zotero-blue-6, #0052cc);
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-entry-highlight,
+[data-color-scheme="dark"] .zinspire-entry-highlight {
+  background-color: rgba(0, 96, 223, 0.25) !important;
+  box-shadow: 0 0 0 2px var(--zotero-blue-6, #0052cc);
+}
+
+/* Lookup button in PDF selection popup */
+.zinspire-lookup-citation-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--fill-quinary, #d1d1d5);
+  background: var(--material-background, #ffffff);
+  cursor: pointer;
+  transition: background 120ms ease-in-out;
+}
+
+.zinspire-lookup-citation-btn:hover {
+  background: var(--fill-quinary, #f0f0f0);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Focused Entry Styles (FTR-FOCUSED-SELECTION)
+   Persistent selection state for PDF citation lookup and keyboard navigation
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Focused entry - persistent selection state */
+/* Use more specific selector and !important to ensure visibility */
+.zinspire-ref-entry.zinspire-entry-focused {
+  background-color: rgba(0, 96, 223, 0.12) !important;
+  border-left: 4px solid #0060df !important;
+  padding-left: 4px !important;
+  border-radius: 0 4px 4px 0;
+  box-sizing: border-box;
+}
+
+/* Ensure focused style doesn't conflict with temporary highlight */
+/* Temporary highlight takes precedence during animation */
+.zinspire-ref-entry.zinspire-entry-highlight.zinspire-entry-focused {
+  border-left: 3px solid #0060df !important;
+}
+
+/* Dark mode support for focused entry */
+@media (prefers-color-scheme: dark) {
+  .zinspire-ref-entry.zinspire-entry-focused {
+    background-color: rgba(0, 96, 223, 0.25) !important;
+    border-left-color: #3584e4 !important;
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-ref-entry.zinspire-entry-focused,
+[data-color-scheme="dark"] .zinspire-ref-entry.zinspire-entry-focused {
+  background-color: rgba(0, 96, 223, 0.25) !important;
+  border-left-color: #3584e4 !important;
+}
+
+/* Hover effect on row (visual feedback for clickable rows) */
+.zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(.zinspire-entry-focused) {
+  background-color: var(--fill-quinary, rgba(0, 0, 0, 0.03));
+  border-radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(.zinspire-entry-focused) {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+:root[zotero-platform-darkmode="true"] .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(.zinspire-entry-focused),
+[data-color-scheme="dark"] .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(.zinspire-entry-focused) {
+  background-color: rgba(255, 255, 255, 0.05);
+}

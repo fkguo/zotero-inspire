@@ -45,6 +45,10 @@ pref-search-history-clear =
 pref-search-history-cleared = History cleared
 pref-search-history-days-label = Keep search history for (days):
 
+pref-pdf-fuzzy-citation =
+    .label = Fuzzy citation detection (experimental)
+pref-pdf-fuzzy-citation-desc = Enable aggressive pattern matching when PDF text layer is broken (e.g., brackets truncated). May cause false positives.
+
 pref-reader-auto-reopen =
     .label = Reopen reader tab when navigating back/forward
 pref-reader-auto-reopen-desc = When enabled, if the reader tab was closed, it will be reopened automatically when using Back or Forward navigation.

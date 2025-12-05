@@ -165,6 +165,55 @@ All data caches use LRU (Least Recently Used) eviction to prevent unbounded memo
 | **Local Status Query Optimization** | SQL batch size increased to 500 |
 | **Infinite Scroll** | IntersectionObserver auto-loads more entries |
 
+### 1.5 PDF Reader Integration (v2.0.0)
+
+When selecting text containing citation markers in the Zotero PDF Reader, the add-on automatically detects citations and provides lookup buttons.
+
+#### Citation Detection
+
+- **Text Selection**: Select text containing citations in PDF (e.g., "see Refs. [1,2,3]")
+- **Popup Button**: When citations detected, shows "INSPIRE Refs. [n]" button in selection popup
+- **Multiple Citations**: When multiple citations selected, shows multiple buttons for each
+
+#### Supported Citation Formats
+
+| Format | Examples |
+|--------|----------|
+| Single number | `[1]`, `[42]` |
+| Multiple numbers | `[1,2,3]`, `[1, 2, 3]` |
+| Number range | `[1-5]`, `[1–5]` |
+| Mixed format | `[1,3-5,7]` |
+| Author-year | `[Smith 2024]`, `[WGR17]` |
+| arXiv ID | `[arXiv:2301.12345]`, `[hep-ph/9901234]` |
+| Superscript digits | ¹²³⁴⁵⁶⁷⁸⁹⁰ |
+
+#### Panel Integration
+
+When clicking the lookup button:
+1. Automatically switches to References tab
+2. Highlights the corresponding reference entry (temporary pulse + persistent focus)
+3. Scrolls to that entry position
+
+#### Persistent Focus Selection
+
+After jumping from PDF lookup, the entry maintains a focused state (light blue background + blue left border) for easy identification:
+
+- **Persistent display**: Focus selection does not auto-clear until user action
+- **Clear methods**: Press Escape, switch tabs, refresh data, or click another entry
+- **Independent from checkboxes**: Focus selection does not affect batch import checkbox selection
+
+#### Fuzzy Detection Mode (Experimental)
+
+For PDFs with broken text layers (e.g., brackets truncated), enable "Fuzzy citation detection" in Preferences:
+
+- **Location**: Preferences → References Panel → Fuzzy citation detection
+- **Function**: Recognizes citation patterns without brackets (e.g., "Bali 19" → `[19]`)
+- **Smart Exclusions**: Automatically excludes:
+  - Document structure terms (Section, Figure, Table, Equation, etc. and their abbreviations/plurals)
+  - Physics units (GeV, MeV, TeV, fb, pb, K, Hz, etc. - comprehensive list)
+  - Decimals, times, percentages, ordinals, fractions, dimensions
+- **Default**: Disabled to avoid false positives
+
 ---
 
 ## 2. Right-Click Menu Operations
@@ -375,5 +424,5 @@ When in search mode, the panel displays:
 
 ---
 
-*Last updated: 2025-12-04 (v1.1.4)*
+*Last updated: 2025-12-05 (v2.0.0)*
 

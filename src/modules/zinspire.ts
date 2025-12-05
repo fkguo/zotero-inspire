@@ -145,6 +145,11 @@ import {
   // Cache types
   type CacheSource,
   type LocalCacheType,
+  // PDF Annotate (FTR-PDF-ANNOTATE)
+  LabelMatcher,
+  getReaderIntegration,
+  type CitationLookupEvent,
+  type ParsedCitation,
 } from "./inspire";
 
 // Re-export for external use
@@ -167,21 +172,21 @@ export class ZInspireReferencePane {
     if (this.registrationKey) {
       return;
     }
-    const paneIcon = `chrome://${config.addonRef}/content/icons/inspire@0.5x.png`;
-    const paneIcon2x = `chrome://${config.addonRef}/content/icons/inspire.png`;
+    const headerIcon = `chrome://${config.addonRef}/content/icons/inspire-header.svg`;
+    const sidenavIcon = `chrome://${config.addonRef}/content/icons/inspire-sidenav.svg`;
 
     this.registrationKey = Zotero.ItemPaneManager.registerSection({
       paneID: 'zoteroinspire-references',
       pluginID: config.addonID,
       header: {
         l10nID: "pane-item-references-header",
-        icon: paneIcon,
-        darkIcon: paneIcon,
+        icon: headerIcon,
+        darkIcon: headerIcon,
       },
       sidenav: {
         l10nID: "pane-item-references-sidenav",
-        icon: paneIcon2x,
-        darkIcon: paneIcon2x,
+        icon: sidenavIcon,
+        darkIcon: sidenavIcon,
       },
       onInit: (args) => {
         try {
@@ -766,8 +771,11 @@ export class ZInspireReferencePane {
     const instances = InspireReferencePanelController.getInstances();
     if (instances.size === 0) {
       // Show a notification to the user
+      const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
       const progressWindow = new ProgressWindowHelper("INSPIRE Search");
+      progressWindow.win.changeHeadline("INSPIRE Search", icon);
       progressWindow.createLine({
+        icon: icon,
         text: "Please open the INSPIRE panel first",
         type: "error",
       });
@@ -917,12 +925,17 @@ class InspireReferencePanelController {
   private publishedOnlyFilterEnabled = false; // Filter for papers with journal information only
   private publishedOnlyButton?: HTMLButtonElement;
 
+  // Focused selection state (FTR-FOCUSED-SELECTION)
+  // Persistent selection for PDF citation lookup and future keyboard navigation
+  private focusedEntryID?: string;
+
   // Event delegation handlers (PERF-14: single listener instead of per-row)
   private boundHandleListClick?: (e: MouseEvent) => void;
   private boundHandleListMouseOver?: (e: MouseEvent) => void;
   private boundHandleListMouseOut?: (e: MouseEvent) => void;
   private boundHandleListMouseMove?: (e: MouseEvent) => void;
   private boundHandleListDoubleClick?: (e: MouseEvent) => void;
+  private boundHandleListKeyDown?: (e: KeyboardEvent) => void;  // FTR-FOCUSED-SELECTION
   // Timer for handling click/double-click conflict on marker
   private markerClickTimer?: ReturnType<typeof setTimeout>;
 
@@ -933,6 +946,10 @@ class InspireReferencePanelController {
   private batchSelectedBadge?: HTMLSpanElement;
   private batchImportButton?: HTMLButtonElement;
   private batchImportAbort?: AbortController;
+
+  // PDF Annotate (FTR-PDF-ANNOTATE)
+  private labelMatcher?: LabelMatcher;
+  private citationLookupHandler?: (event: CitationLookupEvent) => void;
 
   constructor(body: HTMLDivElement) {
     this.body = body;
@@ -1271,6 +1288,441 @@ class InspireReferencePanelController {
     this.registerNotifier();
     InspireReferencePanelController.instances.add(this);
     InspireReferencePanelController.syncBackButtonStates();
+
+    // FTR-PDF-ANNOTATE: Register for citation lookup events
+    this.initPdfCitationLookup();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PDF Citation Lookup (FTR-PDF-ANNOTATE)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Initialize PDF citation lookup event handler.
+   * Listens for citation selections from the PDF reader.
+   */
+  private initPdfCitationLookup(): void {
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] initPdfCitationLookup called for controller`,
+    );
+    const reader = getReaderIntegration();
+    
+    // Create bound handler so we can remove it later
+    this.citationLookupHandler = (event: CitationLookupEvent) => {
+      this.handleCitationLookup(event);
+    };
+
+    reader.on("citationLookup", this.citationLookupHandler);
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] Controller registered for citationLookup events`,
+    );
+  }
+
+  /**
+   * Handle citation lookup request from PDF reader.
+   * Finds matching entry and scrolls/highlights it.
+   */
+  private handleCitationLookup(event: CitationLookupEvent): void {
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] handleCitationLookup: parentItemID=${event.parentItemID}, currentItemID=${this.currentItemID}, labels=[${event.citation.labels.join(",")}]`,
+    );
+
+    // Only handle if this controller is showing the same item
+    if (this.currentItemID !== event.parentItemID) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Ignoring: item mismatch (controller shows ${this.currentItemID}, event for ${event.parentItemID})`,
+      );
+      return;
+    }
+
+    // Ensure we have entries loaded
+    if (!this.allEntries?.length) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] No entries loaded yet, showing loading message`,
+      );
+      this.showToast(getString("references-panel-status-loading"));
+      return;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] Processing lookup: viewMode=${this.viewMode}, entriesCount=${this.allEntries.length}`,
+    );
+
+    // Citation lookup only works on References tab (where the reference list matches PDF)
+    if (this.viewMode !== "references") {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Warning: viewMode is ${this.viewMode}, not "references" - match may fail`,
+      );
+    }
+
+    // Build label matcher if not exists or entries changed
+    if (!this.labelMatcher) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Building new LabelMatcher for ${this.allEntries.length} entries`,
+      );
+      this.labelMatcher = new LabelMatcher(this.allEntries);
+      // Log alignment diagnosis for debugging
+      const report = this.labelMatcher.diagnoseAlignment();
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Alignment: ${report.alignedCount}/${report.totalEntries} aligned, recommendation=${report.recommendation}`,
+      );
+    }
+
+    // Try to match citation labels
+    const citation = event.citation;
+    for (const label of citation.labels) {
+      const result = this.labelMatcher.match(label);
+      if (result) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] Match found: [${label}] -> index ${result.entryIndex}, entryId=${result.entryId}, method=${result.matchMethod}, confidence=${result.confidence}`,
+        );
+
+        // Ensure INSPIRE pane is visible before scrolling
+        // This will click the sidenav button if our section is not selected
+        const paneActivated = this.ensureINSPIREPaneVisible();
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible result: ${paneActivated}`,
+        );
+
+        // Give the UI time to update if we just activated the pane
+        // Then scroll to and highlight the matched entry
+        const doScrollAndHighlight = () => {
+          // Check if DOM is ready
+          if (!this.listEl || !this.body?.isConnected) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: DOM not ready, retrying in 100ms`,
+            );
+            setTimeout(doScrollAndHighlight, 100);
+            return;
+          }
+          // Check if list has children (content is rendered)
+          const listElChildren = this.listEl?.children?.length ?? 0;
+          if (listElChildren === 0 && this.allEntries.length > 0) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: forcing re-render (no children)`,
+            );
+            this.renderReferenceList({ preserveScroll: false });
+          }
+          this.scrollToEntryByIndex(result.entryIndex);
+          this.highlightEntryRow(result.entryIndex);
+        };
+
+        if (paneActivated) {
+          // Longer delay when item pane was collapsed - it needs time to render
+          setTimeout(doScrollAndHighlight, 150);
+        } else {
+          // Pane already visible, scroll immediately
+          doScrollAndHighlight();
+        }
+        return;
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] No match for label [${label}]`,
+        );
+      }
+    }
+
+    // No match found - show notification
+    const labelsStr = citation.labels.join(", ");
+    this.showToast(
+      getString("pdf-annotate-not-found", { args: { label: labelsStr } }),
+    );
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] No match found for any label in [${labelsStr}]`,
+    );
+  }
+
+  /**
+   * Scroll the list to show entry at the given index.
+   */
+  private scrollToEntryByIndex(index: number): void {
+    const entry = this.allEntries[index];
+    if (!entry) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: no entry at index ${index}`,
+      );
+      return;
+    }
+
+    // Get cached row element
+    const row = this.rowCache.get(entry.id);
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: index=${index}, entryId=${entry.id}, rowCached=${!!row}, listEl=${!!this.listEl}`,
+    );
+
+    if (row && this.listEl) {
+      // Scroll row into view with smooth behavior
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] scrollIntoView called for entry ${entry.id}`,
+      );
+    } else if (!row) {
+      // Row not in cache - this can happen if entry is not rendered yet
+      // (e.g., due to virtual scroll or filtered out)
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Row not in cache for entry ${entry.id} - entry may not be rendered`,
+      );
+      // Try to find by data-entry-id attribute as fallback
+      const rowByAttr = this.listEl?.querySelector(`[data-entry-id="${entry.id}"]`) as HTMLElement | null;
+      if (rowByAttr) {
+        rowByAttr.scrollIntoView({ behavior: "smooth", block: "center" });
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] Found row by data-entry-id attribute`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Highlight an entry row temporarily.
+   */
+  private highlightEntryRow(index: number): void {
+    const entry = this.allEntries[index];
+    if (!entry) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRow: no entry at index ${index}`,
+      );
+      return;
+    }
+
+    // Get row from cache or by attribute
+    let row = this.rowCache.get(entry.id);
+    if (!row) {
+      row = this.listEl?.querySelector(`[data-entry-id="${entry.id}"]`) as HTMLElement | null ?? undefined;
+    }
+
+    if (!row) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRow: row not found for entry ${entry.id}`,
+      );
+      return;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRow: adding highlight to entry ${entry.id}`,
+    );
+
+    // Remove any previous highlight
+    const prev = this.listEl?.querySelector(".zinspire-entry-highlight");
+    if (prev) {
+      prev.classList.remove("zinspire-entry-highlight");
+    }
+
+    // Add highlight class (temporary pulse animation)
+    row.classList.add("zinspire-entry-highlight");
+
+    // FTR-FOCUSED-SELECTION: Set focused entry (persistent selection)
+    this.setFocusedEntry(entry.id);
+
+    // Auto-remove temporary highlight after animation, but keep focused state
+    setTimeout(() => {
+      row.classList.remove("zinspire-entry-highlight");
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] temporary highlight removed from entry ${entry.id}, focused state kept`,
+      );
+    }, 2500);
+  }
+
+  /**
+   * Set focused entry and update visual state.
+   * FTR-FOCUSED-SELECTION: Persistent selection for PDF citation lookup and keyboard navigation.
+   * Uses inline styles because CSS files may not load properly in Zotero.
+   * @param entryID - Entry ID to focus, or undefined to clear focus
+   */
+  private setFocusedEntry(entryID?: string): void {
+    // Remove previous focus
+    if (this.focusedEntryID) {
+      const prevRow = this.rowCache.get(this.focusedEntryID);
+      if (prevRow) {
+        this.applyFocusedEntryStyle(prevRow, false);
+        Zotero.debug(
+          `[${config.addonName}] [FOCUSED-SELECTION] Removed focus from ${this.focusedEntryID}`,
+        );
+      }
+    }
+
+    // Set new focus
+    this.focusedEntryID = entryID;
+
+    if (entryID) {
+      const row = this.rowCache.get(entryID);
+      if (row) {
+        this.applyFocusedEntryStyle(row, true);
+        Zotero.debug(
+          `[${config.addonName}] [FOCUSED-SELECTION] Set focus to entry ${entryID}`,
+        );
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] [FOCUSED-SELECTION] WARNING: row not found in cache for entry ${entryID}`,
+        );
+      }
+    } else {
+      Zotero.debug(
+        `[${config.addonName}] [FOCUSED-SELECTION] Cleared focus`,
+      );
+    }
+  }
+
+  /**
+   * Clear focused entry.
+   * FTR-FOCUSED-SELECTION: Called when switching tabs, refreshing, or pressing Escape.
+   */
+  private clearFocusedEntry(): void {
+    this.setFocusedEntry(undefined);
+  }
+
+  /**
+   * Apply or remove focused entry inline styles on a row element.
+   * FTR-FOCUSED-SELECTION: Extracted to avoid code duplication between
+   * setFocusedEntry() and updateRowContent().
+   * Uses inline styles because CSS files may not load properly in Zotero.
+   * Uses box-shadow for left border to avoid layout shift (keeps buttons aligned).
+   *
+   * @param row - The row element to style
+   * @param isFocused - Whether to apply focus styles (true) or clear them (false)
+   */
+  private applyFocusedEntryStyle(row: HTMLElement, isFocused: boolean): void {
+    if (isFocused) {
+      row.classList.add("zinspire-entry-focused");
+      const isDarkMode = Zotero.getMainWindow?.()?.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+      if (isDarkMode) {
+        row.style.backgroundColor = "rgba(0, 96, 223, 0.2)";
+        row.style.boxShadow = "inset 3px 0 0 #3584e4";
+      } else {
+        row.style.backgroundColor = "rgba(0, 96, 223, 0.12)";
+        row.style.boxShadow = "inset 3px 0 0 #0060df";
+      }
+    } else {
+      row.classList.remove("zinspire-entry-focused");
+      row.style.backgroundColor = "";
+      row.style.boxShadow = "";
+    }
+  }
+
+  /**
+   * Ensure the INSPIRE References pane is visible in the item pane sidenav.
+   * Finds and clicks the sidenav button for our registered section.
+   * Returns true if the pane was found and activated, false otherwise.
+   */
+  private ensureINSPIREPaneVisible(): boolean {
+    const mainWindow = Zotero.getMainWindow?.();
+    if (!mainWindow?.document) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: mainWindow not available`,
+      );
+      return false;
+    }
+
+    const doc = mainWindow.document;
+
+    // Use correct Zotero 7 API: ZoteroPane.itemPane has 'collapsed', 'width' attributes
+    const zoteroPane = Zotero.getActiveZoteroPane?.();
+    const itemPaneEl = zoteroPane?.itemPane as HTMLElement | false | undefined;
+    const itemPaneCollapsed = itemPaneEl ? itemPaneEl.getAttribute("collapsed") === "true" : false;
+    const itemPaneOffsetWidth = itemPaneEl ? (itemPaneEl as HTMLElement).offsetWidth : 0;
+    // Item pane is hidden if collapsed=true OR has zero width
+    const itemPaneHidden = itemPaneCollapsed || (itemPaneEl && itemPaneOffsetWidth === 0);
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: itemPane exists=${!!itemPaneEl}, collapsed=${itemPaneCollapsed}, offsetWidth=${itemPaneOffsetWidth}, hidden=${itemPaneHidden}`,
+    );
+
+    // If item pane is collapsed, we need to open it first
+    if (itemPaneCollapsed && itemPaneEl) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: item pane is collapsed, attempting to open it`,
+      );
+      try {
+        // Remove collapsed attribute
+        itemPaneEl.removeAttribute("collapsed");
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: removed collapsed attribute from itemPane`,
+        );
+        
+        // Check if item pane has a valid width - if not, set a default
+        // When item pane was never opened, width attribute is null and content has 0 width
+        const currentWidth = itemPaneEl.getAttribute("width");
+        if (!currentWidth || currentWidth === "0") {
+          // Set a reasonable default width (similar to Zotero's default)
+          const defaultWidth = "350";
+          itemPaneEl.setAttribute("width", defaultWidth);
+          // Also set style.width to ensure immediate effect
+          itemPaneEl.style.width = defaultWidth + "px";
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: set default width=${defaultWidth} on itemPane`,
+          );
+        }
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: failed to open item pane: ${err}`,
+        );
+      }
+    }
+
+    // Our registered paneID is 'zoteroinspire-references'
+    // In Zotero 7, sidenav buttons have data-pane attribute matching the paneID
+    const paneID = "zoteroinspire-references";
+
+    // Try to find the sidenav button for our section
+    // The button should be in item-pane-sidenav or similar container
+    const sidenavButton = doc.querySelector(
+      `[data-pane="${paneID}"], [data-l10n-id="pane-item-references-sidenav"]`
+    ) as HTMLElement | null;
+
+    if (sidenavButton) {
+      // Check if already selected
+      const isSelected =
+        sidenavButton.classList.contains("selected") ||
+        sidenavButton.getAttribute("aria-selected") === "true" ||
+        sidenavButton.hasAttribute("selected");
+
+      if (!isSelected) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: clicking sidenav button to select INSPIRE section`,
+        );
+        // Click the button to select our section
+        sidenavButton.click();
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: INSPIRE section already selected`,
+        );
+      }
+      return true;
+    }
+
+    // Alternative: Try to find by looking through all sidenav buttons
+    const sidenavContainer = doc.querySelector(
+      ".item-pane-sidenav, #zotero-item-pane-sidenav, [class*='sidenav']"
+    );
+
+    if (sidenavContainer) {
+      // Look for our section button by its icon or other attributes
+      const allButtons = Array.from(
+        sidenavContainer.querySelectorAll("toolbarbutton, button, [role='tab']")
+      ) as HTMLElement[];
+      for (const btn of allButtons) {
+        if (!btn) continue;
+        const labelAttr = btn.getAttribute?.("data-l10n-id");
+        const tooltipAttr = btn.getAttribute?.("tooltiptext");
+        const paneAttr = btn.getAttribute?.("data-pane");
+
+        if (
+          paneAttr === paneID ||
+          labelAttr?.includes("references") ||
+          tooltipAttr?.toLowerCase().includes("inspire")
+        ) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: found button by alternative search, clicking`,
+          );
+          btn.click?.();
+          return true;
+        }
+      }
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: could not find sidenav button for INSPIRE section`,
+    );
+    return false;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1973,6 +2425,17 @@ class InspireReferencePanelController {
         }
         return;
       }
+
+      // FTR-FOCUSED-SELECTION: Row background click sets focus
+      // Only if not clicking on interactive elements (buttons, links, inputs, etc.)
+      const isInteractiveElement = target.closest(
+        "button, a, input, .zinspire-ref-entry__dot, .zinspire-ref-entry__link, " +
+        ".zinspire-ref-entry__author-link, .zinspire-ref-entry__stats-button, " +
+        ".zinspire-ref-entry__bibtex, .zinspire-ref-entry__checkbox"
+      );
+      if (!isInteractiveElement) {
+        this.setFocusedEntry(entry.id);
+      }
     };
 
     // Mouseover handler for tooltip and hover effects
@@ -2050,12 +2513,21 @@ class InspireReferencePanelController {
       }
     };
 
+    // FTR-FOCUSED-SELECTION: Escape key clears focused entry
+    this.boundHandleListKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && this.focusedEntryID) {
+        this.clearFocusedEntry();
+        event.preventDefault();
+      }
+    };
+
     // Attach listeners to listEl
     this.listEl.addEventListener("click", this.boundHandleListClick);
     this.listEl.addEventListener("mouseover", this.boundHandleListMouseOver);
     this.listEl.addEventListener("mouseout", this.boundHandleListMouseOut);
     this.listEl.addEventListener("mousemove", this.boundHandleListMouseMove);
     this.listEl.addEventListener("dblclick", this.boundHandleListDoubleClick);
+    this.listEl.addEventListener("keydown", this.boundHandleListKeyDown);
   }
 
   /**
@@ -2081,6 +2553,11 @@ class InspireReferencePanelController {
     if (this.boundHandleListDoubleClick) {
       this.listEl.removeEventListener("dblclick", this.boundHandleListDoubleClick);
       this.boundHandleListDoubleClick = undefined;
+    }
+    // FTR-FOCUSED-SELECTION: cleanup keydown handler
+    if (this.boundHandleListKeyDown) {
+      this.listEl.removeEventListener("keydown", this.boundHandleListKeyDown);
+      this.boundHandleListKeyDown = undefined;
     }
     // Clear any pending click timer
     if (this.markerClickTimer) {
@@ -3302,6 +3779,12 @@ class InspireReferencePanelController {
       this.rateLimiterUnsubscribe = undefined;
     }
     // Note: No outside click handler cleanup needed - popup only closes via button toggle
+    // FTR-PDF-ANNOTATE: Cleanup citation lookup handler
+    if (this.citationLookupHandler) {
+      getReaderIntegration().off("citationLookup", this.citationLookupHandler);
+      this.citationLookupHandler = undefined;
+    }
+    this.labelMatcher = undefined;
     InspireReferencePanelController.instances.delete(this);
     if (!InspireReferencePanelController.instances.size) {
       InspireReferencePanelController.navigationStack = [];
@@ -3445,6 +3928,9 @@ class InspireReferencePanelController {
   handleRefresh() {
     if (!this.currentRecid) return;
 
+    // FTR-FOCUSED-SELECTION: Clear focus when refreshing
+    this.clearFocusedEntry();
+
     // Clear memory cache and local file cache based on current view mode
     // Smart caching: delete both unsorted and sorted cache files
     switch (this.viewMode) {
@@ -3537,9 +4023,11 @@ class InspireReferencePanelController {
     const entriesWithRecid = this.allEntries.filter((e) => e.recid);
 
     if (!entriesWithRecid.length) {
-      new ztoolkit.ProgressWindow(config.addonName)
-        .createLine({ text: strings.noRecidEntries, type: "default" })
-        .show();
+      const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+      const noRecidWin = new ztoolkit.ProgressWindow(config.addonName);
+      noRecidWin.win.changeHeadline(config.addonName, icon);
+      noRecidWin.createLine({ icon: icon, text: strings.noRecidEntries, type: "default" });
+      noRecidWin.show();
       return;
     }
 
@@ -3547,9 +4035,11 @@ class InspireReferencePanelController {
     const allBibTeX: string[] = [];
     let successCount = 0;
 
-    const progressWin = new ztoolkit.ProgressWindow(config.addonName)
-      .createLine({ text: strings.bibtexFetching, type: "default" })
-      .show();
+    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+    const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+    progressWin.win.changeHeadline(config.addonName, icon);
+    progressWin.createLine({ icon: icon, text: strings.bibtexFetching, type: "default" });
+    progressWin.show();
 
     try {
       for (let i = 0; i < entriesWithRecid.length; i += BATCH_SIZE) {
@@ -3578,6 +4068,7 @@ class InspireReferencePanelController {
         const success = await copyToClipboard(allBibTeX.join("\n\n"));
         if (success) {
           progressWin.changeLine({
+            icon: icon,
             text: getString("references-panel-bibtex-all-copied", {
               args: { count: successCount },
             }),
@@ -3586,6 +4077,7 @@ class InspireReferencePanelController {
         }
       } else {
         progressWin.changeLine({
+          icon: icon,
           text: strings.bibtexAllFailed,
           type: "fail",
         });
@@ -3593,6 +4085,7 @@ class InspireReferencePanelController {
     } catch (e) {
       Zotero.debug(`[${config.addonName}] Copy all BibTeX error: ${e}`);
       progressWin.changeLine({
+        icon: icon,
         text: strings.bibtexAllFailed,
         type: "fail",
       });
@@ -3616,9 +4109,11 @@ class InspireReferencePanelController {
     
     if (!entriesWithRecid.length) {
       const strings = getCachedStrings();
-      new ztoolkit.ProgressWindow(config.addonName)
-        .createLine({ text: strings.noRecidEntries, type: "default" })
-        .show();
+      const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+      const noRecidWin = new ztoolkit.ProgressWindow(config.addonName);
+      noRecidWin.win.changeHeadline(config.addonName, icon);
+      noRecidWin.createLine({ icon: icon, text: strings.noRecidEntries, type: "default" });
+      noRecidWin.show();
       return;
     }
 
@@ -3712,9 +4207,11 @@ class InspireReferencePanelController {
     let successCount = 0;
     let failedBatches = 0;
 
-    const progressWin = new ztoolkit.ProgressWindow(config.addonName)
-      .createLine({ text: strings.bibtexFetching, type: "default" })
-      .show();
+    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+    const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+    progressWin.win.changeHeadline(config.addonName, icon);
+    progressWin.createLine({ icon: icon, text: strings.bibtexFetching, type: "default" });
+    progressWin.show();
 
     try {
       for (let i = 0; i < entriesWithRecid.length; i += BATCH_SIZE) {
@@ -3747,7 +4244,7 @@ class InspireReferencePanelController {
       }
 
       if (!allContent.length) {
-        progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
+        progressWin.changeLine({ icon: icon, text: strings.bibtexAllFailed, type: "fail" });
         setTimeout(() => progressWin.close(), 2000);
         return;
       }
@@ -3763,6 +4260,7 @@ class InspireReferencePanelController {
         if (contentSize > CLIPBOARD_WARN_SIZE) {
           // Content too large, suggest file export
           progressWin.changeLine({
+            icon: icon,
             text: getString("references-panel-export-too-large", {
               args: { size: Math.round(contentSize / 1024) },
             }),
@@ -3775,6 +4273,7 @@ class InspireReferencePanelController {
         const success = await copyToClipboard(fullContent);
         if (success) {
           progressWin.changeLine({
+            icon: icon,
             text: getString("references-panel-export-copied", {
               args: { count: successCount, format: formatLabel },
             }),
@@ -3782,6 +4281,7 @@ class InspireReferencePanelController {
           });
         } else {
           progressWin.changeLine({
+            icon: icon,
             text: getString("references-panel-export-clipboard-failed"),
             type: "fail",
           });
@@ -3793,6 +4293,7 @@ class InspireReferencePanelController {
         if (filePath) {
           await Zotero.File.putContentsAsync(filePath, fullContent);
           progressWin.changeLine({
+            icon: icon,
             text: getString("references-panel-export-saved", {
               args: { count: successCount, format: formatLabel },
             }),
@@ -3800,6 +4301,7 @@ class InspireReferencePanelController {
           });
         } else {
           progressWin.changeLine({
+            icon: icon,
             text: getString("references-panel-export-cancelled"),
             type: "default",
           });
@@ -3872,9 +4374,13 @@ class InspireReferencePanelController {
       const previousItemID = this.currentItemID;
       const itemChanged = previousItemID !== item.id;
       this.currentItemID = item.id;
-      if (itemChanged && !InspireReferencePanelController.isNavigatingHistory) {
-        InspireReferencePanelController.forwardStack = [];
-        InspireReferencePanelController.syncBackButtonStates();
+      if (itemChanged) {
+        // FTR-PDF-ANNOTATE: Invalidate label matcher for new item
+        this.labelMatcher = undefined;
+        if (!InspireReferencePanelController.isNavigatingHistory) {
+          InspireReferencePanelController.forwardStack = [];
+          InspireReferencePanelController.syncBackButtonStates();
+        }
       }
 
       if (itemChanged) {
@@ -6066,6 +6572,10 @@ class InspireReferencePanelController {
         this.entryCitedPreviousMode = this.viewMode;
       }
     }
+
+    // FTR-FOCUSED-SELECTION: Clear focus when switching tabs
+    this.clearFocusedEntry();
+
     this.viewMode = mode;
     this.updateTabSelection();
     this.updateSearchUIVisibility();
@@ -7541,6 +8051,10 @@ class InspireReferencePanelController {
     if (this.rowPool.length < this.maxRowPoolSize) {
       // PERF-13: Keep structure intact, just reset data attributes
       delete row.dataset.entryId;
+      // FTR-FOCUSED-SELECTION: Clear inline focus styles before pooling
+      row.classList.remove("zinspire-entry-focused", "zinspire-entry-highlight");
+      row.style.backgroundColor = "";
+      row.style.boxShadow = "";
       this.rowPool.push(row);
     }
     // If pool is full, just let the element be garbage collected
@@ -7691,6 +8205,9 @@ class InspireReferencePanelController {
         statsButton.style.display = "none";
       }
     }
+
+    // FTR-FOCUSED-SELECTION: Restore focus state if this entry is focused
+    this.applyFocusedEntryStyle(row, this.focusedEntryID === entry.id);
   }
 
   /**
@@ -8466,9 +8983,11 @@ class InspireReferencePanelController {
   }
 
   private showToast(message: string) {
+    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
     const toast = new ztoolkit.ProgressWindow(config.addonName, {
       closeOnClick: true,
     });
+    toast.win.changeHeadline(config.addonName, icon);
     toast.createLine({ text: message });
     toast.show();
     toast.startCloseTimer(3000);
@@ -8634,9 +9153,11 @@ class InspireReferencePanelController {
         if (success) {
           button.textContent = "✓";
           // Show toast notification
+          const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
           const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
             closeOnClick: true,
           });
+          progressWindow.win.changeHeadline(config.addonName, icon);
           progressWindow.createLine({
             text: getString("references-panel-bibtex-copied"),
             type: "success",
@@ -8653,9 +9174,11 @@ class InspireReferencePanelController {
       button.textContent = "✗";
       Zotero.debug(`[${config.addonName}] BibTeX copy failed: ${_err}`);
       // Show error toast
+      const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
       const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
         closeOnClick: true,
       });
+      progressWindow.win.changeHeadline(config.addonName, icon);
       progressWindow.createLine({
         text: getString("references-panel-bibtex-failed"),
         type: "fail",
@@ -9325,7 +9848,9 @@ class InspireReferencePanelController {
     mainWindow?.addEventListener("keydown", escapeHandler, true);
 
     // Progress window
+    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
     const progressWindow = new ProgressWindowHelper(config.addonName);
+    progressWindow.win.changeHeadline(config.addonName, icon);
     progressWindow.createLine({
       text: getString("references-panel-batch-importing", { args: { done: 0, total } }),
       progress: 0,

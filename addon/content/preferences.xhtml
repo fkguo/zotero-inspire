@@ -11,6 +11,7 @@
   <preference id="pref-chart_enable" name="__prefsPrefix__.chart_enable" type="bool" />
   <preference id="pref-chart_default_collapsed" name="__prefsPrefix__.chart_default_collapsed" type="bool" />
   <preference id="pref-search_history_days" name="__prefsPrefix__.search_history_days" type="int" />
+  <preference id="pref-pdf_fuzzy_citation" name="__prefsPrefix__.pdf_fuzzy_citation" type="bool" />
   <preference id="pref-reader_auto_reopen" name="__prefsPrefix__.reader_auto_reopen" type="bool" />
   <preference id="pref-tag_enable" name="__prefsPrefix__.tag_enable" type="bool" />
   <preference id="pref-tag_norecid" name="__prefsPrefix__.tag_norecid" type="string" />
@@ -150,6 +151,11 @@
           preference="extensions.zotero.inspiremeta.search_history_days" min="1" max="365"
           class="zinspire-pref-input" style="width: 60px; margin-left: 8px;" />
       </hbox>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px;">
+      <checkbox id="zotero-prefpane-__addonRef__-pdf_fuzzy_citation" preference="extensions.zotero.inspiremeta.pdf_fuzzy_citation"
+        data-l10n-id="pref-pdf-fuzzy-citation" />
+      <html:p class="zinspire-pref-desc" data-l10n-id="pref-pdf-fuzzy-citation-desc"></html:p>
     </vbox>
   </vbox>
 

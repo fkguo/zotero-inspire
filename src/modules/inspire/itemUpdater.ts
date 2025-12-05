@@ -8,6 +8,9 @@ import {
   INSPIRE_NOTE_HTML_ENTITIES,
   INSPIRE_LITERATURE_URL,
 } from "./constants";
+
+// Plugin icon for progress windows (PNG format required for ProgressWindow headline)
+const PLUGIN_ICON = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
 import type { jsobject, ItemWithPendingInspireNote } from "./types";
 import { getInspireMeta, getCrossrefCount, fetchBibTeX } from "./metadataService";
 import { deriveRecidFromItem, copyToClipboard } from "./apiUtils";
@@ -105,18 +108,19 @@ export class ZInspire {
         }
       } else {
         if (!this.final_count_shown) {
-          const icon = "chrome://zotero/skin/tick.png";
           this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
             closeOnClick: true,
           });
-          this.progressWindow.changeHeadline("Finished");
+          this.progressWindow.win.changeHeadline("Finished", PLUGIN_ICON);
           if (operation === "full" || operation === "noabstract") {
             this.progressWindow.createLine({
+              icon: PLUGIN_ICON,
               text: "INSPIRE metadata updated for " + this.counter + " items.",
               progress: 100,
             });
           } else if (operation === "citations") {
             this.progressWindow.createLine({
+              icon: PLUGIN_ICON,
               text:
                 "INSPIRE citations updated for " +
                 this.counter +
@@ -278,7 +282,10 @@ export class ZInspire {
       closeOnClick: true,
       closeTime: -1,
     });
+    // Note: Zotero 7 ProgressWindow headline does not display icons
+    // Use icon in createLine instead to show plugin logo
     this.progressWindow.createLine({
+      icon: PLUGIN_ICON,
       text: `Processing 0 of ${total} items...`,
       progress: 0,
     });
@@ -310,6 +317,7 @@ export class ZInspire {
         if (!this.isCancelled) {
           const percent = Math.round((completed / total) * 100);
           this.progressWindow.changeLine({
+            icon: PLUGIN_ICON,
             text: `Processing ${completed} of ${total} items...`,
             progress: percent,
           });
@@ -361,10 +369,9 @@ export class ZInspire {
     const statsWindow = new ztoolkit.ProgressWindow(config.addonName, {
       closeOnClick: true,
     });
-    statsWindow.changeHeadline(getString("update-cancelled"));
-    const icon = "chrome://zotero/skin/warning.png";
+    statsWindow.win.changeHeadline(getString("update-cancelled"), PLUGIN_ICON);
     statsWindow.createLine({
-      icon: icon,
+      icon: PLUGIN_ICON,
       text: getString("update-cancelled-stats", { args: { completed: completed.toString(), total: total.toString() } }),
     });
     statsWindow.show();
@@ -390,7 +397,9 @@ export class ZInspire {
     const total = recidSet.size;
     Zotero.debug(`[${config.addonName}] prefetchReferencesCache: creating progress window`);
     const progressWindow = new ProgressWindowHelper(getString("download-cache-progress-title"));
+    progressWindow.win.changeHeadline(getString("download-cache-progress-title"), PLUGIN_ICON);
     progressWindow.createLine({
+      icon: PLUGIN_ICON,
       text: getString("download-cache-start", { args: { total } }),
       progress: 0,
     });
@@ -411,6 +420,7 @@ export class ZInspire {
 
       processed++;
       progressWindow.changeLine({
+        icon: PLUGIN_ICON,
         text: getString("download-cache-progress", { args: { done: processed, total } }),
         progress: Math.round((processed / total) * 100),
       });
@@ -441,13 +451,15 @@ export class ZInspire {
       }
     }
 
-    progressWindow.changeHeadline(getString("download-cache-progress-title"));
+    progressWindow.win.changeHeadline(getString("download-cache-progress-title"), PLUGIN_ICON);
     progressWindow.createLine({
+      icon: PLUGIN_ICON,
       text: getString("download-cache-success", { args: { success } }),
       type: "success",
     });
     if (failed > 0) {
       progressWindow.createLine({
+        icon: PLUGIN_ICON,
         text: getString("download-cache-failed", { args: { failed } }),
         type: "error",
       });
@@ -462,10 +474,9 @@ export class ZInspire {
     const statsWindow = new ztoolkit.ProgressWindow(config.addonName, {
       closeOnClick: true,
     });
-    statsWindow.changeHeadline(getString("download-cache-cancelled-title"));
-    const icon = "chrome://zotero/skin/warning.png";
+    statsWindow.win.changeHeadline(getString("download-cache-cancelled-title"), PLUGIN_ICON);
     statsWindow.createLine({
-      icon: icon,
+      icon: PLUGIN_ICON,
       text: getString("download-cache-cancelled", { args: { done: completed.toString(), total: total.toString() } }),
     });
     statsWindow.show();
@@ -474,7 +485,8 @@ export class ZInspire {
 
   private showCacheNotification(message: string, type: "info" | "error" = "info") {
     const window = new ProgressWindowHelper(config.addonName);
-    window.createLine({ text: message, type });
+    window.win.changeHeadline(config.addonName, PLUGIN_ICON);
+    window.createLine({ icon: PLUGIN_ICON, text: message, type });
     window.show();
     window.startCloseTimer(3000);
   }
@@ -492,8 +504,9 @@ export class ZInspire {
     this.current++;
 
     const percent = Math.round((this.numberOfUpdatedItems / this.toUpdate) * 100);
-    this.progressWindow.changeLine({ progress: percent });
+    this.progressWindow.changeLine({ icon: PLUGIN_ICON, progress: percent });
     this.progressWindow.changeLine({
+      icon: PLUGIN_ICON,
       text: "Item " + this.current + " of " + this.toUpdate,
     });
     this.progressWindow.show();
@@ -620,7 +633,7 @@ export class ZInspire {
    */
   private showCopyNotification(message: string, type: "success" | "fail" = "success") {
     const window = new ProgressWindowHelper(config.addonName);
-    window.createLine({ text: message, type });
+    window.createLine({ icon: PLUGIN_ICON, text: message, type });
     window.show();
     window.startCloseTimer(2500);
   }
