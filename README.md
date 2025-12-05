@@ -19,7 +19,9 @@ This add-on for the excellent open-source reference manager [Zotero](https://git
     - [Cached data and toolbar controls](#cached-data-and-toolbar-controls)
     - [Back/Forward Navigation](#backforward-navigation)
     - [INSPIRE Search from Search Bar (new in 1.1.2)](#inspire-search-from-search-bar-new-in-112)
-  - [What&#39;s new in 1.1.x](#whats-new-in-11x)
+  - [What's new](#whats-new)
+    - [🆕 PDF Reader Citation Detection (v2.0.0)](#-pdf-reader-citation-detection-v200)
+    - [Previous releases (1.1.x)](#previous-releases-11x)
   - [Installation](#installation)
     - [Pre-built binaries](#pre-built-binaries)
     - [Building from source](#building-from-source)
@@ -30,6 +32,7 @@ This add-on for the excellent open-source reference manager [Zotero](https://git
     - [Field Order in Extra](#field-order-in-extra)
     - [arXiv Primary Category Tag](#arxiv-primary-category-tag)
     - [References Panel](#references-panel)
+    - [Local Cache (new in 1.1.3)](#local-cache-new-in-113)
     - [Reader View Navigation](#reader-view-navigation)
     - [INSPIRE Record Not Found](#inspire-record-not-found)
   - [Additional tip for citing as you writing LaTeX](#additional-tip-for-citing-as-you-writing-latex)
@@ -106,7 +109,7 @@ Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you ca
 ![showcase](images/screenshot1.png)
 ![collectionwindow](images/screenshot2.png)
 
-## What's new in 2.0
+## What's new
 
 ### 🆕 PDF Reader Citation Detection (v2.0.0)
 
