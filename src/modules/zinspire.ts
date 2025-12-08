@@ -49,6 +49,30 @@ import {
   FILTER_HISTORY_PREF_KEY,
   FILTER_HISTORY_MAX_ENTRIES,
   AUTHOR_IDS_EXTRACT_LIMIT,
+  // New constants for magic number replacement
+  FILTER_DEBOUNCE_MS,
+  CHART_THROTTLE_MS,
+  TOOLTIP_SHOW_DELAY_MS,
+  TOOLTIP_HIDE_DELAY_MS,
+  SCROLL_HIGHLIGHT_DELAY_MS,
+  PROGRESS_CLOSE_DELAY_MS,
+  PROGRESS_CLOSE_DELAY_WARN_MS,
+  RAF_FALLBACK_MS,
+  REFERENCES_CACHE_SIZE,
+  CITED_BY_CACHE_SIZE,
+  ENTRY_CITED_CACHE_SIZE,
+  METADATA_CACHE_SIZE,
+  SEARCH_CACHE_SIZE,
+  ROW_POOL_MAX_SIZE,
+  CHART_MAX_BAR_WIDTH,
+  RENDER_PAGE_SIZE_FILTERED,
+  METADATA_BATCH_SIZE,
+  LOCAL_STATUS_BATCH_SIZE,
+  HIGH_CITATIONS_THRESHOLD,
+  SMALL_AUTHOR_GROUP_THRESHOLD,
+  AUTHOR_NAME_MAX_LENGTH,
+  CLIPBOARD_WARN_SIZE_BYTES,
+  CITATION_RANGES,
   // Quick Filter constants
   QUICK_FILTER_TYPES,
   QUICK_FILTER_PREF_KEY,
@@ -150,6 +174,9 @@ import {
   getReaderIntegration,
   type CitationLookupEvent,
   type ParsedCitation,
+  // Style utilities
+  CHART_STYLES,
+  toStyleString,
 } from "./inspire";
 
 // Re-export for external use
@@ -797,12 +824,39 @@ class InspireReferencePanelController {
   private static navigationStack: NavigationSnapshot[] = [];
   private static forwardStack: NavigationSnapshot[] = [];
   private static isNavigatingHistory = false;
+  // Shared citation listener (singleton on readerIntegration)
+  private static citationListenerRegistered = false;
+  private static sharedCitationHandler?: (event: CitationLookupEvent) => void;
+  // Shared citationLookup dedupe (prevents multiple controllers from handling same event)
+  private static lastGlobalCitationEventKey?: string;
+  private static lastGlobalCitationEventTs = 0;
+  private static globalCitationInFlightKey?: string;
 
   /**
    * Get all active controller instances for external access.
    */
   static getInstances(): Set<InspireReferencePanelController> {
     return this.instances;
+  }
+  private static pickControllerForEvent(
+    event: CitationLookupEvent,
+  ): InspireReferencePanelController | undefined {
+    // Prefer reader tab match
+    if (event.readerTabID) {
+      for (const inst of this.instances) {
+        if (inst.currentReaderTabID && inst.currentReaderTabID === event.readerTabID) {
+          return inst;
+        }
+      }
+    }
+    // Then parent item match
+    for (const inst of this.instances) {
+      if (inst.currentItemID === event.parentItemID) {
+        return inst;
+      }
+    }
+    // Fallback: first instance
+    return this.instances.values().next().value;
   }
   private static sharedPendingScrollRestore?: ScrollState & { itemID: number };
 
@@ -829,13 +883,13 @@ class InspireReferencePanelController {
   private allEntries: InspireReferenceEntry[] = [];
   // LRU caches to prevent unbounded memory growth
   // References: ~100 entries, each with InspireReferenceEntry[]
-  private referencesCache = new LRUCache<string, InspireReferenceEntry[]>(100);
+  private referencesCache = new LRUCache<string, InspireReferenceEntry[]>(REFERENCES_CACHE_SIZE);
   // Cited-by: ~50 entries (large arrays, paginated data)
-  private citedByCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  private citedByCache = new LRUCache<string, InspireReferenceEntry[]>(CITED_BY_CACHE_SIZE);
   // Entry-cited: ~50 entries (similar to cited-by)
-  private entryCitedCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  private entryCitedCache = new LRUCache<string, InspireReferenceEntry[]>(ENTRY_CITED_CACHE_SIZE);
   // Metadata: ~500 entries (individual metadata objects, frequently accessed)
-  private metadataCache = new LRUCache<string, jsobject>(500);
+  private metadataCache = new LRUCache<string, jsobject>(METADATA_CACHE_SIZE);
   // Row cache: cleared on each render, no LRU needed
   private rowCache = new Map<string, HTMLElement>();
   private activeAbort?: AbortController;
@@ -853,8 +907,8 @@ class InspireReferencePanelController {
   private abstractHideTimeout?: ReturnType<typeof setTimeout>;
   private abstractAbort?: AbortController;
   private tooltipRAF?: number;  // For requestAnimationFrame throttling
-  private readonly tooltipShowDelay = 300;
-  private readonly tooltipHideDelay = 600;
+  private readonly tooltipShowDelay = TOOLTIP_SHOW_DELAY_MS;
+  private readonly tooltipHideDelay = TOOLTIP_HIDE_DELAY_MS;
   // Frontend pagination state (for cited-by and author papers)
   private renderedCount = 0;  // Number of entries currently rendered
   private loadMoreButton?: HTMLButtonElement;
@@ -885,12 +939,12 @@ class InspireReferencePanelController {
   private chartStatsBottomLine?: HTMLSpanElement;
   // Filter input debounce timer
   private filterDebounceTimer?: ReturnType<typeof setTimeout>;
-  private readonly filterDebounceDelay = 150; // ms
+  private readonly filterDebounceDelay = FILTER_DEBOUNCE_MS;
   // Chart deferred rendering timer
   private chartRenderTimer?: ReturnType<typeof setTimeout>;
   // Row element pool for recycling (reduces DOM creation and GC pressure)
   private rowPool: HTMLDivElement[] = [];
-  private readonly maxRowPoolSize = 150;
+  private readonly maxRowPoolSize = ROW_POOL_MAX_SIZE;
   // Rate limiter status display
   private rateLimiterStatusEl?: HTMLSpanElement;
   private rateLimiterUnsubscribe?: () => void;
@@ -901,7 +955,7 @@ class InspireReferencePanelController {
   private cacheSourceEl?: HTMLSpanElement;
 
   // Search mode state
-  private searchCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  private searchCache = new LRUCache<string, InspireReferenceEntry[]>(SEARCH_CACHE_SIZE);
   private searchSort: InspireSortOption = "mostrecent";
   private currentSearchQuery?: string;  // Current active search query
   private searchHistory: SearchHistoryItem[] = [];  // Recent search queries
@@ -936,6 +990,7 @@ class InspireReferencePanelController {
   private boundHandleListMouseMove?: (e: MouseEvent) => void;
   private boundHandleListDoubleClick?: (e: MouseEvent) => void;
   private boundHandleListKeyDown?: (e: KeyboardEvent) => void;  // FTR-FOCUSED-SELECTION
+  private boundHandleBodyKeyDown?: (e: KeyboardEvent) => void;
   // Timer for handling click/double-click conflict on marker
   private markerClickTimer?: ReturnType<typeof setTimeout>;
 
@@ -950,6 +1005,13 @@ class InspireReferencePanelController {
   // PDF Annotate (FTR-PDF-ANNOTATE)
   private labelMatcher?: LabelMatcher;
   private citationLookupHandler?: (event: CitationLookupEvent) => void;
+  /** Track if PDF parsing has been attempted for current item */
+  private pdfParseAttempted = false;
+  /** Deduplicate bursty citationLookup events */
+  private lastCitationEventKey?: string;
+  private lastCitationEventTs = 0;
+  /** In-flight guard to avoid re-entrance on same label burst */
+  private citationInFlightKey?: string;
 
   constructor(body: HTMLDivElement) {
     this.body = body;
@@ -1302,38 +1364,94 @@ class InspireReferencePanelController {
    * Listens for citation selections from the PDF reader.
    */
   private initPdfCitationLookup(): void {
-    Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] initPdfCitationLookup called for controller`,
-    );
+    // Register a SINGLE listener on readerIntegration; dispatch to active controller
+    if (InspireReferencePanelController.citationListenerRegistered) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] initPdfCitationLookup skipped (already registered)`,
+      );
+      return;
+    }
     const reader = getReaderIntegration();
-    
-    // Create bound handler so we can remove it later
-    this.citationLookupHandler = (event: CitationLookupEvent) => {
-      this.handleCitationLookup(event);
+    InspireReferencePanelController.sharedCitationHandler = (event: CitationLookupEvent) => {
+      const controller = InspireReferencePanelController.pickControllerForEvent(event);
+      if (!controller) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] No controller available for citationLookup event`,
+        );
+        return;
+      }
+      controller.handleCitationLookup(event);
     };
-
-    reader.on("citationLookup", this.citationLookupHandler);
+    reader.on("citationLookup", InspireReferencePanelController.sharedCitationHandler);
+    InspireReferencePanelController.citationListenerRegistered = true;
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] Controller registered for citationLookup events`,
+      `[${config.addonName}] [PDF-ANNOTATE] Registered shared citationLookup listener`,
     );
   }
 
   /**
    * Handle citation lookup request from PDF reader.
-   * Finds matching entry and scrolls/highlights it.
+   * FTR-PDF-ANNOTATE-MULTI-LABEL: Now supports multiple matches per label.
+   * Finds matching entries and scrolls/highlights them.
    */
-  private handleCitationLookup(event: CitationLookupEvent): void {
+  private async handleCitationLookup(event: CitationLookupEvent): Promise<void> {
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] handleCitationLookup: parentItemID=${event.parentItemID}, currentItemID=${this.currentItemID}, labels=[${event.citation.labels.join(",")}]`,
     );
 
-    // Only handle if this controller is showing the same item
-    if (this.currentItemID !== event.parentItemID) {
+    // Only handle events from the active reader tab to avoid cross-pane interference
+    const activeReaderTabID =
+      this.currentReaderTabID ?? ReaderTabHelper.getSelectedTabID();
+    if (
+      event.readerTabID &&
+      activeReaderTabID &&
+      event.readerTabID !== activeReaderTabID
+    ) {
       Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Ignoring: item mismatch (controller shows ${this.currentItemID}, event for ${event.parentItemID})`,
+        `[${config.addonName}] [PDF-ANNOTATE] Skipping citationLookup from foreign readerTabID=${event.readerTabID}, active=${activeReaderTabID}`,
       );
       return;
     }
+
+    // Deduplicate bursty repeated events (same item + labels in short window)
+    const evtKey = `${event.parentItemID}:${event.citation.labels.join(",")}`;
+    const now = Date.now();
+    const dedupeWindow = 800;
+    const globalRecent =
+      InspireReferencePanelController.lastGlobalCitationEventKey === evtKey &&
+      now - InspireReferencePanelController.lastGlobalCitationEventTs < dedupeWindow;
+    const globalInFlight =
+      InspireReferencePanelController.globalCitationInFlightKey === evtKey;
+    if (
+      globalRecent ||
+      globalInFlight ||
+      (this.lastCitationEventKey === evtKey &&
+        now - this.lastCitationEventTs < dedupeWindow) ||
+      this.citationInFlightKey === evtKey
+    ) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Skipping duplicate citationLookup (${evtKey})`,
+      );
+      return;
+    }
+    InspireReferencePanelController.lastGlobalCitationEventKey = evtKey;
+    InspireReferencePanelController.lastGlobalCitationEventTs = now;
+    InspireReferencePanelController.globalCitationInFlightKey = evtKey;
+    this.lastCitationEventKey = evtKey;
+    this.lastCitationEventTs = now;
+    this.citationInFlightKey = evtKey;
+
+    try {
+      // Ensure the controller is synced to the PDF's parent item
+      if (this.currentItemID !== event.parentItemID) {
+        const switched = await this.ensureItemForCitation(event.parentItemID);
+        if (!switched) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] Ignoring: failed to sync to item ${event.parentItemID}`,
+          );
+          return;
+        }
+      }
 
     // Ensure we have entries loaded
     if (!this.allEntries?.length) {
@@ -1361,75 +1479,249 @@ class InspireReferencePanelController {
         `[${config.addonName}] [PDF-ANNOTATE] Building new LabelMatcher for ${this.allEntries.length} entries`,
       );
       this.labelMatcher = new LabelMatcher(this.allEntries);
-      // Log alignment diagnosis for debugging
-      const report = this.labelMatcher.diagnoseAlignment();
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Alignment: ${report.alignedCount}/${report.totalEntries} aligned, recommendation=${report.recommendation}`,
-      );
+      this.pdfParseAttempted = false;  // Reset flag when labelMatcher is rebuilt
     }
 
-    // Try to match citation labels
-    const citation = event.citation;
-    for (const label of citation.labels) {
-      const result = this.labelMatcher.match(label);
-      if (result) {
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] Match found: [${label}] -> index ${result.entryIndex}, entryId=${result.entryId}, method=${result.matchMethod}, confidence=${result.confidence}`,
-        );
+    // FTR-PDF-ANNOTATE-MULTI-LABEL: Check if PDF parsing is needed (even if labelMatcher exists)
+    // This allows PDF parsing to be triggered if the preference was enabled after first lookup
+    const report = this.labelMatcher.diagnoseAlignment();
+    const pdfParseEnabled = getPref("pdf_parse_refs_list") === true;
+    const hasPDFMapping = this.labelMatcher.hasPDFMapping?.() ?? false;
+    
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] State: pdfParseEnabled=${pdfParseEnabled}, pdfParseAttempted=${this.pdfParseAttempted}, hasPDFMapping=${hasPDFMapping}, recommendation=${report.recommendation}`,
+    );
 
-        // Ensure INSPIRE pane is visible before scrolling
-        // This will click the sidenav button if our section is not selected
-        const paneActivated = this.ensureINSPIREPaneVisible();
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible result: ${paneActivated}`,
-        );
-
-        // Give the UI time to update if we just activated the pane
-        // Then scroll to and highlight the matched entry
-        const doScrollAndHighlight = () => {
-          // Check if DOM is ready
-          if (!this.listEl || !this.body?.isConnected) {
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: DOM not ready, retrying in 100ms`,
-            );
-            setTimeout(doScrollAndHighlight, 100);
-            return;
-          }
-          // Check if list has children (content is rendered)
-          const listElChildren = this.listEl?.children?.length ?? 0;
-          if (listElChildren === 0 && this.allEntries.length > 0) {
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: forcing re-render (no children)`,
-            );
-            this.renderReferenceList({ preserveScroll: false });
-          }
-          this.scrollToEntryByIndex(result.entryIndex);
-          this.highlightEntryRow(result.entryIndex);
-        };
-
-        if (paneActivated) {
-          // Longer delay when item pane was collapsed - it needs time to render
-          setTimeout(doScrollAndHighlight, 150);
+    // Try PDF parsing if: enabled + labels missing + no existing mapping
+    // NOTE: Allow retry if previous attempt failed (pdfParseAttempted but no mapping)
+    const forcePDFStrict = getPref("pdf_force_mapping_on_mismatch") !== false;
+    const labelAvail = report.labelAvailableCount ?? 0;
+    const labelRate =
+      report.totalEntries > 0 ? labelAvail / report.totalEntries : 0;
+    const wellAlignedLabels =
+      report.recommendation === "USE_INSPIRE_LABEL" && labelRate >= 0.95;
+    const shouldAttemptPDFParse =
+      pdfParseEnabled &&
+      !hasPDFMapping &&
+      report.totalEntries > 0 &&
+      (
+        // 原逻辑：标签几乎缺失
+        report.recommendation === "USE_INDEX_ONLY" ||
+        // 新增：标签对齐不足（需要参考 PDF）
+        report.recommendation === "USE_INDEX_WITH_FALLBACK" ||
+        // 新增：强制偏好开启时，仅在标签未高对齐时尝试 PDF 解析
+        (forcePDFStrict && !wellAlignedLabels)
+      );
+    
+    if (shouldAttemptPDFParse) {
+      const labelRate = report.labelAvailableCount
+        ? ((report.labelAvailableCount / report.totalEntries) * 100).toFixed(0)
+        : "0";
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ⚠️ WARNING: Label data mostly missing (${labelRate}% available). Attempting PDF parsing...`,
+      );
+      
+      // FTR-PDF-ANNOTATE-MULTI-LABEL: AWAIT PDF parsing before matching
+      try {
+        const parseSuccess = await this.tryParsePDFReferences(event.parentItemID);
+        if (parseSuccess) {
+          this.pdfParseAttempted = true;  // Only mark as attempted if successful
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] PDF parsing completed successfully`,
+          );
         } else {
-          // Pane already visible, scroll immediately
-          doScrollAndHighlight();
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] PDF parsing completed but no mapping created`,
+          );
         }
-        return;
-      } else {
+      } catch (err) {
         Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] No match for label [${label}]`,
+          `[${config.addonName}] [PDF-ANNOTATE] PDF parsing failed: ${err}`,
+        );
+      }
+    } else if (!pdfParseEnabled && report.recommendation === "USE_INDEX_ONLY" && report.totalEntries > 0) {
+      // Only show warning toast if PDF parsing is disabled
+      const labelRate = report.labelAvailableCount
+        ? ((report.labelAvailableCount / report.totalEntries) * 100).toFixed(0)
+        : "0";
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ⚠️ WARNING: Label data mostly missing (${labelRate}% available). PDF parsing disabled. Using index-based fallback.`,
+      );
+      // Only show toast once per session (first lookup)
+      if (!this.pdfParseAttempted) {
+        this.pdfParseAttempted = true;
+        this.showToast(
+          getString("pdf-annotate-fallback-warning", {
+            args: { rate: labelRate },
+          }),
         );
       }
     }
 
+    // FTR-PDF-ANNOTATE-MULTI-LABEL: Try to match all citation labels and get all matches
+    const citation = event.citation;
+    const allMatches = this.labelMatcher.matchAll(citation.labels);
+
+    if (allMatches.length > 0) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Found ${allMatches.length} match(es) for labels [${citation.labels.join(",")}]`,
+      );
+
+      // Log individual matches for debugging
+      for (const match of allMatches) {
+        const isIndexFallback = match.matchMethod === "inferred" && match.confidence === "low";
+        const warningPrefix = isIndexFallback ? "⚠️ INDEX FALLBACK: " : "";
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ${warningPrefix}Match: [${match.pdfLabel}] -> index ${match.entryIndex}, entryId=${match.entryId}, method=${match.matchMethod}, confidence=${match.confidence}`,
+        );
+      }
+
+      // Ensure INSPIRE pane is visible before scrolling
+      const paneActivated = this.ensureINSPIREPaneVisible();
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible result: ${paneActivated}`,
+      );
+
+      // Give the UI time to update if we just activated the pane
+      // Then scroll to and highlight the matched entries
+      const doScrollAndHighlight = () => {
+        // Check if DOM is ready
+        if (!this.listEl || !this.body?.isConnected) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: DOM not ready, retrying in 100ms`,
+          );
+          setTimeout(doScrollAndHighlight, 100);
+          return;
+        }
+        // Check if list has children (content is rendered)
+        const listElChildren = this.listEl?.children?.length ?? 0;
+        if (listElChildren === 0 && this.allEntries.length > 0) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: forcing re-render (no children)`,
+          );
+          this.renderReferenceList({ preserveScroll: false });
+        }
+
+        // Scroll to first match
+        const firstIndex = allMatches[0].entryIndex;
+        this.scrollToEntryByIndex(firstIndex);
+
+        // FTR-PDF-ANNOTATE-MULTI-LABEL: Highlight all matches (with limit)
+        const MAX_HIGHLIGHT = 20;
+        const toHighlight = allMatches.slice(0, MAX_HIGHLIGHT);
+        this.highlightEntryRows(toHighlight.map((m) => m.entryIndex));
+
+        // Show toast if multiple matches or truncated; include missing info if any
+        if (allMatches.length > 1) {
+          const labelsStr = citation.labels.join(", ");
+          let msg =
+            allMatches.length > MAX_HIGHLIGHT
+              ? getString("pdf-annotate-multi-match-truncated", {
+                  args: {
+                    label: labelsStr,
+                    count: allMatches.length,
+                    shown: MAX_HIGHLIGHT,
+                  },
+                })
+              : getString("pdf-annotate-multi-match", {
+                  args: { label: labelsStr, count: allMatches.length },
+                });
+          // Append missing info (first missing author/year) if label had extra PDF refs not found
+          if (citation.labels.length === 1 && this.labelMatcher) {
+            const miss = this.labelMatcher.getMismatchForLabel(citation.labels[0]);
+            if (miss?.missing?.length) {
+              const firstMissing = miss.missing[0];
+              const missingStr = `${firstMissing.firstAuthorLastName ?? "?"} ${firstMissing.year ?? ""}`.trim();
+              msg = `${msg} (missing in INSPIRE: ${missingStr})`;
+            }
+          }
+          this.showToast(msg);
+        }
+      };
+
+      if (paneActivated) {
+        // Longer delay when item pane was collapsed - it needs time to render
+        setTimeout(doScrollAndHighlight, SCROLL_HIGHLIGHT_DELAY_MS);
+      } else {
+        // Pane already visible, scroll immediately
+        doScrollAndHighlight();
+      }
+      return;
+    }
+
     // No match found - show notification
     const labelsStr = citation.labels.join(", ");
-    this.showToast(
-      getString("pdf-annotate-not-found", { args: { label: labelsStr } }),
-    );
+    let notFoundMsg = getString("pdf-annotate-not-found", { args: { label: labelsStr } });
+    if (citation.labels.length === 1 && this.labelMatcher) {
+      const miss = this.labelMatcher.getMismatchForLabel(citation.labels[0]);
+      if (miss?.missing?.length) {
+        const firstMissing = miss.missing[0];
+        const missingStr = `${firstMissing.firstAuthorLastName ?? "?"} ${firstMissing.year ?? ""}`.trim();
+        notFoundMsg = `${notFoundMsg} (missing in INSPIRE: ${missingStr})`;
+      }
+    }
+    this.showToast(notFoundMsg);
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] No match found for any label in [${labelsStr}]`,
     );
+  } finally {
+    const clearKey = this.citationInFlightKey;
+    this.citationInFlightKey = undefined;
+    if (clearKey) {
+      setTimeout(() => {
+        if (InspireReferencePanelController.globalCitationInFlightKey === clearKey) {
+          InspireReferencePanelController.globalCitationInFlightKey = undefined;
+        }
+      }, 400);
+    }
+  }
+  }
+
+  /**
+   * Sync controller state to the PDF parent item when citation events come from a different item.
+   * Loads references so label matching can proceed.
+   */
+  private async ensureItemForCitation(itemID: number): Promise<boolean> {
+    const item = Zotero.Items.get(itemID);
+    if (!item || !item.isRegularItem()) {
+      return false;
+    }
+
+    // If already showing this item and have entries, no-op
+    if (this.currentItemID === itemID && this.allEntries?.length) {
+      return true;
+    }
+
+    // Switch to references view to keep mapping consistent
+    this.viewMode = "references";
+    this.labelMatcher = undefined;
+    this.pdfParseAttempted = false;
+    this.currentItemID = itemID;
+
+    const recid =
+      deriveRecidFromItem(item) ?? (await fetchRecidFromInspire(item));
+    if (!recid) {
+      this.currentRecid = undefined;
+      this.allEntries = [];
+      this.renderChartImmediate();
+      this.renderMessage(getString("references-panel-no-recid"));
+      this.lastRenderedEntries = [];
+      return false;
+    }
+
+    this.currentRecid = recid;
+    this.updateSortSelector();
+    try {
+      await this.loadEntries(recid, "references");
+      return this.allEntries?.length > 0;
+    } catch (err) {
+      if ((err as any)?.name !== "AbortError") {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureItemForCitation load error: ${err}`,
+        );
+      }
+      return false;
+    }
   }
 
   /**
@@ -1444,10 +1736,28 @@ class InspireReferencePanelController {
       return;
     }
 
-    // Get cached row element
-    const row = this.rowCache.get(entry.id);
+    // Get cached row element, but verify it's still connected to DOM
+    let row = this.rowCache.get(entry.id);
+    if (row && !row.isConnected) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: cached row for ${entry.id} is disconnected, looking up in DOM`,
+      );
+      row = undefined;
+    }
+
+    // Fallback to DOM lookup
+    if (!row && this.listEl) {
+      row = this.listEl.querySelector(`[data-entry-id="${entry.id}"]`) as HTMLElement | null ?? undefined;
+      if (row) {
+        this.rowCache.set(entry.id, row);
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: found row in DOM for ${entry.id}`,
+        );
+      }
+    }
+
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: index=${index}, entryId=${entry.id}, rowCached=${!!row}, listEl=${!!this.listEl}`,
+      `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: index=${index}, entryId=${entry.id}, rowFound=${!!row}, isConnected=${row?.isConnected ?? false}, listEl=${!!this.listEl}`,
     );
 
     if (row && this.listEl) {
@@ -1457,19 +1767,9 @@ class InspireReferencePanelController {
         `[${config.addonName}] [PDF-ANNOTATE] scrollIntoView called for entry ${entry.id}`,
       );
     } else if (!row) {
-      // Row not in cache - this can happen if entry is not rendered yet
-      // (e.g., due to virtual scroll or filtered out)
       Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Row not in cache for entry ${entry.id} - entry may not be rendered`,
+        `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: WARNING - row not found for entry ${entry.id}`,
       );
-      // Try to find by data-entry-id attribute as fallback
-      const rowByAttr = this.listEl?.querySelector(`[data-entry-id="${entry.id}"]`) as HTMLElement | null;
-      if (rowByAttr) {
-        rowByAttr.scrollIntoView({ behavior: "smooth", block: "center" });
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] Found row by data-entry-id attribute`,
-        );
-      }
     }
   }
 
@@ -1524,6 +1824,291 @@ class InspireReferencePanelController {
   }
 
   /**
+   * Try to parse PDF reference list and apply mapping to LabelMatcher.
+   * FTR-PDF-ANNOTATE-MULTI-LABEL: Scans PDF's References section to fix label alignment.
+   * @param parentItemID - The Zotero item ID (parent of PDF)
+   * @returns true if mapping was successfully applied, false otherwise
+   */
+  private async tryParsePDFReferences(parentItemID: number): Promise<boolean> {
+    const { getPDFReferencesParser } = await import("./inspire/pdfAnnotate/pdfReferencesParser");
+
+    // Get the parent item and find its PDF attachment
+    const item = Zotero.Items.get(parentItemID);
+    if (!item) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Item ${parentItemID} not found`,
+      );
+      return false;
+    }
+
+    // Find PDF attachment
+    const attachments = item.getAttachments();
+    let pdfPath: string | null = null;
+    let pdfAttachmentID: number | null = null;
+
+    for (const attachmentID of attachments) {
+      const attachment = Zotero.Items.get(attachmentID);
+      if (attachment?.attachmentContentType === "application/pdf") {
+        const filePath = await attachment.getFilePathAsync();
+        if (filePath) {
+          pdfPath = filePath;
+          pdfAttachmentID = attachmentID;
+        }
+        break;
+      }
+    }
+
+    if (!pdfPath || !pdfAttachmentID) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] No PDF attachment found for item ${parentItemID}`,
+      );
+      return false;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-PARSE] Found PDF: ${pdfPath} (attachment ${pdfAttachmentID})`,
+    );
+
+    // Extract text from PDF (last few pages where References usually are)
+    try {
+      // Use Zotero's fulltext cache to extract text
+      const pdfText = await this.extractPDFTextForReferences(pdfPath, pdfAttachmentID);
+      if (!pdfText) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Could not extract text from PDF`,
+        );
+        return false;
+      }
+
+      // Parse the reference list
+      const parser = getPDFReferencesParser();
+      const mapping = parser.parseReferencesSection(pdfText);
+
+      if (mapping && this.labelMatcher) {
+        this.labelMatcher.setPDFMapping(mapping);
+
+        // FTR-PDF-MATCHING: Calculate and store max label for concatenated range detection
+        // Set for attachment ID since reader.itemID is the attachment
+        const labelNums = Array.from(mapping.labelCounts.keys())
+          .map(l => parseInt(l, 10))
+          .filter(n => !isNaN(n));
+        if (labelNums.length > 0 && pdfAttachmentID) {
+          const maxLabel = Math.max(...labelNums);
+          getReaderIntegration().setMaxKnownLabel(pdfAttachmentID, maxLabel);
+        }
+
+        const multiCount = Array.from(mapping.labelCounts.values()).filter((c) => c > 1).length;
+        this.showToast(
+          getString("pdf-annotate-parse-success", {
+            args: {
+              total: mapping.totalLabels,
+              multi: multiCount,
+            },
+          }),
+        );
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Successfully applied PDF mapping`,
+        );
+        return true;
+      }
+      
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] No valid mapping created from PDF`,
+      );
+      return false;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Error: ${err}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Extract text from PDF for reference list parsing.
+   * Reads from Zotero's fulltext cache files (.zotero-ft-cache) directly.
+   * 
+   * @param pdfPath - Path to the PDF file
+   * @param _attachmentID - The Zotero attachment item ID (unused, kept for API compatibility)
+   */
+  private async extractPDFTextForReferences(
+    pdfPath: string,
+    _attachmentID: number,
+  ): Promise<string | null> {
+    try {
+      // Method 1: Try to read the fulltext cache file directly
+      // Zotero stores fulltext cache in the same directory as the PDF
+      // with the naming pattern: .zotero-ft-cache
+      const cacheFileName = ".zotero-ft-cache";
+      const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf("/"));
+      const cachePath = `${pdfDir}/${cacheFileName}`;
+      
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Looking for fulltext cache at: ${cachePath}`,
+      );
+
+      try {
+        // Check if cache file exists
+        const cacheExists = await IOUtils.exists(cachePath);
+        if (cacheExists) {
+          // Read the cache file
+          const cacheData = await IOUtils.read(cachePath);
+          const decoder = new TextDecoder("utf-8");
+          const text = decoder.decode(cacheData);
+          
+          if (text && text.length > 100) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-PARSE] Got ${text.length} chars from fulltext cache file (full text, no tail truncation)`,
+            );
+            return text;
+          }
+          Zotero.debug(
+            `[${config.addonName}] [PDF-PARSE] Cache file exists but has insufficient content (${text?.length || 0} chars)`,
+          );
+        } else {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-PARSE] No fulltext cache file found at ${cachePath}`,
+          );
+        }
+      } catch (e) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Error reading cache file: ${e}`,
+        );
+      }
+
+      // Method 2: Try using Zotero's Fulltext.getItemWords (if available)
+      // This returns an array of words, which we can join
+       
+      const fulltext = Zotero.Fulltext as any;
+      if (fulltext) {
+        // Try getItemWords first (returns words array)
+        if (typeof fulltext.getItemWords === "function") {
+          try {
+            const words = await fulltext.getItemWords(_attachmentID);
+            if (words && words.length > 0) {
+              const text = words.join(" ");
+              Zotero.debug(
+                `[${config.addonName}] [PDF-PARSE] Got ${text.length} chars from getItemWords (full text, no tail truncation)`,
+              );
+              return text;
+            }
+          } catch (e) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-PARSE] getItemWords error: ${e}`,
+            );
+          }
+        }
+        
+        // Try getTextForItem (alternative API)
+        if (typeof fulltext.getTextForItem === "function") {
+          try {
+            const text = await fulltext.getTextForItem(_attachmentID);
+            if (text && text.length > 100) {
+              Zotero.debug(
+                `[${config.addonName}] [PDF-PARSE] Got ${text.length} chars from getTextForItem (full text, no tail truncation)`,
+              );
+              return text;
+            }
+          } catch (e) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-PARSE] getTextForItem error: ${e}`,
+            );
+          }
+        }
+        
+        // List available Fulltext methods for debugging
+        const methods = Object.keys(fulltext).filter(k => typeof fulltext[k] === "function");
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Available Zotero.Fulltext methods: ${methods.slice(0, 20).join(", ")}${methods.length > 20 ? "..." : ""}`,
+        );
+      }
+
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Could not extract text from PDF`,
+      );
+      return null;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Text extraction error: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Highlight multiple entry rows.
+   * FTR-PDF-ANNOTATE-MULTI-LABEL: New method to support multi-label highlighting.
+   * Sets the first entry as focused, and highlights all entries with temporary animation.
+   * @param indices - Array of entry indices to highlight
+   */
+  private highlightEntryRows(indices: number[]): void {
+    if (!indices.length) return;
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: highlighting ${indices.length} entries`,
+    );
+
+    // Clear any existing highlights
+    const prevHighlights = this.listEl?.querySelectorAll(".zinspire-entry-highlight");
+    prevHighlights?.forEach((el) => el.classList.remove("zinspire-entry-highlight"));
+
+    // Set first entry as focused (persistent selection)
+    const firstEntry = this.allEntries[indices[0]];
+    if (firstEntry) {
+      this.setFocusedEntry(firstEntry.id);
+    }
+
+    // Collect all row elements to highlight
+    const rowsToHighlight: HTMLElement[] = [];
+    for (const index of indices) {
+      const entry = this.allEntries[index];
+      if (!entry) continue;
+
+      // Get row from cache, but verify it's still connected to DOM
+      let row = this.rowCache.get(entry.id);
+      if (row && !row.isConnected) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: cached row for ${entry.id} is disconnected, looking up in DOM`,
+        );
+        row = undefined;
+      }
+      // Fallback to DOM lookup
+      if (!row) {
+        row = this.listEl?.querySelector(`[data-entry-id="${entry.id}"]`) as HTMLElement | null ?? undefined;
+        if (row) {
+          this.rowCache.set(entry.id, row);
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: found row in DOM for ${entry.id}`,
+          );
+        }
+      }
+
+      if (row) {
+        row.classList.add("zinspire-entry-highlight");
+        rowsToHighlight.push(row);
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: added highlight to entry ${entry.id}, isConnected=${row.isConnected}`,
+        );
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: WARNING - row not found for entry ${entry.id}`,
+        );
+      }
+    }
+
+    // Auto-remove temporary highlight after animation (longer delay for multiple)
+    const highlightDuration = indices.length > 1 ? 3000 : 2500;
+    setTimeout(() => {
+      for (const row of rowsToHighlight) {
+        row.classList.remove("zinspire-entry-highlight");
+      }
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: removed temporary highlights from ${rowsToHighlight.length} entries`,
+      );
+    }, highlightDuration);
+  }
+
+  /**
    * Set focused entry and update visual state.
    * FTR-FOCUSED-SELECTION: Persistent selection for PDF citation lookup and keyboard navigation.
    * Uses inline styles because CSS files may not load properly in Zotero.
@@ -1532,7 +2117,17 @@ class InspireReferencePanelController {
   private setFocusedEntry(entryID?: string): void {
     // Remove previous focus
     if (this.focusedEntryID) {
-      const prevRow = this.rowCache.get(this.focusedEntryID);
+      let prevRow = this.rowCache.get(this.focusedEntryID);
+      // FTR-PDF-ANNOTATE-MULTI-LABEL: If cached row is disconnected, try to find it in DOM
+      if (prevRow && !prevRow.isConnected) {
+        Zotero.debug(
+          `[${config.addonName}] [FOCUSED-SELECTION] Cached row for ${this.focusedEntryID} is disconnected, looking up in DOM`,
+        );
+        prevRow = this.listEl?.querySelector(`[data-entry-id="${this.focusedEntryID}"]`) as HTMLElement | undefined;
+        if (prevRow) {
+          this.rowCache.set(this.focusedEntryID, prevRow);
+        }
+      }
       if (prevRow) {
         this.applyFocusedEntryStyle(prevRow, false);
         Zotero.debug(
@@ -1545,7 +2140,28 @@ class InspireReferencePanelController {
     this.focusedEntryID = entryID;
 
     if (entryID) {
-      const row = this.rowCache.get(entryID);
+      let row = this.rowCache.get(entryID);
+      // FTR-PDF-ANNOTATE-MULTI-LABEL: If cached row is disconnected, try to find it in DOM
+      if (row && !row.isConnected) {
+        Zotero.debug(
+          `[${config.addonName}] [FOCUSED-SELECTION] Cached row for ${entryID} is disconnected, looking up in DOM`,
+        );
+        row = this.listEl?.querySelector(`[data-entry-id="${entryID}"]`) as HTMLElement | undefined;
+        if (row) {
+          this.rowCache.set(entryID, row);
+        }
+      }
+      // Try DOM lookup as fallback if not in cache
+      if (!row) {
+        Zotero.debug(
+          `[${config.addonName}] [FOCUSED-SELECTION] Row not in cache, looking up in DOM for ${entryID}`,
+        );
+        row = this.listEl?.querySelector(`[data-entry-id="${entryID}"]`) as HTMLElement | undefined;
+        if (row) {
+          this.rowCache.set(entryID, row);
+        }
+      }
+
       if (row) {
         this.applyFocusedEntryStyle(row, true);
         Zotero.debug(
@@ -1553,7 +2169,7 @@ class InspireReferencePanelController {
         );
       } else {
         Zotero.debug(
-          `[${config.addonName}] [FOCUSED-SELECTION] WARNING: row not found in cache for entry ${entryID}`,
+          `[${config.addonName}] [FOCUSED-SELECTION] WARNING: row not found in cache or DOM for entry ${entryID}`,
         );
       }
     } else {
@@ -1582,9 +2198,24 @@ class InspireReferencePanelController {
    * @param isFocused - Whether to apply focus styles (true) or clear them (false)
    */
   private applyFocusedEntryStyle(row: HTMLElement, isFocused: boolean): void {
+    // Debug: Check if row is connected to DOM
+    const isConnected = row.isConnected;
+    Zotero.debug(
+      `[${config.addonName}] [FOCUSED-SELECTION] applyFocusedEntryStyle: isFocused=${isFocused}, isConnected=${isConnected}, tagName=${row.tagName}`,
+    );
+
+    if (!isConnected) {
+      Zotero.debug(
+        `[${config.addonName}] [FOCUSED-SELECTION] WARNING: row is not connected to DOM, styles will not be visible!`,
+      );
+    }
+
     if (isFocused) {
       row.classList.add("zinspire-entry-focused");
       const isDarkMode = Zotero.getMainWindow?.()?.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+      Zotero.debug(
+        `[${config.addonName}] [FOCUSED-SELECTION] Applying focus style, isDarkMode=${isDarkMode}`,
+      );
       if (isDarkMode) {
         row.style.backgroundColor = "rgba(0, 96, 223, 0.2)";
         row.style.boxShadow = "inset 3px 0 0 #3584e4";
@@ -2521,6 +3152,24 @@ class InspireReferencePanelController {
       }
     };
 
+    // FTR-FOCUSED-SELECTION: Allow Esc to clear focus even when list is not focused (e.g., PDF Look-up)
+    this.boundHandleBodyKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !this.focusedEntryID) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      // Avoid interfering with form inputs where Escape may have its own meaning
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return;
+      }
+
+      this.clearFocusedEntry();
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
     // Attach listeners to listEl
     this.listEl.addEventListener("click", this.boundHandleListClick);
     this.listEl.addEventListener("mouseover", this.boundHandleListMouseOver);
@@ -2528,6 +3177,8 @@ class InspireReferencePanelController {
     this.listEl.addEventListener("mousemove", this.boundHandleListMouseMove);
     this.listEl.addEventListener("dblclick", this.boundHandleListDoubleClick);
     this.listEl.addEventListener("keydown", this.boundHandleListKeyDown);
+    // Capture on document to catch Escape even when focus is outside the list (e.g., after PDF Look-up)
+    this.body.ownerDocument?.addEventListener("keydown", this.boundHandleBodyKeyDown, true);
   }
 
   /**
@@ -2559,6 +3210,10 @@ class InspireReferencePanelController {
       this.listEl.removeEventListener("keydown", this.boundHandleListKeyDown);
       this.boundHandleListKeyDown = undefined;
     }
+    if (this.boundHandleBodyKeyDown) {
+      this.body.ownerDocument?.removeEventListener("keydown", this.boundHandleBodyKeyDown, true);
+      this.boundHandleBodyKeyDown = undefined;
+    }
     // Clear any pending click timer
     if (this.markerClickTimer) {
       clearTimeout(this.markerClickTimer);
@@ -2581,7 +3236,7 @@ class InspireReferencePanelController {
     const mainWindow = owningWindow ?? Zotero.getMainWindow?.();
     const schedule = mainWindow?.requestAnimationFrame
       ? mainWindow.requestAnimationFrame.bind(mainWindow)
-      : (cb: FrameRequestCallback) => (mainWindow?.setTimeout?.(cb, 16) ?? setTimeout(cb, 16)) as unknown as number;
+      : (cb: FrameRequestCallback) => (mainWindow?.setTimeout?.(cb, RAF_FALLBACK_MS) ?? setTimeout(cb, RAF_FALLBACK_MS)) as unknown as number;
     const cancel = mainWindow?.cancelAnimationFrame
       ? mainWindow.cancelAnimationFrame.bind(mainWindow)
       : (id: number) => (mainWindow?.clearTimeout?.(id) ?? clearTimeout(id));
@@ -3184,21 +3839,13 @@ class InspireReferencePanelController {
     this.chartSvgWrapper.textContent = "";
     const loadingMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
     loadingMsg.className = "zinspire-chart-no-data";
-    loadingMsg.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      color: #9ca3af;
-      font-size: 12px;
-      font-style: italic;
-    `;
+    loadingMsg.style.cssText = toStyleString(CHART_STYLES.noDataItalic);
     loadingMsg.textContent = "Loading...";
     this.chartSvgWrapper.appendChild(loadingMsg);
   }
 
   // Throttle interval for chart rendering during rapid data updates (ms)
-  private static readonly CHART_THROTTLE_INTERVAL = 300;
+  private static readonly CHART_THROTTLE_INTERVAL = CHART_THROTTLE_MS;
   private lastChartRenderTime = 0;
 
   /**
@@ -3274,21 +3921,14 @@ class InspireReferencePanelController {
     if (!entries.length) {
       const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
       noDataMsg.className = "zinspire-chart-no-data";
-      noDataMsg.style.cssText = `
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 100%;
-        color: #9ca3af;
-        font-size: 12px;
-      `;
+      noDataMsg.style.cssText = toStyleString(CHART_STYLES.noData);
       noDataMsg.textContent = getString("references-panel-chart-no-data");
       this.chartSvgWrapper.appendChild(noDataMsg);
       return;
     }
 
     // Dynamic bar count based on container width
-    const MAX_BAR_WIDTH = 50;
+    const MAX_BAR_WIDTH = CHART_MAX_BAR_WIDTH;
     const MIN_BAR_WIDTH = 20;
     const DEFAULT_MAX_BARS = 10;
     const BAR_GAP = 3;
@@ -3343,7 +3983,7 @@ class InspireReferencePanelController {
     const barGap = 4;
 
     // Calculate bar width first to determine if labels need rotation
-    const MAX_BAR_WIDTH_RENDER = 50;
+    const MAX_BAR_WIDTH_RENDER = CHART_MAX_BAR_WIDTH;
     const MIN_BAR_WIDTH_RENDER = 15;
     const basePadding = { top: 4, right: 8, left: 8 };
     const availableWidth = containerWidth - basePadding.left - basePadding.right;
@@ -3642,17 +4282,17 @@ class InspireReferencePanelController {
           case "0":
             return citationCount === 0;
           case "1-9":
-            return citationCount >= 1 && citationCount <= 9;
+            return citationCount >= CITATION_RANGES.LOW_MIN && citationCount <= CITATION_RANGES.LOW_MAX;
           case "10-49":
-            return citationCount >= 10 && citationCount <= 49;
+            return citationCount >= CITATION_RANGES.MID_LOW_MIN && citationCount <= CITATION_RANGES.MID_LOW_MAX;
           case "50-99":
-            return citationCount >= 50 && citationCount <= 99;
+            return citationCount >= CITATION_RANGES.MID_MIN && citationCount <= CITATION_RANGES.MID_MAX;
           case "100-249":
-            return citationCount >= 100 && citationCount <= 249;
+            return citationCount >= CITATION_RANGES.MID_HIGH_MIN && citationCount <= CITATION_RANGES.MID_HIGH_MAX;
           case "250-499":
-            return citationCount >= 250 && citationCount <= 499;
+            return citationCount >= CITATION_RANGES.HIGH_MIN && citationCount <= CITATION_RANGES.HIGH_MAX;
           case "500+":
-            return citationCount >= 500;
+            return citationCount >= CITATION_RANGES.VERY_HIGH_MIN;
           default:
             return false;
         }
@@ -3669,12 +4309,12 @@ class InspireReferencePanelController {
     // Use totalAuthors which is the actual author count from INSPIRE API
     // This is more reliable than authors.length which is limited for performance
     const authorCount = entry.totalAuthors ?? entry.authors?.length ?? 0;
-    return authorCount > 0 && authorCount <= 10;
+    return authorCount > 0 && authorCount <= SMALL_AUTHOR_GROUP_THRESHOLD;
   }
 
   private matchesHighCitationsFilter(entry: InspireReferenceEntry): boolean {
     const citationCount = this.getCitationValue(entry);
-    return citationCount > 50;
+    return citationCount > HIGH_CITATIONS_THRESHOLD;
   }
 
   private matchesRecentYearsFilter(entry: InspireReferenceEntry, years: number): boolean {
@@ -3779,12 +4419,24 @@ class InspireReferencePanelController {
       this.rateLimiterUnsubscribe = undefined;
     }
     // Note: No outside click handler cleanup needed - popup only closes via button toggle
-    // FTR-PDF-ANNOTATE: Cleanup citation lookup handler
-    if (this.citationLookupHandler) {
-      getReaderIntegration().off("citationLookup", this.citationLookupHandler);
-      this.citationLookupHandler = undefined;
+    // FTR-PDF-ANNOTATE: Cleanup shared citation lookup handler when last instance gone
+    if (
+      InspireReferencePanelController.instances.size === 1 &&
+      InspireReferencePanelController.citationListenerRegistered &&
+      InspireReferencePanelController.sharedCitationHandler
+    ) {
+      getReaderIntegration().off(
+        "citationLookup",
+        InspireReferencePanelController.sharedCitationHandler,
+      );
+      InspireReferencePanelController.citationListenerRegistered = false;
+      InspireReferencePanelController.sharedCitationHandler = undefined;
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Unregistered shared citationLookup listener`,
+      );
     }
     this.labelMatcher = undefined;
+    this.pdfParseAttempted = false;
     InspireReferencePanelController.instances.delete(this);
     if (!InspireReferencePanelController.instances.size) {
       InspireReferencePanelController.navigationStack = [];
@@ -4031,7 +4683,7 @@ class InspireReferencePanelController {
       return;
     }
 
-    const BATCH_SIZE = 50; // Same as existing code for metadata batch fetch
+    const BATCH_SIZE = METADATA_BATCH_SIZE; // Same as existing code for metadata batch fetch
     const allBibTeX: string[] = [];
     let successCount = 0;
 
@@ -4091,7 +4743,7 @@ class InspireReferencePanelController {
       });
     }
 
-    setTimeout(() => progressWin.close(), 2000);
+    setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
   }
 
   /**
@@ -4202,7 +4854,7 @@ class InspireReferencePanelController {
     const entriesWithRecid = targetEntries.filter((e) => e.recid);
     const strings = getCachedStrings();
 
-    const BATCH_SIZE = 50;
+    const BATCH_SIZE = METADATA_BATCH_SIZE;
     const allContent: string[] = [];
     let successCount = 0;
     let failedBatches = 0;
@@ -4245,7 +4897,7 @@ class InspireReferencePanelController {
 
       if (!allContent.length) {
         progressWin.changeLine({ icon: icon, text: strings.bibtexAllFailed, type: "fail" });
-        setTimeout(() => progressWin.close(), 2000);
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
         return;
       }
 
@@ -4255,9 +4907,8 @@ class InspireReferencePanelController {
       if (target === "clipboard") {
         // Warn if content is very large (may exceed clipboard limits)
         const contentSize = new Blob([fullContent]).size;
-        const CLIPBOARD_WARN_SIZE = 500 * 1024; // 500KB threshold
 
-        if (contentSize > CLIPBOARD_WARN_SIZE) {
+        if (contentSize > CLIPBOARD_WARN_SIZE_BYTES) {
           // Content too large, suggest file export
           progressWin.changeLine({
             icon: icon,
@@ -4266,7 +4917,7 @@ class InspireReferencePanelController {
             }),
             type: "fail",
           });
-          setTimeout(() => progressWin.close(), 3000);
+          setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_WARN_MS);
           return;
         }
 
@@ -4312,7 +4963,7 @@ class InspireReferencePanelController {
       progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
     }
 
-    setTimeout(() => progressWin.close(), 2000);
+    setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
   }
 
   /**
@@ -5544,7 +6195,7 @@ class InspireReferencePanelController {
 
     // Increased chunk size for fewer SQL queries (was 100, now 500)
     // SQLite handles IN clauses with 500+ parameters efficiently
-    const CHUNK_SIZE = 500;
+    const CHUNK_SIZE = LOCAL_STATUS_BATCH_SIZE;
     const recidMap = new Map<string, number>();
 
     for (let i = 0; i < recids.length; i += CHUNK_SIZE) {
@@ -6118,14 +6769,14 @@ class InspireReferencePanelController {
       // This improves perceived performance for references with 100+ entries
       // PERF FIX: Always use pagination when there are many entries, even with filters
       // Without this, DOM operations (clearing 10000+ elements) can take seconds
-      // Use higher threshold (500) when filtering for better UX with smaller result sets
+      // Use higher threshold when filtering for better UX with smaller result sets
       const hasFilter =
         filterGroups.length > 0 ||
         this.chartSelectedBins.size > 0 ||
         this.authorFilterEnabled ||
         this.publishedOnlyFilterEnabled ||
         this.quickFilters.size > 0;
-      const paginationThreshold = hasFilter ? 500 : RENDER_PAGE_SIZE;
+      const paginationThreshold = hasFilter ? RENDER_PAGE_SIZE_FILTERED : RENDER_PAGE_SIZE;
       const usePagination = filtered.length > paginationThreshold;
       const entriesToRender = usePagination
         ? filtered.slice(0, paginationThreshold)
@@ -8569,13 +9220,13 @@ class InspireReferencePanelController {
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
-    // Generate cache key: priority BAI > recid > name
+    // Generate cache key: priority BAI > name > recid
+    // Note: INSPIRE doesn't currently support author recid queries, so it's lowest priority
     let authorQuery: string;
     if (authorInfo.bai) {
       authorQuery = `bai:${authorInfo.bai}`;
-    } else if (authorInfo.recid) {
-      authorQuery = `recid:${authorInfo.recid}`;
     } else {
+      // Use name-based query; recid is kept as cache key fallback only (not used for API)
       authorQuery = convertFullNameToSearchQuery(authorInfo.fullName);
     }
     if (!authorQuery) {
@@ -9262,7 +9913,7 @@ class InspireReferencePanelController {
       return; // Skip if previous frame hasn't rendered yet
     }
     const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
-    const raf = win.requestAnimationFrame || ((cb: FrameRequestCallback) => win.setTimeout(cb, 16));
+    const raf = win.requestAnimationFrame || ((cb: FrameRequestCallback) => win.setTimeout(cb, RAF_FALLBACK_MS));
     this.tooltipRAF = raf(() => {
       this.tooltipRAF = undefined;
       if (this.abstractTooltip && this.abstractTooltip.style.display !== "none") {

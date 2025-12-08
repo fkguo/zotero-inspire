@@ -49,6 +49,13 @@ pref-pdf-fuzzy-citation =
     .label = Fuzzy citation detection (experimental)
 pref-pdf-fuzzy-citation-desc = Enable aggressive pattern matching when PDF text layer is broken (e.g., brackets truncated). May cause false positives.
 
+pref-pdf-parse-refs-list =
+    .label = Parse PDF reference list (fixes multi-citation alignment)
+pref-pdf-parse-refs-list-desc = Scans the PDF's References section to determine citation boundaries when INSPIRE labels are missing. Enable this if clicking [21] jumps to [20]'s second paper.
+pref-pdf-force-mapping =
+    .label = Force PDF mapping when INSPIRE differs
+pref-pdf-force-mapping-desc = If PDF and INSPIRE reference lists diverge (e.g., arXiv vs published version), prefer PDF-derived mapping and skip index fallback to avoid wrong jumps.
+
 pref-reader-auto-reopen =
     .label = Reopen reader tab when navigating back/forward
 pref-reader-auto-reopen-desc = When enabled, if the reader tab was closed, it will be reopened automatically when using Back or Forward navigation.

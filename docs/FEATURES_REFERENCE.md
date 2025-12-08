@@ -424,5 +424,132 @@ When in search mode, the panel displays:
 
 ---
 
-*Last updated: 2025-12-05 (v2.0.0)*
+## 8. Architecture Refactoring (v2.1.0)
+
+A major internal refactoring focused on code quality, modularity, and maintainability.
+
+### 8.1 Modular Panel Architecture
+
+Extracted 6 independent manager classes from the monolithic `InspireReferencePanelController`:
+
+| Manager | Responsibility | Lines |
+|---------|----------------|-------|
+| `ChartManager` | Statistics chart rendering and interaction | ~500 |
+| `FilterManager` | Text filtering, Quick Filters, author/published filters | ~400 |
+| `NavigationManager` | Back/forward navigation with scroll state preservation | ~300 |
+| `ExportManager` | BibTeX/LaTeX export to clipboard or file | ~500 |
+| `BatchImportManager` | Batch selection, duplicate detection, and import | ~520 |
+| `RowPoolManager` | Row pooling and template management (PERF-13 core) | ~290 |
+
+### 8.2 Performance Monitoring
+
+New `PerformanceMonitor` class for timing operations and detecting slow operations:
+
+```typescript
+// Timing API
+const monitor = getPerformanceMonitor();
+const timerId = monitor.start("operation");
+// ... do work ...
+monitor.stop(timerId);
+
+// Async measurement
+const result = await monitor.measureAsync("fetchData", () => fetchData());
+
+// Statistics
+const stats = monitor.getStats("operation");
+// { count, totalMs, avgMs, minMs, maxMs, lastMs }
+
+// Report
+const report = monitor.getReport();
+// { startTime, endTime, duration, operations: [...stats] }
+```
+
+### 8.3 Unit Test Coverage
+
+Added 153 unit tests using Vitest framework across 4 test files:
+
+| Test File | Tests | Coverage |
+|-----------|-------|----------|
+| `test/textUtils.test.ts` | 25 | Text normalization and filtering |
+| `test/filters.test.ts` | 56 | Filter predicates and Quick Filters |
+| `test/apiTypes.test.ts` | 38 | API type guards and utility functions |
+| `test/matchStrategies.test.ts` | 34 | PDF citation matching strategies |
+
+### 8.4 Code Quality Improvements
+
+#### Magic Numbers to Named Constants
+
+Extended `constants.ts` with organized constant groups:
+
+```typescript
+// UI timing constants
+export const FILTER_DEBOUNCE_MS = 150;
+export const CHART_THROTTLE_MS = 300;
+export const TOOLTIP_SHOW_DELAY_MS = 300;
+export const TOOLTIP_HIDE_DELAY_MS = 600;
+
+// Cache size constants
+export const REFERENCES_CACHE_SIZE = 100;
+export const METADATA_CACHE_SIZE = 500;
+export const ROW_POOL_MAX_SIZE = 150;
+
+// Filter thresholds
+export const HIGH_CITATIONS_THRESHOLD = 50;
+export const SMALL_AUTHOR_GROUP_THRESHOLD = 10;
+```
+
+#### Style Utilities
+
+New `styles.ts` module for consolidated inline styles:
+
+```typescript
+import { applyStyles, FLEX_STYLES, BUTTON_STYLES } from "./styles";
+
+// Apply multiple style patterns
+applyStyles(element, FLEX_STYLES.column, BUTTON_STYLES.primary);
+
+// Check dark mode
+if (isDarkMode()) { ... }
+```
+
+#### Filter Strategy Pattern
+
+New `filters.ts` with unified filter predicates:
+
+```typescript
+import { matchesHighCitations, getQuickFilterPredicate } from "./filters";
+
+// Direct predicate usage
+const isHighCited = matchesHighCitations(entry, context);
+
+// Registry-based lookup
+const predicate = getQuickFilterPredicate("highCitations");
+const matches = predicate(entry, context);
+```
+
+#### Complete API Type Definitions
+
+New `apiTypes.ts` with full INSPIRE API types:
+
+```typescript
+import {
+  isInspireLiteratureSearchResponse,
+  getPrimaryTitle,
+  getPrimaryArxivId,
+  extractRecidFromRef,
+} from "./apiTypes";
+
+// Type guard
+if (isInspireLiteratureSearchResponse(response)) {
+  const hits = response.hits.hits;
+}
+
+// Utility functions
+const title = getPrimaryTitle(metadata);
+const arxiv = getPrimaryArxivId(metadata);
+```
+
+---
+
+*Last updated: 2025-12-08 (v2.1.0)*
 

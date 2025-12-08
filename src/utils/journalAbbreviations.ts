@@ -234,6 +234,101 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     names: ["Journal of Cosmology and Astroparticle Physics", "J. Cosmol. Astropart. Phys."],
     abbreviations: ["JCAP"],
   },
+  // Additional HEP journals
+  {
+    names: ["Annual Review of Nuclear and Particle Science", "Annu. Rev. Nucl. Part. Sci.", "Ann. Rev. Nucl. Part. Sci."],
+    abbreviations: ["ARNPS"],
+  },
+  {
+    names: ["Annals of Physics", "Ann. Phys.", "Ann Phys"],
+    abbreviations: ["AnnPhys"],
+  },
+  {
+    names: ["Reports on Progress in Physics", "Rep. Prog. Phys.", "Rept. Prog. Phys."],
+    abbreviations: ["RPP"],
+  },
+  {
+    names: ["Fortschritte der Physik", "Fortsch. Phys.", "Fortschr. Phys."],
+    abbreviations: ["FortschPhys"],
+  },
+  {
+    names: [
+      "Nuclear Instruments and Methods in Physics Research Section A",
+      "Nucl. Instrum. Methods Phys. Res. A",
+      "Nucl. Instrum. Meth. A",
+      "NIM A",
+    ],
+    abbreviations: ["NIMA"],
+  },
+  {
+    names: [
+      "Nuclear Instruments and Methods in Physics Research Section B",
+      "Nucl. Instrum. Methods Phys. Res. B",
+      "Nucl. Instrum. Meth. B",
+      "NIM B",
+    ],
+    abbreviations: ["NIMB"],
+  },
+  {
+    names: ["Physical Review", "Phys. Rev."],
+    abbreviations: ["PR"],
+  },
+  {
+    names: ["Progress of Theoretical and Experimental Physics", "Prog. Theor. Exp. Phys.", "PTEP"],
+    abbreviations: ["PTEP"],
+  },
+  {
+    names: ["Zeitschrift für Physik C", "Z. Phys. C", "Zeit. Phys. C"],
+    abbreviations: ["ZPC"],
+  },
+  {
+    names: ["Zeitschrift für Physik A", "Z. Phys. A", "Zeit. Phys. A"],
+    abbreviations: ["ZPA"],
+  },
+  {
+    names: ["Il Nuovo Cimento A", "Nuovo Cimento A", "Nuovo Cim. A"],
+    abbreviations: ["NCA"],
+  },
+  {
+    names: ["Il Nuovo Cimento B", "Nuovo Cimento B", "Nuovo Cim. B"],
+    abbreviations: ["NCB"],
+  },
+  {
+    names: ["Communications in Mathematical Physics", "Commun. Math. Phys."],
+    abbreviations: ["CMP"],
+  },
+  {
+    names: ["Living Reviews in Relativity", "Living Rev. Relativ.", "Living Rev. Rel."],
+    abbreviations: ["LRR"],
+  },
+  {
+    names: ["Astrophysical Journal", "Astrophys. J."],
+    abbreviations: ["ApJ"],
+  },
+  {
+    names: ["Astrophysical Journal Letters", "Astrophys. J. Lett."],
+    abbreviations: ["ApJL"],
+  },
+  {
+    names: ["Monthly Notices of the Royal Astronomical Society", "Mon. Not. Roy. Astron. Soc."],
+    abbreviations: ["MNRAS"],
+  },
+  {
+    names: ["Astronomy and Astrophysics", "Astron. Astrophys."],
+    abbreviations: ["AA"],
+  },
+  {
+    names: ["Computer Physics Communications", "Comput. Phys. Commun."],
+    abbreviations: ["CPC_Comp"],
+  },
+  {
+    names: ["Few-Body Systems", "Few Body Syst."],
+    abbreviations: ["FBS"],
+  },
+  {
+    names: ["Physics of the Dark Universe", "Phys. Dark Univ."],
+    abbreviations: ["PDU"],
+  },
 ];
 
 export function normalizeJournalName(name: string): string {

@@ -5,11 +5,8 @@ zotero-cmd.json
 **/.DS_Store
 *.code-workspace
 tmp/
-image/FUTURE_IMPROVEMENTS/*.png
-PERFORMANCE_OPTIMIZATIONS.md
+image/*/*.*
 .cursor/rules/*
 *IMPOVEMENTS*.md
-FUTURE_IMPROVEMENTS.md
-localdocs/FEATURES_REFERENCE_PANEL.md
-localdocs/FTR-PDF-ANNOTATE-PLAN.md
-localdocs/FTR-FOCUSED-SELECTION-PLAN.md
+localdocs/*.*
+CLAUDE.md

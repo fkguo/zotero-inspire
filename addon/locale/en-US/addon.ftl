@@ -267,5 +267,15 @@ references-panel-batch-duplicate-cancel = Cancel
 
 # PDF Citation Lookup (FTR-PDF-ANNOTATE)
 pdf-annotate-lookup-button = Look up in References
-pdf-annotate-not-found = Reference [{ $label }] not found in this paper
+pdf-annotate-not-found = Reference [{ $label }] is not in the INSPIRE reference list for this paper. If it exists in the PDF but not here, consider submitting a correction to INSPIRE.
 pdf-annotate-no-text-layer = This PDF has no text layer. Citations cannot be detected.
+
+# Multi-label matching (FTR-PDF-ANNOTATE-MULTI-LABEL)
+pdf-annotate-multi-match =
+  { $count ->
+    [one] Found 1 entry for [{ $label }]
+   *[other] Found { $count } entries for [{ $label }]
+  }
+pdf-annotate-multi-match-truncated = Found { $count } entries for [{ $label }] (showing first { $shown })
+pdf-annotate-fallback-warning = INSPIRE references may differ from the PDF (labels: { $rate }%). Using position match; consider submitting a correction to INSPIRE.
+pdf-annotate-parse-success = Parsed PDF references: { $total } citations ({ $multi } multi-paper)

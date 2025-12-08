@@ -321,6 +321,15 @@ function applyMetadataToEntry(
       entry.authors = authors.slice(0, AUTHOR_IDS_EXTRACT_LIMIT);
       entry.authorText = formatAuthors(entry.authors, entry.totalAuthors);
     }
+  } else if (
+    // Fix for large collaborations: INSPIRE API truncates authors in references
+    // field, causing totalAuthors to be incorrect. Update when metadata has
+    // higher author_count than current totalAuthors (e.g., 67 vs 1).
+    typeof metadata.author_count === "number" &&
+    metadata.author_count > (entry.totalAuthors ?? 0)
+  ) {
+    entry.totalAuthors = metadata.author_count;
+    entry.authorText = formatAuthors(entry.authors, entry.totalAuthors);
   }
 
   // Year update

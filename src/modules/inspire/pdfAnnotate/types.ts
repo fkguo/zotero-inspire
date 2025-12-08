@@ -3,6 +3,8 @@
 // FTR-PDF-ANNOTATE: Citation detection and References Panel integration
 // ─────────────────────────────────────────────────────────────────────────────
 
+import type { MatchConfidence, MatchMethod } from "./constants";
+
 /**
  * Citation type detected from PDF text
  */
@@ -33,6 +35,7 @@ export interface CitationPosition {
 
 /**
  * Result of matching a PDF label to an INSPIRE entry
+ * FTR-PDF-MATCHING: Extended with diagnostic fields for user feedback
  */
 export interface MatchResult {
   /** The PDF label that was matched */
@@ -42,9 +45,25 @@ export interface MatchResult {
   /** The matched entry (optional, for convenience) */
   entryId?: string;
   /** Confidence level of the match */
-  confidence: "high" | "medium" | "low";
+  confidence: MatchConfidence;
   /** How the match was determined */
-  matchMethod: "exact" | "inferred" | "fuzzy";
+  matchMethod: MatchMethod;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // FTR-PDF-MATCHING: Extended diagnostic fields for user feedback
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Identifier that produced the match (if applicable) */
+  matchedIdentifier?: {
+    type: "arxiv" | "doi" | "journal";
+    value: string;
+  };
+  /** Year difference between PDF and INSPIRE (for year-based matches) */
+  yearDelta?: number;
+  /** Warning if PDF version differs from INSPIRE version */
+  versionMismatchWarning?: string;
+  /** Match score (for debugging) */
+  score?: number;
 }
 
 /**
@@ -59,10 +78,13 @@ export interface AlignmentIssue {
 
 /**
  * Report from label alignment diagnosis
+ * FTR-PDF-ANNOTATE-MULTI-LABEL: Added labelAvailableCount for availability rate
  */
 export interface AlignmentReport {
   totalEntries: number;
   alignedCount: number;
+  /** Number of entries with any label (for availability rate calculation) */
+  labelAvailableCount?: number;
   issues: AlignmentIssue[];
   recommendation: "USE_INSPIRE_LABEL" | "USE_INDEX_WITH_FALLBACK" | "USE_INDEX_ONLY";
 }
@@ -105,5 +127,110 @@ export interface ReaderState {
   parentItemID: number;
   scannedPages: Set<number>;
   citations: Map<number, ParsedCitation[]>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zotero Structured Page Data Types
+// FTR-PDF-STRUCTURED-DATA: Types for Zotero's internal PDF page data
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Character data from Zotero's PDF processing
+ * Reference: tmp/zotero/reader/src/pdf/selection.js
+ */
+export interface ZoteroChar {
+  /** The character content */
+  c: string;
+  /** Unicode representation */
+  u: string;
+  /** Bounding box [x1, y1, x2, y2] */
+  rect: [number, number, number, number];
+  /** Rotation angle in degrees */
+  rotation: number;
+  /** Space character follows this char */
+  spaceAfter: boolean;
+  /** Line break follows this char */
+  lineBreakAfter: boolean;
+  /** Paragraph break follows this char */
+  paragraphBreakAfter: boolean;
+  /** Word boundary follows this char */
+  wordBreakAfter: boolean;
+  /** Character can be ignored (e.g., control chars) */
+  ignorable: boolean;
+  /** Character is isolated (not part of normal flow) */
+  isolated: boolean;
+  /** Inline bounding box for rendering */
+  inlineRect: [number, number, number, number];
+  /** Page index (0-based) */
+  pageIndex: number;
+  /** Character offset in the page text */
+  offset: number;
+}
+
+/**
+ * Overlay element detected by Zotero in PDF
+ * These include citations, links, footnotes, etc.
+ */
+export interface ZoteroOverlay {
+  /** Type of overlay element */
+  type: "reference" | "citation" | "internal-link" | "external-link" | "footnote";
+  /** Position information */
+  position: {
+    pageIndex: number;
+    rects: [number, number, number, number][];
+  };
+  /** Referenced items (for citation/reference types) */
+  references?: unknown[];
+}
+
+/**
+ * Structured page data from Zotero's PDF processing
+ * Obtained via pdfDocument.getPageData({ pageIndex })
+ */
+export interface ZoteroPageData {
+  /** Character-level data with position and formatting info */
+  chars: ZoteroChar[];
+  /** Detected overlay elements (citations, links, etc.) */
+  overlays: ZoteroOverlay[];
+  /** Page viewport [x1, y1, x2, y2] */
+  viewBox: [number, number, number, number];
+}
+
+/**
+ * Processed data for the entire PDF document
+ * Obtained via pdfDocument.getProcessedData()
+ */
+export interface ZoteroProcessedData {
+  /** Map of page index to page data */
+  pages: Record<number, ZoteroPageData>;
+  /** Total page count */
+  pageCount?: number;
+}
+
+/**
+ * Reference entry parsed from structured char data
+ * More accurate than text-only parsing
+ */
+export interface StructuredRefEntry {
+  /** Citation label (e.g., "1", "2") */
+  label: string | null;
+  /** Full text of the reference entry */
+  text: string;
+  /** Character range in the page */
+  charRange: { start: number; end: number };
+  /** First author's last name */
+  firstAuthor: string | null;
+  /** Publication year */
+  year: string | null;
+  /** arXiv ID if detected */
+  arxivId: string | null;
+  /** DOI if detected */
+  doi: string | null;
+  /** Journal name/abbreviation */
+  journal: string | null;
+  /** Volume number */
+  volume: string | null;
+  /** Starting page number */
+  page: string | null;
 }
 

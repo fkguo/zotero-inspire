@@ -1,15 +1,23 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Reader Integration
 // FTR-PDF-ANNOTATE: Integrate with Zotero Reader for citation detection
+// FTR-CACHE-PRELOAD: Background preload references when PDF is opened
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../../../package.json";
-import { getCitationParser } from "./citationParser";
+import { getCitationParser, postProcessLabels } from "./citationParser";
 import { getPref } from "../../../utils/prefs";
+import { deriveRecidFromItem } from "../apiUtils";
+import { localCache } from "../localCache";
+import { fetchReferencesEntries, enrichReferencesEntries } from "../referencesService";
+import type { InspireReferenceEntry } from "../types";
 import type {
   ParsedCitation,
   CitationLookupEvent,
   ReaderState,
+  ZoteroChar,
+  ZoteroPageData,
+  ZoteroProcessedData,
 } from "./types";
 
 /**
@@ -27,6 +35,14 @@ export class ReaderIntegration {
   private listeners = new Map<string, Set<EventCallback<any>>>();
   private readerStates = new Map<string, ReaderState>();
   private initialized = false;
+  /** Store bound handler reference for unregistration */
+  private boundTextSelectionHandler?: (args: any) => void;
+  /** Track preloaded recids to avoid duplicate background fetches */
+  private preloadedRecids = new Set<string>();
+  /** Track in-flight preload promises to avoid concurrent fetches for same recid */
+  private preloadingRecids = new Map<string, Promise<void>>();
+  /** FTR-PDF-MATCHING: Store max known label per item for concatenated range detection */
+  private maxKnownLabelByItem = new Map<number, number>();
 
   /**
    * Get singleton instance
@@ -63,10 +79,13 @@ export class ReaderIntegration {
     }
 
     try {
+      // Store bound handler reference for later unregistration
+      this.boundTextSelectionHandler = this.handleTextSelectionPopup.bind(this);
+
       // Register for text selection popup
       Zotero.Reader.registerEventListener(
         "renderTextSelectionPopup",
-        this.handleTextSelectionPopup.bind(this),
+        this.boundTextSelectionHandler,
         config.addonID,
       );
 
@@ -84,17 +103,61 @@ export class ReaderIntegration {
   }
 
   /**
+   * FTR-PDF-MATCHING: Set the max known label for an item (from PDF parsing).
+   * Used for concatenated range detection (e.g., [62-64] copied as [6264]).
+   * @param itemID - Zotero item ID
+   * @param maxLabel - Maximum citation label number found in PDF
+   */
+  setMaxKnownLabel(itemID: number, maxLabel: number): void {
+    this.maxKnownLabelByItem.set(itemID, maxLabel);
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] Set maxKnownLabel=${maxLabel} for item ${itemID}`,
+    );
+  }
+
+  /**
+   * FTR-PDF-MATCHING: Get the max known label for an item.
+   * @param itemID - Zotero item ID
+   * @returns Max label or undefined if not set
+   */
+  getMaxKnownLabel(itemID: number): number | undefined {
+    return this.maxKnownLabelByItem.get(itemID);
+  }
+
+  /**
    * Cleanup resources.
    */
   cleanup(): void {
+    // Unregister Zotero Reader event listener to prevent memory leak
+    if (this.initialized && this.boundTextSelectionHandler) {
+      try {
+        Zotero.Reader.unregisterEventListener(
+          "renderTextSelectionPopup",
+          this.boundTextSelectionHandler,
+        );
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] Unregistered renderTextSelectionPopup listener`,
+        );
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] Failed to unregister event listener: ${err}`,
+        );
+      }
+      this.boundTextSelectionHandler = undefined;
+    }
+
     const listenerCount = this.listeners.size;
     const stateCount = this.readerStates.size;
+    const preloadCount = this.preloadedRecids.size;
     this.readerStates.clear();
     this.listeners.clear();
+    this.preloadedRecids.clear();
+    this.preloadingRecids.clear();
+    this.maxKnownLabelByItem.clear();
     this.initialized = false;
     ReaderIntegration.instance = null;
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] Cleaned up: ${listenerCount} listeners, ${stateCount} reader states`,
+      `[${config.addonName}] [PDF-ANNOTATE] Cleaned up: ${listenerCount} listeners, ${stateCount} reader states, ${preloadCount} preloaded recids`,
     );
   }
 
@@ -130,7 +193,11 @@ export class ReaderIntegration {
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] args.params keys: ${Object.keys(params || {}).join(", ") || "(none)"}`,
     );
-    
+
+    // FTR-CACHE-PRELOAD: Trigger background preload when user interacts with PDF
+    // This ensures references are cached before user clicks on a citation
+    this.triggerBackgroundPreload(reader);
+
     // Try to find selected text from params.annotation
     if (params?.annotation) {
       Zotero.debug(
@@ -160,12 +227,18 @@ export class ReaderIntegration {
     // For longer text, use parseText to find ALL citations; for short text, use parseSelection
     const parser = getCitationParser();
     const enableFuzzy = getPref("pdf_fuzzy_citation") === true;
+    // FTR-PDF-MATCHING: Get max known label for concatenated range detection
+    const maxKnownLabel = reader?.itemID ? this.getMaxKnownLabel(reader.itemID) : undefined;
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] maxKnownLabel for itemID ${reader?.itemID}: ${maxKnownLabel ?? "undefined"}`,
+    );
     let allLabels: string[] = [];
-    
+
     if (selectedText.length <= 50) {
       // Short selection: use parseSelection (more lenient, handles partial selections)
       // Pass enableFuzzy to control aggressive pattern matching
-      const citation = parser.parseSelection(selectedText, enableFuzzy);
+      // Pass maxKnownLabel for concatenated range detection (e.g., [62-64] copied as [6264])
+      const citation = parser.parseSelection(selectedText, enableFuzzy, maxKnownLabel);
       if (citation && citation.labels.length > 0) {
         allLabels = citation.labels;
       }
@@ -179,12 +252,13 @@ export class ReaderIntegration {
           labelSet.add(label);
         }
       }
-      allLabels = Array.from(labelSet);
-      
+      // FTR-PDF-MATCHING: Apply postProcessLabels to handle concatenated ranges (e.g., [6264] -> [62,63,64])
+      allLabels = postProcessLabels(Array.from(labelSet), maxKnownLabel);
+
       // If no citations found with parseText and fuzzy is enabled,
       // fallback to parseSelection for aggressive pattern matching
       if (allLabels.length === 0 && enableFuzzy) {
-        const fuzzyCitation = parser.parseSelection(selectedText, true);
+        const fuzzyCitation = parser.parseSelection(selectedText, true, maxKnownLabel);
         if (fuzzyCitation && fuzzyCitation.labels.length > 0) {
           allLabels = fuzzyCitation.labels;
         }
@@ -649,6 +723,349 @@ export class ReaderIntegration {
    */
   clearReaderState(tabID: string): void {
     this.readerStates.delete(tabID);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-CACHE-PRELOAD: Background Preload for References
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Trigger background preload of references for the current PDF's parent item.
+   * This is called when user interacts with the PDF (text selection popup appears).
+   * Non-blocking: runs in background without affecting UI responsiveness.
+   */
+  private triggerBackgroundPreload(reader: any): void {
+    try {
+      // Get parent item info from reader
+      const itemID = reader?.itemID;
+      if (!itemID) return;
+
+      const item = Zotero.Items.get(itemID);
+      if (!item) return;
+
+      // Get parent item (PDF attachment's parent)
+      const parentItemID = item.parentItemID || itemID;
+      const parentItem = Zotero.Items.get(parentItemID);
+      if (!parentItem || !parentItem.isRegularItem()) return;
+
+      // Get recid from parent item
+      const recid = deriveRecidFromItem(parentItem);
+      if (!recid) return;
+
+      // Skip if already preloaded or currently preloading
+      if (this.preloadedRecids.has(recid)) return;
+      if (this.preloadingRecids.has(recid)) return;
+
+      // Start background preload (fire and forget)
+      // FTR-PDF-MATCHING: Pass itemID to set maxKnownLabel after fetch
+      const preloadPromise = this.preloadReferencesForRecid(recid, itemID);
+      this.preloadingRecids.set(recid, preloadPromise);
+
+      // Clean up after preload completes
+      preloadPromise
+        .then(() => {
+          this.preloadedRecids.add(recid);
+        })
+        .catch((err) => {
+          Zotero.debug(
+            `[${config.addonName}] [PRELOAD] Failed to preload refs for ${recid}: ${err}`,
+          );
+        })
+        .finally(() => {
+          this.preloadingRecids.delete(recid);
+        });
+    } catch (err) {
+      // Silently ignore errors - preload is best-effort
+      Zotero.debug(
+        `[${config.addonName}] [PRELOAD] triggerBackgroundPreload error: ${err}`,
+      );
+    }
+  }
+
+  /**
+   * Preload references for a given recid.
+   * Checks cache first; if miss, fetches from INSPIRE and stores to cache.
+   * FTR-PDF-MATCHING: Also sets maxKnownLabel based on entry count.
+   * @param recid - INSPIRE record ID
+   * @param attachmentItemID - Optional Zotero attachment item ID for maxKnownLabel
+   */
+  private async preloadReferencesForRecid(recid: string, attachmentItemID?: number): Promise<void> {
+    // Check if local cache is enabled
+    if (!localCache.isEnabled()) {
+      Zotero.debug(
+        `[${config.addonName}] [PRELOAD] Cache disabled, skipping preload for ${recid}`,
+      );
+      return;
+    }
+
+    // Check if already in cache
+    const cached = await localCache.get<InspireReferenceEntry[]>("refs", recid);
+    if (cached) {
+      Zotero.debug(
+        `[${config.addonName}] [PRELOAD] References for ${recid} already cached (age: ${cached.ageHours.toFixed(1)}h)`,
+      );
+      // FTR-PDF-MATCHING: Set maxKnownLabel from cached data
+      if (attachmentItemID && cached.data && cached.data.length > 0) {
+        this.setMaxKnownLabel(attachmentItemID, cached.data.length);
+      }
+      return;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PRELOAD] Starting background fetch for ${recid}`,
+    );
+
+    // Fetch from INSPIRE
+    const entries = await fetchReferencesEntries(recid);
+    if (!entries || entries.length === 0) {
+      Zotero.debug(
+        `[${config.addonName}] [PRELOAD] No references found for ${recid}`,
+      );
+      return;
+    }
+
+    // Enrich with complete metadata (title, authors, etc.)
+    await enrichReferencesEntries(entries);
+
+    // Store to local cache
+    await localCache.set("refs", recid, entries, undefined, entries.length);
+
+    // FTR-PDF-MATCHING: Set maxKnownLabel based on entry count for precise concatenated range detection
+    // This provides an early estimate before PDF is parsed
+    if (attachmentItemID && entries.length > 0) {
+      this.setMaxKnownLabel(attachmentItemID, entries.length);
+      Zotero.debug(
+        `[${config.addonName}] [PRELOAD] Set maxKnownLabel=${entries.length} for attachment ${attachmentItemID}`,
+      );
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PRELOAD] Cached ${entries.length} references for ${recid}`,
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-PDF-STRUCTURED-DATA: Zotero Structured Page Data Access
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get the PDF document object from a reader instance.
+   * This accesses Zotero's internal PDF.js document.
+   */
+  private getPDFDocument(reader: any): any | null {
+    try {
+      // Try different paths to access the PDF document
+      // Path 1: _internalReader._iframeWindow.PDFViewerApplication
+      const internalReader = reader?._internalReader;
+      if (internalReader?._iframeWindow?.PDFViewerApplication?.pdfDocument) {
+        return internalReader._iframeWindow.PDFViewerApplication.pdfDocument;
+      }
+
+      // Path 2: _iframeWindow.wrappedJSObject.PDFViewerApplication
+      if (reader?._iframeWindow?.wrappedJSObject?.PDFViewerApplication?.pdfDocument) {
+        return reader._iframeWindow.wrappedJSObject.PDFViewerApplication.pdfDocument;
+      }
+
+      // Path 3: Direct _iframeWindow.PDFViewerApplication
+      if (reader?._iframeWindow?.PDFViewerApplication?.pdfDocument) {
+        return reader._iframeWindow.PDFViewerApplication.pdfDocument;
+      }
+
+      return null;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [STRUCTURED-DATA] Failed to get PDF document: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get structured page data for a specific page from Zotero Reader.
+   * Returns character-level data with position and formatting information.
+   *
+   * @param reader - The Zotero Reader instance
+   * @param pageIndex - 0-based page index
+   * @returns Page data with chars and overlays, or null if unavailable
+   */
+  async getStructuredPageData(
+    reader: any,
+    pageIndex: number,
+  ): Promise<ZoteroPageData | null> {
+    try {
+      const pdfDocument = this.getPDFDocument(reader);
+      if (!pdfDocument) {
+        Zotero.debug(
+          `[${config.addonName}] [STRUCTURED-DATA] PDF document not accessible`,
+        );
+        return null;
+      }
+
+      // Check if getPageData method exists
+      if (typeof pdfDocument.getPageData !== "function") {
+        Zotero.debug(
+          `[${config.addonName}] [STRUCTURED-DATA] getPageData method not available`,
+        );
+        return null;
+      }
+
+      const pageData = await pdfDocument.getPageData({ pageIndex });
+      return pageData as ZoteroPageData;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [STRUCTURED-DATA] Failed to get page data for page ${pageIndex}: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get processed data for the entire PDF document.
+   * This includes all pages' character data and detected overlays.
+   *
+   * @param reader - The Zotero Reader instance
+   * @returns Processed data with all pages, or null if unavailable
+   */
+  async getProcessedData(reader: any): Promise<ZoteroProcessedData | null> {
+    try {
+      const pdfDocument = this.getPDFDocument(reader);
+      if (!pdfDocument) {
+        Zotero.debug(
+          `[${config.addonName}] [STRUCTURED-DATA] PDF document not accessible`,
+        );
+        return null;
+      }
+
+      // Check if getProcessedData method exists
+      if (typeof pdfDocument.getProcessedData !== "function") {
+        Zotero.debug(
+          `[${config.addonName}] [STRUCTURED-DATA] getProcessedData method not available`,
+        );
+        return null;
+      }
+
+      const processedData = await pdfDocument.getProcessedData();
+      return processedData as ZoteroProcessedData;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [STRUCTURED-DATA] Failed to get processed data: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Extract plain text from Zotero character array.
+   * Respects spacing, line breaks, and paragraph breaks.
+   * Reference: Zotero's reader/src/pdf/selection.js getTextFromChars()
+   *
+   * @param chars - Array of ZoteroChar objects
+   * @returns Extracted text with proper spacing
+   */
+  extractTextFromChars(chars: ZoteroChar[]): string {
+    const textParts: string[] = [];
+
+    for (const char of chars) {
+      if (char.ignorable) continue;
+
+      textParts.push(char.c);
+
+      // Add appropriate spacing based on flags
+      if (char.paragraphBreakAfter) {
+        textParts.push("\n\n");
+      } else if (char.lineBreakAfter) {
+        textParts.push("\n");
+      } else if (char.spaceAfter) {
+        textParts.push(" ");
+      }
+    }
+
+    return textParts.join("").trim();
+  }
+
+  /**
+   * Get full text from a reader using Zotero's structured data.
+   * Falls back to null if structured data is not available.
+   *
+   * @param reader - The Zotero Reader instance
+   * @returns Full text of the PDF, or null if unavailable
+   */
+  async getFullTextFromStructuredData(reader: any): Promise<string | null> {
+    try {
+      const processedData = await this.getProcessedData(reader);
+      if (!processedData?.pages) {
+        Zotero.debug(
+          `[${config.addonName}] [STRUCTURED-DATA] No processed data available`,
+        );
+        return null;
+      }
+
+      const pageIndices = Object.keys(processedData.pages)
+        .map(Number)
+        .sort((a, b) => a - b);
+
+      const textParts: string[] = [];
+      for (const pageIndex of pageIndices) {
+        const pageData = processedData.pages[pageIndex];
+        if (pageData?.chars?.length) {
+          const pageText = this.extractTextFromChars(pageData.chars);
+          textParts.push(pageText);
+        }
+      }
+
+      const fullText = textParts.join("\n\n");
+      Zotero.debug(
+        `[${config.addonName}] [STRUCTURED-DATA] Extracted ${fullText.length} chars from ${pageIndices.length} pages`,
+      );
+
+      return fullText || null;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [STRUCTURED-DATA] Failed to get full text: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get the current active Reader instance.
+   * Useful for extracting structured data from the currently open PDF.
+   */
+  getCurrentReader(): any | null {
+    try {
+      // @ts-ignore - Zotero_Tabs is a global
+      const selectedTabID = Zotero_Tabs?.selectedID;
+      if (!selectedTabID) return null;
+
+      return Zotero.Reader.getByTabID(selectedTabID);
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [STRUCTURED-DATA] Failed to get current reader: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Check if Zotero's structured page data API is available.
+   * This determines whether we can use the enhanced parsing methods.
+   *
+   * @param reader - The Zotero Reader instance
+   * @returns true if structured data API is available
+   */
+  async isStructuredDataAvailable(reader: any): Promise<boolean> {
+    try {
+      const pdfDocument = this.getPDFDocument(reader);
+      if (!pdfDocument) return false;
+
+      // Check for required methods
+      return (
+        typeof pdfDocument.getPageData === "function" ||
+        typeof pdfDocument.getProcessedData === "function"
+      );
+    } catch {
+      return false;
+    }
   }
 }
 

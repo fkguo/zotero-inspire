@@ -208,6 +208,36 @@ function updateLocalCacheControls(doc: Document, syncCheckbox = true) {
   });
 }
 
+function updatePDFParseControls(doc: Document, syncCheckbox = true) {
+  const parseCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-pdf_parse_refs_list"
+  ) as HTMLInputElement | null;
+  const forceCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-pdf_force_mapping_on_mismatch"
+  ) as HTMLInputElement | null;
+
+  let parseEnabled = getPref("pdf_parse_refs_list") === true;
+  if (parseCheckbox) {
+    if (syncCheckbox) {
+      parseCheckbox.checked = parseEnabled;
+    } else {
+      parseEnabled = parseCheckbox.checked;
+      setPref("pdf_parse_refs_list", parseEnabled);
+    }
+  }
+
+  if (forceCheckbox) {
+    const forcePref = getPref("pdf_force_mapping_on_mismatch") !== false;
+    forceCheckbox.disabled = !parseEnabled;
+    if (parseEnabled) {
+      forceCheckbox.checked = forcePref;
+    } else {
+      // keep stored pref, but visually unchecked when disabled
+      forceCheckbox.checked = false;
+    }
+  }
+}
+
 /**
  * This function is just an example of dispatcher for Preference UI events.
  * Any operations should be placed in a function to keep this funcion clear.
@@ -225,12 +255,26 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         updateEnrichSettingsDisplay(doc, true);
         setTimeout(() => updateEnrichSettingsDisplay(doc, true), 50);
         updateLocalCacheControls(doc);
+        updatePDFParseControls(doc);
         const enableCheckbox = doc.getElementById(
           "zotero-prefpane-zoteroinspire-local_cache_enable"
         ) as HTMLInputElement | null;
         enableCheckbox?.addEventListener("command", () => {
           updateLocalCacheControls(doc, false);
           updateEnrichSettingsDisplay(doc, true);
+        });
+        const parseCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-pdf_parse_refs_list"
+        ) as HTMLInputElement | null;
+        parseCheckbox?.addEventListener("command", () => {
+          updatePDFParseControls(doc, false);
+        });
+        const forceCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-pdf_force_mapping_on_mismatch"
+        ) as HTMLInputElement | null;
+        forceCheckbox?.addEventListener("command", (e) => {
+          const cb = e.target as HTMLInputElement;
+          setPref("pdf_force_mapping_on_mismatch", cb.checked);
         });
         const batchInput = doc.getElementById(
           "zotero-prefpane-zoteroinspire-local_cache_enrich_batch"

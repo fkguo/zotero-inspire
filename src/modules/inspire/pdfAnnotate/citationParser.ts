@@ -38,6 +38,19 @@ function decodeSuperscript(text: string): string {
 }
 
 /**
+ * Fix common OCR errors where brackets are misrecognized as letters.
+ * Common patterns:
+ * - "[" → "f" or "{"
+ * - "]" → "g" or "}"
+ * Examples: "f5g" → "[5]", "f26,30g" → "[26,30]"
+ */
+function fixOCRBrackets(text: string): string {
+  // Pattern: f followed by digits/commas/dashes/spaces, then g
+  // This matches OCR errors like "f5g", "f26,30g", "f1-5g"
+  return text.replace(/\bf([\d,\s–-]+)g\b/g, "[$1]");
+}
+
+/**
  * Expand a numeric range (e.g., "1-5") to array ["1", "2", "3", "4", "5"]
  */
 function expandRange(start: number, end: number): string[] {
@@ -46,6 +59,130 @@ function expandRange(start: number, end: number): string[] {
     return [String(start), String(end)];
   }
   return Array.from({ length: end - start + 1 }, (_, i) => String(start + i));
+}
+
+/**
+ * FTR-PDF-MATCHING: Try to parse a large number as a concatenated range.
+ *
+ * This handles cases where PDF copy loses the dash in ranges:
+ * - PDF displays: [62-64]
+ * - Copied text:  [6264] (dash lost)
+ *
+ * Algorithm: Try splitting "ABCD" at each position to find valid range:
+ * - "6264" → try "6-264", "62-64", "626-4"
+ * - Valid if: start < end, both reasonable, small span (≤50)
+ *
+ * Two modes:
+ * 1. Precise mode (maxKnownLabel provided): Only trigger if num > maxKnownLabel
+ * 2. Heuristic mode (maxKnownLabel undefined): Only consider 4-digit numbers
+ *    where both parts are < 100, handling common cases like "6264" → "62-64"
+ *
+ * @param label - The numeric label string (e.g., "6264")
+ * @param maxKnownLabel - Maximum valid label from PDF parsing (optional)
+ * @returns Expanded range labels, or null if not a valid concatenated range
+ */
+function tryParseAsConcatenatedRange(label: string, maxKnownLabel?: number): string[] | null {
+  // Must be all digits
+  if (!/^\d+$/.test(label)) return null;
+
+  const num = parseInt(label, 10);
+  if (isNaN(num)) return null;
+
+  // Need at least 2 digits to split
+  if (label.length < 2) return null;
+
+  // Determine if we have a valid threshold
+  const hasValidThreshold = maxKnownLabel !== undefined && maxKnownLabel > 0;
+
+  if (hasValidThreshold) {
+    // Precise mode: only trigger if num exceeds maxKnownLabel
+    // This is the key heuristic: if PDF has refs 1-79, then "6264" is clearly invalid
+    if (num <= maxKnownLabel!) return null;
+  } else {
+    // Heuristic mode: only consider 4-digit numbers that are clearly too large
+    // Common papers have < 100 refs, so 4-digit numbers like "6264" are likely concatenations
+    // But we can't be sure about 3-digit numbers, so be conservative
+    if (label.length < 4 || num < 1000) return null;
+  }
+
+  // Try splitting at each position
+  for (let i = 1; i < label.length; i++) {
+    const startStr = label.substring(0, i);
+    const endStr = label.substring(i);
+
+    // Skip if end part has leading zeros (invalid number format)
+    if (endStr.length > 1 && endStr.startsWith('0')) continue;
+
+    const start = parseInt(startStr, 10);
+    const end = parseInt(endStr, 10);
+
+    // Validate as a reasonable range:
+    // 1. start < end (valid range direction)
+    // 2. start >= 1 (valid starting point)
+    if (start < 1 || start >= end) continue;
+
+    // 3. end within bounds
+    // 4. span not too large (≤50)
+    if (hasValidThreshold) {
+      // Precise mode: use maxKnownLabel as upper bound
+      if (end > maxKnownLabel! || (end - start) > 50) continue;
+    } else {
+      // Heuristic mode: conservative bounds
+      // Only accept splits where both parts are < 100
+      // This handles common cases like "6264" -> "62-64"
+      if (start >= 100 || end >= 100 || (end - start) > 50) continue;
+    }
+
+    // Found a valid split! Expand to range
+    const expanded = expandRange(start, end);
+    ztoolkit.log(
+      `[PDF-ANNOTATE] Concatenated range detected: "${label}" → ${start}-${end} → [${expanded.join(",")}] (mode=${hasValidThreshold ? 'precise' : 'heuristic'}, maxKnownLabel=${maxKnownLabel ?? 'undefined'})`
+    );
+    return expanded;
+  }
+
+  return null;
+}
+
+/**
+ * Post-process extracted labels to detect concatenated ranges.
+ * FTR-PDF-MATCHING: Exported for use in readerIntegration.ts when parseText is used.
+ *
+ * Now works in two modes:
+ * 1. Precise mode (maxKnownLabel provided): Uses threshold for accurate detection
+ * 2. Heuristic mode (maxKnownLabel undefined): Conservative detection for 4-digit
+ *    numbers where both parts are < 100 (e.g., "6264" → "62-64")
+ *
+ * @param labels - Array of extracted label strings
+ * @param maxKnownLabel - Maximum valid label from PDF (optional)
+ * @returns Processed labels with concatenated ranges expanded
+ */
+export function postProcessLabels(labels: string[], maxKnownLabel?: number): string[] {
+  const result: string[] = [];
+
+  for (const label of labels) {
+    // Try to parse as concatenated range
+    // tryParseAsConcatenatedRange handles the decision logic:
+    // - Precise mode if maxKnownLabel is set
+    // - Heuristic mode if maxKnownLabel is undefined (4-digit numbers with parts < 100)
+    const expanded = tryParseAsConcatenatedRange(label, maxKnownLabel);
+    if (expanded) {
+      // Add expanded labels (avoiding duplicates)
+      for (const exp of expanded) {
+        if (!result.includes(exp)) {
+          result.push(exp);
+        }
+      }
+      continue;
+    }
+
+    // Keep original label
+    if (!result.includes(label)) {
+      result.push(label);
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -199,14 +336,22 @@ export class CitationParser {
         type: "numeric",
         extractLabels: (m) => expandRange(parseInt(m[1], 10), parseInt(m[2], 10)),
       },
-      // Superscript digits: ¹²³
+      // Superscript digits: ¹²³ (single reference) or ¹·²·³ / ¹,²,³ (multiple)
+      // Note: consecutive superscripts like ¹²³ are treated as single reference [123]
+      // Separated superscripts like ¹·² or ¹,² are multiple references [1, 2]
       {
-        regex: /([⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g,
+        regex: /([⁰¹²³⁴⁵⁶⁷⁸⁹]+(?:[·,\s][⁰¹²³⁴⁵⁶⁷⁸⁹]+)*)/g,
         type: "numeric",
         extractLabels: (m) => {
-          const decoded = decodeSuperscript(m[1]);
-          // Split if it's a sequence like "123" -> ["1", "2", "3"]
-          return decoded.split("");
+          const text = m[1];
+          // Check if there are separators (·, comma, space between superscripts)
+          if (/[·,\s]/.test(text)) {
+            // Multiple references separated by ·, comma, or space
+            return text.split(/[·,\s]+/).map(part => decodeSuperscript(part)).filter(Boolean);
+          }
+          // Single consecutive superscript sequence = single reference number
+          const decoded = decodeSuperscript(text);
+          return [decoded];
         },
       },
       // [Author Year] - author-year style
@@ -288,12 +433,15 @@ export class CitationParser {
   /**
    * Parse a simple selection that might be just "[1]" or "1".
    * More lenient than parseText for direct user selections.
-   * 
+   *
    * @param selection - The selected text
    * @param enableFuzzy - Enable aggressive/fuzzy matching for broken PDF text layers
    *                      (e.g., when brackets are truncated). Default: false
+   * @param maxKnownLabel - Maximum valid label from PDF parsing (optional).
+   *                        Used to detect concatenated ranges where dash is lost
+   *                        (e.g., [62-64] copied as [6264])
    */
-  parseSelection(selection: string, enableFuzzy = false): ParsedCitation | null {
+  parseSelection(selection: string, enableFuzzy = false, maxKnownLabel?: number): ParsedCitation | null {
     // Clean up selection: trim whitespace
     let trimmed = selection.trim();
     
@@ -301,42 +449,62 @@ export class CitationParser {
     ztoolkit.log(`[PDF-ANNOTATE] parseSelection raw input (${selection.length} chars): "${selection.slice(0, 150)}..."`);
     ztoolkit.log(`[PDF-ANNOTATE] parseSelection trimmed (${trimmed.length} chars): "${trimmed.slice(0, 150)}..."`);
     
+    // FTR-PDF-ANNOTATE-MULTI-LABEL: Fix OCR bracket errors (f5g → [5], f26,30g → [26,30])
+    const ocrFixed = fixOCRBrackets(trimmed);
+    if (ocrFixed !== trimmed) {
+      ztoolkit.log(`[PDF-ANNOTATE] OCR bracket fix: "${trimmed}" → "${ocrFixed}"`);
+      trimmed = ocrFixed;
+    }
+    
     // Smart cleanup: try to find [xxx] pattern ANYWHERE in the text first
     // This handles cases like "SS [25,26,29]." or "text [1,2,3] more text"
-    // Use a global search to find the LAST complete [xxx] pattern
-    // (to prefer "[25,26,29]" in "SS [25,26,29]." over any earlier partial match)
+    // FTR-PDF-ANNOTATE-MULTI-LABEL: Collect ALL numeric bracket matches, not just the last one
+    // This handles cases like "[7] and [9]" -> should return both labels [7, 9]
     const allBracketMatches = [...trimmed.matchAll(/\[([^\[\]]+)\]/g)];
     ztoolkit.log(`[PDF-ANNOTATE] allBracketMatches count: ${allBracketMatches.length}`);
     for (const m of allBracketMatches) {
       ztoolkit.log(`[PDF-ANNOTATE]   bracket match: "[${m[1]}]" at index ${m.index}`);
     }
     if (allBracketMatches.length > 0) {
-      // Take the last match (most likely to be the intended citation)
-      // But prefer the match that contains only citation-like content
-      let bestMatch: RegExpMatchArray | null = null;
+      // FTR-PDF-ANNOTATE-MULTI-LABEL: Collect ALL labels from ALL numeric bracket matches
+      const allCollectedLabels: string[] = [];
       for (const match of allBracketMatches) {
         const content = match[1];
         // Check if content looks like a numeric citation (digits, commas, dashes)
         if (/^[\d,\s–-]+$/.test(content)) {
-          bestMatch = match;
+          const matchLabels = parseMixedCitation(content);
+          for (const label of matchLabels) {
+            if (!allCollectedLabels.includes(label)) {
+              allCollectedLabels.push(label);
+            }
+          }
         }
-      }
-      // If no numeric match found, try any match
-      if (!bestMatch && allBracketMatches.length > 0) {
-        bestMatch = allBracketMatches[allBracketMatches.length - 1];
       }
       
-      if (bestMatch) {
-        const content = bestMatch[1];
-        const labels = parseMixedCitation(content);
-        if (labels.length > 0) {
-          return {
-            raw: `[${content}]`,
-            type: "numeric",
-            labels,
-            position: null,
-          };
-        }
+      ztoolkit.log(`[PDF-ANNOTATE] Collected labels from bracket matches: [${allCollectedLabels.join(",")}]`);
+
+      if (allCollectedLabels.length > 0) {
+        // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
+        const processedLabels = postProcessLabels(allCollectedLabels, maxKnownLabel);
+        return {
+          raw: processedLabels.map(l => `[${l}]`).join(","),
+          type: "numeric",
+          labels: processedLabels,
+          position: null,
+        };
+      }
+      
+      // If no numeric matches, try the last bracket match as fallback
+      const lastMatch = allBracketMatches[allBracketMatches.length - 1];
+      if (lastMatch) {
+        const content = lastMatch[1];
+        // For non-numeric content (e.g., author-year), return as-is
+        return {
+          raw: `[${content}]`,
+          type: "author-year",  // Assume non-numeric is author-year style
+          labels: [content],
+          position: null,
+        };
       }
     }
     
@@ -400,10 +568,12 @@ export class CitationParser {
       }
       ztoolkit.log(`[PDF-ANNOTATE] allVisibleLabels: [${allVisibleLabels.join(",")}]`);
       if (allVisibleLabels.length > 0) {
+        // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
+        const processedLabels = postProcessLabels(allVisibleLabels, maxKnownLabel);
         return {
-          raw: allVisibleLabels.map(l => `[${l}]`).join(","),
+          raw: processedLabels.map(l => `[${l}]`).join(","),
           type: "numeric",
-          labels: allVisibleLabels,
+          labels: processedLabels,
           position: null,
         };
       }
@@ -413,10 +583,12 @@ export class CitationParser {
     // Try bare number (user selected "1" without brackets)
     const bareNumber = trimmed.match(/^(\d+)$/);
     if (bareNumber) {
+      // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
+      const processedLabels = postProcessLabels([bareNumber[1]], maxKnownLabel);
       return {
         raw: trimmed,
         type: "numeric",
-        labels: [bareNumber[1]],
+        labels: processedLabels,
         position: null,
       };
     }
@@ -438,10 +610,12 @@ export class CitationParser {
     const mixedLabels = parseMixedCitation(trimmed);
     ztoolkit.log(`[PDF-ANNOTATE] parseMixedCitation result: [${mixedLabels.join(",")}]`);
     if (mixedLabels.length > 0) {
+      // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
+      const processedLabels = postProcessLabels(mixedLabels, maxKnownLabel);
       return {
         raw: trimmed,
         type: "numeric",
-        labels: mixedLabels,
+        labels: processedLabels,
         position: null,
       };
     }
@@ -492,6 +666,48 @@ export class CitationParser {
         docRefNumbers.add(n);
         ztoolkit.log(`[PDF-ANNOTATE] Excluding "${docMatch[1]}. ${n}" as document reference`);
       }
+    }
+    
+    // Pattern 0: Numeric ranges without brackets (e.g., "12–19") inside OCR text
+    // Treated as explicit patterns so exclusion rules are relaxed
+    const rangeRegex = /\b(\d{1,4})\s*[–-]\s*(\d{1,4})\b/g;
+    let rangeMatch;
+    while ((rangeMatch = rangeRegex.exec(trimmed)) !== null) {
+      const start = parseInt(rangeMatch[1], 10);
+      const end = parseInt(rangeMatch[2], 10);
+      if (
+        Number.isFinite(start) &&
+        Number.isFinite(end) &&
+        start >= 1 &&
+        end >= start &&
+        end <= 1499
+      ) {
+        const expanded = expandRange(start, end);
+        for (const label of expanded) {
+          if (!docRefNumbers.has(label) && !allFuzzyLabels.includes(label)) {
+            allFuzzyLabels.push(label);
+          }
+        }
+        ztoolkit.log(`[PDF-ANNOTATE] Fuzzy Pattern 0 (Range): found ${start}–${end} -> [${expanded.join(",")}]`);
+      }
+    }
+    
+    // Pattern 0b: Comma-separated numbers without brackets (e.g., "10,11")
+    // Treated as explicit to relax exclusion rules; ignore years and doc refs
+    const listRegex = /\b\d{1,4}(?:\s*,\s*\d{1,4})+\b/g;
+    let listMatch;
+    while ((listMatch = listRegex.exec(trimmed)) !== null) {
+      const nums = (listMatch[0].match(/\d{1,4}/g) || [])
+        .map((n) => parseInt(n, 10))
+        .filter((n) => n >= 1 && n <= 1499 && !(n >= 1900 && n <= 2099));
+      if (nums.length === 0) continue;
+      for (const n of nums) {
+        const label = String(n);
+        if (!docRefNumbers.has(label) && !allFuzzyLabels.includes(label)) {
+          allFuzzyLabels.push(label);
+        }
+      }
+      ztoolkit.log(`[PDF-ANNOTATE] Fuzzy Pattern 0b (List): found [${nums.join(",")}]`);
     }
     
     // Pattern 1: Explicit reference markers (e.g., "Ref. 19", "Refs. 22,23")
@@ -622,10 +838,12 @@ export class CitationParser {
     // Return all collected labels (from Ref markers, author-number, and standalone)
     if (allFuzzyLabels.length > 0) {
       ztoolkit.log(`[PDF-ANNOTATE] Fuzzy detection final result: [${allFuzzyLabels.join(",")}]`);
+      // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
+      const processedLabels = postProcessLabels(allFuzzyLabels, maxKnownLabel);
       return {
-        raw: `[${allFuzzyLabels.join(",")}]`,
+        raw: `[${processedLabels.join(",")}]`,
         type: "numeric",
-        labels: allFuzzyLabels,
+        labels: processedLabels,
         position: null,
       };
     }
