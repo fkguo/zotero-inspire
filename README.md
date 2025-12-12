@@ -113,40 +113,14 @@ Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you ca
 
 ## What's new
 
-### 🆕 Architecture Refactoring (v2.1.0)
+### 🆕 Smart Update Mode (v2.1.0)
 
-A major internal refactoring release focused on code quality, modularity, and maintainability:
-
-- **Modular Panel Architecture**: Extracted 6 independent manager classes from the monolithic controller:
-  - `ChartManager` - Statistics chart rendering and interaction
-  - `FilterManager` - Text filtering, Quick Filters, and author/publication filters
-  - `NavigationManager` - Back/forward navigation with scroll state preservation
-  - `ExportManager` - BibTeX/LaTeX export to clipboard or file
-  - `BatchImportManager` - Batch selection, duplicate detection, and import
-  - `RowPoolManager` - Row pooling and template management (PERF-13 optimization core)
-
-- **Performance Monitoring**: New `PerformanceMonitor` class for timing operations and detecting slow operations
-
-- **Cache Statistics & Debugging** (new): All LRU caches now track hit/miss statistics. New `MemoryMonitor` class provides centralized cache monitoring with console debug commands:
-  - `Zotero.ZoteroInspire.getCacheStats()` - Returns cache statistics object
-  - `Zotero.ZoteroInspire.logCacheStats()` - Logs formatted stats to console
-  - `Zotero.ZoteroInspire.resetCacheStats()` - Resets all counters
-  - `Zotero.ZoteroInspire.startMemoryMonitor(ms)` - Starts periodic logging
-  - `Zotero.ZoteroInspire.stopMemoryMonitor()` - Stops periodic logging
-
-- **Unit Test Coverage**: Added 153 unit tests using Vitest framework covering:
-  - Text normalization and filtering
-  - Filter predicates and Quick Filters
-  - API type guards and utilities
-  - PDF citation matching strategies
-
-- **Chinese Localization**: Complete simplified Chinese translation (~370 lines) for all UI strings
-
-- **Code Quality Improvements**:
-  - Magic numbers replaced with named constants
-  - Inline styles consolidated into style utilities
-  - Filter methods unified with strategy pattern
-  - Complete INSPIRE API type definitions with type guards
+- **Preserve manual edits** when updating INSPIRE metadata
+- **Preview dialog** to select which fields to update
+- **Auto-preserve diacritic author names** (e.g., Meißner vs Meissner)
+- **Configurable field protection** in Preferences (title, authors, abstract, journal)
+- **UI toolbar redesign**: Modern 3-row layout with pill-style tabs, compact navigation buttons
+- **Chinese localization**: Complete simplified Chinese translation for all UI strings
 
 ### 🆕 PDF Reader Citation Detection (v2.0.0)
 
