@@ -9,6 +9,19 @@ import type { ZoteroChar, ZoteroPageData, StructuredRefEntry } from "./types";
 import { MATCH_CONFIG, PARSE_CONFIG } from "./constants";
 
 /**
+ * Extended letter character class for author names in PDF parsing.
+ * Includes ASCII letters plus common European characters (German, French, Spanish, etc.)
+ *
+ * Characters included:
+ * - ASCII: a-zA-Z
+ * - German: ß, ä, ö, ü, Ä, Ö, Ü
+ * - French/Spanish/Portuguese: à, á, â, ã, è, é, ê, ë, ì, í, î, ï, ò, ó, ô, õ, ù, ú, û, ñ, ç, etc.
+ * - Other European: ł, Ł, ř, č, š, ž, etc.
+ */
+const AUTHOR_LETTER_LOWER = "a-zßäöüàáâãèéêëìíîïòóôõùúûñçłęąśćźżńřčšžěůığş'\\-";
+const AUTHOR_LETTER_UPPER = "A-ZÄÖÜÀÁÂÃÈÉÊËÌÍÎÏÒÓÔÕÙÚÛÑÇŁĘĄŚĆŹŻŃŘČŠŽŮIĞŞ";
+
+/**
  * Extracted bibliographic info from a single paper in PDF text
  */
 export interface PDFPaperInfo {
@@ -18,6 +31,8 @@ export interface PDFPaperInfo {
   isErratum?: boolean;
   /** First author's last name (if detected) */
   firstAuthorLastName?: string;
+  /** All author last names extracted from this reference (for disambiguation) */
+  allAuthorLastNames?: string[];
   /** Publication year (if detected) */
   year?: string;
   /** Page number (if detected) */
@@ -931,16 +946,18 @@ export class PDFReferencesParser {
 
     // First try to extract from "Initials LastName" pattern (most common)
     // Pattern: "A. LastName" or "A.B. LastName" or "A. B. LastName"
+    // Support 2-letter surnames like "Li", "Wu", "Xu"
     if (!info.firstAuthorLastName) {
-      match = text.match(/^([A-Z]\.?\s*)+([A-Z][a-z]{2,})/);
+      match = text.match(/^([A-Z]\.?\s*)+([A-Z][a-z]+)/);
       if (match) {
         info.firstAuthorLastName = match[2];
       }
     }
 
     // Try "LastName, Initials" pattern
+    // Support 2-letter surnames like "Li", "Wu", "Xu" (common in Chinese names)
     if (!info.firstAuthorLastName) {
-      match = text.match(/^([A-Z][a-z]{2,}(?:-[A-Z][a-z]+)?),\s*[A-Z]\./);
+      match = text.match(/^([A-Z][a-z]+(?:-[A-Z][a-z]+)?),\s*[A-Z]\./);
       if (match) {
         info.firstAuthorLastName = match[1];
       }
@@ -949,7 +966,7 @@ export class PDFReferencesParser {
     // Try to extract from "Collaboration" patterns
     if (!info.firstAuthorLastName) {
       // "CLEO Collaboration, Y. Kubota et al." -> look for author after comma
-      match = text.match(/Collaboration,?\s+([A-Z]\.?\s*)+([A-Z][a-z]{2,})/i);
+      match = text.match(/Collaboration,?\s+([A-Z]\.?\s*)+([A-Z][a-z]+)/i);
       if (match) {
         info.firstAuthorLastName = match[2];
       }
@@ -957,7 +974,7 @@ export class PDFReferencesParser {
 
     // Try "Data Group, K. Hagiwara..." style (e.g., Particle Data Group)
     if (!info.firstAuthorLastName) {
-      match = text.match(/Data\s+Group,?\s+([A-Z]\.?\s*)+([A-Z][a-z]{2,})/i);
+      match = text.match(/Data\s+Group,?\s+([A-Z]\.?\s*)+([A-Z][a-z]+)/i);
       if (match) {
         info.firstAuthorLastName = match[2];
       }
@@ -973,7 +990,7 @@ export class PDFReferencesParser {
 
     // Try "Name et al." pattern
     if (!info.firstAuthorLastName) {
-      match = text.match(/^([A-Z][a-z]{2,})\s+et\s+al/i);
+      match = text.match(/^([A-Z][a-z]+)\s+et\s+al/i);
       if (match) {
         info.firstAuthorLastName = match[1];
       }
@@ -1371,6 +1388,509 @@ export class PDFReferencesParser {
       volume: entry.volume || undefined,
     };
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Author-Year Format Reference Parsing
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Build reference section text for author-year format parsing.
+   * Unlike buildReferenceSectionFromPages, this method does NOT trim based on
+   * numeric labels, which would incorrectly cut off alphabetically-ordered refs.
+   *
+   * @param pdfText - Full text extracted from PDF
+   * @returns Reference section text from "REFERENCES" header to end of document
+   */
+  private buildAuthorYearRefSection(pdfText: string): string {
+    // Find the REFERENCES header
+    const refStart = this.findReferencesSectionStart(pdfText);
+
+    if (refStart < 0) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE-AY] No REFERENCES header found`,
+      );
+      return "";
+    }
+
+    // Extract from REFERENCES header to end of document
+    // No numeric label trimming - author-year refs are alphabetically ordered
+    const refText = pdfText.slice(refStart);
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-PARSE-AY] Built ref section: start=${refStart}, length=${refText.length}`,
+    );
+
+    return refText;
+  }
+
+  /**
+   * Parse author-year format references section from PDF text.
+   * Used for RMP-style references: "Cho, S., et al., 2011a, Phys. Rev. Lett. 106, 212001."
+   *
+   * @param pdfText - Full text extracted from PDF
+   * @returns AuthorYearReferenceMapping or null if parsing fails
+   */
+  parseAuthorYearReferencesSection(pdfText: string): AuthorYearReferenceMapping | null {
+    Zotero.debug(
+      `[${config.addonName}] [PDF-PARSE-AY] Starting author-year reference parsing (${pdfText.length} chars)`,
+    );
+
+    // 1. Find references section
+    // IMPORTANT: For author-year format, we use buildAuthorYearRefSection instead of
+    // buildReferenceSectionFromPages, because the latter trims based on numeric labels
+    // which would incorrectly cut off content in alphabetically-ordered author-year refs.
+    const refText = this.buildAuthorYearRefSection(pdfText);
+    if (!refText.trim() || refText.length < 500) {
+      Zotero.debug(`[${config.addonName}] [PDF-PARSE-AY] Reference section too short or not found`);
+      return null;
+    }
+
+    // 2. Parse individual references
+    const references = this.parseAuthorYearReferences(refText);
+    if (references.length < 5) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE-AY] Too few references found (${references.length})`,
+      );
+      return null;
+    }
+
+    // 3. Build author-year map
+    // Use array to handle multiple papers with same first author + year
+    const authorYearMap = new Map<string, PDFPaperInfo[]>();
+    let withJournal = 0;
+
+    // DEBUG: Log all parsed references to find missing ones
+    const allKeys = references.map(r => `${r.firstAuthorLastName || "?"} ${r.year || "?"}`).slice(0, 20);
+    Zotero.debug(
+      `[${config.addonName}] [PDF-PARSE-AY] First 20 parsed refs: [${allKeys.join(", ")}]`,
+    );
+
+    // Check specifically for Braaten entries
+    const braatenRefs = references.filter(r =>
+      r.firstAuthorLastName?.toLowerCase() === "braaten"
+    );
+    if (braatenRefs.length > 0) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE-AY] Found ${braatenRefs.length} Braaten refs: ${braatenRefs.map(r => `${r.year}(j=${r.journalAbbrev},v=${r.volume},p=${r.pageStart})`).join(", ")}`,
+      );
+    }
+
+    for (const ref of references) {
+      if (!ref.firstAuthorLastName || !ref.year) continue;
+
+      // Build key: "AuthorLastName YearSuffix" (e.g., "Cho 2011a")
+      const key = `${ref.firstAuthorLastName} ${ref.year}`.toLowerCase();
+      // Also create a key without diacritics for bidirectional fallback (e.g., "lü 2016" -> "lu 2016")
+      const keyNoDiacritics = key.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      // DEBUG: Log Li 2013 entries to find M.-T. Li arXiv paper
+      if (ref.firstAuthorLastName?.toLowerCase() === "li" && ref.year === "2013") {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE-AY] Li 2013 ref: arxiv=${ref.arxivId || "none"}, journal=${ref.journalAbbrev || "none"}, vol=${ref.volume || "none"}, page=${ref.pageStart || "none"}, raw=${ref.rawText?.substring(0, 80) || "none"}`,
+        );
+      }
+
+      // Only add if we have additional info (journal, DOI, arXiv)
+      if (ref.journalAbbrev || ref.doi || ref.arxivId) {
+        // Append to array instead of overwriting
+        const existing = authorYearMap.get(key) || [];
+        existing.push(ref);
+        authorYearMap.set(key, existing);
+
+        // Also add under the no-diacritics key for bidirectional fallback
+        // This allows "lu 2016" to find entries stored as "lü 2016" and vice versa
+        if (keyNoDiacritics !== key) {
+          const existingNoDiacritics = authorYearMap.get(keyNoDiacritics) || [];
+          existingNoDiacritics.push(ref);
+          authorYearMap.set(keyNoDiacritics, existingNoDiacritics);
+        }
+
+        if (ref.journalAbbrev) withJournal++;
+      } else {
+        // DEBUG: Log refs that are skipped due to missing info
+        if (ref.firstAuthorLastName.toLowerCase() === "braaten") {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-PARSE-AY] Braaten ref skipped (no journal/doi/arxiv): year=${ref.year}`,
+          );
+        }
+      }
+    }
+
+    if (authorYearMap.size < 5) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE-AY] Too few valid author-year entries (${authorYearMap.size})`,
+      );
+      return null;
+    }
+
+    // 4. Assess confidence
+    const confidence: "high" | "medium" | "low" =
+      withJournal > authorYearMap.size * 0.7
+        ? "high"
+        : withJournal > authorYearMap.size * 0.4
+          ? "medium"
+          : "low";
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-PARSE-AY] Parsed ${authorYearMap.size} author-year keys (${withJournal} with journal), confidence=${confidence}`,
+    );
+
+    // Log a few samples for debugging, including multi-paper keys
+    const samples = Array.from(authorYearMap.entries()).slice(0, 5);
+    for (const [key, infos] of samples) {
+      if (infos.length > 1) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE-AY] Sample: "${key}" -> ${infos.length} papers: ${infos.map(i => `${i.journalAbbrev || "?"} ${i.volume || "?"}`).join("; ")}`,
+        );
+      } else {
+        const info = infos[0];
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE-AY] Sample: "${key}" -> ${info.journalAbbrev || "?"} ${info.volume || "?"}, ${info.pageStart || "?"}`,
+        );
+      }
+    }
+
+    // Log keys with multiple papers (important for disambiguation)
+    const multiPaperKeys = Array.from(authorYearMap.entries()).filter(([_, infos]) => infos.length > 1);
+    if (multiPaperKeys.length > 0) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE-AY] Found ${multiPaperKeys.length} keys with multiple papers: ${multiPaperKeys.map(([k, v]) => `${k}(${v.length})`).join(", ")}`,
+      );
+    }
+
+    return {
+      parsedAt: Date.now(),
+      authorYearMap,
+      totalReferences: references.length,
+      confidence,
+    };
+  }
+
+  /**
+   * Parse individual author-year references from reference section text.
+   * Handles RMP-style: "AuthorLastName, I., et al., YEAR[suffix], Journal Vol, Page."
+   */
+  private parseAuthorYearReferences(refText: string): PDFPaperInfo[] {
+    const results: PDFPaperInfo[] = [];
+
+    // FTR-PDF-ANNOTATE-FIX: Normalize combining diacritics before parsing
+    // PDF text extraction often produces broken composed characters like "Lu ̈" (Lu + space + combining umlaut)
+    // instead of the correct "Lü". This happens because PDF stores the umlaut separately.
+    // Fix: Move combining mark onto the following base character, then normalize to NFC.
+    // Example: "Lu ̈, Q.-F." -> "Lü, Q.-F."
+    refText = refText
+      // Move combining mark onto the following base if it sits between letters (L ̈u -> Lü)
+      .replace(/([A-Za-z])\s+([\u0300-\u036f])\s*([A-Za-z])/g, "$1$3$2")
+      // Fallback: collapse gaps between letter and combining mark
+      .replace(/([A-Za-z])\s+([\u0300-\u036f])/g, "$1$2")
+      .normalize("NFC");
+
+    // RMP author-year format pattern:
+    // Each reference typically starts with "AuthorLastName, I." at the beginning of a line
+    // or after a period from the previous reference.
+    //
+    // Pattern: AuthorLastName, FirstInitial., [...], YEARsuffix, Journal Volume, Page.
+    //
+    // Examples:
+    // Cho, S., et al. (ExHIC Collaboration), 2011a, Phys. Rev. Lett. 106, 212001.
+    // Weinstein, J. D., and N. Isgur, 1982, Phys. Rev. Lett. 48, 659.
+    // Albaladejo, M., et al., 2017, Chin. Phys. C 41, 121001.
+
+    // Strategy: Find all year occurrences with the pattern ", YEARx, " and extract
+    // the author (before) and journal info (after)
+    //
+    // Key insight: In RMP format, the year is always preceded by ", " and followed by ", "
+    // Format: ..., 2011a, Journal Vol, Page.
+    //
+    // Important: Journal names contain periods (e.g., "Phys. Rev. Lett."), so we can't use [^.]+
+    // Instead, we capture until the final period that ends the reference entry.
+    // The end of a reference is marked by: period followed by newline, or period followed by
+    // the start of a new author name (capital letter + lowercase + comma).
+
+    // Pattern breakdown:
+    // ,\s*           - comma followed by optional whitespace (before year)
+    // ((?:19|20)\d{2}[a-z]?) - year with optional suffix (capture group 1)
+    // \s*,\s*        - comma with optional whitespace (after year)
+    // (.+?)          - journal info, non-greedy (capture group 2)
+    // \.             - final period
+    // Lookahead options (extended to handle edge cases):
+    //   - \s*\n       - period followed by whitespace and newline
+    //   - \s*$        - period at end of string
+    //   - \s+[A-Z]... - period followed by new author name (standard case)
+    //                   NOTE: Use [a-z]+ (not {2,}) to support 2-letter surnames like "Li"
+    //   - \s*\n.*\n\s*[A-Z]... - period followed by page header/footer then new author
+    //   - \s+"        - period followed by quote (for titles in quotes)
+    // Use extended character class to support German ß, umlauts, accents, etc.
+    const yearPattern = new RegExp(
+      `,\\s*((?:19|20)\\d{2}[a-z]?)\\s*,\\s*(.+?)\\.(?=\\s*\\n|\\s*$|\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+,|\\s*\\n[^\\n]*\\n\\s*[${AUTHOR_LETTER_UPPER}]|\\s+")`,
+      "g"
+    );
+    let match: RegExpExecArray | null;
+
+    while ((match = yearPattern.exec(refText)) !== null) {
+      const yearWithSuffix = match[1];
+      const journalPart = match[2].trim();
+
+      // DEBUG: Track Braaten-related entries
+      const isBraatenYear = yearWithSuffix === "2005a" || yearWithSuffix === "2005b";
+
+      // Find the author part: go backwards from the match to find "LastName, I."
+      // The author is at the start of the reference line
+      const beforeYear = refText.slice(Math.max(0, match.index - 300), match.index);
+
+      // Find the start of this reference entry.
+      // RMP format: "Braaten, E., and M. Kusunoki, 2005a, Phys. Rev. D 71, 074005."
+      // We need to find "Braaten" (first author), not "Kusunoki" (last listed author)
+      //
+      // Key insight for RMP-style author-year references:
+      // - Multiple references appear on the same line, separated by "page. Author" pattern
+      // - Newlines only occur at page boundaries (for headers/footers)
+      // - Therefore, we should ALWAYS use the digit pattern first to find ref boundaries
+      // - Only fall back to newline if digit pattern fails
+      let refEntryStart = 0;
+      const lastNewlineIdx = beforeYear.lastIndexOf("\n");
+
+      // Function to find reference boundary using digit+period pattern
+      // This is the PRIMARY method for RMP-style refs where multiple refs are on same line
+      const findRefBoundaryByDigitPattern = (text: string): number => {
+        const prevRefEndPattern = new RegExp(
+          `\\d+\\.\\s+([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+),\\s*[${AUTHOR_LETTER_UPPER}][\\.\\-]`,
+          "g"
+        );
+        const allPrevRefEnds = [...text.matchAll(prevRefEndPattern)];
+        if (allPrevRefEnds.length > 0) {
+          const lastMatch = allPrevRefEnds[allPrevRefEnds.length - 1];
+          const fullMatch = lastMatch[0];
+          const nameStartInMatch = fullMatch.indexOf(lastMatch[1]);
+          return (lastMatch.index ?? 0) + nameStartInMatch;
+        }
+        return -1; // Return -1 to indicate no match found
+      };
+
+      // Helper: Check if text after newline is a page header/footer (not a reference start)
+      // Used only as fallback when digit pattern fails
+      const isPageHeader = (text: string): boolean => {
+        const trimmed = text.trim();
+        if (!trimmed) return true; // Empty line is not a reference start
+        // Common page header patterns in physics papers
+        const pageHeaderPatterns = [
+          /^[A-Z][a-z]+\s+et\s+al\.:/i,                    // "Guo et al.:" running header
+          /^Rev\.\s*Mod\.\s*Phys\./i,                      // Journal header
+          /^Phys\.\s*Rev\./i,                              // Journal header
+          /^\d{6}-\d+\s*$/,                                // Page number like "015004-52"
+          /^Vol\.\s*\d+/i,                                 // Volume header
+          /^No\.\s*\d+/i,                                  // Issue header
+          /^[A-Z][A-Z\s]+$/,                               // All caps header
+          /^January|February|March|April|May|June|July|August|September|October|November|December/i, // Month in header
+        ];
+        for (const pattern of pageHeaderPatterns) {
+          if (pattern.test(trimmed)) return true;
+        }
+        return false;
+      };
+
+      // ALWAYS try digit pattern first - this is the reliable boundary for RMP-style refs
+      const digitBoundary = findRefBoundaryByDigitPattern(beforeYear);
+
+      if (digitBoundary >= 0) {
+        // Found a digit pattern boundary - use it
+        refEntryStart = digitBoundary;
+      } else if (lastNewlineIdx >= 0) {
+        // No digit pattern - fall back to newline if it's not a page header
+        const afterNewline = beforeYear.slice(lastNewlineIdx + 1);
+        if (!isPageHeader(afterNewline)) {
+          refEntryStart = lastNewlineIdx + 1;
+        }
+        // If page header, refEntryStart stays at 0 (start of beforeYear)
+      }
+      // If no digit pattern and no valid newline, refEntryStart is 0
+
+      // Extract first author from the reference entry start
+      // Use extended character class to support German ß, umlauts, etc.
+      const refEntryText = beforeYear.slice(refEntryStart);
+      const firstAuthorPattern = new RegExp(
+        `^\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+),\\s*[${AUTHOR_LETTER_UPPER}]\\.`
+      );
+      const firstAuthorMatch = refEntryText.match(firstAuthorPattern);
+
+      let firstAuthorLastName: string | null = null;
+      if (firstAuthorMatch) {
+        firstAuthorLastName = firstAuthorMatch[1];
+      } else {
+        // Fallback: try to find any capitalized name at line start
+        const lineStartPattern = new RegExp(
+          `^\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+),`
+        );
+        const lineStartAuthor = refEntryText.match(lineStartPattern);
+        if (lineStartAuthor) {
+          firstAuthorLastName = lineStartAuthor[1];
+        }
+      }
+
+      // DEBUG: Log when we're looking at a year that might be Braaten
+      if (isBraatenYear) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE-AY] DEBUG year=${yearWithSuffix}: refEntryText="${refEntryText.slice(0, 60)}...", firstAuthor=${firstAuthorLastName || "NONE"}`,
+        );
+      }
+
+      if (!firstAuthorLastName) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE-AY] Could not extract author for year ${yearWithSuffix}, refEntryText="${refEntryText.slice(0, 80)}..."`,
+        );
+        continue;
+      }
+
+      // Extract all author last names from refEntryText for disambiguation
+      // Patterns to handle:
+      // - "LastName, I." or "LastName, I.-J." (comma before initial)
+      // - "and I. LastName" or "and I.-J. LastName" (after "and")
+      // - ", I. LastName" (middle author without "and", e.g., "Artoisenet, P., E. Braaten, and D. Kang")
+      //
+      // IMPORTANT: Collect authors with their positions and sort by position at the end
+      // to preserve the original order from the PDF text. This is critical for
+      // selectBestPdfPaperInfo which uses author order to disambiguate papers.
+      const authorMatches: Array<{ name: string; index: number }> = [];
+
+      // Pattern 1: "LastName, I." format (e.g., "Guo, F.-K.", "Hidalgo-Duque, C.")
+      // FIX: Added compound surname support (?:-[UPPER][lower]+)? to match "Hidalgo-Duque"
+      const authorPattern1 = new RegExp(
+        `([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+(?:-[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+)?),\\s*[${AUTHOR_LETTER_UPPER}][\\.\\-]`,
+        "g"
+      );
+      let authorMatch;
+      while ((authorMatch = authorPattern1.exec(refEntryText)) !== null) {
+        const name = authorMatch[1];
+        if (!authorMatches.some(m => m.name === name)) {
+          authorMatches.push({ name, index: authorMatch.index });
+        }
+      }
+
+      // Pattern 2: "and I. LastName" format with any number of initials
+      // Examples: "and W. Wang", "and C.-P. Shen", "and M. P. Valderrama", "and A. B. C. Smith"
+      // FIX: Use (?:\s*-?[UPPER][.\-])* to handle multiple space-separated or hyphenated initials
+      // FIX: Added compound surname support (?:-[UPPER][lower]+)? to match "Hidalgo-Duque"
+      const authorPattern2 = new RegExp(
+        `and\\s+[${AUTHOR_LETTER_UPPER}][\\.\\-](?:\\s*-?[${AUTHOR_LETTER_UPPER}][\\.\\-])*\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+(?:-[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+)?)`,
+        "gi"
+      );
+      while ((authorMatch = authorPattern2.exec(refEntryText)) !== null) {
+        const name = authorMatch[1];
+        if (!authorMatches.some(m => m.name === name)) {
+          authorMatches.push({ name, index: authorMatch.index });
+        }
+      }
+
+      // Pattern 3: ", I. LastName" (middle author without "and") with any number of initials
+      // Examples: ", E. Braaten", ", U.-G. Meißner", ", M. P. Smith", ", A. B. C. Jones"
+      // Must be preceded by comma+space and followed by comma or "and"
+      // FIX: Use (?:\s*-?[UPPER][.\-])* to handle multiple space-separated or hyphenated initials
+      // FIX: Added compound surname support (?:-[UPPER][lower]+)? to match "Hidalgo-Duque"
+      const authorPattern3 = new RegExp(
+        `,\\s+[${AUTHOR_LETTER_UPPER}][\\.\\-](?:\\s*-?[${AUTHOR_LETTER_UPPER}][\\.\\-])*\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+(?:-[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+)?)(?=,|\\s+and\\b)`,
+        "gi"
+      );
+      while ((authorMatch = authorPattern3.exec(refEntryText)) !== null) {
+        const name = authorMatch[1];
+        // Skip if this is a partial match of a compound surname already in the list
+        // e.g., skip "Duque" if "Hidalgo-Duque" is already present
+        // e.g., skip "Soler" if "Fernandez-Soler" is already present
+        const isPartOfExisting = authorMatches.some(existing => {
+          const existingLower = existing.name.toLowerCase();
+          const nameLower = name.toLowerCase();
+          // Check if existing name contains this name as part of a compound (with hyphen)
+          return existingLower.includes(`-${nameLower}`) || existingLower.includes(`${nameLower}-`);
+        });
+        if (!isPartOfExisting && !authorMatches.some(m => m.name === name)) {
+          authorMatches.push({ name, index: authorMatch.index });
+        }
+      }
+
+      // Sort by position in text to preserve original author order
+      authorMatches.sort((a, b) => a.index - b.index);
+      const allAuthorLastNames = authorMatches.map(m => m.name);
+
+      // Build the full reference text for extractPaperInfo
+      const fullRefText = refEntryText + match[0].slice(1); // Include ", year, journal."
+
+      // Extract paper info using existing method
+      const info = this.extractPaperInfo(fullRefText, false);
+
+      // Override with our more reliable extracted values
+      info.firstAuthorLastName = firstAuthorLastName;
+      info.year = yearWithSuffix;
+      info.allAuthorLastNames = allAuthorLastNames.length > 0 ? allAuthorLastNames : [firstAuthorLastName];
+
+      // Parse journal info directly from journalPart: "Phys. Rev. Lett. 106, 212001"
+      // Pattern: Journal Name Volume, Page
+      const jvpMatch = journalPart.match(/^(.+?)\s+(\d+)\s*,\s*(\d+)/);
+      if (jvpMatch) {
+        info.journalAbbrev = jvpMatch[1].trim();
+        info.volume = jvpMatch[2];
+        info.pageStart = jvpMatch[3];
+      } else {
+        // Try alternative pattern: "Journal Name Volume Page" (no comma)
+        const jvpMatch2 = journalPart.match(/^(.+?)\s+(\d+)\s+(\d+)/);
+        if (jvpMatch2) {
+          info.journalAbbrev = jvpMatch2[1].trim();
+          info.volume = jvpMatch2[2];
+          info.pageStart = jvpMatch2[3];
+        }
+      }
+
+      const hasJournal = !!info.journalAbbrev && !!info.volume;
+      const hasStrongId = !!info.arxivId || !!info.doi;
+
+      // Skip only if we lack both journal info and any strong identifier
+      if (!hasJournal && !hasStrongId) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE-AY] Skipping ${firstAuthorLastName} ${yearWithSuffix}: no journal info from "${journalPart}"`,
+        );
+        continue;
+      }
+
+      // Always add - duplicates with same author+year but different co-authors/journals are allowed
+      const key = `${firstAuthorLastName} ${yearWithSuffix}`.toLowerCase();
+      results.push(info);
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE-AY] Parsed: ${key} -> ${info.journalAbbrev} ${info.volume}, ${info.pageStart} (authors: ${allAuthorLastNames.join(", ")})`,
+      );
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-PARSE-AY] Extracted ${results.length} references from text`,
+    );
+
+    return results;
+  }
+
+  /**
+   * Get author-year key from PDFPaperInfo.
+   * Returns normalized "authorlastname year" for lookup.
+   */
+  static getAuthorYearKey(info: PDFPaperInfo): string | null {
+    if (!info.firstAuthorLastName || !info.year) return null;
+    return `${info.firstAuthorLastName} ${info.year}`.toLowerCase();
+  }
+}
+
+/**
+ * Author-year reference mapping from PDF
+ * Maps "Author Year" (e.g., "Cho 2011a") -> PDFPaperInfo[]
+ * FTR-PDF-ANNOTATE-AUTHOR-YEAR: Enables precise matching for author-year citations
+ *
+ * Note: Uses array to handle multiple papers with same first author + year but different co-authors
+ * e.g., "Guo 2014" -> [{Guo, Meißner, Wang -> Commun. Theor. Phys.}, {Guo, Hidalgo-Duque -> Eur. Phys. J.}]
+ */
+export interface AuthorYearReferenceMapping {
+  /** Parse timestamp */
+  parsedAt: number;
+  /** "Author Year" -> paper infos array (e.g., "Cho 2011a" -> [{journal: "Phys. Rev. Lett.", ...}]) */
+  authorYearMap: Map<string, PDFPaperInfo[]>;
+  /** Total references found */
+  totalReferences: number;
+  /** Parse quality indicator */
+  confidence: "high" | "medium" | "low";
 }
 
 /**

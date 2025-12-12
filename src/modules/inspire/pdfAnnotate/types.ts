@@ -22,6 +22,17 @@ export interface ParsedCitation {
   labels: string[];
   /** Position information (optional, filled by scanner) */
   position?: CitationPosition | null;
+  /**
+   * FTR-PDF-ANNOTATE-AUTHOR-YEAR: Sub-citations for complex author-year formats.
+   * When a single selection contains multiple distinct citations (e.g., "Bignamini et al. (2009, 2010)"
+   * represents 2 separate papers), each sub-citation is stored here with its own display text and labels.
+   */
+  subCitations?: Array<{
+    /** Display text for this citation (e.g., "Bignamini et al. (2009)") */
+    displayText: string;
+    /** Labels for matching this specific citation */
+    labels: string[];
+  }>;
 }
 
 /**
@@ -36,6 +47,7 @@ export interface CitationPosition {
 /**
  * Result of matching a PDF label to an INSPIRE entry
  * FTR-PDF-MATCHING: Extended with diagnostic fields for user feedback
+ * FTR-AMBIGUOUS-AUTHOR-YEAR: Extended with ambiguous candidate support
  */
 export interface MatchResult {
   /** The PDF label that was matched */
@@ -64,6 +76,44 @@ export interface MatchResult {
   versionMismatchWarning?: string;
   /** Match score (for debugging) */
   score?: number;
+  /** FTR-MISSING-FIX: Index of the PDF paper in paperInfos array that this result came from */
+  sourcePaperIndex?: number;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // FTR-AMBIGUOUS-AUTHOR-YEAR: Support for ambiguous author-year matches
+  // When same first author has multiple papers in the same year, user needs
+  // to choose the correct one.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** True if this match is ambiguous (multiple candidates with same score) */
+  isAmbiguous?: boolean;
+  /** All candidate matches when ambiguous - user should choose one */
+  ambiguousCandidates?: AmbiguousCandidate[];
+}
+
+/**
+ * FTR-AMBIGUOUS-AUTHOR-YEAR: Candidate for ambiguous author-year match.
+ * Contains enough info to display to user for selection.
+ */
+export interface AmbiguousCandidate {
+  /** Index in the entries array */
+  entryIndex: number;
+  /** Entry ID */
+  entryId?: string;
+  /** Display text for user (e.g., "Phys. Rev. D 93, 074031 (8 authors)") */
+  displayText: string;
+  /** Paper title (truncated if too long) */
+  title?: string;
+  /** Journal abbreviation */
+  journal?: string;
+  /** Volume */
+  volume?: string;
+  /** Page start */
+  page?: string;
+  /** Number of authors */
+  authorCount?: number;
+  /** Second author's last name (for disambiguation) */
+  secondAuthor?: string;
 }
 
 /**

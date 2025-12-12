@@ -69,9 +69,24 @@ export {
 } from "./authorUtils";
 
 // Re-export classes and utilities
-export { LRUCache, ZInsUtils, ReaderTabHelper, clearAllHistoryPrefs } from "./utils";
+export { LRUCache, ZInsUtils, ReaderTabHelper, clearAllHistoryPrefs, type CacheStats } from "./utils";
 export { ZInsMenu } from "./menu";
-export { ZInspire, setInspireMeta, setCrossRefCitations, saveItemWithPendingInspireNote } from "./itemUpdater";
+export { ZInspire, setInspireMeta, setInspireMetaSelective, setCrossRefCitations, saveItemWithPendingInspireNote } from "./itemUpdater";
+export { MemoryMonitor } from "./memoryMonitor";
+
+// Re-export CrossRef service
+export { crossrefFetch } from "./crossrefService";
+
+// Re-export enrichment config
+export {
+  ENRICH_BATCH_PREF,
+  ENRICH_PARALLEL_PREF,
+  ENRICH_BATCH_RANGE,
+  ENRICH_PARALLEL_RANGE,
+  ENRICH_BATCH_DEFAULT,
+  ENRICH_PARALLEL_DEFAULT,
+  getEnrichmentSettings,
+} from "./enrichConfig";
 
 // Re-export metadata service
 export {
@@ -101,6 +116,26 @@ export { localCache } from "./localCache";
 
 // Re-export reference services
 export { fetchReferencesEntries, buildReferenceEntry, enrichReferencesEntries } from "./referencesService";
+
+// Re-export smart update service (FTR-SMART-UPDATE)
+export {
+  type FieldCategory,
+  type FieldChange,
+  type SmartUpdateDiff,
+  type FieldProtectionConfig,
+  DEFAULT_FIELD_PROTECTION,
+  getFieldProtectionConfig,
+  isFieldProtected,
+  compareItemWithInspire,
+  filterProtectedChanges,
+  getFieldDisplayName,
+  formatValueForDisplay,
+  isSmartUpdateEnabled,
+  shouldShowPreview,
+  isAutoCheckEnabled,
+  showUpdateNotification,
+  showSmartUpdatePreviewDialog,
+} from "./smartUpdate";
 
 // Re-export PDF annotate module (FTR-PDF-ANNOTATE)
 export {

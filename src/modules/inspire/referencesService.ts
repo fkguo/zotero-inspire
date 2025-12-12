@@ -18,7 +18,12 @@ import {
   extractArxivFromReference,
   extractArxivFromMetadata,
 } from "./apiUtils";
-import { INSPIRE_API_BASE, AUTHOR_IDS_EXTRACT_LIMIT } from "./constants";
+import {
+  INSPIRE_API_BASE,
+  AUTHOR_IDS_EXTRACT_LIMIT,
+  API_FIELDS_ENRICHMENT,
+  buildFieldsParam,
+} from "./constants";
 import type { InspireReferenceEntry } from "./types";
 import { inspireFetch } from "./rateLimiter";
 
@@ -95,6 +100,10 @@ export function buildReferenceEntry(
     resolvedYear,
     errata,
   );
+  // Extract primary DOI from reference data
+  const doi = Array.isArray(reference?.dois) && reference.dois.length
+    ? reference.dois[0]
+    : undefined;
   const entry: InspireReferenceEntry = {
     id: `${index}-${recid ?? reference?.label ?? Date.now()}`,
     label: reference?.label,
@@ -120,6 +129,7 @@ export function buildReferenceEntry(
     publicationInfo,
     publicationInfoErrata: errata,
     arxivDetails,
+    doi,
   };
   entry.displayText = buildDisplayText(entry);
   return entry;
@@ -229,7 +239,8 @@ async function fetchAndApplyBatchMetadata(
   if (signal?.aborted || !batchRecids.length) return [];
 
   const query = batchRecids.map(r => `recid:${r}`).join(" OR ");
-  const fieldsParam = "&fields=control_number,citation_count,citation_count_without_self_citations,titles.title,authors.full_name,author_count,publication_info,earliest_date,arxiv_eprints";
+  // FTR-API-FIELD-OPTIMIZATION: Use centralized field configuration
+  const fieldsParam = buildFieldsParam(API_FIELDS_ENRICHMENT);
   const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batchRecids.length}${fieldsParam}`;
 
   try {
@@ -346,6 +357,12 @@ function applyMetadataToEntry(
     if (arxiv) {
       entry.arxivDetails = arxiv;
     }
+  }
+
+  // Extract DOI from metadata if not already present
+  if (!entry.doi && Array.isArray(metadata.dois) && metadata.dois.length) {
+    const doiObj = metadata.dois[0];
+    entry.doi = typeof doiObj === "string" ? doiObj : doiObj?.value;
   }
 
   // Publication summary update

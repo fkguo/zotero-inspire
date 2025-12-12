@@ -77,6 +77,13 @@ export class ZInsMenu {
         },
         {
           tag: "menuitem",
+          label: getString("menuitem-copy-citation-key"),
+          commandListener: () => {
+            _globalThis.inspire.copyCitationKey();
+          },
+        },
+        {
+          tag: "menuitem",
           label: getString("menuitem-copy-inspire-link"),
           commandListener: () => {
             _globalThis.inspire.copyInspireLink();
@@ -84,9 +91,9 @@ export class ZInsMenu {
         },
         {
           tag: "menuitem",
-          label: getString("menuitem-copy-citation-key"),
+          label: getString("menuitem-copy-inspire-link-md"),
           commandListener: () => {
-            _globalThis.inspire.copyCitationKey();
+            _globalThis.inspire.copyInspireLinkMarkdown();
           },
         },
         {

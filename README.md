@@ -36,6 +36,7 @@ This add-on for the excellent open-source reference manager [Zotero](https://git
     - [Local Cache (new in 1.1.3)](#local-cache-new-in-113)
     - [Reader View Navigation](#reader-view-navigation)
     - [INSPIRE Record Not Found](#inspire-record-not-found)
+    - [Smart Update (new in 2.1.0)](#smart-update-new-in-210)
   - [Additional tip for citing as you writing LaTeX](#additional-tip-for-citing-as-you-writing-latex)
   - [References](#references)
   - [License](#license)
@@ -125,6 +126,13 @@ A major internal refactoring release focused on code quality, modularity, and ma
   - `RowPoolManager` - Row pooling and template management (PERF-13 optimization core)
 
 - **Performance Monitoring**: New `PerformanceMonitor` class for timing operations and detecting slow operations
+
+- **Cache Statistics & Debugging** (new): All LRU caches now track hit/miss statistics. New `MemoryMonitor` class provides centralized cache monitoring with console debug commands:
+  - `Zotero.ZoteroInspire.getCacheStats()` - Returns cache statistics object
+  - `Zotero.ZoteroInspire.logCacheStats()` - Logs formatted stats to console
+  - `Zotero.ZoteroInspire.resetCacheStats()` - Resets all counters
+  - `Zotero.ZoteroInspire.startMemoryMonitor(ms)` - Starts periodic logging
+  - `Zotero.ZoteroInspire.stopMemoryMonitor()` - Stops periodic logging
 
 - **Unit Test Coverage**: Added 153 unit tests using Vitest framework covering:
   - Text normalization and filtering
@@ -267,7 +275,8 @@ A major new feature: **automatic citation detection in the PDF reader**!
       return `[Copy INSPIRE Link] link to ${linkText} copied.`
       }
       ```
-  - `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors` ($\leq10$, otherwise keeping only the first 3; the author list will be updated if no author is given or the first name of the first author is empty), `title`, `abstract`, etc.
+  - `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors`, `title`, `abstract`, etc.
+    - **Note**: All fields are overwritten with INSPIRE data. Use **Smart Update** mode (see Settings below) if you want to protect specific fields from being overwritten.
   - Set the arXiv number of articles that are not published to the `Journal Abbr` field. Items of type `report` or `preprint` are set to `journalArticle`.
   - It will also get the citation counts with and without self-citations for each selected item. One can also choose to update only the citation counts using `Citation counts only` in the right-click menu.
     - The current INSPIRE system does not display the citation count without self citations for a given paper. However, this number is in the metadata, and can be extracted with this add-on.
@@ -353,6 +362,20 @@ Handle items that could not be found in the INSPIRE database:
 
 - **Add tag to items without INSPIRE record**: Tag items that could not be found in INSPIRE (enabled by default)
 - **Tag name**: Customize the tag name used for items without INSPIRE records (default: `⛔ No INSPIRE recid found`)
+
+### Smart Update (new in 2.1.0)
+
+Control how metadata updates are applied to preserve your manual edits:
+
+- **Enable smart update mode**: When enabled, the add-on compares local item data with INSPIRE metadata and only updates fields that have changed. Disabled by default (standard mode overwrites all fields).
+- **Show preview dialog before updating**: When updating a single item, displays a dialog showing all detected changes with checkboxes, allowing you to select which fields to update. Only shown for single-item updates (batch updates apply changes automatically based on protection settings). Enabled by default when Smart Update is active.
+- **Protected fields**: Select which fields should be protected when you have existing data. Protected fields will not be overwritten if they already contain non-empty values:
+  - **Title**: Protect manually edited titles
+  - **Authors**: Protect manually edited author names
+  - **Abstract**: Protect manually edited abstracts
+  - **Journal**: Protect manually edited journal abbreviations
+- **Protected author names**: A comma-separated list of author names that should always be preserved, even when the Authors field is not protected. This is useful for names with special characters that INSPIRE may store differently (e.g., "Meißner" vs "Meissner", "Müller" vs "Mueller", "O'Brien"). The matching is case-insensitive and works with last names.
+- **Automatic diacritic preservation**: The add-on automatically detects when your local author names contain diacritics (ä, ö, ü, ß, é, ñ, etc.) that INSPIRE stores as ASCII equivalents. In such cases, your local spelling is preserved automatically without needing to add names to the protected list. For example, if you have "Meißner" locally and INSPIRE has "Meissner", the local version is kept.
 
 ## Additional tip for citing as you writing LaTeX
 

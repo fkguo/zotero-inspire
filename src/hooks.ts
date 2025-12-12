@@ -2,7 +2,7 @@ import { config } from "../package.json";
 import { initLocale, getString } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 import { ZInsMenu, ZInsUtils, ZInspireReferencePane } from "./modules/zinspire";
-import { localCache, getReaderIntegration } from "./modules/inspire";
+import { localCache, getReaderIntegration, recidLookupCache, MemoryMonitor } from "./modules/inspire";
 import {
   ENRICH_BATCH_RANGE,
   ENRICH_PARALLEL_RANGE,
@@ -24,12 +24,36 @@ async function onStartup() {
 
   await onMainWindowLoad(Zotero.getMainWindow());
 
+  // Register LRU caches for monitoring
+  MemoryMonitor.getInstance().registerCache("recidLookup", recidLookupCache);
+
+  // Expose console commands for debugging
+  exposeConsoleCommands();
+
   // Purge expired local cache entries in background after startup
   setTimeout(() => {
     localCache.purgeExpired().catch(err => {
       Zotero.debug(`[${config.addonName}] Failed to purge expired cache: ${err}`);
     });
   }, 10000); // Delay 10s to avoid startup contention
+}
+
+/**
+ * Expose debug commands on Zotero[addonInstance] for console access.
+ * Usage in Zotero console:
+ *   Zotero.ZoteroInspire.getCacheStats()
+ *   Zotero.ZoteroInspire.logCacheStats()
+ *   Zotero.ZoteroInspire.resetCacheStats()
+ */
+function exposeConsoleCommands(): void {
+  const instance = (Zotero as any)[config.addonInstance];
+  if (instance) {
+    instance.getCacheStats = () => MemoryMonitor.getInstance().getCacheStats();
+    instance.logCacheStats = () => MemoryMonitor.getInstance().logCacheStats();
+    instance.resetCacheStats = () => MemoryMonitor.getInstance().resetCacheStats();
+    instance.startMemoryMonitor = (interval?: number) => MemoryMonitor.getInstance().start(interval);
+    instance.stopMemoryMonitor = () => MemoryMonitor.getInstance().stop();
+  }
 }
 
 async function onMainWindowLoad(_win: Window): Promise<void> {
@@ -238,6 +262,39 @@ function updatePDFParseControls(doc: Document, syncCheckbox = true) {
   }
 }
 
+function updateSmartUpdateControls(doc: Document, syncCheckbox = true) {
+  const enableCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-smart_update_enable"
+  ) as HTMLInputElement | null;
+
+  let enabled = getPref("smart_update_enable") as boolean;
+  if (enableCheckbox) {
+    if (syncCheckbox) {
+      enableCheckbox.checked = enabled;
+    } else {
+      enabled = enableCheckbox.checked;
+      setPref("smart_update_enable", enabled);
+    }
+  }
+
+  // Sub-options that should be disabled when smart update is off
+  const subControlIds = [
+    "zotero-prefpane-zoteroinspire-smart_update_show_preview",
+    "zotero-prefpane-zoteroinspire-smart_update_protect_title",
+    "zotero-prefpane-zoteroinspire-smart_update_protect_authors",
+    "zotero-prefpane-zoteroinspire-smart_update_protect_abstract",
+    "zotero-prefpane-zoteroinspire-smart_update_protect_journal",
+    "zotero-prefpane-zoteroinspire-smart_update_always_citations",
+    "zotero-prefpane-zoteroinspire-smart_update_always_arxiv",
+  ];
+
+  subControlIds.forEach((id) => {
+    const el = doc.getElementById(id) as HTMLInputElement | null;
+    if (!el) return;
+    el.disabled = !enabled;
+  });
+}
+
 /**
  * This function is just an example of dispatcher for Preference UI events.
  * Any operations should be placed in a function to keep this funcion clear.
@@ -256,6 +313,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         setTimeout(() => updateEnrichSettingsDisplay(doc, true), 50);
         updateLocalCacheControls(doc);
         updatePDFParseControls(doc);
+        updateSmartUpdateControls(doc);
         const enableCheckbox = doc.getElementById(
           "zotero-prefpane-zoteroinspire-local_cache_enable"
         ) as HTMLInputElement | null;
@@ -275,6 +333,13 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         forceCheckbox?.addEventListener("command", (e) => {
           const cb = e.target as HTMLInputElement;
           setPref("pdf_force_mapping_on_mismatch", cb.checked);
+        });
+        // Smart Update enable checkbox listener
+        const smartUpdateCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-smart_update_enable"
+        ) as HTMLInputElement | null;
+        smartUpdateCheckbox?.addEventListener("command", () => {
+          updateSmartUpdateControls(doc, false);
         });
         const batchInput = doc.getElementById(
           "zotero-prefpane-zoteroinspire-local_cache_enrich_batch"

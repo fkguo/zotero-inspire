@@ -5,7 +5,7 @@
         {
           "version": "2.1.0",
           "update_link": "https://github.com/fkguo/zotero-inspire/releases/download/v2.1.0/zotero-inspire.xpi",
-          "update_hash": "sha512:cf732d9f281a6c49a3c7085682587de914b45d1670863f443d379db1d6e86d80bb7748d61919ac3079c9400da12177d26b02421b042ae67358bb14dbf90935fb",
+          "update_hash": "sha512:e41a60d07cb9ea83f4b6ce6ac9eec3ee8a51dcfc923a8005f744611ef87a4ee8c1136c2bfde65cff71cf673227b16c3c944152d9d0dd11b5b2672fed62d5f66a",
           "applications": {
             "zotero": {
               "strict_min_version": "6.999",

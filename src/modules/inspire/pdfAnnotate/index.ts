@@ -53,3 +53,40 @@ export {
   createDefaultCoordinator,
 } from "./matchStrategies";
 
+// Re-export shared utilities (FTR-REFACTOR: Centralized scoring and author utilities)
+export {
+  SCORE,
+  YEAR_DELTA,
+  API_CONFIG,
+  PARSE_CONFIG,
+  MATCH_CONFIG,
+  UI_CONFIG,
+} from "./constants";
+export type { MatchConfidence, MatchMethod } from "./constants";
+
+export {
+  normalizeArxivId,
+  normalizeDoi,
+  normalizeJournal,
+  journalsSimilar,
+  isJournalMatch,
+  calculateCompositeScore,
+  getStrongMatchKind,
+  scorePdfPaperInfos,
+  selectBestPdfPaperInfo,
+  scoreEntryForAuthorYear,
+} from "./matchScoring";
+export type { CompositeScore, AuthorYearScore } from "./matchScoring";
+
+export {
+  normalizeAuthorName,
+  normalizeAuthorCompact,
+  extractLastName,
+  authorsMatch,
+  isCollaboration,
+  extractCollaborationName,
+  buildInitialsPattern,
+  buildDifferentInitialsPattern,
+  parseAuthorLabels,
+} from "./authorUtils";
+

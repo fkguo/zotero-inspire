@@ -8,7 +8,9 @@ import { config } from "../../../../package.json";
 import { getCitationParser, postProcessLabels } from "./citationParser";
 import { getPref } from "../../../utils/prefs";
 import { deriveRecidFromItem } from "../apiUtils";
+import { CACHE_TTL } from "../constants";
 import { localCache } from "../localCache";
+import { MemoryMonitor } from "../memoryMonitor";
 import { fetchReferencesEntries, enrichReferencesEntries } from "../referencesService";
 import { getPDFReferencesParser, type PDFReferenceMapping, type AuthorYearReferenceMapping } from "./pdfReferencesParser";
 import type { InspireReferenceEntry } from "../types";
@@ -22,6 +24,51 @@ import type {
   ZoteroPageData,
   ZoteroProcessedData,
 } from "./types";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TransientState - Unified state management for easy cleanup
+// Prevents memory leaks by centralizing state that needs clearing
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Transient state that is cleared on cleanup.
+ * Centralizing these allows simple reset via createInitialTransientState().
+ */
+interface TransientState {
+  /** Track preloaded recids to avoid duplicate background fetches */
+  preloadedRecids: Set<string>;
+  /** Track in-flight preload promises to avoid concurrent fetches for same recid */
+  preloadingRecids: Map<string, Promise<void>>;
+  /** FTR-PDF-MATCHING: Store max known label per item for concatenated range detection */
+  maxKnownLabelByItem: Map<number, number>;
+  /** FTR-CITATION-FORMAT-DETECT: Store detected citation format per attachment item */
+  citationFormatByItem: Map<number, CitationType>;
+  /** FTR-CITATION-FORMAT-DETECT: Track items being scanned to avoid duplicate scans */
+  scanningFormatItems: Set<number>;
+  /** FTR-RECID-AUTO-UPDATE: Track parent items that were opened without recid */
+  itemsAwaitingRecid: Set<number>;
+  /** FTR-PDF-PARSE-PRELOAD: Track items being preloaded to avoid duplicate parses */
+  pdfParsingItems: Set<number>;
+  /** FTR-PRELOAD-AWAIT: Track PDF parsing promises for await support */
+  pdfParsingPromises: Map<number, Promise<void>>;
+}
+
+/**
+ * Create initial transient state with empty collections.
+ * Called on initialization and cleanup.
+ */
+function createInitialTransientState(): TransientState {
+  return {
+    preloadedRecids: new Set(),
+    preloadingRecids: new Map(),
+    maxKnownLabelByItem: new Map(),
+    citationFormatByItem: new Map(),
+    scanningFormatItems: new Set(),
+    itemsAwaitingRecid: new Set(),
+    pdfParsingItems: new Set(),
+    pdfParsingPromises: new Map(),
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Debug logging control
@@ -53,18 +100,14 @@ export class ReaderIntegration {
   private initialized = false;
   /** Store bound handler reference for unregistration */
   private boundTextSelectionHandler?: (args: any) => void;
-  /** Track preloaded recids to avoid duplicate background fetches */
-  private preloadedRecids = new Set<string>();
-  /** Track in-flight preload promises to avoid concurrent fetches for same recid */
-  private preloadingRecids = new Map<string, Promise<void>>();
-  /** FTR-PDF-MATCHING: Store max known label per item for concatenated range detection */
-  private maxKnownLabelByItem = new Map<number, number>();
-  /** FTR-CITATION-FORMAT-DETECT: Store detected citation format per attachment item */
-  private citationFormatByItem = new Map<number, CitationType>();
-  /** FTR-CITATION-FORMAT-DETECT: Track items being scanned to avoid duplicate scans */
-  private scanningFormatItems = new Set<number>();
+  /** Unified transient state for easy cleanup */
+  private transientState = createInitialTransientState();
   /** FTR-CITATION-FORMAT-DETECT: Notifier ID for tab events */
   private tabNotifierID?: string;
+  /** FTR-RECID-AUTO-UPDATE: Notifier ID for item events */
+  private itemNotifierID?: string;
+  /** FTR-RECID-AUTO-UPDATE: Track current reader tab's parent item ID */
+  private currentReaderParentItemID?: number;
   /** FTR-REFACTOR: Cache processed PDF data per item (expensive to re-fetch) */
   private static readonly PROCESSED_DATA_CACHE_SIZE = 20;
   private processedDataCache = new LRUCache<number, { data: ZoteroProcessedData; timestamp: number }>(
@@ -72,8 +115,6 @@ export class ReaderIntegration {
   );
   /** FTR-REFACTOR: Cache page data per item+page (for frequently accessed pages) */
   private pageDataCache = new LRUCache<string, { data: ZoteroPageData; timestamp: number }>(50);
-  /** FTR-REFACTOR: Cache TTL in milliseconds (5 minutes) */
-  private static readonly CACHE_TTL_MS = 5 * 60 * 1000;
   /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF numeric mapping per parent item */
   private static readonly PDF_MAPPING_CACHE_SIZE = 30;
   private pdfMappingCache = new LRUCache<number, PDFReferenceMapping>(
@@ -83,10 +124,6 @@ export class ReaderIntegration {
   private pdfAuthorYearMappingCache = new LRUCache<number, AuthorYearReferenceMapping>(
     ReaderIntegration.PDF_MAPPING_CACHE_SIZE
   );
-  /** FTR-PDF-PARSE-PRELOAD: Track items being preloaded to avoid duplicate parses */
-  private pdfParsingItems = new Set<number>();
-  /** FTR-PRELOAD-AWAIT: Track PDF parsing promises for await support */
-  private pdfParsingPromises = new Map<number, Promise<void>>();
 
   /**
    * Get singleton instance
@@ -138,8 +175,18 @@ export class ReaderIntegration {
         `[${config.addonName}] [PDF-ANNOTATE] Successfully registered renderTextSelectionPopup listener`,
       );
 
+      // Register LRU caches with MemoryMonitor for statistics tracking
+      const monitor = MemoryMonitor.getInstance();
+      monitor.registerCache("processedData", this.processedDataCache);
+      monitor.registerCache("pageData", this.pageDataCache);
+      monitor.registerCache("pdfMapping", this.pdfMappingCache);
+      monitor.registerCache("pdfAuthorYearMapping", this.pdfAuthorYearMappingCache);
+
       // FTR-CITATION-FORMAT-DETECT: Register tab notifier to detect when PDF is opened
       this.registerTabNotifier();
+
+      // FTR-RECID-AUTO-UPDATE: Register item notifier to detect when recid becomes available
+      this.registerItemNotifier();
 
       return true;
     } catch (err) {
@@ -157,7 +204,7 @@ export class ReaderIntegration {
    * @param maxLabel - Maximum citation label number found in PDF
    */
   setMaxKnownLabel(itemID: number, maxLabel: number): void {
-    this.maxKnownLabelByItem.set(itemID, maxLabel);
+    this.transientState.maxKnownLabelByItem.set(itemID, maxLabel);
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] Set maxKnownLabel=${maxLabel} for item ${itemID}`,
     );
@@ -169,7 +216,7 @@ export class ReaderIntegration {
    * @returns Max label or undefined if not set
    */
   getMaxKnownLabel(itemID: number): number | undefined {
-    return this.maxKnownLabelByItem.get(itemID);
+    return this.transientState.maxKnownLabelByItem.get(itemID);
   }
 
   /**
@@ -197,26 +244,35 @@ export class ReaderIntegration {
     // FTR-CITATION-FORMAT-DETECT: Unregister tab notifier
     this.unregisterTabNotifier();
 
+    // FTR-RECID-AUTO-UPDATE: Unregister item notifier
+    this.unregisterItemNotifier();
+
     const listenerCount = this.listeners.size;
     const stateCount = this.readerStates.size;
-    const preloadCount = this.preloadedRecids.size;
-    const formatCount = this.citationFormatByItem.size;
+    const preloadCount = this.transientState.preloadedRecids.size;
+    const formatCount = this.transientState.citationFormatByItem.size;
+    const awaitingRecidCount = this.transientState.itemsAwaitingRecid.size;
     const processedDataCacheCount = this.processedDataCache.size;
     const pageDataCacheCount = this.pageDataCache.size;
+
+    // Clear non-transient state
     this.readerStates.clear();
     this.listeners.clear();
-    this.preloadedRecids.clear();
-    this.preloadingRecids.clear();
-    this.pdfParsingPromises.clear();
-    this.maxKnownLabelByItem.clear();
-    this.citationFormatByItem.clear();
-    this.scanningFormatItems.clear();
+    this.currentReaderParentItemID = undefined;
+
+    // Reset all transient state in one operation (prevents forgotten cleanup)
+    this.transientState = createInitialTransientState();
+
+    // Clear LRU caches (they have their own eviction but need explicit cleanup on shutdown)
     this.processedDataCache.clear();
     this.pageDataCache.clear();
+    this.pdfMappingCache.clear();
+    this.pdfAuthorYearMappingCache.clear();
+
     this.initialized = false;
     ReaderIntegration.instance = null;
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] Cleaned up: ${listenerCount} listeners, ${stateCount} reader states, ${preloadCount} preloaded recids, ${formatCount} detected formats, ${processedDataCacheCount} processedData cache, ${pageDataCacheCount} pageData cache`,
+      `[${config.addonName}] [PDF-ANNOTATE] Cleaned up: ${listenerCount} listeners, ${stateCount} reader states, ${preloadCount} preloaded recids, ${formatCount} detected formats, ${awaitingRecidCount} items awaiting recid, ${processedDataCacheCount} processedData cache, ${pageDataCacheCount} pageData cache`,
     );
   }
 
@@ -988,18 +1044,18 @@ export class ReaderIntegration {
       if (!recid) return;
 
       // Skip if already preloaded or currently preloading
-      if (this.preloadedRecids.has(recid)) return;
-      if (this.preloadingRecids.has(recid)) return;
+      if (this.transientState.preloadedRecids.has(recid)) return;
+      if (this.transientState.preloadingRecids.has(recid)) return;
 
       // Start background preload (fire and forget)
       // FTR-PDF-MATCHING: Pass itemID to set maxKnownLabel after fetch
       const preloadPromise = this.preloadReferencesForRecid(recid, itemID);
-      this.preloadingRecids.set(recid, preloadPromise);
+      this.transientState.preloadingRecids.set(recid, preloadPromise);
 
       // Clean up after preload completes
       preloadPromise
         .then(() => {
-          this.preloadedRecids.add(recid);
+          this.transientState.preloadedRecids.add(recid);
         })
         .catch((err) => {
           Zotero.debug(
@@ -1007,7 +1063,7 @@ export class ReaderIntegration {
           );
         })
         .finally(() => {
-          this.preloadingRecids.delete(recid);
+          this.transientState.preloadingRecids.delete(recid);
         });
     } catch (err) {
       // Silently ignore errors - preload is best-effort
@@ -1098,16 +1154,16 @@ export class ReaderIntegration {
     if (!parentItemID) return;
 
     // Skip if already parsing or cached
-    if (this.pdfParsingItems.has(parentItemID)) return;
+    if (this.transientState.pdfParsingItems.has(parentItemID)) return;
     if (this.pdfMappingCache.has(parentItemID)) return;
 
     // Create and track the parsing promise
     const parsePromise = this.preloadPDFParsing(attachmentItemID);
-    this.pdfParsingPromises.set(parentItemID, parsePromise);
+    this.transientState.pdfParsingPromises.set(parentItemID, parsePromise);
 
     // Clean up promise map when done
     parsePromise.finally(() => {
-      this.pdfParsingPromises.delete(parentItemID);
+      this.transientState.pdfParsingPromises.delete(parentItemID);
     }).catch((err) => {
       Zotero.debug(
         `[${config.addonName}] [PRELOAD] PDF parsing preload failed: ${err}`,
@@ -1133,7 +1189,7 @@ export class ReaderIntegration {
     if (!parentItemID) return;
 
     // Skip if already parsing or cached
-    if (this.pdfParsingItems.has(parentItemID)) return;
+    if (this.transientState.pdfParsingItems.has(parentItemID)) return;
     if (this.pdfMappingCache.has(parentItemID)) {
       Zotero.debug(
         `[${config.addonName}] [PRELOAD-PDF] Already cached for item ${parentItemID}`,
@@ -1141,7 +1197,7 @@ export class ReaderIntegration {
       return;
     }
 
-    this.pdfParsingItems.add(parentItemID);
+    this.transientState.pdfParsingItems.add(parentItemID);
 
     try {
       // Get PDF file path
@@ -1196,7 +1252,7 @@ export class ReaderIntegration {
         `[${config.addonName}] [PRELOAD-PDF] Error parsing PDF for ${parentItemID}: ${err}`,
       );
     } finally {
-      this.pdfParsingItems.delete(parentItemID);
+      this.transientState.pdfParsingItems.delete(parentItemID);
     }
   }
 
@@ -1246,7 +1302,7 @@ export class ReaderIntegration {
    * @param parentItemID - The parent item ID
    */
   isPDFParsingInProgress(parentItemID: number): boolean {
-    return this.pdfParsingItems.has(parentItemID);
+    return this.transientState.pdfParsingItems.has(parentItemID);
   }
 
   /**
@@ -1279,7 +1335,7 @@ export class ReaderIntegration {
    * @param recid - INSPIRE record ID
    */
   getPreloadPromise(recid: string): Promise<void> | undefined {
-    return this.preloadingRecids.get(recid);
+    return this.transientState.preloadingRecids.get(recid);
   }
 
   /**
@@ -1287,7 +1343,7 @@ export class ReaderIntegration {
    * @param recid - INSPIRE record ID
    */
   isPreloading(recid: string): boolean {
-    return this.preloadingRecids.has(recid);
+    return this.transientState.preloadingRecids.has(recid);
   }
 
   /**
@@ -1295,7 +1351,7 @@ export class ReaderIntegration {
    * @param recid - INSPIRE record ID
    */
   isPreloaded(recid: string): boolean {
-    return this.preloadedRecids.has(recid);
+    return this.transientState.preloadedRecids.has(recid);
   }
 
   /**
@@ -1305,7 +1361,7 @@ export class ReaderIntegration {
    * @param parentItemID - The parent item ID (not attachment)
    */
   getPdfParsePromise(parentItemID: number): Promise<void> | undefined {
-    return this.pdfParsingPromises.get(parentItemID);
+    return this.transientState.pdfParsingPromises.get(parentItemID);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1363,7 +1419,7 @@ export class ReaderIntegration {
       const cacheKey = itemID ? `${itemID}:${pageIndex}` : null;
       if (cacheKey) {
         const cached = this.pageDataCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < ReaderIntegration.CACHE_TTL_MS) {
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL.READER_INTEGRATION_MS) {
           debugLog(
             `[${config.addonName}] [STRUCTURED-DATA] Using cached pageData for ${cacheKey}`,
           );
@@ -1421,7 +1477,7 @@ export class ReaderIntegration {
       const itemID = reader?.itemID;
       if (itemID) {
         const cached = this.processedDataCache.get(itemID);
-        if (cached && Date.now() - cached.timestamp < ReaderIntegration.CACHE_TTL_MS) {
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL.READER_INTEGRATION_MS) {
           debugLog(
             `[${config.addonName}] [STRUCTURED-DATA] Using cached processedData for item ${itemID}`,
           );
@@ -1653,9 +1709,86 @@ export class ReaderIntegration {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-RECID-AUTO-UPDATE: Item notifier for detecting recid availability
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Register item notifier to detect when items are modified.
+   * Used to detect when recid becomes available for items that were opened without one.
+   */
+  private registerItemNotifier(): void {
+    try {
+      const callback = {
+        notify: async (
+          event: string,
+          type: string,
+          ids: number[] | string[],
+          extraData: { [key: string]: any },
+        ) => {
+          // Only handle item modify events
+          if (type !== "item" || event !== "modify") return;
+
+          // Check if any of the modified items are ones we're tracking
+          for (const id of ids) {
+            const itemID = typeof id === "string" ? parseInt(id, 10) : id;
+            if (isNaN(itemID)) continue;
+
+            // Check if this item was awaiting recid
+            if (!this.transientState.itemsAwaitingRecid.has(itemID)) continue;
+
+            const item = Zotero.Items.get(itemID);
+            if (!item || !item.isRegularItem()) continue;
+
+            const recid = deriveRecidFromItem(item);
+            if (recid) {
+              // Recid is now available!
+              this.transientState.itemsAwaitingRecid.delete(itemID);
+              Zotero.debug(
+                `[${config.addonName}] [RECID-AUTO-UPDATE] Item ${itemID} now has recid ${recid} after modification`,
+              );
+
+              // Emit event so panel can refresh
+              this.emit("itemRecidAvailable", { parentItemID: itemID, recid });
+            }
+          }
+        },
+      };
+
+      this.itemNotifierID = Zotero.Notifier.registerObserver(callback, ["item"]);
+      Zotero.debug(
+        `[${config.addonName}] [RECID-AUTO-UPDATE] Registered item notifier: ${this.itemNotifierID}`,
+      );
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [RECID-AUTO-UPDATE] Failed to register item notifier: ${err}`,
+      );
+    }
+  }
+
+  /**
+   * Unregister item notifier.
+   */
+  private unregisterItemNotifier(): void {
+    if (this.itemNotifierID) {
+      try {
+        Zotero.Notifier.unregisterObserver(this.itemNotifierID);
+        Zotero.debug(
+          `[${config.addonName}] [RECID-AUTO-UPDATE] Unregistered item notifier`,
+        );
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] [RECID-AUTO-UPDATE] Failed to unregister item notifier: ${err}`,
+        );
+      }
+      this.itemNotifierID = undefined;
+    }
+  }
+
   /**
    * Handle reader tab opened/selected event.
    * Triggers background citation format detection.
+   * FTR-RECID-AUTO-UPDATE: Tracks items without recid for auto-update.
    */
   private handleReaderTabOpened(tabID: string): void {
     try {
@@ -1663,9 +1796,44 @@ export class ReaderIntegration {
       if (!reader?.itemID) return;
 
       const itemID = reader.itemID;
+      const item = Zotero.Items.get(itemID);
+      if (!item) return;
 
-      // Skip if already detected or currently scanning
-      if (this.citationFormatByItem.has(itemID) || this.scanningFormatItems.has(itemID)) {
+      // Get parent item ID
+      const parentItemID = item.parentItemID || itemID;
+      const parentItem = Zotero.Items.get(parentItemID);
+      if (!parentItem || !parentItem.isRegularItem()) return;
+
+      // FTR-RECID-AUTO-UPDATE: Track current reader parent item
+      this.currentReaderParentItemID = parentItemID;
+
+      // Check if item has recid
+      const recid = deriveRecidFromItem(parentItem);
+
+      // FTR-RECID-AUTO-UPDATE: Track items without recid
+      if (!recid) {
+        this.transientState.itemsAwaitingRecid.add(parentItemID);
+        Zotero.debug(
+          `[${config.addonName}] [RECID-AUTO-UPDATE] Item ${parentItemID} opened without recid, tracking for auto-update`,
+        );
+        // Emit event so panel can show "no recid" message immediately
+        this.emit("itemNoRecid", { parentItemID });
+      } else {
+        // Item has recid - check if it was previously awaiting
+        if (this.transientState.itemsAwaitingRecid.has(parentItemID)) {
+          this.transientState.itemsAwaitingRecid.delete(parentItemID);
+          Zotero.debug(
+            `[${config.addonName}] [RECID-AUTO-UPDATE] Item ${parentItemID} now has recid ${recid}, emitting update event`,
+          );
+          // Emit event so panel can refresh
+          this.emit("itemRecidAvailable", { parentItemID, recid });
+        }
+      }
+
+      // Skip citation format detection if already detected or currently scanning
+      if (this.transientState.citationFormatByItem.has(itemID) || this.transientState.scanningFormatItems.has(itemID)) {
+        // Still trigger background preload even if format was already detected
+        this.triggerBackgroundPreload(reader);
         return;
       }
 
@@ -1694,13 +1862,13 @@ export class ReaderIntegration {
     if (!itemID) return;
 
     // Mark as scanning
-    this.scanningFormatItems.add(itemID);
+    this.transientState.scanningFormatItems.add(itemID);
 
     try {
       const format = await this.detectCitationFormat(reader);
 
       // Cache the detected format
-      this.citationFormatByItem.set(itemID, format);
+      this.transientState.citationFormatByItem.set(itemID, format);
 
       Zotero.debug(
         `[${config.addonName}] [FORMAT-DETECT] Detected format for item ${itemID}: ${format}`,
@@ -1713,9 +1881,9 @@ export class ReaderIntegration {
         `[${config.addonName}] [FORMAT-DETECT] Error detecting format for item ${itemID}: ${err}`,
       );
       // Default to numeric on error
-      this.citationFormatByItem.set(itemID, "numeric");
+      this.transientState.citationFormatByItem.set(itemID, "numeric");
     } finally {
-      this.scanningFormatItems.delete(itemID);
+      this.transientState.scanningFormatItems.delete(itemID);
     }
   }
 
@@ -2018,7 +2186,7 @@ export class ReaderIntegration {
    * @returns Detected format or undefined
    */
   getCitationFormat(itemID: number): CitationType | undefined {
-    return this.citationFormatByItem.get(itemID);
+    return this.transientState.citationFormatByItem.get(itemID);
   }
 
   /**
@@ -2029,7 +2197,7 @@ export class ReaderIntegration {
    * @returns true if author-year format was detected
    */
   isAuthorYearFormat(itemID: number): boolean {
-    return this.citationFormatByItem.get(itemID) === "author-year";
+    return this.transientState.citationFormatByItem.get(itemID) === "author-year";
   }
 }
 

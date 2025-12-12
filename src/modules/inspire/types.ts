@@ -44,11 +44,11 @@ export interface InspireReferenceEntry {
   citationCount?: number;
   citationCountWithoutSelf?: number;  // Citation count excluding self-citations
   publicationInfo?: any;
-  publicationInfoErrata?: Array<{ info: any; label: string }>;
+  publicationInfoErrata?: Array<{ info: any; label: string; doi?: string }>;
   arxivDetails?: InspireArxivDetails | string | null;
   abstract?: string;
   abstractLoading?: boolean;
-  doi?: string;  // DOI for duplicate detection (FTR-BATCH-IMPORT)
+  doi?: string;  // DOI for journal link and duplicate detection
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

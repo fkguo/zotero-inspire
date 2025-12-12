@@ -44,6 +44,7 @@ references-panel-status-empty = Select an item to load INSPIRE data
 references-panel-reader-mode = INSPIRE data is unavailable in the reader view
 references-panel-select-item = Select a single regular item to view INSPIRE data
 references-panel-no-recid = INSPIRE record not found for this item
+references-panel-recid-found = INSPIRE record found! Loading references...
 references-panel-status-loading = Loading references...
 references-panel-status-loading-cited = Loading citing records...
 references-panel-status-loading-entry = Loading citing records for the selected reference...
@@ -144,6 +145,10 @@ references-panel-author-click-hint = Click to view papers by { $author }
 references-panel-copy-bibtex = Copy BibTeX
 references-panel-bibtex-copied = BibTeX copied to clipboard
 references-panel-bibtex-failed = Failed to fetch BibTeX
+references-panel-copy-link = Copy link
+references-panel-open-link = Open in browser
+references-panel-link-copied = Link copied to clipboard
+references-panel-copy-failed = Failed to copy to clipboard
 
 update-cancelled = Update cancelled by user
 update-cancelled-stats = Updated { $completed }/{ $total } items before cancellation
@@ -166,6 +171,12 @@ references-panel-export-clipboard-failed = Failed to copy to clipboard (content 
 references-panel-export-too-large = Content too large ({ $size }KB) - please use "Export to File" instead
 references-panel-export-cancelled = Export cancelled
 references-panel-export-save-title = Export References
+
+# Citation style export (uses Zotero's built-in bibliography dialog)
+references-panel-export-citation-header = 📝 Citation Style
+references-panel-export-citation-copied = { $count } formatted references copied
+references-panel-export-citation-no-local = No local Zotero items to format (only local library items can use citation styles)
+references-panel-export-citation-select-style = Select Citation Style...
 
 # Chart localization strings
 references-panel-chart-collapse = Collapse chart
@@ -214,6 +225,7 @@ references-panel-cache-source-local = From local cache ({ $age }h ago)
 menuitem-copy-bibtex = Copy BibTeX
 menuitem-copy-inspire-link = Copy INSPIRE link
 menuitem-copy-citation-key = Copy citation key
+menuitem-copy-inspire-link-md = Copy INSPIRE link (Markdown)
 menuitem-copy-zotero-link = Copy Zotero link
 copy-success-bibtex =
   { $count ->
@@ -221,6 +233,7 @@ copy-success-bibtex =
    *[other] Copied { $count } BibTeX entries
   }
 copy-success-inspire-link = INSPIRE link copied to clipboard
+copy-success-inspire-link-md = Markdown link copied to clipboard
 copy-success-citation-key =
   { $count ->
     [one] Copied 1 citation key
@@ -279,3 +292,46 @@ pdf-annotate-multi-match =
 pdf-annotate-multi-match-truncated = Found { $count } entries for [{ $label }] (showing first { $shown })
 pdf-annotate-fallback-warning = INSPIRE references may differ from the PDF (labels: { $rate }%). Using position match; consider submitting a correction to INSPIRE.
 pdf-annotate-parse-success = Parsed PDF references: { $total } citations ({ $multi } multi-paper)
+
+# Smart Update feature (FTR-SMART-UPDATE)
+smart-update-untitled = (Untitled)
+smart-update-value-empty = (empty)
+smart-update-field-title = Title
+smart-update-field-date = Date
+smart-update-field-journal = Journal
+smart-update-field-volume = Volume
+smart-update-field-pages = Pages
+smart-update-field-issue = Issue
+smart-update-field-abstract = Abstract
+smart-update-field-doi = DOI
+smart-update-field-arxiv = arXiv
+smart-update-field-citations = Citations
+smart-update-field-citations-wo-self = Citations (w/o self)
+smart-update-field-citekey = Citation Key
+smart-update-field-collaboration = Collaboration
+smart-update-field-authors = Authors
+
+# Smart Update Preview Dialog
+smart-update-preview-title = Smart Update Preview
+smart-update-preview-header = Changes for: { $title }
+smart-update-preview-info = Select the fields you want to update. Uncheck to skip a field.
+smart-update-preview-current = Current
+smart-update-preview-new = New
+smart-update-preview-apply = Apply
+smart-update-preview-cancel = Cancel
+smart-update-preview-no-changes = No changes detected for this item.
+
+# Auto-check update notification (FTR-SMART-UPDATE-AUTO-CHECK)
+smart-update-auto-check-available = Updates available from INSPIRE
+smart-update-auto-check-view = View Changes
+smart-update-auto-check-dismiss = Dismiss
+smart-update-auto-check-changes =
+  { $count ->
+    [one] 1 field has new data
+   *[other] { $count } fields have new data
+  }
+
+# Ambiguous citation picker (FTR-AMBIGUOUS-AUTHOR-YEAR)
+pdf-annotate-ambiguous-title = Multiple matches for "{ $citation }"
+pdf-annotate-ambiguous-message = This citation matches multiple papers. Please select the correct one:
+pdf-annotate-ambiguous-cancel = Cancel

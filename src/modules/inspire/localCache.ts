@@ -17,7 +17,8 @@ const DEFAULT_TTL_REFS = -1;     // Permanent (references don't change)
 const DEFAULT_TTL_CITED = 24;    // 24 hours for cited-by and author papers
 
 // Cache version for format migrations
-const CACHE_VERSION = 1;
+// v2: Added DOI field to reference entries for journal links
+const CACHE_VERSION = 2;
 
 // Write queue delay (ms) - debounce rapid writes
 const WRITE_DEBOUNCE_MS = 500;
@@ -169,12 +170,15 @@ class InspireLocalCache {
    */
   private getFilePath(type: LocalCacheType, key: string, sort?: string, compressed = false): string | null {
     if (!this.cacheDir) return null;
-    
+
+    // Defensive: ensure key is a string (INSPIRE API may return recid as number)
+    const keyStr = String(key);
+
     // Sanitize key for filename safety
-    const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const safeSuffix = sort ? `_${sort.replace(/[^a-zA-Z0-9]/g, "")}` : "";
+    const safeKey = keyStr.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeSuffix = sort ? `_${String(sort).replace(/[^a-zA-Z0-9]/g, "")}` : "";
     const ext = compressed ? COMPRESSED_EXT : ".json";
-    
+
     return PathUtils.join(this.cacheDir, `${type}_${safeKey}${safeSuffix}${ext}`);
   }
 

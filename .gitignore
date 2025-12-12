@@ -1,12 +1,12 @@
 **/build
-node_modules
 package-lock.json
 zotero-cmd.json
 **/.DS_Store
 *.code-workspace
-tmp/
-image/*/*.*
-.cursor/rules/*
 *IMPOVEMENTS*.md
-localdocs/*.*
 CLAUDE.md
+.cursor/
+.claude/
+localdocs/
+tmp/
+node_modules/

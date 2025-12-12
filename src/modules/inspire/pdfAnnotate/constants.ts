@@ -40,6 +40,8 @@ export const SCORE = {
   PAGE_MATCH: 2,
   /** Journal match bonus */
   JOURNAL_MATCH: 4,
+  /** Marginal score threshold - scores <= this are weak (just author+year+small bonus) */
+  MARGINAL_THRESHOLD: 7,
 } as const;
 
 /**

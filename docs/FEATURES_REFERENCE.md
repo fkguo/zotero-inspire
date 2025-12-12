@@ -125,9 +125,29 @@ All data caches use LRU (Least Recently Used) eviction to prevent unbounded memo
 | `citedByCache`     | LRU | 50 | Caches cited-by results by recid + sort          |
 | `entryCitedCache`  | LRU | 50 | Caches entry-cited/author-papers results         |
 | `metadataCache`    | LRU | 500 | Caches individual record metadata                |
+| `recidLookupCache` | LRU | 500 | Caches recid lookups to avoid repeated API calls |
+| `processedDataCache` | LRU | 20 | Caches PDF processed data per item              |
+| `pageDataCache`    | LRU | 50 | Caches PDF page data per item+page              |
+| `pdfMappingCache`  | LRU | 30 | Caches PDF numeric reference mapping            |
+| `pdfAuthorYearMappingCache` | LRU | 30 | Caches PDF author-year mapping      |
 | `rowCache`         | Map | - | Caches DOM elements for rendered rows (cleared on re-render) |
-| `recidLookupCache` | Map | - | Caches recid lookups to avoid repeated API calls |
 | `searchTextCache`  | WeakMap | - | Caches search text per entry (auto GC'd) |
+
+#### LRU Cache Statistics (v2.1.0)
+
+All LRU caches now track hit/miss statistics for performance analysis:
+
+```typescript
+interface CacheStats {
+  hits: number;      // Number of cache hits
+  misses: number;    // Number of cache misses
+  hitRate: number;   // hits / (hits + misses)
+  size: number;      // Current entries in cache
+  maxSize: number;   // Maximum cache capacity
+}
+```
+
+Access cache statistics via debug console commands (see Section 8.5).
 
 #### Local persistent cache (v1.1.3)
 
@@ -549,7 +569,57 @@ const title = getPrimaryTitle(metadata);
 const arxiv = getPrimaryArxivId(metadata);
 ```
 
+### 8.5 Memory Monitoring and Debug Commands
+
+New `MemoryMonitor` class provides centralized cache statistics and debugging capabilities:
+
+#### MemoryMonitor API
+
+```typescript
+// Singleton access
+const monitor = MemoryMonitor.getInstance();
+
+// Register caches for tracking
+monitor.registerCache("myCache", myLRUCache);
+
+// Get statistics
+const report = monitor.getCacheStats();
+// Returns: { caches: {...}, totalHits, totalMisses, overallHitRate, timestamp }
+
+// Log to debug output
+monitor.logCacheStats();
+
+// Reset all counters
+monitor.resetCacheStats();
+
+// Periodic monitoring
+monitor.start(30000);  // Log every 30 seconds
+monitor.stop();
+```
+
+#### Console Commands
+
+Available in Zotero Error Console (`Tools` → `Developer` → `Error Console`):
+
+| Command | Description |
+|---------|-------------|
+| `Zotero.ZoteroInspire.getCacheStats()` | Returns cache statistics object |
+| `Zotero.ZoteroInspire.logCacheStats()` | Logs formatted stats to debug output |
+| `Zotero.ZoteroInspire.resetCacheStats()` | Resets all hit/miss counters |
+| `Zotero.ZoteroInspire.startMemoryMonitor(ms)` | Starts periodic logging (default: 30000ms) |
+| `Zotero.ZoteroInspire.stopMemoryMonitor()` | Stops periodic logging |
+
+#### Registered Caches
+
+The following caches are automatically registered on startup:
+
+- `recidLookup` - INSPIRE recid lookups
+- `processedData` - PDF processed data
+- `pageData` - PDF page data
+- `pdfMapping` - PDF numeric reference mapping
+- `pdfAuthorYearMapping` - PDF author-year mapping
+
 ---
 
-*Last updated: 2025-12-08 (v2.1.0)*
+*Last updated: 2025-12-12 (v2.1.0)*
 

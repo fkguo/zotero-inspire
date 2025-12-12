@@ -6,16 +6,35 @@ import { SEARCH_HISTORY_PREF_KEY } from "./constants";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Cache statistics for monitoring cache efficiency.
+ */
+export interface CacheStats {
+  /** Number of cache hits */
+  hits: number;
+  /** Number of cache misses */
+  misses: number;
+  /** Hit rate (0-1) */
+  hitRate: number;
+  /** Current cache size */
+  size: number;
+  /** Maximum cache size */
+  maxSize: number;
+}
+
+/**
  * LRU (Least Recently Used) Cache implementation.
  * Extends Map with automatic eviction of least recently used entries when full.
- * 
+ *
  * Features:
  * - O(1) get and set operations
  * - Automatic eviction when exceeding maxSize
  * - get() moves entry to "most recently used" position
+ * - Built-in hit/miss statistics tracking
  */
 export class LRUCache<K, V> extends Map<K, V> {
   private readonly maxSize: number;
+  private _hits = 0;
+  private _misses = 0;
 
   constructor(maxSize: number) {
     super();
@@ -24,13 +43,17 @@ export class LRUCache<K, V> extends Map<K, V> {
 
   /**
    * Get value and move to most recently used position.
+   * Tracks hits and misses for statistics.
    */
   get(key: K): V | undefined {
     const value = super.get(key);
     if (value !== undefined) {
+      this._hits++;
       // Move to end (most recently used) by re-inserting
       super.delete(key);
       super.set(key, value);
+    } else {
+      this._misses++;
     }
     return value;
   }
@@ -61,10 +84,39 @@ export class LRUCache<K, V> extends Map<K, V> {
   }
 
   /**
-   * Peek at value without updating position.
+   * Peek at value without updating position or tracking statistics.
    */
   peek(key: K): V | undefined {
     return super.get(key);
+  }
+
+  /**
+   * Get cache statistics.
+   */
+  getStats(): CacheStats {
+    const total = this._hits + this._misses;
+    return {
+      hits: this._hits,
+      misses: this._misses,
+      hitRate: total > 0 ? this._hits / total : 0,
+      size: this.size,
+      maxSize: this.maxSize,
+    };
+  }
+
+  /**
+   * Reset statistics counters.
+   */
+  resetStats(): void {
+    this._hits = 0;
+    this._misses = 0;
+  }
+
+  /**
+   * Get max size of this cache.
+   */
+  getMaxSize(): number {
+    return this.maxSize;
   }
 }
 

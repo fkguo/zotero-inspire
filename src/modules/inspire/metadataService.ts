@@ -4,81 +4,148 @@ import {
   INSPIRE_API_BASE,
   ARXIV_ABS_URL,
   CROSSREF_API_URL,
+  API_FIELDS_CITATIONS,
+  API_FIELDS_FULL_UPDATE,
+  API_FIELDS_AUTO_CHECK,
+  API_FIELDS_LOOKUP,
+  buildFieldsParam,
 } from "./constants";
 import type { jsobject } from "./types";
 import { recidLookupCache } from "./apiUtils";
 import { inspireFetch } from "./rateLimiter";
+import { crossrefFetch } from "./crossrefService";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RegExp Constants (hoisted to module level for performance)
+// ─────────────────────────────────────────────────────────────────────────────
+const ARXIV_REGEX = /arxiv/i;
+const ARXIV_ID_REGEX = /(arXiv:|_eprint:)(.+)/;
+const ARXIV_URL_REGEX = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
+const RECID_FROM_URL_REGEX = /[^/]*$/;
+const DOI_IN_EXTRA_REGEX = /DOI:(.+)/i;
+const DOI_ORG_IN_EXTRA_REGEX = /doi\.org\/(.+)/i;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Identifier Extraction (FTR-REFACTOR: Extracted for clarity)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ExtractedIdentifier {
+  idtype: "doi" | "arxiv" | "literature";
+  value: string;
+  searchOrNot: 0 | 1;
+}
+
+/**
+ * Extract identifier (DOI, arXiv, or recid) from a Zotero item.
+ * Checks multiple fields: DOI, URL, Extra, archiveLocation.
+ *
+ * @param item - Zotero item to extract identifier from
+ * @returns Extracted identifier info, or null if not found
+ */
+function extractIdentifierFromItem(item: Zotero.Item): ExtractedIdentifier | null {
+  const doi0 = item.getField("DOI") as string;
+  const url = item.getField("url") as string;
+  const extra = item.getField("extra") as string;
+
+  // DOI from DOI field (if not an arXiv link)
+  if (doi0 && !ARXIV_REGEX.test(doi0)) {
+    const cleanDoi = doi0.replace(/^.+doi.org\//, "");
+    return { idtype: "doi", value: cleanDoi, searchOrNot: 0 };
+  }
+
+  // arXiv from Extra field
+  if (extra.includes("arXiv:") || extra.includes("_eprint:")) {
+    const match = extra.match(ARXIV_ID_REGEX);
+    if (match) {
+      const arxivSplit = match[2].split(" ");
+      const arxivId = arxivSplit[0] === "" ? arxivSplit[1] : arxivSplit[0];
+      return { idtype: "arxiv", value: arxivId, searchOrNot: 0 };
+    }
+  }
+
+  // Check URL for various identifiers
+  if (/(doi|arxiv|\/literature\/)/i.test(url)) {
+    // arXiv from URL
+    const arxivUrlMatch = ARXIV_URL_REGEX.exec(url);
+    if (arxivUrlMatch) {
+      return { idtype: "arxiv", value: arxivUrlMatch[1], searchOrNot: 0 };
+    }
+
+    // DOI from URL
+    if (/doi/i.test(url)) {
+      const cleanDoi = url.replace(/^.+doi.org\//, "");
+      return { idtype: "doi", value: cleanDoi, searchOrNot: 0 };
+    }
+
+    // Literature recid from URL
+    if (url.includes("/literature/")) {
+      const recidMatch = RECID_FROM_URL_REGEX.exec(url);
+      if (recidMatch?.[0]?.match(/^\d+/)) {
+        return { idtype: "literature", value: recidMatch[0], searchOrNot: 0 };
+      }
+    }
+  }
+
+  // DOI from Extra field
+  const doiInExtra = extra.match(DOI_IN_EXTRA_REGEX);
+  if (doiInExtra) {
+    return { idtype: "doi", value: doiInExtra[1].trim(), searchOrNot: 0 };
+  }
+
+  const doiOrgInExtra = extra.match(DOI_ORG_IN_EXTRA_REGEX);
+  if (doiOrgInExtra) {
+    return { idtype: "doi", value: doiOrgInExtra[1], searchOrNot: 0 };
+  }
+
+  // Recid from archiveLocation
+  const recid = item.getField("archiveLocation") as string;
+  if (recid?.match(/^\d+/)) {
+    return { idtype: "literature", value: recid, searchOrNot: 0 };
+  }
+
+  // Fallback to citation key search
+  if (extra.includes("Citation Key:")) {
+    return { idtype: "doi", value: "", searchOrNot: 1 };
+  }
+
+  return null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INSPIRE Metadata Fetching
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getInspireMeta(item: Zotero.Item, operation: string): Promise<jsobject | -1> {
-  const doi0 = item.getField("DOI") as string;
-  let doi = doi0;
-  const url = item.getField("url") as string;
-  const extra = item.getField("extra") as string;
-  let searchOrNot = 0;
-
-  let idtype = "doi";
-  const arxivReg = new RegExp(/arxiv/i);
-  if (!doi || arxivReg.test(doi)) {
-    if (extra.includes("arXiv:") || extra.includes("_eprint:")) {
-      // arXiv number from Extra
-      idtype = "arxiv";
-      const regexArxivId = /(arXiv:|_eprint:)(.+)/;
-      if (extra.match(regexArxivId)) {
-        const arxiv_split = (extra.match(regexArxivId) || "   ")[2].split(" ");
-        if (arxiv_split[0] === "") {
-          doi = arxiv_split[1];
-        } else {
-          doi = arxiv_split[0];
-        }
-      }
-    } else if (/(doi|arxiv|\/literature\/)/i.test(url)) {
-      const patt = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
-      const m = patt.exec(url);
-      if (!m) {
-        if (/doi/i.test(url)) {
-          doi = url.replace(/^.+doi.org\//, "");
-        } else if (url.includes("/literature/")) {
-          const _recid = /[^/]*$/.exec(url) || "    ";
-          if (_recid[0].match(/^\d+/)) {
-            idtype = "literature";
-            doi = _recid[0];
-          }
-        }
-      } else {
-        idtype = "arxiv";
-        doi = m[1];
-      }
-    } else if (/DOI:/i.test(extra)) {
-      const regexDOIinExtra = /DOI:(.+)/i;
-      doi = (extra.match(regexDOIinExtra) || "")[1].trim();
-    } else if (/doi\.org\//i.test(extra)) {
-      const regexDOIinExtra = /doi\.org\/(.+)/i;
-      doi = (extra.match(regexDOIinExtra) || "")[1];
-    } else {
-      const _recid = item.getField("archiveLocation") as string;
-      if (_recid.match(/^\d+/)) {
-        idtype = "literature";
-        doi = _recid;
-      }
-    }
-  } else if (/doi/i.test(doi)) {
-    doi = doi.replace(/^.+doi.org\//, "");
+  const identifier = extractIdentifierFromItem(item);
+  if (!identifier) {
+    return -1;
   }
 
-  if (!doi && extra.includes("Citation Key:")) searchOrNot = 1;
+  const { idtype, value: doi, searchOrNot } = identifier;
+  const extra = item.getField("extra") as string;
   const t0 = performance.now();
+
+  // FTR-API-FIELD-OPTIMIZATION: Select fields based on operation type
+  let fieldsParam = "";
+  if (operation === "citations") {
+    fieldsParam = buildFieldsParam(API_FIELDS_CITATIONS);
+  } else if (operation === "literatureLookup") {
+    fieldsParam = buildFieldsParam(API_FIELDS_LOOKUP);
+  } else if (operation === "autoCheck") {
+    // Lightweight fields for smart update comparison (no abstracts)
+    fieldsParam = buildFieldsParam(API_FIELDS_AUTO_CHECK);
+  } else {
+    // For full update or abstract operations, use full fields
+    fieldsParam = buildFieldsParam(API_FIELDS_FULL_UPDATE);
+  }
 
   let urlInspire = "";
   if (searchOrNot === 0) {
     const edoi = encodeURIComponent(doi);
-    urlInspire = `${INSPIRE_API_BASE}/${idtype}/${edoi}`;
+    urlInspire = `${INSPIRE_API_BASE}/${idtype}/${edoi}${fieldsParam ? "?" + fieldsParam.slice(1) : ""}`;
   } else if (searchOrNot === 1) {
     const citekey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0].split(": ")[1];
-    urlInspire = `${INSPIRE_API_BASE}/literature?q=texkey%20${encodeURIComponent(citekey)}`;
+    urlInspire = `${INSPIRE_API_BASE}/literature?q=texkey%20${encodeURIComponent(citekey)}${fieldsParam}`;
   }
 
   if (!urlInspire) {
@@ -132,7 +199,8 @@ export async function fetchRecidFromInspire(item: Zotero.Item): Promise<string |
     Zotero.debug(`[${config.addonName}] Invalid item.id: ${item.id}, skipping cache`);
     const meta = (await getInspireMeta(item, "literatureLookup")) as jsobject | -1;
     if (meta === -1 || typeof meta !== "object") return null;
-    return (meta.recid as string | undefined | null) ?? null;
+    // FIX: INSPIRE API returns recid as number, convert to string
+    return meta.recid != null ? String(meta.recid) : null;
   }
 
   // Check cache first to avoid redundant API calls
@@ -146,11 +214,12 @@ export async function fetchRecidFromInspire(item: Zotero.Item): Promise<string |
   if (meta === -1 || typeof meta !== "object") {
     return null;
   }
-  const recid = meta.recid as string | undefined | null;
+  // FIX: INSPIRE API returns recid as number, convert to string
+  const recid = meta.recid != null ? String(meta.recid) : null;
   if (recid) {
     recidLookupCache.set(item.id, recid);
   }
-  return recid ?? null;
+  return recid;
 }
 
 export async function fetchInspireMetaByRecid(
@@ -159,10 +228,20 @@ export async function fetchInspireMetaByRecid(
   operation: string = "full",
   minimal: boolean = false,
 ): Promise<jsobject | -1> {
-  let url = `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}`;
+  // FTR-API-FIELD-OPTIMIZATION: Select fields based on operation type
+  let fieldsParam = "";
   if (minimal) {
-    url += "?fields=metadata.title,metadata.creators,metadata.date";
+    fieldsParam = "?fields=metadata.title,metadata.creators,metadata.date";
+  } else if (operation === "citations") {
+    fieldsParam = buildFieldsParam(API_FIELDS_CITATIONS).replace("&", "?");
+  } else if (operation === "autoCheck") {
+    // Lightweight fields for smart update comparison (no abstracts)
+    fieldsParam = buildFieldsParam(API_FIELDS_AUTO_CHECK).replace("&", "?");
+  } else {
+    fieldsParam = buildFieldsParam(API_FIELDS_FULL_UPDATE).replace("&", "?");
   }
+
+  const url = `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}${fieldsParam}`;
   const response = await inspireFetch(url, { signal }).catch(() => null);
   if (!response || response.status === 404) {
     return -1;
@@ -256,25 +335,25 @@ export async function getCrossrefCount(item: Zotero.Item): Promise<number> {
   const t0 = performance.now();
   let response: any = null;
 
+  // Try CrossRef API first
   if (response === null) {
     const style = "vnd.citationstyles.csl+json";
     const xform = "transform/application/" + style;
     const url = `${CROSSREF_API_URL}/${edoi}/${xform}`;
-    response = await fetch(url)
-      .then((response) => response.json())
-      .catch((_err) => null);
+    const fetchResponse = await crossrefFetch(url);
+    response = fetchResponse ? await fetchResponse.json().catch(() => null) : null;
   }
 
+  // Fallback to DOI.org with Accept header
   if (response === null) {
     const url = "https://doi.org/" + edoi;
     const style = "vnd.citationstyles.csl+json";
-    response = await fetch(url, {
+    const fetchResponse = await crossrefFetch(url, {
       headers: {
         Accept: "application/" + style,
       },
-    })
-      .then((response) => response.json())
-      .catch((_err) => null);
+    });
+    response = fetchResponse ? await fetchResponse.json().catch(() => null) : null;
   }
 
   if (response === null) {
@@ -404,6 +483,12 @@ export function buildMetaFromMetadata(meta: any, operation: string): jsobject {
       if (imprint.date) {
         metaInspire.date = imprint.date;
       }
+    }
+
+    // Fallback: use preprint_date if date is still not set (for unpublished papers)
+    if (!metaInspire.date && meta["preprint_date"]) {
+      // preprint_date is in format "YYYY-MM-DD", extract year for Zotero
+      metaInspire.date = meta["preprint_date"];
     }
 
     const creators: any[] = [];

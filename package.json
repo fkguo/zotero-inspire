@@ -1,7 +1,7 @@
 {
   "name": "zotero-inspire",
   "version": "2.1.0",
-  "description": "Inspire Metadata Updater",
+  "description": "Zotere INSPIRE References",
   "config": {
     "addonName": "zotero-inspire",
     "addonID": "zoteroinspire@itp.ac.cn",
@@ -15,7 +15,7 @@
     "type": "git",
     "url": "git+https://github.com/fkguo/zotero-inspire.git"
   },
-  "author": "Feng-Kun Guo, Yu Zhang",
+  "author": "Feng-Kun Guo, Yu Zhang, various AI models",
   "license": "MPL-2.0-or-later",
   "bugs": {
     "url": "https://github.com/fkguo/zotero-inspire/issues"

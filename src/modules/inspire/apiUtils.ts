@@ -6,6 +6,7 @@ import {
 } from "./constants";
 import type { InspireArxivDetails } from "./types";
 import { formatArxivDetails } from "./formatters";
+import { LRUCache } from "./utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INSPIRE recid extraction functions
@@ -76,49 +77,60 @@ export function buildReferenceUrl(reference: any, recid?: string | null): string
   return buildFallbackUrl(reference);
 }
 
+/**
+ * Build fallback URL from DOI or arXiv info.
+ * FTR-REFACTOR: Unified function that works with both reference and metadata objects.
+ *
+ * @param source - Source object containing DOI/arXiv info (reference or metadata)
+ * @param arxiv - Explicit arXiv details to use (optional)
+ * @returns URL string or undefined
+ */
 export function buildFallbackUrl(
-  reference: any,
+  source: any,
   arxiv?: InspireArxivDetails | string | null,
 ): string | undefined {
-  if (Array.isArray(reference?.dois) && reference.dois.length) {
-    return `${DOI_ORG_URL}/${reference.dois[0]}`;
-  }
-  const explicit = formatArxivDetails(arxiv);
-  if (explicit?.id) {
-    return `${ARXIV_ABS_URL}/${explicit.id}`;
-  }
-  const derived = formatArxivDetails(reference?.arxiv_eprint);
-  if (derived?.id) {
-    return `${ARXIV_ABS_URL}/${derived.id}`;
-  }
-  return undefined;
-}
-
-export function buildFallbackUrlFromMetadata(
-  metadata: any,
-  arxiv?: InspireArxivDetails | null,
-): string | undefined {
-  if (!metadata) {
+  if (!source) {
     return undefined;
   }
-  if (Array.isArray(metadata?.dois) && metadata.dois.length) {
-    const first = metadata.dois[0];
-    const value =
-      typeof first === "string" ? first : (first?.value as string | undefined);
+
+  // Try DOI first (handles both string and {value: string} formats)
+  if (Array.isArray(source?.dois) && source.dois.length) {
+    const first = source.dois[0];
+    const value = typeof first === "string" ? first : (first?.value as string | undefined);
     if (value) {
       return `${DOI_ORG_URL}/${value}`;
     }
   }
-  const provided = formatArxivDetails(arxiv)?.id;
-  if (provided) {
-    return `${ARXIV_ABS_URL}/${provided}`;
+
+  // Try explicit arXiv parameter
+  const explicit = formatArxivDetails(arxiv);
+  if (explicit?.id) {
+    return `${ARXIV_ABS_URL}/${explicit.id}`;
   }
-  const derived = extractArxivFromMetadata(metadata);
-  if (derived?.id) {
-    return `${ARXIV_ABS_URL}/${derived.id}`;
+
+  // Try arXiv from source - reference style (arxiv_eprint)
+  if (source?.arxiv_eprint) {
+    const derived = formatArxivDetails(source.arxiv_eprint);
+    if (derived?.id) {
+      return `${ARXIV_ABS_URL}/${derived.id}`;
+    }
   }
+
+  // Try arXiv from source - metadata style (arxiv_eprints array)
+  if (Array.isArray(source?.arxiv_eprints) && source.arxiv_eprints.length) {
+    const derived = extractArxivFromMetadata(source);
+    if (derived?.id) {
+      return `${ARXIV_ABS_URL}/${derived.id}`;
+    }
+  }
+
   return undefined;
 }
+
+/**
+ * @deprecated Use buildFallbackUrl instead. This alias is kept for backward compatibility.
+ */
+export const buildFallbackUrlFromMetadata = buildFallbackUrl;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // arXiv Extraction Functions
@@ -387,5 +399,6 @@ export async function findItemsByRecids(recids: string[]): Promise<Map<string, n
 // Recid Lookup Cache
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const recidLookupCache = new Map<number, string>();
+// Use LRUCache to prevent unbounded memory growth (max 500 entries)
+export const recidLookupCache = new LRUCache<number, string>(500);
 
