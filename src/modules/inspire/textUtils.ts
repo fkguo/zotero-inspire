@@ -150,3 +150,19 @@ export function ensureSearchText(entry: InspireReferenceEntry): string {
   return entry.searchText;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Year Normalization
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalize year by stripping suffix (e.g., "2011a" -> "2011").
+ * Returns null if year is undefined, null, or empty.
+ * @param year - Year string, possibly with suffix (e.g., "2011a", "2024b")
+ * @returns Base year string without suffix, or null
+ */
+export function normalizeYear(year: string | undefined | null): string | null {
+  if (!year) return null;
+  return year.replace(/[a-z]$/i, "");
+}
+
+

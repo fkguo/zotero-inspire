@@ -4,13 +4,15 @@
 
 /**
  * Author search information for precise INSPIRE author search.
- * Priority: BAI > recid > fullName
+ * Priority: BAI > fullName > recid
  * BAI (INSPIRE Author ID) like "Feng.Kun.Guo.1" is the most reliable.
+ * Note: INSPIRE currently doesn't support querying authors by recid,
+ * so recid is kept as lowest priority for potential future support.
  */
 export interface AuthorSearchInfo {
   fullName: string;
   bai?: string;    // INSPIRE BAI (e.g., "Feng.Kun.Guo.1") - most precise
-  recid?: string;  // INSPIRE author recid (backup)
+  recid?: string;  // INSPIRE author recid (lowest priority, not currently supported by INSPIRE API)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,11 +44,11 @@ export interface InspireReferenceEntry {
   citationCount?: number;
   citationCountWithoutSelf?: number;  // Citation count excluding self-citations
   publicationInfo?: any;
-  publicationInfoErrata?: Array<{ info: any; label: string }>;
+  publicationInfoErrata?: Array<{ info: any; label: string; doi?: string }>;
   arxivDetails?: InspireArxivDetails | string | null;
   abstract?: string;
   abstractLoading?: boolean;
-  doi?: string;  // DOI for duplicate detection (FTR-BATCH-IMPORT)
+  doi?: string;  // DOI for journal link and duplicate detection
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

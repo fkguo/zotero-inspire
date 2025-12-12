@@ -417,6 +417,74 @@ References Panel 支持批量选择和导入多条参考文献：
 
 - **LRU 缓存**: 限制缓存大小，防止长期使用导致内存增长
 - **搜索文本缓存**: 避免重复计算搜索字符串
+- **缓存统计监控** *(v2.1.0)*: LRUCache 支持命中/未命中统计，可用于性能分析
+
+### 调试命令 (v2.1.0)
+
+插件在 Zotero 控制台中提供调试命令，可在 `工具` → `开发者` → `Error Console` 中使用：
+
+| 命令 | 说明 |
+|------|------|
+| `Zotero.ZoteroInspire.getCacheStats()` | 获取所有缓存的统计信息（命中率、大小等） |
+| `Zotero.ZoteroInspire.logCacheStats()` | 输出缓存统计到调试日志 |
+| `Zotero.ZoteroInspire.resetCacheStats()` | 重置所有缓存的统计计数器 |
+| `Zotero.ZoteroInspire.startMemoryMonitor(ms)` | 启动周期性内存监控（默认 30 秒间隔） |
+| `Zotero.ZoteroInspire.stopMemoryMonitor()` | 停止内存监控 |
+
+**缓存统计示例输出**:
+```
+processedData: 85.2% hit rate (23/27), size: 15/20
+pageData: 92.1% hit rate (117/127), size: 48/50
+pdfMapping: 78.6% hit rate (11/14), size: 8/30
+recidLookup: 95.0% hit rate (190/200), size: 156/500
+[Overall]: 91.3% hit rate (341/368)
+```
+
+---
+
+## 架构重构 (v2.1.0)
+
+v2.1.0 版本对内部架构进行了重大重构，提升代码质量、模块化程度和可维护性：
+
+### 模块化面板架构
+
+从主控制器中提取了 6 个独立的管理器类：
+
+| 管理器 | 职责 |
+|--------|------|
+| `ChartManager` | 统计图表渲染和交互 |
+| `FilterManager` | 文本过滤、Quick Filters、作者/已发表过滤 |
+| `NavigationManager` | 前进/后退导航历史，滚动状态保存 |
+| `ExportManager` | BibTeX/LaTeX 导出到剪贴板或文件 |
+| `BatchImportManager` | 批量选择、重复检测、批量导入 |
+| `RowPoolManager` | 行元素池化和模板管理（PERF-13 优化核心） |
+
+### 性能监控
+
+新增 `PerformanceMonitor` 类用于性能计时和慢操作检测：
+- 支持同步和异步操作计时
+- 统计 API（平均值、最大值、调用次数）
+- 可配置的慢操作阈值和回调
+
+新增 `MemoryMonitor` 类用于缓存统计和内存监控：
+- 集中管理所有 LRUCache 实例的统计
+- 支持周期性日志输出
+- 提供控制台调试命令
+
+### 单元测试覆盖
+
+使用 Vitest 框架添加了 153 个单元测试，覆盖：
+- 文本规范化和过滤
+- 过滤谓词和 Quick Filters
+- API 类型守卫和工具函数
+- PDF 引用匹配策略
+
+### 代码质量改进
+
+- 魔法数字替换为命名常量
+- 内联样式整合到样式工具模块
+- 过滤方法使用策略模式统一
+- 完整的 INSPIRE API 类型定义和类型守卫
 
 ---
 
@@ -439,4 +507,4 @@ INSPIRE API 限制每 5 秒最多 15 个请求。插件已优化请求频率以�
 
 ---
 
-*本文档对应插件版本：2.0.0（最后更新：2025-12-05）*
+*本文档对应插件版本：2.1.0（最后更新：2025-12-12）*

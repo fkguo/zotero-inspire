@@ -125,9 +125,29 @@ All data caches use LRU (Least Recently Used) eviction to prevent unbounded memo
 | `citedByCache`     | LRU | 50 | Caches cited-by results by recid + sort          |
 | `entryCitedCache`  | LRU | 50 | Caches entry-cited/author-papers results         |
 | `metadataCache`    | LRU | 500 | Caches individual record metadata                |
+| `recidLookupCache` | LRU | 500 | Caches recid lookups to avoid repeated API calls |
+| `processedDataCache` | LRU | 20 | Caches PDF processed data per item              |
+| `pageDataCache`    | LRU | 50 | Caches PDF page data per item+page              |
+| `pdfMappingCache`  | LRU | 30 | Caches PDF numeric reference mapping            |
+| `pdfAuthorYearMappingCache` | LRU | 30 | Caches PDF author-year mapping      |
 | `rowCache`         | Map | - | Caches DOM elements for rendered rows (cleared on re-render) |
-| `recidLookupCache` | Map | - | Caches recid lookups to avoid repeated API calls |
 | `searchTextCache`  | WeakMap | - | Caches search text per entry (auto GC'd) |
+
+#### LRU Cache Statistics (v2.1.0)
+
+All LRU caches now track hit/miss statistics for performance analysis:
+
+```typescript
+interface CacheStats {
+  hits: number;      // Number of cache hits
+  misses: number;    // Number of cache misses
+  hitRate: number;   // hits / (hits + misses)
+  size: number;      // Current entries in cache
+  maxSize: number;   // Maximum cache capacity
+}
+```
+
+Access cache statistics via debug console commands (see Section 8.5).
 
 #### Local persistent cache (v1.1.3)
 
@@ -424,5 +444,182 @@ When in search mode, the panel displays:
 
 ---
 
-*Last updated: 2025-12-05 (v2.0.0)*
+## 8. Architecture Refactoring (v2.1.0)
+
+A major internal refactoring focused on code quality, modularity, and maintainability.
+
+### 8.1 Modular Panel Architecture
+
+Extracted 6 independent manager classes from the monolithic `InspireReferencePanelController`:
+
+| Manager | Responsibility | Lines |
+|---------|----------------|-------|
+| `ChartManager` | Statistics chart rendering and interaction | ~500 |
+| `FilterManager` | Text filtering, Quick Filters, author/published filters | ~400 |
+| `NavigationManager` | Back/forward navigation with scroll state preservation | ~300 |
+| `ExportManager` | BibTeX/LaTeX export to clipboard or file | ~500 |
+| `BatchImportManager` | Batch selection, duplicate detection, and import | ~520 |
+| `RowPoolManager` | Row pooling and template management (PERF-13 core) | ~290 |
+
+### 8.2 Performance Monitoring
+
+New `PerformanceMonitor` class for timing operations and detecting slow operations:
+
+```typescript
+// Timing API
+const monitor = getPerformanceMonitor();
+const timerId = monitor.start("operation");
+// ... do work ...
+monitor.stop(timerId);
+
+// Async measurement
+const result = await monitor.measureAsync("fetchData", () => fetchData());
+
+// Statistics
+const stats = monitor.getStats("operation");
+// { count, totalMs, avgMs, minMs, maxMs, lastMs }
+
+// Report
+const report = monitor.getReport();
+// { startTime, endTime, duration, operations: [...stats] }
+```
+
+### 8.3 Unit Test Coverage
+
+Added 153 unit tests using Vitest framework across 4 test files:
+
+| Test File | Tests | Coverage |
+|-----------|-------|----------|
+| `test/textUtils.test.ts` | 25 | Text normalization and filtering |
+| `test/filters.test.ts` | 56 | Filter predicates and Quick Filters |
+| `test/apiTypes.test.ts` | 38 | API type guards and utility functions |
+| `test/matchStrategies.test.ts` | 34 | PDF citation matching strategies |
+
+### 8.4 Code Quality Improvements
+
+#### Magic Numbers to Named Constants
+
+Extended `constants.ts` with organized constant groups:
+
+```typescript
+// UI timing constants
+export const FILTER_DEBOUNCE_MS = 150;
+export const CHART_THROTTLE_MS = 300;
+export const TOOLTIP_SHOW_DELAY_MS = 300;
+export const TOOLTIP_HIDE_DELAY_MS = 600;
+
+// Cache size constants
+export const REFERENCES_CACHE_SIZE = 100;
+export const METADATA_CACHE_SIZE = 500;
+export const ROW_POOL_MAX_SIZE = 150;
+
+// Filter thresholds
+export const HIGH_CITATIONS_THRESHOLD = 50;
+export const SMALL_AUTHOR_GROUP_THRESHOLD = 10;
+```
+
+#### Style Utilities
+
+New `styles.ts` module for consolidated inline styles:
+
+```typescript
+import { applyStyles, FLEX_STYLES, BUTTON_STYLES } from "./styles";
+
+// Apply multiple style patterns
+applyStyles(element, FLEX_STYLES.column, BUTTON_STYLES.primary);
+
+// Check dark mode
+if (isDarkMode()) { ... }
+```
+
+#### Filter Strategy Pattern
+
+New `filters.ts` with unified filter predicates:
+
+```typescript
+import { matchesHighCitations, getQuickFilterPredicate } from "./filters";
+
+// Direct predicate usage
+const isHighCited = matchesHighCitations(entry, context);
+
+// Registry-based lookup
+const predicate = getQuickFilterPredicate("highCitations");
+const matches = predicate(entry, context);
+```
+
+#### Complete API Type Definitions
+
+New `apiTypes.ts` with full INSPIRE API types:
+
+```typescript
+import {
+  isInspireLiteratureSearchResponse,
+  getPrimaryTitle,
+  getPrimaryArxivId,
+  extractRecidFromRef,
+} from "./apiTypes";
+
+// Type guard
+if (isInspireLiteratureSearchResponse(response)) {
+  const hits = response.hits.hits;
+}
+
+// Utility functions
+const title = getPrimaryTitle(metadata);
+const arxiv = getPrimaryArxivId(metadata);
+```
+
+### 8.5 Memory Monitoring and Debug Commands
+
+New `MemoryMonitor` class provides centralized cache statistics and debugging capabilities:
+
+#### MemoryMonitor API
+
+```typescript
+// Singleton access
+const monitor = MemoryMonitor.getInstance();
+
+// Register caches for tracking
+monitor.registerCache("myCache", myLRUCache);
+
+// Get statistics
+const report = monitor.getCacheStats();
+// Returns: { caches: {...}, totalHits, totalMisses, overallHitRate, timestamp }
+
+// Log to debug output
+monitor.logCacheStats();
+
+// Reset all counters
+monitor.resetCacheStats();
+
+// Periodic monitoring
+monitor.start(30000);  // Log every 30 seconds
+monitor.stop();
+```
+
+#### Console Commands
+
+Available in Zotero Error Console (`Tools` → `Developer` → `Error Console`):
+
+| Command | Description |
+|---------|-------------|
+| `Zotero.ZoteroInspire.getCacheStats()` | Returns cache statistics object |
+| `Zotero.ZoteroInspire.logCacheStats()` | Logs formatted stats to debug output |
+| `Zotero.ZoteroInspire.resetCacheStats()` | Resets all hit/miss counters |
+| `Zotero.ZoteroInspire.startMemoryMonitor(ms)` | Starts periodic logging (default: 30000ms) |
+| `Zotero.ZoteroInspire.stopMemoryMonitor()` | Stops periodic logging |
+
+#### Registered Caches
+
+The following caches are automatically registered on startup:
+
+- `recidLookup` - INSPIRE recid lookups
+- `processedData` - PDF processed data
+- `pageData` - PDF page data
+- `pdfMapping` - PDF numeric reference mapping
+- `pdfAuthorYearMapping` - PDF author-year mapping
+
+---
+
+*Last updated: 2025-12-12 (v2.1.0)*
 

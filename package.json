@@ -1,7 +1,7 @@
 {
   "name": "zotero-inspire",
-  "version": "2.0.0",
-  "description": "Inspire Metadata Updater",
+  "version": "2.1.0",
+  "description": "Zotere INSPIRE References",
   "config": {
     "addonName": "zotero-inspire",
     "addonID": "zoteroinspire@itp.ac.cn",
@@ -15,7 +15,7 @@
     "type": "git",
     "url": "git+https://github.com/fkguo/zotero-inspire.git"
   },
-  "author": "Feng-Kun Guo, Yu Zhang",
+  "author": "Feng-Kun Guo, Yu Zhang, various AI models",
   "license": "MPL-2.0-or-later",
   "bugs": {
     "url": "https://github.com/fkguo/zotero-inspire/issues"
@@ -28,7 +28,9 @@
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "update-deps": "npm update --save"
   },
   "dependencies": {
@@ -39,10 +41,12 @@
     "@eslint/js": "^9.14.0",
     "@types/node": "^22.10.2",
     "@types/pako": "^2.0.4",
+    "@vitest/coverage-v8": "^4.0.15",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.19.0",
+    "vitest": "^3.2.4",
     "zotero-plugin-scaffold": "^0.1.7",
     "zotero-types": "^4.0.5"
   },

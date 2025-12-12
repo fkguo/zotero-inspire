@@ -32,9 +32,11 @@ This add-on for the excellent open-source reference manager [Zotero](https://git
     - [Field Order in Extra](#field-order-in-extra)
     - [arXiv Primary Category Tag](#arxiv-primary-category-tag)
     - [References Panel](#references-panel)
+    - [PDF Reader Citation Detection (new in 2.0.0)](#pdf-reader-citation-detection-new-in-200)
     - [Local Cache (new in 1.1.3)](#local-cache-new-in-113)
     - [Reader View Navigation](#reader-view-navigation)
     - [INSPIRE Record Not Found](#inspire-record-not-found)
+    - [Smart Update (new in 2.1.0)](#smart-update-new-in-210)
   - [Additional tip for citing as you writing LaTeX](#additional-tip-for-citing-as-you-writing-latex)
   - [References](#references)
   - [License](#license)
@@ -110,6 +112,41 @@ Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you ca
 ![collectionwindow](images/screenshot2.png)
 
 ## What's new
+
+### 🆕 Architecture Refactoring (v2.1.0)
+
+A major internal refactoring release focused on code quality, modularity, and maintainability:
+
+- **Modular Panel Architecture**: Extracted 6 independent manager classes from the monolithic controller:
+  - `ChartManager` - Statistics chart rendering and interaction
+  - `FilterManager` - Text filtering, Quick Filters, and author/publication filters
+  - `NavigationManager` - Back/forward navigation with scroll state preservation
+  - `ExportManager` - BibTeX/LaTeX export to clipboard or file
+  - `BatchImportManager` - Batch selection, duplicate detection, and import
+  - `RowPoolManager` - Row pooling and template management (PERF-13 optimization core)
+
+- **Performance Monitoring**: New `PerformanceMonitor` class for timing operations and detecting slow operations
+
+- **Cache Statistics & Debugging** (new): All LRU caches now track hit/miss statistics. New `MemoryMonitor` class provides centralized cache monitoring with console debug commands:
+  - `Zotero.ZoteroInspire.getCacheStats()` - Returns cache statistics object
+  - `Zotero.ZoteroInspire.logCacheStats()` - Logs formatted stats to console
+  - `Zotero.ZoteroInspire.resetCacheStats()` - Resets all counters
+  - `Zotero.ZoteroInspire.startMemoryMonitor(ms)` - Starts periodic logging
+  - `Zotero.ZoteroInspire.stopMemoryMonitor()` - Stops periodic logging
+
+- **Unit Test Coverage**: Added 153 unit tests using Vitest framework covering:
+  - Text normalization and filtering
+  - Filter predicates and Quick Filters
+  - API type guards and utilities
+  - PDF citation matching strategies
+
+- **Chinese Localization**: Complete simplified Chinese translation (~370 lines) for all UI strings
+
+- **Code Quality Improvements**:
+  - Magic numbers replaced with named constants
+  - Inline styles consolidated into style utilities
+  - Filter methods unified with strategy pattern
+  - Complete INSPIRE API type definitions with type guards
 
 ### 🆕 PDF Reader Citation Detection (v2.0.0)
 
@@ -238,7 +275,8 @@ A major new feature: **automatic citation detection in the PDF reader**!
       return `[Copy INSPIRE Link] link to ${linkText} copied.`
       }
       ```
-  - `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors` ($\leq10$, otherwise keeping only the first 3; the author list will be updated if no author is given or the first name of the first author is empty), `title`, `abstract`, etc.
+  - `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors`, `title`, `abstract`, etc.
+    - **Note**: All fields are overwritten with INSPIRE data. Use **Smart Update** mode (see Settings below) if you want to protect specific fields from being overwritten.
   - Set the arXiv number of articles that are not published to the `Journal Abbr` field. Items of type `report` or `preprint` are set to `journalArticle`.
   - It will also get the citation counts with and without self-citations for each selected item. One can also choose to update only the citation counts using `Citation counts only` in the right-click menu.
     - The current INSPIRE system does not display the citation count without self citations for a given paper. However, this number is in the metadata, and can be extracted with this add-on.
@@ -288,6 +326,15 @@ Configure the INSPIRE References Panel behavior:
 - **Maximum authors to display**: Number of authors shown before "et al." in the references panel (range: 1-20, default: 3)
 - **Enable statistics chart**: Show interactive statistics chart (by year/citations) at the top of the panel (disabled by default)
   - **Collapsed by default**: When enabled, the chart starts collapsed and can be expanded by clicking the toggle button (enabled by default)
+- **Search history retention**: Number of days to keep INSPIRE search history (range: 1-365, default: 30)
+
+### PDF Reader Citation Detection (new in 2.0.0)
+
+Configure how the add-on detects citations in PDF reader:
+
+- **Fuzzy citation detection (experimental)**: Enable aggressive citation detection for PDFs with broken text layers (e.g., truncated brackets). Disabled by default to avoid false positives.
+- **Parse PDF reference list**: Parse the reference list from PDF to improve label-to-entry matching, especially useful for multi-citation references like `[1,2,3]`. Disabled by default.
+  - **Force mapping on mismatch**: When enabled (default), if the PDF reference count diverges from INSPIRE, force PDF-based mapping and skip index fallback. This helps prevent wrong matches when PDF and INSPIRE have different reference lists.
 
 ### Local Cache (new in 1.1.3)
 
@@ -295,9 +342,12 @@ Control the persistent cache used for offline viewing:
 
 - **Enable local cache**: Master toggle; when disabled only in-memory caches are used.
 - **Show cache source indicator**: Displays whether the current view came from INSPIRE, memory, or local disk.
-- **Cache TTL (hours)**: Applies to Cited-by and Author tabs; References are always permanent.
 - **Compress cache files (gzip)**: Enabled by default. Uses the pako library to shrink large cache files by ~80% while keeping read/write transparent. Disable if you need raw JSON files.
-- **Custom cache directory**: Leave empty to use the Zotero data directory or click “Browse…” / “Reset” to manage a custom folder.
+- **Metadata enrichment settings** (new in 1.1.4): Control how reference metadata is fetched when loading cached references.
+  - **Batch size**: Number of entries per metadata request (range: 25-110, default: 100). Lower values reduce INSPIRE API load but increase total requests.
+  - **Parallel requests**: Number of concurrent batch requests (range: 1-5, default: 4). Lower values are gentler on INSPIRE servers.
+- **Cache TTL (hours)**: Applies to Cited-by and Author tabs; References are always permanent.
+- **Custom cache directory**: Leave empty to use the Zotero data directory or click "Browse…" / "Reset" to manage a custom folder.
 - **Clear cache**: Removes all on-disk cache files and reports the number of entries deleted.
 
 ### Reader View Navigation
@@ -312,6 +362,20 @@ Handle items that could not be found in the INSPIRE database:
 
 - **Add tag to items without INSPIRE record**: Tag items that could not be found in INSPIRE (enabled by default)
 - **Tag name**: Customize the tag name used for items without INSPIRE records (default: `⛔ No INSPIRE recid found`)
+
+### Smart Update (new in 2.1.0)
+
+Control how metadata updates are applied to preserve your manual edits:
+
+- **Enable smart update mode**: When enabled, the add-on compares local item data with INSPIRE metadata and only updates fields that have changed. Disabled by default (standard mode overwrites all fields).
+- **Show preview dialog before updating**: When updating a single item, displays a dialog showing all detected changes with checkboxes, allowing you to select which fields to update. Only shown for single-item updates (batch updates apply changes automatically based on protection settings). Enabled by default when Smart Update is active.
+- **Protected fields**: Select which fields should be protected when you have existing data. Protected fields will not be overwritten if they already contain non-empty values:
+  - **Title**: Protect manually edited titles
+  - **Authors**: Protect manually edited author names
+  - **Abstract**: Protect manually edited abstracts
+  - **Journal**: Protect manually edited journal abbreviations
+- **Protected author names**: A comma-separated list of author names that should always be preserved, even when the Authors field is not protected. This is useful for names with special characters that INSPIRE may store differently (e.g., "Meißner" vs "Meissner", "Müller" vs "Mueller", "O'Brien"). The matching is case-insensitive and works with last names.
+- **Automatic diacritic preservation**: The add-on automatically detects when your local author names contain diacritics (ä, ö, ü, ß, é, ñ, etc.) that INSPIRE stores as ASCII equivalents. In such cases, your local spelling is preserved automatically without needing to add names to the protected list. For example, if you have "Meißner" locally and INSPIRE has "Meissner", the local version is kept.
 
 ## Additional tip for citing as you writing LaTeX
 

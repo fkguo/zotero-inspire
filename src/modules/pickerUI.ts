@@ -1,4 +1,5 @@
 import { getString } from "../utils/locale";
+import type { AmbiguousCandidate } from "./inspire/pdfAnnotate/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Style helper functions for reference panel UI elements
@@ -74,23 +75,44 @@ export function applyAuthorLinkStyle(el: HTMLElement): void {
 }
 
 /**
- * Apply styles to the tab button based on active state (highlight style)
+ * Apply inline styles to clickable meta links (DOI/arXiv links in publication info)
+ * Blue color to indicate clickable links, no underline for cleaner look
+ */
+export function applyMetaLinkStyle(el: HTMLAnchorElement): void {
+  el.style.cursor = "pointer";
+  el.style.textDecoration = "none";
+  el.style.color = "#0066cc";
+}
+
+/**
+ * Apply styles to the tab button based on active state (pill button style)
  */
 export function applyTabButtonStyle(
   el: HTMLElement,
   isActive: boolean,
 ): void {
+  // Base styles applied to all tab buttons
+  el.style.padding = "4px 12px";
+  el.style.fontSize = "12px";
+  el.style.borderRadius = "12px";
   el.style.cursor = "pointer";
+  el.style.transition = "all 0.15s ease";
+  el.style.whiteSpace = "nowrap";
+
   if (isActive) {
-    el.style.backgroundColor = "#e6f2ff";
-    el.style.color = "#0b2d66";
-    el.style.fontWeight = "600";
-    el.style.textDecoration = "none";
+    // Active tab: primary color pill
+    el.style.backgroundColor = "#0066cc";
+    el.style.color = "#fff";
+    el.style.fontWeight = "500";
+    el.style.border = "1px solid #0066cc";
+    el.style.boxShadow = "none";
   } else {
-    el.style.backgroundColor = "";
-    el.style.color = "";
-    el.style.fontWeight = "";
-    el.style.textDecoration = "";
+    // Inactive tab: outlined pill (clearly looks like a button)
+    el.style.backgroundColor = "var(--material-background, #fff)";
+    el.style.color = "var(--fill-secondary, #64748b)";
+    el.style.fontWeight = "400";
+    el.style.border = "1px solid var(--fill-quinary, #d1d5db)";
+    el.style.boxShadow = "none";
   }
 }
 
@@ -1210,5 +1232,333 @@ export function showTargetPickerUI(
     doc.addEventListener("keydown", onGlobalKeyDown, true);
 
     filterInput.focus();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ambiguous citation picker UI (FTR-AMBIGUOUS-AUTHOR-YEAR)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Result from the ambiguous citation picker
+ */
+export interface AmbiguousCitationSelection {
+  /** Selected candidate */
+  candidate: AmbiguousCandidate;
+  /** Index in the original candidates array */
+  candidateIndex: number;
+}
+
+/**
+ * Show a picker UI for selecting between ambiguous citation matches.
+ * Used when same first author has multiple papers in the same year.
+ *
+ * @param citationText - The citation text (e.g., "Guo et al. (2016)")
+ * @param candidates - Array of possible matches
+ * @param body - Container element for the picker
+ * @returns Selected candidate or null if cancelled
+ */
+export function showAmbiguousCitationPicker(
+  citationText: string,
+  candidates: AmbiguousCandidate[],
+  body: HTMLElement,
+): Promise<AmbiguousCitationSelection | null> {
+  return new Promise((resolve) => {
+    const doc = body.ownerDocument;
+
+    // Create overlay
+    const overlay = doc.createElement("div");
+    overlay.classList.add("zinspire-ambiguous-picker__overlay");
+    overlay.style.position = "fixed";
+    overlay.style.top = "0";
+    overlay.style.left = "0";
+    overlay.style.width = "100%";
+    overlay.style.height = "100%";
+    overlay.style.zIndex = "10000";
+    overlay.style.backgroundColor = "rgba(0, 0, 0, 0.3)";
+    overlay.style.display = "flex";
+    overlay.style.alignItems = "center";
+    overlay.style.justifyContent = "center";
+    overlay.style.transition = "background-color 0.2s ease";
+
+    // Create panel
+    const panel = doc.createElement("div");
+    panel.classList.add("zinspire-ambiguous-picker");
+    panel.style.backgroundColor = "var(--material-background, #fff)";
+    panel.style.color = "var(--material-color, #000)";
+    panel.style.border = "1px solid var(--material-border, #ccc)";
+    panel.style.borderRadius = "8px";
+    panel.style.boxShadow = "0 4px 24px rgba(0, 0, 0, 0.25)";
+    panel.style.display = "flex";
+    panel.style.flexDirection = "column";
+    panel.style.fontSize = "14px";
+    panel.style.maxWidth = "500px";
+    panel.style.width = "90%";
+    panel.style.maxHeight = "80vh";
+    panel.style.overflow = "hidden";
+
+    overlay.appendChild(panel);
+
+    // Header
+    const header = doc.createElement("div");
+    header.classList.add("zinspire-ambiguous-picker__header");
+    header.style.padding = "12px 16px";
+    header.style.fontWeight = "600";
+    header.style.fontSize = "15px";
+    header.style.borderBottom = "1px solid var(--material-border, #eee)";
+    header.style.backgroundColor = "var(--material-side-background, #f5f5f5)";
+    header.style.borderRadius = "8px 8px 0 0";
+    header.textContent = getString("pdf-annotate-ambiguous-title", {
+      args: { citation: citationText },
+    });
+    panel.appendChild(header);
+
+    // Message
+    const message = doc.createElement("div");
+    message.classList.add("zinspire-ambiguous-picker__message");
+    message.style.padding = "12px 16px";
+    message.style.fontSize = "13px";
+    message.style.color = "var(--fill-secondary, #666)";
+    message.textContent = getString("pdf-annotate-ambiguous-message");
+    panel.appendChild(message);
+
+    // Candidates list
+    const list = doc.createElement("div");
+    list.classList.add("zinspire-ambiguous-picker__list");
+    list.style.flex = "1";
+    list.style.overflowY = "auto";
+    list.style.padding = "8px 16px";
+    list.style.display = "flex";
+    list.style.flexDirection = "column";
+    list.style.gap = "12px";
+    panel.appendChild(list);
+
+    let focusedIndex = 0;
+    const buttons: HTMLButtonElement[] = [];
+
+    // updateFocus will be called after buttons are created
+    const updateFocus = () => {
+      buttons.forEach((btn, idx) => {
+        const radioIndicator = (btn as any)._radioIndicator as HTMLElement | undefined;
+        const innerDot = (btn as any)._innerDot as HTMLElement | undefined;
+        if (idx === focusedIndex) {
+          btn.style.backgroundColor = "#e6f2ff";
+          btn.style.borderColor = "#0066cc";
+          if (radioIndicator) radioIndicator.style.borderColor = "#0066cc";
+          if (innerDot) innerDot.style.opacity = "1";
+        } else {
+          btn.style.backgroundColor = "var(--material-background, #fff)";
+          btn.style.borderColor = "var(--material-border, #ccc)";
+          if (radioIndicator) radioIndicator.style.borderColor = "var(--material-border, #ccc)";
+          if (innerDot) innerDot.style.opacity = "0";
+        }
+      });
+    };
+
+    // Create buttons for each candidate
+    candidates.forEach((candidate, index) => {
+      const button = doc.createElement("button");
+      button.type = "button";
+      button.classList.add("zinspire-ambiguous-picker__candidate");
+      button.style.display = "flex";
+      button.style.flexDirection = "row";
+      button.style.alignItems = "center";
+      button.style.width = "100%";
+      button.style.padding = "10px 12px";
+      button.style.border = "1px solid var(--material-border, #ccc)";
+      button.style.borderRadius = "6px";
+      button.style.backgroundColor = "var(--material-background, #fff)";
+      button.style.cursor = "pointer";
+      button.style.textAlign = "left";
+      button.style.transition = "background-color 0.15s ease, border-color 0.15s ease";
+      button.style.gap = "12px";
+
+      // Radio-style indicator
+      const radioIndicator = doc.createElement("div");
+      radioIndicator.style.width = "18px";
+      radioIndicator.style.height = "18px";
+      radioIndicator.style.borderRadius = "50%";
+      radioIndicator.style.border = "2px solid var(--material-border, #ccc)";
+      radioIndicator.style.flexShrink = "0";
+      radioIndicator.style.display = "flex";
+      radioIndicator.style.alignItems = "center";
+      radioIndicator.style.justifyContent = "center";
+      radioIndicator.style.transition = "border-color 0.15s ease";
+      button.appendChild(radioIndicator);
+
+      // Inner dot (shown when selected)
+      const innerDot = doc.createElement("div");
+      innerDot.style.width = "8px";
+      innerDot.style.height = "8px";
+      innerDot.style.borderRadius = "50%";
+      innerDot.style.backgroundColor = "#0066cc";
+      innerDot.style.opacity = "0";
+      innerDot.style.transition = "opacity 0.15s ease";
+      radioIndicator.appendChild(innerDot);
+
+      // Content container
+      const content = doc.createElement("div");
+      content.style.flex = "1";
+      content.style.minWidth = "0";
+      content.style.display = "flex";
+      content.style.flexDirection = "column";
+      content.style.gap = "2px";
+
+      // Main line: Journal + Volume + Page
+      const mainLine = doc.createElement("div");
+      mainLine.style.display = "flex";
+      mainLine.style.alignItems = "baseline";
+      mainLine.style.gap = "6px";
+      mainLine.style.flexWrap = "wrap";
+
+      // Journal name (bold)
+      if (candidate.journal) {
+        const journalSpan = doc.createElement("span");
+        journalSpan.style.fontWeight = "600";
+        journalSpan.style.fontSize = "14px";
+        journalSpan.style.color = "var(--fill-primary, #333)";
+        journalSpan.textContent = candidate.journal;
+        mainLine.appendChild(journalSpan);
+      }
+
+      // Volume + Page
+      const volPageParts: string[] = [];
+      if (candidate.volume) volPageParts.push(candidate.volume);
+      if (candidate.page) volPageParts.push(candidate.page);
+      if (volPageParts.length > 0) {
+        const volPageSpan = doc.createElement("span");
+        volPageSpan.style.fontSize = "14px";
+        volPageSpan.style.color = "var(--fill-primary, #333)";
+        volPageSpan.textContent = volPageParts.join(", ");
+        mainLine.appendChild(volPageSpan);
+      }
+
+      // If no journal info, use displayText as fallback
+      if (!candidate.journal && !candidate.volume) {
+        const fallbackSpan = doc.createElement("span");
+        fallbackSpan.style.fontSize = "14px";
+        fallbackSpan.style.color = "var(--fill-primary, #333)";
+        fallbackSpan.textContent = candidate.displayText;
+        mainLine.appendChild(fallbackSpan);
+      }
+
+      content.appendChild(mainLine);
+
+      // Title line (truncated)
+      if (candidate.title) {
+        const titleLine = doc.createElement("div");
+        titleLine.style.fontSize = "13px";
+        titleLine.style.color = "var(--fill-primary, #333)";
+        titleLine.style.overflow = "hidden";
+        titleLine.style.textOverflow = "ellipsis";
+        titleLine.style.whiteSpace = "nowrap";
+        titleLine.style.maxWidth = "100%";
+        // Truncate title if too long
+        const maxTitleLength = 60;
+        const truncatedTitle = candidate.title.length > maxTitleLength
+          ? candidate.title.substring(0, maxTitleLength) + "..."
+          : candidate.title;
+        titleLine.textContent = truncatedTitle;
+        titleLine.title = candidate.title; // Full title on hover
+        content.appendChild(titleLine);
+      }
+
+      button.appendChild(content);
+
+      // Store reference to radio indicator for updateFocus
+      (button as any)._radioIndicator = radioIndicator;
+      (button as any)._innerDot = innerDot;
+
+      // Hover effects
+      button.addEventListener("mouseenter", () => {
+        focusedIndex = index;
+        updateFocus();
+      });
+
+      // Click handler
+      button.addEventListener("click", () => {
+        finish({ candidate, candidateIndex: index });
+      });
+
+      list.appendChild(button);
+      buttons.push(button);
+    });
+
+    // Actions bar
+    const actions = doc.createElement("div");
+    actions.classList.add("zinspire-ambiguous-picker__actions");
+    actions.style.padding = "12px 16px";
+    actions.style.display = "flex";
+    actions.style.justifyContent = "flex-end";
+    actions.style.gap = "8px";
+    actions.style.borderTop = "1px solid var(--material-border, #eee)";
+    actions.style.backgroundColor = "var(--material-side-background, #f5f5f5)";
+    actions.style.borderRadius = "0 0 8px 8px";
+
+    const cancelBtn = doc.createElement("button");
+    cancelBtn.classList.add("zinspire-ambiguous-picker__button");
+    cancelBtn.textContent = getString("pdf-annotate-ambiguous-cancel");
+    cancelBtn.style.padding = "6px 16px";
+    cancelBtn.style.minWidth = "70px";
+    cancelBtn.style.border = "1px solid var(--material-border, #ccc)";
+    cancelBtn.style.borderRadius = "4px";
+    cancelBtn.style.backgroundColor = "var(--material-background, #fff)";
+    cancelBtn.style.cursor = "pointer";
+
+    actions.appendChild(cancelBtn);
+    panel.appendChild(actions);
+
+    body.appendChild(overlay);
+    updateFocus();
+
+    let isFinished = false;
+
+    const finish = (selection: AmbiguousCitationSelection | null) => {
+      if (isFinished) return;
+      isFinished = true;
+      overlay.remove();
+      doc.removeEventListener("keydown", onKeyDown, true);
+      resolve(selection);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(null);
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        focusedIndex = Math.min(focusedIndex + 1, candidates.length - 1);
+        updateFocus();
+        buttons[focusedIndex]?.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        focusedIndex = Math.max(focusedIndex - 1, 0);
+        updateFocus();
+        buttons[focusedIndex]?.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const candidate = candidates[focusedIndex];
+        if (candidate) {
+          finish({ candidate, candidateIndex: focusedIndex });
+        }
+        return;
+      }
+    };
+
+    cancelBtn.addEventListener("click", () => finish(null));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) finish(null);
+    });
+    doc.addEventListener("keydown", onKeyDown, true);
+
+    // Focus first button
+    buttons[0]?.focus();
   });
 }

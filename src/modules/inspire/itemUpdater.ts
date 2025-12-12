@@ -11,12 +11,28 @@ import {
 
 // Plugin icon for progress windows (PNG format required for ProgressWindow headline)
 const PLUGIN_ICON = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RegExp Constants (hoisted to module level for performance)
+// ─────────────────────────────────────────────────────────────────────────────
+const ARXIV_EXTRA_LINE_REGEX = /^.*(arXiv:|_eprint:).*$(\n|)/gim;
+
 import type { jsobject, ItemWithPendingInspireNote } from "./types";
 import { getInspireMeta, getCrossrefCount, fetchBibTeX } from "./metadataService";
 import { deriveRecidFromItem, copyToClipboard } from "./apiUtils";
 import { localCache } from "./localCache";
 import { fetchReferencesEntries, enrichReferencesEntries } from "./referencesService";
 import { inspireFetch } from "./rateLimiter";
+import {
+  isSmartUpdateEnabled,
+  shouldShowPreview,
+  compareItemWithInspire,
+  filterProtectedChanges,
+  getFieldProtectionConfig,
+  showSmartUpdatePreviewDialog,
+  mergeCreatorsWithProtectedNames,
+  type FieldChange,
+} from "./smartUpdate";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -533,9 +549,51 @@ export class ZInspire {
         if (item.itemType !== "book" && (metaInspire as jsobject).document_type == "book") {
           item.setType(Zotero.ItemTypes.getID("book") as number);
         }
-        await setInspireMeta(item, metaInspire as jsobject, operation);
-        await saveItemWithPendingInspireNote(item);
-        this.counter++;
+
+        // Smart update mode: compare and filter changes
+        if (isSmartUpdateEnabled()) {
+          const diff = compareItemWithInspire(item, metaInspire as jsobject);
+          if (diff.hasChanges) {
+            const protectionConfig = getFieldProtectionConfig();
+            let allowedChanges = filterProtectedChanges(diff, protectionConfig);
+            const skippedCount = diff.changes.length - allowedChanges.length;
+
+            if (skippedCount > 0) {
+              Zotero.debug(`[${config.addonName}] Smart update: skipped ${skippedCount} protected fields`);
+            }
+
+            if (allowedChanges.length > 0) {
+              // Show preview dialog only for single-item updates (not batch)
+              if (shouldShowPreview() && this.toUpdate === 1) {
+                const result = await showSmartUpdatePreviewDialog(diff, allowedChanges);
+                if (!result.confirmed) {
+                  Zotero.debug(`[${config.addonName}] Smart update: user cancelled preview`);
+                  return;
+                }
+                // Filter to only user-selected fields
+                allowedChanges = allowedChanges.filter(c => result.selectedFields.includes(c.field));
+                if (allowedChanges.length === 0) {
+                  Zotero.debug(`[${config.addonName}] Smart update: no fields selected by user`);
+                  return;
+                }
+              }
+
+              // Apply only allowed changes
+              await setInspireMetaSelective(item, metaInspire as jsobject, operation, allowedChanges);
+              await saveItemWithPendingInspireNote(item);
+              this.counter++;
+            } else {
+              Zotero.debug(`[${config.addonName}] Smart update: no changes to apply after filtering`);
+            }
+          } else {
+            Zotero.debug(`[${config.addonName}] Smart update: no changes detected`);
+          }
+        } else {
+          // Standard update mode
+          await setInspireMeta(item, metaInspire as jsobject, operation);
+          await saveItemWithPendingInspireNote(item);
+          this.counter++;
+        }
       } else {
         if (getPref("tag_enable") && getPref("tag_norecid") !== "" && !item.hasTag(getPref("tag_norecid") as string)) {
           item.addTag(getPref("tag_norecid") as string, 1);
@@ -703,6 +761,35 @@ export class ZInspire {
   }
 
   /**
+   * Copy INSPIRE link as Markdown format: [citation_key](url)
+   */
+  async copyInspireLinkMarkdown() {
+    const item = this.getSelectedSingleItem();
+    if (!item) return;
+
+    const recid = deriveRecidFromItem(item);
+    if (!recid) {
+      this.showCopyNotification(getString("copy-error-no-recid"), "fail");
+      return;
+    }
+
+    const citationKey = (item.getField("citationKey") as string | undefined)?.trim();
+    if (!citationKey) {
+      this.showCopyNotification(getString("copy-error-no-citation-key"), "fail");
+      return;
+    }
+
+    const url = `${INSPIRE_LITERATURE_URL}/${recid}`;
+    const markdown = `[${citationKey}](${url})`;
+    const success = await copyToClipboard(markdown);
+    if (success) {
+      this.showCopyNotification(getString("copy-success-inspire-link-md"), "success");
+    } else {
+      this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+    }
+  }
+
+  /**
    * Copy citation key for the selected item.
    */
   async copyCitationKey() {
@@ -864,16 +951,23 @@ export async function setInspireMeta(
         item.setField("publisher", metaInspire.publisher);
       }
 
-      if (!item.getField("title")) {
+      if (metaInspire.title) {
         item.setField("title", metaInspire.title);
       }
-      if (!item.getCreator(0) || !(item.getCreator(0) as _ZoteroTypes.Item.Creator).firstName) {
-        item.setCreators(metaInspire.creators);
+      if (metaInspire.creators) {
+        // Check for protected author names
+        const protectionConfig = getFieldProtectionConfig();
+        const localCreators = item.getCreators() as _ZoteroTypes.Item.Creator[];
+        const mergedCreators = mergeCreatorsWithProtectedNames(
+          localCreators,
+          metaInspire.creators,
+          protectionConfig.protectedNames,
+        );
+        item.setCreators(mergedCreators ?? metaInspire.creators);
       }
 
       if (metaInspire.arxiv) {
         const arxivId = metaInspire.arxiv.value;
-        const _arxivReg = new RegExp(/^.*(arXiv:|_eprint:).*$(\n|)/gim);
         let arXivInfo = "";
         if (/^\d/.test(arxivId)) {
           const arxivPrimeryCategory = metaInspire.arxiv.categories[0];
@@ -881,9 +975,9 @@ export async function setInspireMeta(
         } else {
           arXivInfo = "arXiv:" + arxivId;
         }
-        const numberOfArxiv = (extra.match(_arxivReg) || "").length;
+        const numberOfArxiv = (extra.match(ARXIV_EXTRA_LINE_REGEX) || "").length;
         if (numberOfArxiv !== 1) {
-          extra = extra.replace(_arxivReg, "");
+          extra = extra.replace(ARXIV_EXTRA_LINE_REGEX, "");
           if (extra.endsWith("\n")) {
             extra += arXivInfo;
           } else {
@@ -944,6 +1038,200 @@ export async function setInspireMeta(
         metaInspire.citation_count_wo_self_citations,
       );
     }
+    extra = extra.replace(/\n\n/gm, "\n");
+    extra = reorderExtraFields(extra);
+    item.setField("extra", extra);
+
+    setArxivCategoryTag(item);
+  }
+}
+
+/**
+ * Selective metadata update - only updates fields that are in the allowedChanges list
+ * Used by smart update mode to preserve user-edited fields
+ */
+export async function setInspireMetaSelective(
+  item: Zotero.Item,
+  metaInspire: jsobject,
+  operation: string,
+  allowedChanges: FieldChange[],
+) {
+  let extra = item.getField("extra") as string;
+  const publication = item.getField("publicationTitle") as string;
+  const citekey_pref = getPref("citekey");
+
+  // Build a set of allowed field names for quick lookup
+  const allowedFields = new Set(allowedChanges.map(c => c.field));
+
+  if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
+    // Always set archive info (this is identification, not user content)
+    item.setField("archive", "INSPIRE");
+    item.setField("archiveLocation", metaInspire.recid);
+
+    if (operation === "full" || operation === "noabstract") {
+      // Journal / Publication info
+      // Note: If no journal info but has arXiv, use arXiv as fallback (matches setInspireMeta logic)
+      if (allowedFields.has("journalAbbreviation")) {
+        if (metaInspire.journalAbbreviation) {
+          if (item.itemType === "journalArticle") {
+            item.setField("journalAbbreviation", metaInspire.journalAbbreviation);
+          } else if (metaInspire.document_type?.[0] === "book" && item.itemType === "book") {
+            item.setField("series", metaInspire.journalAbbreviation);
+          } else {
+            item.setField("publicationTitle", metaInspire.journalAbbreviation);
+          }
+        } else if (metaInspire.arxiv?.value && item.itemType === "journalArticle") {
+          // arXiv fallback for unpublished papers
+          const arxivId = metaInspire.arxiv.value;
+          let arXivInfo = "";
+          if (/^\d/.test(arxivId) && metaInspire.arxiv.categories?.[0]) {
+            arXivInfo = `arXiv:${arxivId} [${metaInspire.arxiv.categories[0]}]`;
+          } else {
+            arXivInfo = `arXiv:${arxivId}`;
+          }
+          item.setField("journalAbbreviation", arXivInfo);
+        }
+      }
+
+      // Volume
+      if (allowedFields.has("volume") && metaInspire.volume) {
+        if (metaInspire.document_type?.[0] === "book") {
+          item.setField("seriesNumber", metaInspire.volume);
+        } else {
+          item.setField("volume", metaInspire.volume);
+        }
+      }
+
+      // Pages
+      if (allowedFields.has("pages") && metaInspire.pages && metaInspire.document_type?.[0] !== "book") {
+        item.setField("pages", metaInspire.pages);
+      }
+
+      // Date
+      if (allowedFields.has("date") && metaInspire.date) {
+        item.setField("date", metaInspire.date);
+      }
+
+      // Issue
+      if (allowedFields.has("issue") && metaInspire.issue) {
+        item.setField("issue", metaInspire.issue);
+      }
+
+      // DOI
+      if (allowedFields.has("DOI") && metaInspire.DOI) {
+        if (item.itemType === "journalArticle" || item.itemType === "preprint") {
+          item.setField("DOI", metaInspire.DOI);
+        } else {
+          item.setField("url", `${DOI_ORG_URL}/${metaInspire.DOI}`);
+        }
+      }
+
+      // ISBN (only if empty)
+      if (metaInspire.isbns && !item.getField("ISBN")) {
+        item.setField("ISBN", metaInspire.isbns);
+      }
+
+      // Publisher (only if empty)
+      if (metaInspire.publisher && !item.getField("publisher") &&
+          (item.itemType === "book" || item.itemType === "bookSection")) {
+        item.setField("publisher", metaInspire.publisher);
+      }
+
+      // Title - update if allowed (protection is handled by filterProtectedChanges)
+      if (allowedFields.has("title") && metaInspire.title) {
+        item.setField("title", metaInspire.title);
+      }
+
+      // Creators - update if allowed, but preserve protected names
+      if (allowedFields.has("creators") && metaInspire.creators) {
+        const protectionConfig = getFieldProtectionConfig();
+        const localCreators = item.getCreators() as _ZoteroTypes.Item.Creator[];
+        const mergedCreators = mergeCreatorsWithProtectedNames(
+          localCreators,
+          metaInspire.creators,
+          protectionConfig.protectedNames,
+        );
+        item.setCreators(mergedCreators ?? metaInspire.creators);
+      }
+
+      // arXiv info (in Extra field)
+      if (allowedFields.has("arXiv") && metaInspire.arxiv) {
+        const arxivId = metaInspire.arxiv.value;
+        let arXivInfo = "";
+        if (/^\d/.test(arxivId)) {
+          const arxivPrimeryCategory = metaInspire.arxiv.categories?.[0] || "";
+          arXivInfo = arxivPrimeryCategory ? `arXiv:${arxivId} [${arxivPrimeryCategory}]` : `arXiv:${arxivId}`;
+        } else {
+          arXivInfo = "arXiv:" + arxivId;
+        }
+        const numberOfArxiv = (extra.match(ARXIV_EXTRA_LINE_REGEX) || "").length;
+        if (numberOfArxiv !== 1) {
+          extra = extra.replace(ARXIV_EXTRA_LINE_REGEX, "");
+          if (extra.endsWith("\n")) {
+            extra += arXivInfo;
+          } else {
+            extra += "\n" + arXivInfo;
+          }
+        } else {
+          extra = extra.replace(/^.*(arXiv:|_eprint:).*$/gim, arXivInfo);
+        }
+
+        // Clear publicationTitle if it contains old arXiv info
+        if (publication.startsWith("arXiv:")) {
+          item.setField("publicationTitle", "");
+        }
+        // Set URL if empty
+        const url = item.getField("url");
+        if (metaInspire.urlArxiv && !url) {
+          item.setField("url", metaInspire.urlArxiv);
+        }
+      }
+
+      extra = extra.replace(/^.*type: article.*$\n/gm, "");
+
+      // Collaboration
+      if (allowedFields.has("collaboration") && metaInspire.collaborations && !extra.includes("tex.collaboration")) {
+        extra = extra + "\n" + "tex.collaboration: " + metaInspire.collaborations.join(", ");
+      }
+
+      // Citations (always update if in allowed list)
+      if (allowedFields.has("citations") || allowedFields.has("citationsWithoutSelf")) {
+        extra = setCitations(
+          extra,
+          metaInspire.citation_count,
+          metaInspire.citation_count_wo_self_citations,
+        );
+      }
+
+      await queueOrUpsertInspireNote(item, metaInspire.note);
+
+      // Citation key
+      if (allowedFields.has("citekey") && citekey_pref === "inspire" && metaInspire.citekey) {
+        if (extra.includes("Citation Key")) {
+          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0]?.split(": ")[1];
+          if (initialCiteKey !== metaInspire.citekey) {
+            extra = extra.replace(/^.*Citation\sKey.*$/gm, `Citation Key: ${metaInspire.citekey}`);
+          }
+        } else {
+          extra += "\nCitation Key: " + metaInspire.citekey;
+        }
+      }
+    }
+
+    // Abstract
+    if (allowedFields.has("abstractNote") && operation === "full" && metaInspire.abstractNote) {
+      item.setField("abstractNote", metaInspire.abstractNote);
+    }
+
+    // Citations-only mode
+    if (operation === "citations" && (allowedFields.has("citations") || allowedFields.has("citationsWithoutSelf"))) {
+      extra = setCitations(
+        extra,
+        metaInspire.citation_count,
+        metaInspire.citation_count_wo_self_citations,
+      );
+    }
+
     extra = extra.replace(/\n\n/gm, "\n");
     extra = reorderExtraFields(extra);
     item.setField("extra", extra);

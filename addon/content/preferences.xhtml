@@ -12,6 +12,8 @@
   <preference id="pref-chart_default_collapsed" name="__prefsPrefix__.chart_default_collapsed" type="bool" />
   <preference id="pref-search_history_days" name="__prefsPrefix__.search_history_days" type="int" />
   <preference id="pref-pdf_fuzzy_citation" name="__prefsPrefix__.pdf_fuzzy_citation" type="bool" />
+  <preference id="pref-pdf_parse_refs_list" name="__prefsPrefix__.pdf_parse_refs_list" type="bool" />
+  <preference id="pref-pdf_force_mapping_on_mismatch" name="__prefsPrefix__.pdf_force_mapping_on_mismatch" type="bool" />
   <preference id="pref-reader_auto_reopen" name="__prefsPrefix__.reader_auto_reopen" type="bool" />
   <preference id="pref-tag_enable" name="__prefsPrefix__.tag_enable" type="bool" />
   <preference id="pref-tag_norecid" name="__prefsPrefix__.tag_norecid" type="string" />
@@ -22,6 +24,14 @@
   <preference id="pref-local_cache_compression" name="__prefsPrefix__.local_cache_compression" type="bool" />
   <preference id="pref-local_cache_enrich_batch" name="__prefsPrefix__.local_cache_enrich_batch" type="int" />
   <preference id="pref-local_cache_enrich_parallel" name="__prefsPrefix__.local_cache_enrich_parallel" type="int" />
+  <preference id="pref-smart_update_enable" name="__prefsPrefix__.smart_update_enable" type="bool" />
+  <preference id="pref-smart_update_show_preview" name="__prefsPrefix__.smart_update_show_preview" type="bool" />
+  <preference id="pref-smart_update_auto_check" name="__prefsPrefix__.smart_update_auto_check" type="bool" />
+  <preference id="pref-smart_update_protect_title" name="__prefsPrefix__.smart_update_protect_title" type="bool" />
+  <preference id="pref-smart_update_protect_authors" name="__prefsPrefix__.smart_update_protect_authors" type="bool" />
+  <preference id="pref-smart_update_protect_abstract" name="__prefsPrefix__.smart_update_protect_abstract" type="bool" />
+  <preference id="pref-smart_update_protect_journal" name="__prefsPrefix__.smart_update_protect_journal" type="bool" />
+  <preference id="pref-smart_update_protected_names" name="__prefsPrefix__.smart_update_protected_names" type="string" />
 </preferences>
 <groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window });" />
 <vbox id="zotero-prefpane-__addonRef__" style="padding: 8px;">
@@ -157,6 +167,16 @@
         data-l10n-id="pref-pdf-fuzzy-citation" />
       <html:p class="zinspire-pref-desc" data-l10n-id="pref-pdf-fuzzy-citation-desc"></html:p>
     </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px;">
+      <checkbox id="zotero-prefpane-__addonRef__-pdf_parse_refs_list" preference="extensions.zotero.inspiremeta.pdf_parse_refs_list"
+        data-l10n-id="pref-pdf-parse-refs-list" />
+      <html:p class="zinspire-pref-desc" data-l10n-id="pref-pdf-parse-refs-list-desc"></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px; margin-left: 20px;">
+      <checkbox id="zotero-prefpane-__addonRef__-pdf_force_mapping_on_mismatch" preference="extensions.zotero.inspiremeta.pdf_force_mapping_on_mismatch"
+        data-l10n-id="pref-pdf-force-mapping" />
+      <html:p class="zinspire-pref-desc" data-l10n-id="pref-pdf-force-mapping-desc"></html:p>
+    </vbox>
   </vbox>
 
   <!-- Reader History -->
@@ -231,6 +251,50 @@
         <button id="zotero-prefpane-__addonRef__-clear_cache" data-l10n-id="pref-local-cache-clear"
           oncommand="Zotero.__addonInstance__.hooks.onPrefsEvent('clearCache', { window });" />
         <label id="zotero-prefpane-__addonRef__-cache_stats" style="margin-left: 12px; color: var(--fill-secondary, #64748b); font-size: 11px;" />
+      </hbox>
+    </vbox>
+  </vbox>
+
+  <!-- Smart Update Settings (FTR-SMART-UPDATE) -->
+  <vbox class="zinspire-pref-section">
+    <html:h3 class="zinspire-pref-title" data-l10n-id="pref-smart-update"></html:h3>
+    <vbox class="zinspire-pref-row">
+      <checkbox id="zotero-prefpane-__addonRef__-smart_update_enable" preference="extensions.zotero.inspiremeta.smart_update_enable"
+        data-l10n-id="pref-smart-update-enable" />
+      <html:p class="zinspire-pref-desc" data-l10n-id="pref-smart-update-enable-desc"></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px; margin-left: 20px;">
+      <checkbox id="zotero-prefpane-__addonRef__-smart_update_show_preview"
+        preference="extensions.zotero.inspiremeta.smart_update_show_preview" data-l10n-id="pref-smart-update-preview" />
+      <html:p class="zinspire-pref-desc" data-l10n-id="pref-smart-update-preview-desc"></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px; margin-left: 20px;">
+      <checkbox id="zotero-prefpane-__addonRef__-smart_update_auto_check"
+        preference="extensions.zotero.inspiremeta.smart_update_auto_check" data-l10n-id="pref-smart-update-auto-check" />
+      <html:p class="zinspire-pref-desc" data-l10n-id="pref-smart-update-auto-check-desc"></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 12px; margin-left: 20px;">
+      <html:h4 style="margin: 4px 0;" data-l10n-id="pref-smart-update-protect-title"></html:h4>
+      <html:p class="zinspire-pref-desc" data-l10n-id="pref-smart-update-protect-desc"></html:p>
+      <hbox style="margin-top: 6px; gap: 16px; flex-wrap: wrap;">
+        <checkbox id="zotero-prefpane-__addonRef__-smart_update_protect_title"
+          preference="extensions.zotero.inspiremeta.smart_update_protect_title" data-l10n-id="pref-smart-update-protect-field-title" />
+        <checkbox id="zotero-prefpane-__addonRef__-smart_update_protect_authors"
+          preference="extensions.zotero.inspiremeta.smart_update_protect_authors" data-l10n-id="pref-smart-update-protect-field-authors" />
+        <checkbox id="zotero-prefpane-__addonRef__-smart_update_protect_abstract"
+          preference="extensions.zotero.inspiremeta.smart_update_protect_abstract" data-l10n-id="pref-smart-update-protect-field-abstract" />
+        <checkbox id="zotero-prefpane-__addonRef__-smart_update_protect_journal"
+          preference="extensions.zotero.inspiremeta.smart_update_protect_journal" data-l10n-id="pref-smart-update-protect-field-journal" />
+      </hbox>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 12px; margin-left: 20px;">
+      <html:h4 style="margin: 4px 0;" data-l10n-id="pref-smart-update-protected-names-title"></html:h4>
+      <html:p class="zinspire-pref-desc" data-l10n-id="pref-smart-update-protected-names-desc"></html:p>
+      <hbox style="margin-top: 6px;">
+        <html:input type="text" id="zotero-prefpane-__addonRef__-smart_update_protected_names"
+          preference="extensions.zotero.inspiremeta.smart_update_protected_names"
+          class="zinspire-pref-input" style="flex: 1;"
+          placeholder="e.g., O'Brien, McDowell" />
       </hbox>
     </vbox>
   </vbox>

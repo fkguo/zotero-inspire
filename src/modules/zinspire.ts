@@ -6,6 +6,7 @@ import { getPref, setPref } from "../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   showTargetPickerUI,
+  showAmbiguousCitationPicker,
   SaveTargetRow,
   SaveTargetSelection,
   applyRefEntryTextContainerStyle,
@@ -14,6 +15,7 @@ import {
   applyRefEntryLinkButtonStyle,
   applyRefEntryContentStyle,
   applyAuthorLinkStyle,
+  applyMetaLinkStyle,
   applyTabButtonStyle,
   applyAbstractTooltipStyle,
   applyBibTeXButtonStyle,
@@ -49,12 +51,39 @@ import {
   FILTER_HISTORY_PREF_KEY,
   FILTER_HISTORY_MAX_ENTRIES,
   AUTHOR_IDS_EXTRACT_LIMIT,
+  // New constants for magic number replacement
+  FILTER_DEBOUNCE_MS,
+  CHART_THROTTLE_MS,
+  TOOLTIP_SHOW_DELAY_MS,
+  TOOLTIP_HIDE_DELAY_MS,
+  SCROLL_HIGHLIGHT_DELAY_MS,
+  PROGRESS_CLOSE_DELAY_MS,
+  PROGRESS_CLOSE_DELAY_WARN_MS,
+  RAF_FALLBACK_MS,
+  REFERENCES_CACHE_SIZE,
+  CITED_BY_CACHE_SIZE,
+  ENTRY_CITED_CACHE_SIZE,
+  METADATA_CACHE_SIZE,
+  SEARCH_CACHE_SIZE,
+  ROW_POOL_MAX_SIZE,
+  CHART_MAX_BAR_WIDTH,
+  RENDER_PAGE_SIZE_FILTERED,
+  METADATA_BATCH_SIZE,
+  LOCAL_STATUS_BATCH_SIZE,
+  HIGH_CITATIONS_THRESHOLD,
+  SMALL_AUTHOR_GROUP_THRESHOLD,
+  AUTHOR_NAME_MAX_LENGTH,
+  CLIPBOARD_WARN_SIZE_BYTES,
+  CITATION_RANGES,
   // Quick Filter constants
   QUICK_FILTER_TYPES,
   QUICK_FILTER_PREF_KEY,
   QUICK_FILTER_CONFIGS,
   isQuickFilterType,
   type QuickFilterType,
+  // API Field Selection (FTR-API-FIELD-OPTIMIZATION)
+  API_FIELDS_LIST_DISPLAY,
+  buildFieldsParam,
   // Types
   type ReferenceSortOption,
   type InspireSortOption,
@@ -150,10 +179,251 @@ import {
   getReaderIntegration,
   type CitationLookupEvent,
   type ParsedCitation,
+  type MatchResult,
+  // Style utilities
+  CHART_STYLES,
+  toStyleString,
+  // Smart Update (FTR-SMART-UPDATE)
+  isSmartUpdateEnabled,
+  isAutoCheckEnabled,
+  compareItemWithInspire,
+  getFieldProtectionConfig,
+  filterProtectedChanges,
+  showSmartUpdatePreviewDialog,
+  showUpdateNotification,
+  type SmartUpdateDiff,
+  type FieldChange,
 } from "./inspire";
 
 // Re-export for external use
 export { ZInsUtils, ZInsMenu, ZInspire };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// InlineHintHelper: Reusable inline hint for input autocomplete
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Shared input styles for inline hint inputs (Filter & Search) */
+const INLINE_HINT_INPUT_STYLE = `
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  font-size: 12px;
+  background-color: transparent !important;
+  background: transparent !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  position: relative;
+  z-index: 2;
+  font-family: system-ui, -apple-system, sans-serif;
+`;
+
+/** Shared wrapper styles for inline hint containers */
+const INLINE_HINT_WRAPPER_STYLE = `
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  background: var(--material-background, #ffffff);
+  border-radius: 4px;
+`;
+
+/** Configure input element for inline hint usage (disable browser autocomplete) */
+function configureInlineHintInput(input: HTMLInputElement): void {
+  input.setAttribute("autocomplete", "off");
+  input.setAttribute("autocorrect", "off");
+  input.setAttribute("autocapitalize", "off");
+  input.setAttribute("spellcheck", "false");
+}
+
+interface InlineHintConfig {
+  input: HTMLInputElement;
+  wrapper: HTMLElement;
+  history: SearchHistoryItem[];
+}
+
+/**
+ * Helper class for managing inline hint (autocomplete suggestion) in input fields.
+ * Used by both Filter input and Search input for consistent behavior.
+ */
+class InlineHintHelper {
+  private input: HTMLInputElement;
+  private wrapper: HTMLElement;
+  private hintEl: HTMLSpanElement;
+  private getHistory: () => SearchHistoryItem[];
+  private _currentHintText = "";
+
+  get currentHintText(): string {
+    return this._currentHintText;
+  }
+
+  constructor(config: InlineHintConfig & { getHistory?: () => SearchHistoryItem[] }) {
+    this.input = config.input;
+    this.wrapper = config.wrapper;
+    this.getHistory = config.getHistory || (() => config.history);
+
+    // Create hint element using native DOM with cssText (required for Zotero)
+    const doc = this.wrapper.ownerDocument;
+    this.hintEl = doc.createElement("span");
+    this.hintEl.className = "zinspire-inline-hint";
+    this.hintEl.style.cssText = `
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--fill-secondary, #888);
+      font-size: 12px;
+      pointer-events: none;
+      white-space: pre;
+      overflow: hidden;
+      z-index: 3;
+      display: none;
+      font-family: system-ui, -apple-system, sans-serif;
+      line-height: 1;
+    `;
+    this.wrapper.appendChild(this.hintEl);
+  }
+
+  /** Update hint based on current input value */
+  update(): void {
+    const inputValue = this.input.value;
+    const history = this.getHistory();
+
+    // Always hide first, then show only if there's a match
+    this.hintEl.textContent = "";
+    this.hintEl.hidden = true;
+    this.hintEl.style.display = "none";
+
+    // No input or no history: stay hidden
+    if (!inputValue || history.length === 0) {
+      this._currentHintText = "";
+      return;
+    }
+
+    // Find matching history entry
+    const lowerValue = inputValue.toLowerCase();
+    let matchingHint = "";
+    for (const item of history) {
+      // Defensive check: skip items with invalid query
+      if (!item.query || typeof item.query !== "string") {
+        continue;
+      }
+      if (
+        item.query.toLowerCase().startsWith(lowerValue) &&
+        item.query.length > inputValue.length
+      ) {
+        matchingHint = item.query;
+        break;
+      }
+    }
+
+    // No match found: stay hidden
+    if (!matchingHint) {
+      this._currentHintText = "";
+      return;
+    }
+
+    // Show hint: display only the remaining suggestion after what user typed
+    const hintSuffix = matchingHint.slice(inputValue.length).replace(/ /g, "\u00A0");
+    this._currentHintText = matchingHint;
+
+    // Calculate position based on input text width
+    const doc = this.wrapper.ownerDocument;
+    const computedStyle = doc.defaultView?.getComputedStyle(this.input);
+
+    if (computedStyle) {
+      // Use a hidden span for accurate text width measurement
+      const measureSpan = doc.createElement("span");
+      measureSpan.style.cssText = `
+        position: absolute;
+        visibility: hidden;
+        white-space: pre;
+        font: ${computedStyle.font};
+        font-size: ${computedStyle.fontSize};
+        font-family: ${computedStyle.fontFamily};
+        font-weight: ${computedStyle.fontWeight};
+        font-style: ${computedStyle.fontStyle};
+        font-variant: ${computedStyle.fontVariant};
+        font-stretch: ${computedStyle.fontStretch};
+        letter-spacing: ${computedStyle.letterSpacing};
+        word-spacing: ${computedStyle.wordSpacing};
+        text-transform: ${computedStyle.textTransform};
+        text-rendering: ${computedStyle.textRendering};
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      `;
+      measureSpan.textContent = inputValue.replace(/ /g, "\u00A0");
+      this.wrapper.appendChild(measureSpan);
+      const textWidth = measureSpan.offsetWidth;
+      this.wrapper.removeChild(measureSpan);
+
+      // Get spacing
+      const paddingLeft = parseFloat(computedStyle.paddingLeft) || 8;
+      const borderLeft = parseFloat(computedStyle.borderLeftWidth) || 0;
+      const paddingTop = parseFloat(computedStyle.paddingTop) || 4;
+      const borderTop = parseFloat(computedStyle.borderTopWidth) || 0;
+
+      // Calculate position relative to wrapper
+      const inputRect = this.input.getBoundingClientRect();
+      const wrapperRect = this.wrapper.getBoundingClientRect();
+      const inputLeftOffset = inputRect.left - wrapperRect.left;
+      const inputTopOffset = inputRect.top - wrapperRect.top;
+
+      const finalLeft = inputLeftOffset + borderLeft + paddingLeft + textWidth;
+      const finalTop = inputTopOffset + borderTop + paddingTop;
+
+      // Update hint element - show it
+      this.hintEl.textContent = hintSuffix;
+      this.hintEl.style.left = `${finalLeft}px`;
+      this.hintEl.style.top = `${finalTop}px`;
+      this.hintEl.style.transform = "none";
+      this.hintEl.hidden = false;
+      this.hintEl.style.display = "block";
+
+      // Match font style of input
+      this.hintEl.style.font = computedStyle.font;
+      this.hintEl.style.fontSize = computedStyle.fontSize;
+      this.hintEl.style.fontFamily = computedStyle.fontFamily;
+      this.hintEl.style.lineHeight = computedStyle.lineHeight;
+      this.hintEl.style.letterSpacing = computedStyle.letterSpacing;
+    } else {
+      // Fallback: approximate character width
+      const textWidth = inputValue.length * 7;
+      this.hintEl.textContent = hintSuffix;
+      this.hintEl.style.left = `${9 + textWidth}px`;
+      this.hintEl.hidden = false;
+      this.hintEl.style.display = "block";
+    }
+  }
+
+  /** Hide hint and clear current hint text */
+  hide(): void {
+    this.hintEl.textContent = "";
+    this.hintEl.hidden = true;
+    this.hintEl.style.display = "none";
+    this._currentHintText = "";
+  }
+
+  /** Accept current hint (for Tab/ArrowRight completion) */
+  accept(): boolean {
+    if (this._currentHintText) {
+      this.input.value = this._currentHintText;
+      this.hide();
+      return true;
+    }
+    return false;
+  }
+
+  /** Get the hint element (for adding custom classes) */
+  getElement(): HTMLSpanElement {
+    return this.hintEl;
+  }
+
+  /** Destroy and remove hint element */
+  destroy(): void {
+    this.hintEl.remove();
+  }
+}
 
 export class ZInspireReferencePane {
   private static controllers = new WeakMap<
@@ -797,6 +1067,16 @@ class InspireReferencePanelController {
   private static navigationStack: NavigationSnapshot[] = [];
   private static forwardStack: NavigationSnapshot[] = [];
   private static isNavigatingHistory = false;
+  // Shared citation listener (singleton on readerIntegration)
+  private static citationListenerRegistered = false;
+  private static sharedCitationHandler?: (event: CitationLookupEvent) => void;
+  // FTR-RECID-AUTO-UPDATE: Shared handlers for recid availability events
+  private static recidAvailableHandler?: (event: { parentItemID: number; recid: string }) => void;
+  private static noRecidHandler?: (event: { parentItemID: number }) => void;
+  // Shared citationLookup dedupe (prevents multiple controllers from handling same event)
+  private static lastGlobalCitationEventKey?: string;
+  private static lastGlobalCitationEventTs = 0;
+  private static globalCitationInFlightKey?: string;
 
   /**
    * Get all active controller instances for external access.
@@ -804,15 +1084,34 @@ class InspireReferencePanelController {
   static getInstances(): Set<InspireReferencePanelController> {
     return this.instances;
   }
+  private static pickControllerForEvent(
+    event: CitationLookupEvent,
+  ): InspireReferencePanelController | undefined {
+    // Prefer reader tab match
+    if (event.readerTabID) {
+      for (const inst of this.instances) {
+        if (inst.currentReaderTabID && inst.currentReaderTabID === event.readerTabID) {
+          return inst;
+        }
+      }
+    }
+    // Then parent item match
+    for (const inst of this.instances) {
+      if (inst.currentItemID === event.parentItemID) {
+        return inst;
+      }
+    }
+    // Fallback: first instance
+    return this.instances.values().next().value;
+  }
   private static sharedPendingScrollRestore?: ScrollState & { itemID: number };
 
   private body: HTMLDivElement;
   private statusEl: HTMLSpanElement;
   private listEl: HTMLDivElement;
   private filterInput: HTMLInputElement;
-  private filterInlineHint?: HTMLSpanElement;
+  private filterInlineHint?: InlineHintHelper;
   private filterHistory: SearchHistoryItem[] = [];
-  private filterCurrentHintText = "";
   private sortSelect!: HTMLSelectElement;
   private tabButtons!: Record<InspireViewMode, HTMLButtonElement>;
   private filterText = "";
@@ -829,13 +1128,13 @@ class InspireReferencePanelController {
   private allEntries: InspireReferenceEntry[] = [];
   // LRU caches to prevent unbounded memory growth
   // References: ~100 entries, each with InspireReferenceEntry[]
-  private referencesCache = new LRUCache<string, InspireReferenceEntry[]>(100);
+  private referencesCache = new LRUCache<string, InspireReferenceEntry[]>(REFERENCES_CACHE_SIZE);
   // Cited-by: ~50 entries (large arrays, paginated data)
-  private citedByCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  private citedByCache = new LRUCache<string, InspireReferenceEntry[]>(CITED_BY_CACHE_SIZE);
   // Entry-cited: ~50 entries (similar to cited-by)
-  private entryCitedCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  private entryCitedCache = new LRUCache<string, InspireReferenceEntry[]>(ENTRY_CITED_CACHE_SIZE);
   // Metadata: ~500 entries (individual metadata objects, frequently accessed)
-  private metadataCache = new LRUCache<string, jsobject>(500);
+  private metadataCache = new LRUCache<string, jsobject>(METADATA_CACHE_SIZE);
   // Row cache: cleared on each render, no LRU needed
   private rowCache = new Map<string, HTMLElement>();
   private activeAbort?: AbortController;
@@ -853,8 +1152,8 @@ class InspireReferencePanelController {
   private abstractHideTimeout?: ReturnType<typeof setTimeout>;
   private abstractAbort?: AbortController;
   private tooltipRAF?: number;  // For requestAnimationFrame throttling
-  private readonly tooltipShowDelay = 300;
-  private readonly tooltipHideDelay = 600;
+  private readonly tooltipShowDelay = TOOLTIP_SHOW_DELAY_MS;
+  private readonly tooltipHideDelay = TOOLTIP_HIDE_DELAY_MS;
   // Frontend pagination state (for cited-by and author papers)
   private renderedCount = 0;  // Number of entries currently rendered
   private loadMoreButton?: HTMLButtonElement;
@@ -885,12 +1184,12 @@ class InspireReferencePanelController {
   private chartStatsBottomLine?: HTMLSpanElement;
   // Filter input debounce timer
   private filterDebounceTimer?: ReturnType<typeof setTimeout>;
-  private readonly filterDebounceDelay = 150; // ms
+  private readonly filterDebounceDelay = FILTER_DEBOUNCE_MS;
   // Chart deferred rendering timer
   private chartRenderTimer?: ReturnType<typeof setTimeout>;
   // Row element pool for recycling (reduces DOM creation and GC pressure)
   private rowPool: HTMLDivElement[] = [];
-  private readonly maxRowPoolSize = 150;
+  private readonly maxRowPoolSize = ROW_POOL_MAX_SIZE;
   // Rate limiter status display
   private rateLimiterStatusEl?: HTMLSpanElement;
   private rateLimiterUnsubscribe?: () => void;
@@ -901,7 +1200,7 @@ class InspireReferencePanelController {
   private cacheSourceEl?: HTMLSpanElement;
 
   // Search mode state
-  private searchCache = new LRUCache<string, InspireReferenceEntry[]>(50);
+  private searchCache = new LRUCache<string, InspireReferenceEntry[]>(SEARCH_CACHE_SIZE);
   private searchSort: InspireSortOption = "mostrecent";
   private currentSearchQuery?: string;  // Current active search query
   private searchHistory: SearchHistoryItem[] = [];  // Recent search queries
@@ -936,6 +1235,8 @@ class InspireReferencePanelController {
   private boundHandleListMouseMove?: (e: MouseEvent) => void;
   private boundHandleListDoubleClick?: (e: MouseEvent) => void;
   private boundHandleListKeyDown?: (e: KeyboardEvent) => void;  // FTR-FOCUSED-SELECTION
+  private boundHandleBodyKeyDown?: (e: KeyboardEvent) => void;
+  private boundHandleListContextMenu?: (e: MouseEvent) => void;  // FTR-COPY-LINK
   // Timer for handling click/double-click conflict on marker
   private markerClickTimer?: ReturnType<typeof setTimeout>;
 
@@ -950,6 +1251,22 @@ class InspireReferencePanelController {
   // PDF Annotate (FTR-PDF-ANNOTATE)
   private labelMatcher?: LabelMatcher;
   private citationLookupHandler?: (event: CitationLookupEvent) => void;
+  /** Track if PDF parsing has been attempted for current item */
+  private pdfParseAttempted = false;
+  /** Deduplicate bursty citationLookup events */
+  private lastCitationEventKey?: string;
+  private lastCitationEventTs = 0;
+  /** In-flight guard to avoid re-entrance on same label burst */
+  private citationInFlightKey?: string;
+
+  // Smart Update Auto-check state (FTR-SMART-UPDATE-AUTO-CHECK)
+  private autoCheckNotification?: HTMLElement;
+  private autoCheckAbort?: AbortController;
+  private autoCheckPendingDiff?: { diff: SmartUpdateDiff; allowedChanges: FieldChange[]; itemRecid: string };
+  /** Map of itemID -> last check timestamp (for throttling, not permanent dedup) */
+  private autoCheckLastCheckTime = new Map<number, number>();
+  /** Throttle interval: don't re-check same item within this time (ms) */
+  private readonly autoCheckThrottleMs = 5000;  // 5 seconds
 
   constructor(body: HTMLDivElement) {
     this.body = body;
@@ -962,6 +1279,10 @@ class InspireReferencePanelController {
     // Initialize quick filters from preferences before building UI
     this.loadQuickFiltersFromPrefs();
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Modern 3-Row Toolbar Layout
+    // ─────────────────────────────────────────────────────────────────────────
+
     const toolbar = ztoolkit.UI.appendElement(
       {
         tag: "div",
@@ -969,6 +1290,27 @@ class InspireReferencePanelController {
       },
       this.body,
     ) as HTMLDivElement;
+    // Main toolbar container styles
+    toolbar.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--fill-quinary, #e2e8f0);
+      background: var(--material-sidepane, #f8fafc);
+    `;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Row 1: Status (count display)
+    // ═══════════════════════════════════════════════════════════════════════
+    const row1 = body.ownerDocument.createElement("div");
+    row1.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 20px;
+    `;
+    toolbar.appendChild(row1);
 
     this.statusEl = ztoolkit.UI.appendElement(
       {
@@ -976,16 +1318,33 @@ class InspireReferencePanelController {
         classList: ["zinspire-ref-panel__status"],
         properties: { textContent: getString("references-panel-status-empty") },
       },
-      toolbar,
+      row1,
     ) as HTMLSpanElement;
+    this.statusEl.style.cssText = `
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--fill-primary, #1e293b);
+    `;
 
-    const tabs = ztoolkit.UI.appendElement(
-      {
-        tag: "div",
-        classList: ["zinspire-ref-panel__tabs"],
-      },
-      toolbar,
-    ) as HTMLDivElement;
+    // ═══════════════════════════════════════════════════════════════════════
+    // Row 2: Tab buttons (pill button style)
+    // ═══════════════════════════════════════════════════════════════════════
+    const row2 = body.ownerDocument.createElement("div");
+    row2.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    `;
+    toolbar.appendChild(row2);
+
+    const tabs = body.ownerDocument.createElement("div");
+    tabs.className = "zinspire-ref-panel__tabs";
+    tabs.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    `;
+    row2.appendChild(tabs);
 
     this.tabButtons = {
       references: this.createTabButton(tabs, "references"),
@@ -993,7 +1352,9 @@ class InspireReferencePanelController {
       entryCited: this.createTabButton(tabs, "entryCited"),
       search: this.createTabButton(tabs, "search"),
     };
-    // Search tab is always visible - users can search directly from panel
+    this.updateTabSelection();
+
+    // Sort dropdown (on same row as tabs, pushed to the right)
     this.sortSelect = ztoolkit.UI.appendElement(
       {
         tag: "select",
@@ -1011,73 +1372,34 @@ class InspireReferencePanelController {
           },
         ],
       },
-      toolbar,
+      row2,
     ) as HTMLSelectElement;
-    this.updateTabSelection();
+    this.sortSelect.style.cssText = `
+      margin-left: auto;
+      padding: 4px 24px 4px 10px;
+      font-size: 12px;
+      border: 1px solid var(--fill-quinary, #cbd5e1);
+      border-radius: 4px;
+      background: var(--material-background, #fff) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M3 4.5L6 8l3-3.5H3z'/%3E%3C/svg%3E") no-repeat right 6px center;
+      color: var(--fill-primary, #334155);
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+    `;
 
-    this.entryViewBackButton = ztoolkit.UI.appendElement(
-      {
-        tag: "button",
-        classList: ["zinspire-ref-panel__button"],
-        attributes: {
-          title: getString("references-panel-entry-back-tooltip"),
-        },
-        properties: {
-          textContent: getString("references-panel-entry-back", {
-            args: { tab: this.getTabLabel("references") },
-          }),
-        },
-        listeners: [
-          {
-            type: "click",
-            listener: () => {
-              this.exitEntryCitedTab().catch(() => void 0);
-            },
-          },
-        ],
-      },
-      toolbar,
-    ) as HTMLButtonElement;
-    this.entryViewBackButton.hidden = true;
+    // ═══════════════════════════════════════════════════════════════════════
+    // Row 3: Filter (left) + Navigation (right)
+    // ═══════════════════════════════════════════════════════════════════════
+    const row3 = body.ownerDocument.createElement("div");
+    row3.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    `;
+    toolbar.appendChild(row3);
 
-    this.backButton = ztoolkit.UI.appendElement(
-      {
-        tag: "button",
-        classList: ["zinspire-ref-panel__button"],
-        attributes: { title: getString("references-panel-back-tooltip") },
-        properties: { textContent: getString("references-panel-back") },
-        listeners: [
-          {
-            type: "click",
-            listener: () => {
-              this.handleBackNavigation();
-            },
-          },
-        ],
-      },
-      toolbar,
-    ) as HTMLButtonElement;
-    this.backButton.disabled = true;
-
-    this.forwardButton = ztoolkit.UI.appendElement(
-      {
-        tag: "button",
-        classList: ["zinspire-ref-panel__button"],
-        attributes: { title: getString("references-panel-forward-tooltip") },
-        properties: { textContent: getString("references-panel-forward") },
-        listeners: [
-          {
-            type: "click",
-            listener: () => {
-              this.handleForwardNavigation();
-            },
-          },
-        ],
-      },
-      toolbar,
-    ) as HTMLButtonElement;
-    this.forwardButton.disabled = true;
-
+    // Filter group (LEFT side)
     const filterGroup = ztoolkit.UI.appendElement(
       {
         tag: "div",
@@ -1090,136 +1412,151 @@ class InspireReferencePanelController {
           flexWrap: "nowrap",
         },
       },
-      toolbar,
+      row3,
     ) as HTMLDivElement;
 
     this.createQuickFiltersControls(filterGroup);
 
-    const filterInputWrapper = ztoolkit.UI.appendElement(
-      {
-        tag: "div",
-        classList: ["zinspire-filter-input-wrapper"],
-        styles: {
-          display: "inline-flex",
-          flex: "1 1 auto",
-          minWidth: "120px",
-          width: "auto",
-          position: "relative",
-          alignItems: "center",
-          background: "var(--material-background, #ffffff)",
-          borderRadius: "4px",
-        },
-      },
-      filterGroup,
-    ) as HTMLDivElement;
+    // Create wrapper using NATIVE DOM (not ztoolkit) - same pattern as Search
+    // Critical: wrapper stays DETACHED until all setup is complete
+    const filterDoc = filterGroup.ownerDocument;
+    const filterInputWrapper = filterDoc.createElement("div");
+    filterInputWrapper.className = "zinspire-filter-input-wrapper";
+    filterInputWrapper.style.cssText = INLINE_HINT_WRAPPER_STYLE + `min-width: 120px;`;
 
-    this.filterInput = ztoolkit.UI.appendElement(
+    // Create filter input using native DOM
+    this.filterInput = filterDoc.createElement("input");
+    this.filterInput.type = "text";
+    this.filterInput.className = "zinspire-ref-panel__filter";
+    this.filterInput.placeholder = getString("references-panel-filter-placeholder");
+    configureInlineHintInput(this.filterInput);
+    this.filterInput.style.cssText = INLINE_HINT_INPUT_STYLE;
+
+    // Create inline hint helper (wrapper is still DETACHED from DOM)
+    const filterHint = new InlineHintHelper({
+      input: this.filterInput,
+      wrapper: filterInputWrapper,
+      history: this.filterHistory,
+      getHistory: () => this.filterHistory,
+    });
+    filterHint.getElement().classList.add("zinspire-filter-inline-hint");
+    this.filterInlineHint = filterHint;
+
+    // Add event listeners BEFORE appending input (same order as Search)
+    this.filterInput.addEventListener("keydown", (event: KeyboardEvent) => {
+      if ((event.key === "Tab" || event.key === "ArrowRight") && filterHint.currentHintText) {
+        const input = event.target as HTMLInputElement;
+        const cursorAtEnd = input.selectionStart === input.value.length;
+        if (cursorAtEnd && filterHint.accept()) {
+          event.preventDefault();
+          this.handleFilterInputChange(input.value);
+          this.addToFilterHistory(input.value);
+        }
+      } else if (event.key === "Escape") {
+        filterHint.hide();
+      } else if (event.key === "Enter") {
+        this.addToFilterHistory((event.target as HTMLInputElement).value);
+        filterHint.hide();
+      }
+    });
+
+    this.filterInput.addEventListener("input", (event: Event) => {
+      const target = event.target as HTMLInputElement;
+      this.handleFilterInputChange(target.value);
+      filterHint.update();
+    });
+
+    this.filterInput.addEventListener("focus", () => {
+      filterHint.update();
+    });
+
+    this.filterInput.addEventListener("blur", () => {
+      this.addToFilterHistory(this.filterInput?.value || "");
+      setTimeout(() => filterHint.hide(), 150);
+    });
+
+    // Append input to wrapper AFTER all event listeners (same order as Search)
+    filterInputWrapper.appendChild(this.filterInput);
+
+    // NOW attach wrapper to DOM (after all setup is complete)
+    filterGroup.appendChild(filterInputWrapper);
+
+    // Navigation group (immediately after filter, no margin-left: auto)
+    const navGroup = body.ownerDocument.createElement("div");
+    navGroup.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    `;
+    row3.appendChild(navGroup);
+
+    // Back button (icon)
+    this.backButton = ztoolkit.UI.appendElement(
       {
-        tag: "input",
-        classList: ["zinspire-ref-panel__filter"],
-        attributes: {
-          type: "search",
-          placeholder: getString("references-panel-filter-placeholder"),
-          autocomplete: "off",
-          autocorrect: "off",
-          autocapitalize: "off",
-          spellcheck: "false",
-        },
-        styles: {
-          display: "inline-block",
-          flex: "1 1 auto",
-          minWidth: "120px",
-          width: "100%",
-          padding: "4px 8px",
-          border: "1px solid var(--zotero-gray-4, #d1d1d5)",
-          borderRadius: "4px",
-          appearance: "none",
-          background: "transparent !important",
-          backgroundColor: "transparent !important",
-          position: "relative",
-          zIndex: "2",
-          fontFamily: "system-ui, -apple-system, sans-serif",
-          fontSize: "12px",
-        },
+        tag: "button",
+        classList: ["zinspire-ref-panel__button"],
+        attributes: { title: getString("references-panel-back-tooltip") },
+        properties: { textContent: "←" },
         listeners: [
           {
-            type: "input",
-            listener: (event: Event) => {
-              const target = event.target as HTMLInputElement;
-              this.handleFilterInputChange(target.value);
-              this.updateFilterInlineHint();
-            },
-          },
-          {
-            type: "focus",
+            type: "click",
             listener: () => {
-              this.updateFilterInlineHint();
-            },
-          },
-          {
-            type: "keydown",
-            listener: (event: Event) => {
-              const keyEvent = event as KeyboardEvent;
-              if ((keyEvent.key === "Tab" || keyEvent.key === "ArrowRight") && this.filterCurrentHintText) {
-                const input = event.target as HTMLInputElement;
-                const cursorAtEnd = input.selectionStart === input.value.length;
-                if (cursorAtEnd) {
-                  keyEvent.preventDefault();
-                  input.value = this.filterCurrentHintText;
-                  this.handleFilterInputChange(input.value);
-                  this.hideFilterInlineHint();
-                  this.addToFilterHistory(input.value);
-                }
-              } else if (keyEvent.key === "Escape") {
-                this.hideFilterInlineHint();
-              } else if (keyEvent.key === "Enter") {
-                this.addToFilterHistory((event.target as HTMLInputElement).value);
-                this.hideFilterInlineHint();
-              }
-            },
-          },
-          {
-            type: "blur",
-            listener: () => {
-              this.addToFilterHistory(this.filterInput?.value || "");
-              setTimeout(() => this.hideFilterInlineHint(), 150);
-            },
-          },
-          {
-            type: "search",
-            listener: (event: Event) => {
-              const target = event.target as HTMLInputElement;
-              this.handleFilterInputChange(target.value);
-              if (!target.value) {
-                this.hideFilterInlineHint();
-              }
+              this.handleBackNavigation();
             },
           },
         ],
       },
-      filterInputWrapper,
-    ) as HTMLInputElement;
+      navGroup,
+    ) as HTMLButtonElement;
+    this.backButton.disabled = true;
+    this.applyNavButtonStyle(this.backButton, true);
 
-    this.filterInlineHint = ztoolkit.UI.appendElement(
+    // Forward button (icon)
+    this.forwardButton = ztoolkit.UI.appendElement(
       {
-        tag: "span",
-        classList: ["zinspire-inline-hint", "zinspire-filter-inline-hint"],
-        styles: {
-          position: "absolute",
-          left: "7px",
-          top: "50%",
-          transform: "translateY(-50%)",
-          color: "var(--fill-secondary, #888)",
-          fontSize: "12px",
-          pointerEvents: "none",
-          whiteSpace: "pre",
-          overflow: "hidden",
-          zIndex: "3",
-          display: "none",
-        },
+        tag: "button",
+        classList: ["zinspire-ref-panel__button"],
+        attributes: { title: getString("references-panel-forward-tooltip") },
+        properties: { textContent: "→" },
+        listeners: [
+          {
+            type: "click",
+            listener: () => {
+              this.handleForwardNavigation();
+            },
+          },
+        ],
       },
-      filterInputWrapper,
-    ) as HTMLSpanElement;
+      navGroup,
+    ) as HTMLButtonElement;
+    this.forwardButton.disabled = true;
+    this.applyNavButtonStyle(this.forwardButton, true);
+
+    // Entry view back button - compact icon version (hidden by default)
+    this.entryViewBackButton = ztoolkit.UI.appendElement(
+      {
+        tag: "button",
+        classList: ["zinspire-ref-panel__button"],
+        attributes: {
+          title: getString("references-panel-entry-back-tooltip"),
+        },
+        properties: {
+          textContent: "↩",  // Compact icon instead of full text
+        },
+        listeners: [
+          {
+            type: "click",
+            listener: () => {
+              this.exitEntryCitedTab().catch(() => void 0);
+            },
+          },
+        ],
+      },
+      navGroup,
+    ) as HTMLButtonElement;
+    this.entryViewBackButton.hidden = true;
+    this.applyNavButtonStyle(this.entryViewBackButton, true);
+    this.entryViewBackButton.style.display = "none";
 
     // Rate limiter status indicator
     this.rateLimiterStatusEl = ztoolkit.UI.appendElement(
@@ -1300,40 +1637,160 @@ class InspireReferencePanelController {
   /**
    * Initialize PDF citation lookup event handler.
    * Listens for citation selections from the PDF reader.
+   * FTR-RECID-AUTO-UPDATE: Also listens for recid availability events.
    */
   private initPdfCitationLookup(): void {
-    Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] initPdfCitationLookup called for controller`,
-    );
+    // Register a SINGLE listener on readerIntegration; dispatch to active controller
+    if (InspireReferencePanelController.citationListenerRegistered) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] initPdfCitationLookup skipped (already registered)`,
+      );
+      return;
+    }
     const reader = getReaderIntegration();
-    
-    // Create bound handler so we can remove it later
-    this.citationLookupHandler = (event: CitationLookupEvent) => {
-      this.handleCitationLookup(event);
+    InspireReferencePanelController.sharedCitationHandler = (event: CitationLookupEvent) => {
+      const controller = InspireReferencePanelController.pickControllerForEvent(event);
+      if (!controller) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] No controller available for citationLookup event`,
+        );
+        return;
+      }
+      controller.handleCitationLookup(event);
     };
+    reader.on("citationLookup", InspireReferencePanelController.sharedCitationHandler);
 
-    reader.on("citationLookup", this.citationLookupHandler);
+    // FTR-RECID-AUTO-UPDATE: Register handler for recid availability events
+    InspireReferencePanelController.recidAvailableHandler = (event: { parentItemID: number; recid: string }) => {
+      // Find controller(s) showing this item and trigger refresh
+      for (const ctrl of InspireReferencePanelController.instances) {
+        if (ctrl.currentItemID === event.parentItemID) {
+          Zotero.debug(
+            `[${config.addonName}] [RECID-AUTO-UPDATE] Refreshing panel for item ${event.parentItemID} with new recid ${event.recid}`,
+          );
+          ctrl.handleRecidBecameAvailable(event.parentItemID, event.recid);
+        }
+      }
+    };
+    reader.on("itemRecidAvailable", InspireReferencePanelController.recidAvailableHandler);
+
+    // FTR-RECID-AUTO-UPDATE: Register handler for no-recid events
+    InspireReferencePanelController.noRecidHandler = (event: { parentItemID: number }) => {
+      // Find controller(s) showing this item and show "no recid" message
+      for (const ctrl of InspireReferencePanelController.instances) {
+        if (ctrl.currentItemID === event.parentItemID) {
+          Zotero.debug(
+            `[${config.addonName}] [RECID-AUTO-UPDATE] Showing no-recid message for item ${event.parentItemID}`,
+          );
+          ctrl.handleNoRecid(event.parentItemID);
+        }
+      }
+    };
+    reader.on("itemNoRecid", InspireReferencePanelController.noRecidHandler);
+
+    InspireReferencePanelController.citationListenerRegistered = true;
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] Controller registered for citationLookup events`,
+      `[${config.addonName}] [PDF-ANNOTATE] Registered shared citationLookup and recid event listeners`,
     );
   }
 
   /**
    * Handle citation lookup request from PDF reader.
-   * Finds matching entry and scrolls/highlights it.
+   * FTR-PDF-ANNOTATE-MULTI-LABEL: Now supports multiple matches per label.
+   * Finds matching entries and scrolls/highlights them.
    */
-  private handleCitationLookup(event: CitationLookupEvent): void {
+  private async handleCitationLookup(event: CitationLookupEvent): Promise<void> {
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] handleCitationLookup: parentItemID=${event.parentItemID}, currentItemID=${this.currentItemID}, labels=[${event.citation.labels.join(",")}]`,
     );
 
-    // Only handle if this controller is showing the same item
-    if (this.currentItemID !== event.parentItemID) {
+    // Only handle events from the active reader tab to avoid cross-pane interference
+    const activeReaderTabID =
+      this.currentReaderTabID ?? ReaderTabHelper.getSelectedTabID();
+    if (
+      event.readerTabID &&
+      activeReaderTabID &&
+      event.readerTabID !== activeReaderTabID
+    ) {
       Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Ignoring: item mismatch (controller shows ${this.currentItemID}, event for ${event.parentItemID})`,
+        `[${config.addonName}] [PDF-ANNOTATE] Skipping citationLookup from foreign readerTabID=${event.readerTabID}, active=${activeReaderTabID}`,
       );
       return;
     }
+
+    // Deduplicate bursty repeated events (same item + labels in short window)
+    const evtKey = `${event.parentItemID}:${event.citation.labels.join(",")}`;
+    const now = Date.now();
+    const dedupeWindow = 800;
+    const globalRecent =
+      InspireReferencePanelController.lastGlobalCitationEventKey === evtKey &&
+      now - InspireReferencePanelController.lastGlobalCitationEventTs < dedupeWindow;
+    const globalInFlight =
+      InspireReferencePanelController.globalCitationInFlightKey === evtKey;
+    if (
+      globalRecent ||
+      globalInFlight ||
+      (this.lastCitationEventKey === evtKey &&
+        now - this.lastCitationEventTs < dedupeWindow) ||
+      this.citationInFlightKey === evtKey
+    ) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Skipping duplicate citationLookup (${evtKey})`,
+      );
+      return;
+    }
+    InspireReferencePanelController.lastGlobalCitationEventKey = evtKey;
+    InspireReferencePanelController.lastGlobalCitationEventTs = now;
+    InspireReferencePanelController.globalCitationInFlightKey = evtKey;
+    this.lastCitationEventKey = evtKey;
+    this.lastCitationEventTs = now;
+    this.citationInFlightKey = evtKey;
+
+    try {
+      // FTR-PRELOAD-AWAIT: Check for in-flight preloads and await them
+      // This significantly reduces first-click latency when preload is already running
+      const reader = getReaderIntegration();
+      const item = Zotero.Items.get(event.parentItemID);
+      if (item) {
+        const recid = deriveRecidFromItem(item);
+        if (recid) {
+          // Check for in-flight reference preload
+          const preloadPromise = reader.getPreloadPromise(recid);
+          if (preloadPromise) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] Awaiting in-flight reference preload for recid ${recid}`,
+            );
+            this.showToast(getString("references-panel-status-loading"));
+            await preloadPromise;
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] In-flight reference preload completed`,
+            );
+          }
+        }
+
+        // Check for in-flight PDF parsing
+        const pdfParsePromise = reader.getPdfParsePromise(event.parentItemID);
+        if (pdfParsePromise) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] Awaiting in-flight PDF parsing for item ${event.parentItemID}`,
+          );
+          await pdfParsePromise;
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] In-flight PDF parsing completed`,
+          );
+        }
+      }
+
+      // Ensure the controller is synced to the PDF's parent item
+      if (this.currentItemID !== event.parentItemID) {
+        const switched = await this.ensureItemForCitation(event.parentItemID);
+        if (!switched) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] Ignoring: failed to sync to item ${event.parentItemID}`,
+          );
+          return;
+        }
+      }
 
     // Ensure we have entries loaded
     if (!this.allEntries?.length) {
@@ -1361,75 +1818,421 @@ class InspireReferencePanelController {
         `[${config.addonName}] [PDF-ANNOTATE] Building new LabelMatcher for ${this.allEntries.length} entries`,
       );
       this.labelMatcher = new LabelMatcher(this.allEntries);
-      // Log alignment diagnosis for debugging
-      const report = this.labelMatcher.diagnoseAlignment();
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Alignment: ${report.alignedCount}/${report.totalEntries} aligned, recommendation=${report.recommendation}`,
-      );
-    }
+      this.pdfParseAttempted = false;  // Reset flag when labelMatcher is rebuilt
 
-    // Try to match citation labels
-    const citation = event.citation;
-    for (const label of citation.labels) {
-      const result = this.labelMatcher.match(label);
-      if (result) {
+      // FTR-PDF-PARSE-PRELOAD: Check for preloaded PDF mapping from background parsing
+      const reader = getReaderIntegration();
+      const preloadedMapping = reader.getPreloadedPDFMapping(event.parentItemID);
+      const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(event.parentItemID);
+
+      if (preloadedMapping) {
+        this.labelMatcher.setPDFMapping(preloadedMapping);
+        this.pdfParseAttempted = true;
         Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] Match found: [${label}] -> index ${result.entryIndex}, entryId=${result.entryId}, method=${result.matchMethod}, confidence=${result.confidence}`,
+          `[${config.addonName}] [PDF-ANNOTATE] Applied preloaded PDF mapping (${preloadedMapping.totalLabels} labels)`,
         );
-
-        // Ensure INSPIRE pane is visible before scrolling
-        // This will click the sidenav button if our section is not selected
-        const paneActivated = this.ensureINSPIREPaneVisible();
+      }
+      if (preloadedAuthorYear) {
+        this.labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
         Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible result: ${paneActivated}`,
-        );
-
-        // Give the UI time to update if we just activated the pane
-        // Then scroll to and highlight the matched entry
-        const doScrollAndHighlight = () => {
-          // Check if DOM is ready
-          if (!this.listEl || !this.body?.isConnected) {
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: DOM not ready, retrying in 100ms`,
-            );
-            setTimeout(doScrollAndHighlight, 100);
-            return;
-          }
-          // Check if list has children (content is rendered)
-          const listElChildren = this.listEl?.children?.length ?? 0;
-          if (listElChildren === 0 && this.allEntries.length > 0) {
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: forcing re-render (no children)`,
-            );
-            this.renderReferenceList({ preserveScroll: false });
-          }
-          this.scrollToEntryByIndex(result.entryIndex);
-          this.highlightEntryRow(result.entryIndex);
-        };
-
-        if (paneActivated) {
-          // Longer delay when item pane was collapsed - it needs time to render
-          setTimeout(doScrollAndHighlight, 150);
-        } else {
-          // Pane already visible, scroll immediately
-          doScrollAndHighlight();
-        }
-        return;
-      } else {
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] No match for label [${label}]`,
+          `[${config.addonName}] [PDF-ANNOTATE] Applied preloaded author-year mapping (${preloadedAuthorYear.authorYearMap.size} entries)`,
         );
       }
     }
 
+    // FTR-PDF-ANNOTATE-MULTI-LABEL: Check if PDF parsing is needed (even if labelMatcher exists)
+    // This allows PDF parsing to be triggered if the preference was enabled after first lookup
+    const report = this.labelMatcher.diagnoseAlignment();
+    const pdfParseEnabled = getPref("pdf_parse_refs_list") === true;
+    const hasPDFMapping = this.labelMatcher.hasPDFMapping?.() ?? false;
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] State: pdfParseEnabled=${pdfParseEnabled}, pdfParseAttempted=${this.pdfParseAttempted}, hasPDFMapping=${hasPDFMapping}, recommendation=${report.recommendation}`,
+    );
+
+    // Try PDF parsing if: enabled + labels missing + no existing mapping
+    // NOTE: Allow retry if previous attempt failed (pdfParseAttempted but no mapping)
+    // FTR-PDF-PARSE-PRELOAD: Skip if preloaded mapping was already applied
+    const forcePDFStrict = getPref("pdf_force_mapping_on_mismatch") !== false;
+    const labelAvail = report.labelAvailableCount ?? 0;
+    const labelRate =
+      report.totalEntries > 0 ? labelAvail / report.totalEntries : 0;
+    const wellAlignedLabels =
+      report.recommendation === "USE_INSPIRE_LABEL" && labelRate >= 0.95;
+    const shouldAttemptPDFParse =
+      pdfParseEnabled &&
+      !hasPDFMapping &&
+      report.totalEntries > 0 &&
+      (
+        // 原逻辑：标签几乎缺失
+        report.recommendation === "USE_INDEX_ONLY" ||
+        // 新增：标签对齐不足（需要参考 PDF）
+        report.recommendation === "USE_INDEX_WITH_FALLBACK" ||
+        // 新增：强制偏好开启时，仅在标签未高对齐时尝试 PDF 解析
+        (forcePDFStrict && !wellAlignedLabels)
+      );
+
+    if (shouldAttemptPDFParse) {
+      const labelRateStr = report.labelAvailableCount
+        ? ((report.labelAvailableCount / report.totalEntries) * 100).toFixed(0)
+        : "0";
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ⚠️ WARNING: Label data mostly missing (${labelRateStr}% available). Attempting PDF parsing...`,
+      );
+
+      // FTR-PDF-ANNOTATE-MULTI-LABEL: AWAIT PDF parsing before matching
+      try {
+        const parseSuccess = await this.tryParsePDFReferences(event.parentItemID);
+        if (parseSuccess) {
+          this.pdfParseAttempted = true;  // Only mark as attempted if successful
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] PDF parsing completed successfully`,
+          );
+        } else {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] PDF parsing completed but no mapping created`,
+          );
+        }
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] PDF parsing failed: ${err}`,
+        );
+      }
+    } else if (!pdfParseEnabled && report.recommendation === "USE_INDEX_ONLY" && report.totalEntries > 0) {
+      // Only show warning toast if PDF parsing is disabled
+      const labelRateStr = report.labelAvailableCount
+        ? ((report.labelAvailableCount / report.totalEntries) * 100).toFixed(0)
+        : "0";
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ⚠️ WARNING: Label data mostly missing (${labelRateStr}% available). PDF parsing disabled. Using index-based fallback.`,
+      );
+      // Only show toast once per session (first lookup)
+      if (!this.pdfParseAttempted) {
+        this.pdfParseAttempted = true;
+        this.showToast(
+          getString("pdf-annotate-fallback-warning", {
+            args: { rate: labelRateStr },
+          }),
+        );
+      }
+    }
+
+    // FTR-PDF-ANNOTATE-MULTI-LABEL: Try to match all citation labels and get all matches
+    // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Use matchAuthorYear for author-year citation format
+    const citation = event.citation;
+    let allMatches: MatchResult[];
+
+    if (citation.type === "author-year") {
+      // Author-year citation: use matchAuthorYear method
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Using author-year matching for labels [${citation.labels.join(",")}]`,
+      );
+      allMatches = this.labelMatcher.matchAuthorYear(citation.labels);
+    } else {
+      // Numeric or other citation types: use standard matchAll
+      allMatches = this.labelMatcher.matchAll(citation.labels);
+    }
+
+    if (allMatches.length > 0) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Found ${allMatches.length} match(es) for labels [${citation.labels.join(",")}]`,
+      );
+
+      // Log individual matches for debugging
+      for (const match of allMatches) {
+        const isIndexFallback = match.matchMethod === "inferred" && match.confidence === "low";
+        const warningPrefix = isIndexFallback ? "⚠️ INDEX FALLBACK: " : "";
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ${warningPrefix}Match: [${match.pdfLabel}] -> index ${match.entryIndex}, entryId=${match.entryId}, method=${match.matchMethod}, confidence=${match.confidence}`,
+        );
+      }
+
+      // FTR-AMBIGUOUS-AUTHOR-YEAR: Handle ambiguous matches with picker UI
+      const firstMatch = allMatches[0];
+      if (firstMatch.isAmbiguous && firstMatch.ambiguousCandidates && firstMatch.ambiguousCandidates.length > 1) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] Ambiguous match detected with ${firstMatch.ambiguousCandidates.length} candidates, showing picker`,
+        );
+
+        // Show picker UI for user to select the correct match
+        const citationText = citation.raw || firstMatch.pdfLabel;
+        const pickerContainer = this.body || Zotero.getMainWindow()?.document.body;
+        if (pickerContainer) {
+          const selection = await showAmbiguousCitationPicker(
+            citationText,
+            firstMatch.ambiguousCandidates,
+            pickerContainer as HTMLElement,
+          );
+
+          if (selection) {
+            // User selected a candidate - update allMatches to use selected entry
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] User selected candidate: entryIndex=${selection.candidate.entryIndex}`,
+            );
+            allMatches = [{
+              pdfLabel: firstMatch.pdfLabel,
+              entryIndex: selection.candidate.entryIndex,
+              entryId: selection.candidate.entryId,
+              confidence: "high",
+              matchMethod: "exact",
+            }];
+          } else {
+            // User cancelled - don't scroll to anything
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] User cancelled ambiguous picker`,
+            );
+            return;
+          }
+        }
+      }
+
+      // Ensure INSPIRE pane is visible before scrolling
+      const paneActivated = this.ensureINSPIREPaneVisible();
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible result: ${paneActivated}`,
+      );
+
+      // Give the UI time to update if we just activated the pane
+      // Then scroll to and highlight the matched entries
+      const doScrollAndHighlight = () => {
+        // Check if DOM is ready
+        if (!this.listEl || !this.body?.isConnected) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: DOM not ready, retrying in 100ms`,
+          );
+          setTimeout(doScrollAndHighlight, 100);
+          return;
+        }
+        // Check if list has children (content is rendered)
+        const listElChildren = this.listEl?.children?.length ?? 0;
+        if (listElChildren === 0 && this.allEntries.length > 0) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] doScrollAndHighlight: forcing re-render (no children)`,
+          );
+          this.renderReferenceList({ preserveScroll: false });
+        }
+
+        // Scroll to first match
+        const firstIndex = allMatches[0].entryIndex;
+        this.scrollToEntryByIndex(firstIndex);
+
+        // FTR-PDF-ANNOTATE-MULTI-LABEL: Highlight all matches (with limit)
+        const MAX_HIGHLIGHT = 20;
+        const toHighlight = allMatches.slice(0, MAX_HIGHLIGHT);
+        this.highlightEntryRows(toHighlight.map((m) => m.entryIndex));
+
+        // Show toast if multiple matches or truncated; include missing info if any
+        if (allMatches.length > 1) {
+          const labelsStr = citation.labels.join(", ");
+          let msg =
+            allMatches.length > MAX_HIGHLIGHT
+              ? getString("pdf-annotate-multi-match-truncated", {
+                  args: {
+                    label: labelsStr,
+                    count: allMatches.length,
+                    shown: MAX_HIGHLIGHT,
+                  },
+                })
+              : getString("pdf-annotate-multi-match", {
+                  args: { label: labelsStr, count: allMatches.length },
+                });
+          // Append missing info (first missing author/year) if label had extra PDF refs not found
+          if (citation.labels.length === 1 && this.labelMatcher) {
+            const miss = this.labelMatcher.getMismatchForLabel(citation.labels[0]);
+            if (miss?.missing?.length) {
+              const firstMissing = miss.missing[0];
+              const missingStr = `${firstMissing.firstAuthorLastName ?? "?"} ${firstMissing.year ?? ""}`.trim();
+              msg = `${msg} (missing in INSPIRE: ${missingStr})`;
+            }
+          }
+          this.showToast(msg);
+        }
+      };
+
+      if (paneActivated) {
+        // Longer delay when item pane was collapsed - it needs time to render
+        setTimeout(doScrollAndHighlight, SCROLL_HIGHLIGHT_DELAY_MS);
+      } else {
+        // Pane already visible, scroll immediately
+        doScrollAndHighlight();
+      }
+      return;
+    }
+
     // No match found - show notification
     const labelsStr = citation.labels.join(", ");
-    this.showToast(
-      getString("pdf-annotate-not-found", { args: { label: labelsStr } }),
-    );
+    let notFoundMsg = getString("pdf-annotate-not-found", { args: { label: labelsStr } });
+    if (citation.labels.length === 1 && this.labelMatcher) {
+      const miss = this.labelMatcher.getMismatchForLabel(citation.labels[0]);
+      if (miss?.missing?.length) {
+        const firstMissing = miss.missing[0];
+        const missingStr = `${firstMissing.firstAuthorLastName ?? "?"} ${firstMissing.year ?? ""}`.trim();
+        notFoundMsg = `${notFoundMsg} (missing in INSPIRE: ${missingStr})`;
+      }
+    }
+    this.showToast(notFoundMsg);
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] No match found for any label in [${labelsStr}]`,
     );
+  } finally {
+    const clearKey = this.citationInFlightKey;
+    this.citationInFlightKey = undefined;
+    if (clearKey) {
+      setTimeout(() => {
+        if (InspireReferencePanelController.globalCitationInFlightKey === clearKey) {
+          InspireReferencePanelController.globalCitationInFlightKey = undefined;
+        }
+      }, 400);
+    }
+  }
+  }
+
+  /**
+   * Sync controller state to the PDF parent item when citation events come from a different item.
+   * Loads references so label matching can proceed.
+   */
+  private async ensureItemForCitation(itemID: number): Promise<boolean> {
+    const item = Zotero.Items.get(itemID);
+    if (!item || !item.isRegularItem()) {
+      return false;
+    }
+
+    // If already showing this item and have entries, no-op
+    if (this.currentItemID === itemID && this.allEntries?.length) {
+      return true;
+    }
+
+    // Switch to references view to keep mapping consistent
+    this.viewMode = "references";
+    this.labelMatcher = undefined;
+    this.pdfParseAttempted = false;
+    this.currentItemID = itemID;
+
+    const recid =
+      deriveRecidFromItem(item) ?? (await fetchRecidFromInspire(item));
+    if (!recid) {
+      this.currentRecid = undefined;
+      this.allEntries = [];
+      this.renderChartImmediate();
+      this.renderMessage(getString("references-panel-no-recid"));
+      this.lastRenderedEntries = [];
+      return false;
+    }
+
+    this.currentRecid = recid;
+    this.updateSortSelector();
+    try {
+      await this.loadEntries(recid, "references");
+      return this.allEntries?.length > 0;
+    } catch (err) {
+      if ((err as any)?.name !== "AbortError") {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureItemForCitation load error: ${err}`,
+        );
+      }
+      return false;
+    }
+  }
+
+  /**
+   * FTR-RECID-AUTO-UPDATE: Handle event when recid becomes available for an item.
+   * Called when an item that was previously opened without recid now has one.
+   * Shows a toast notification and refreshes the panel with the new data.
+   */
+  private async handleRecidBecameAvailable(itemID: number, recid: string): Promise<void> {
+    // Verify this is still the current item
+    if (this.currentItemID !== itemID) {
+      return;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [RECID-AUTO-UPDATE] handleRecidBecameAvailable: item ${itemID}, recid ${recid}`,
+    );
+
+    // Show notification to user
+    this.showToast(getString("references-panel-recid-found"));
+
+    // Update current recid and load entries
+    this.currentRecid = recid;
+    this.updateSortSelector();
+
+    // Reset view mode to references if not already
+    if (this.viewMode !== "references") {
+      this.viewMode = "references";
+      this.updateTabSelection();
+    }
+
+    // Load entries with the new recid
+    try {
+      await this.loadEntries(recid, "references");
+      Zotero.debug(
+        `[${config.addonName}] [RECID-AUTO-UPDATE] Successfully loaded ${this.allEntries.length} entries for item ${itemID}`,
+      );
+    } catch (err) {
+      if ((err as any)?.name !== "AbortError") {
+        Zotero.debug(
+          `[${config.addonName}] [RECID-AUTO-UPDATE] Failed to load entries: ${err}`,
+        );
+        this.allEntries = [];
+        this.renderChartImmediate();
+        this.renderMessage(getString("references-panel-status-error"));
+      }
+    }
+  }
+
+  /**
+   * FTR-RECID-AUTO-UPDATE: Handle event when item has no recid.
+   * Shows the "no recid" message immediately instead of trying to load.
+   */
+  private handleNoRecid(itemID: number): void {
+    // Verify this is still the current item
+    if (this.currentItemID !== itemID) {
+      return;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [RECID-AUTO-UPDATE] handleNoRecid: item ${itemID}`,
+    );
+
+    // Clear any loading state and show no-recid message
+    this.currentRecid = undefined;
+    this.allEntries = [];
+    this.renderChartImmediate();
+    this.renderMessage(getString("references-panel-no-recid"));
+    this.lastRenderedEntries = [];
+    this.updateSortSelector();
+  }
+
+  /**
+   * Get row element for entry, checking cache first then DOM.
+   * Updates cache if found in DOM.
+   * @param entryId - Entry ID to find row for
+   * @returns HTMLElement if found, undefined otherwise
+   */
+  private getEntryRow(entryId: string): HTMLElement | undefined {
+    // Check cache first
+    let row = this.rowCache.get(entryId);
+
+    // Verify cached row is still connected to DOM
+    if (row && !row.isConnected) {
+      Zotero.debug(
+        `[${config.addonName}] getEntryRow: cached row for ${entryId} is disconnected, looking up in DOM`,
+      );
+      row = undefined;
+    }
+
+    // Fallback to DOM lookup
+    if (!row && this.listEl) {
+      row = this.listEl.querySelector(`[data-entry-id="${entryId}"]`) as HTMLElement | null ?? undefined;
+      if (row) {
+        this.rowCache.set(entryId, row);
+        Zotero.debug(
+          `[${config.addonName}] getEntryRow: found row in DOM for ${entryId}`,
+        );
+      }
+    }
+
+    return row;
   }
 
   /**
@@ -1444,10 +2247,10 @@ class InspireReferencePanelController {
       return;
     }
 
-    // Get cached row element
-    const row = this.rowCache.get(entry.id);
+    const row = this.getEntryRow(entry.id);
+
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: index=${index}, entryId=${entry.id}, rowCached=${!!row}, listEl=${!!this.listEl}`,
+      `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: index=${index}, entryId=${entry.id}, rowFound=${!!row}, isConnected=${row?.isConnected ?? false}, listEl=${!!this.listEl}`,
     );
 
     if (row && this.listEl) {
@@ -1457,19 +2260,9 @@ class InspireReferencePanelController {
         `[${config.addonName}] [PDF-ANNOTATE] scrollIntoView called for entry ${entry.id}`,
       );
     } else if (!row) {
-      // Row not in cache - this can happen if entry is not rendered yet
-      // (e.g., due to virtual scroll or filtered out)
       Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Row not in cache for entry ${entry.id} - entry may not be rendered`,
+        `[${config.addonName}] [PDF-ANNOTATE] scrollToEntryByIndex: WARNING - row not found for entry ${entry.id}`,
       );
-      // Try to find by data-entry-id attribute as fallback
-      const rowByAttr = this.listEl?.querySelector(`[data-entry-id="${entry.id}"]`) as HTMLElement | null;
-      if (rowByAttr) {
-        rowByAttr.scrollIntoView({ behavior: "smooth", block: "center" });
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] Found row by data-entry-id attribute`,
-        );
-      }
     }
   }
 
@@ -1485,11 +2278,7 @@ class InspireReferencePanelController {
       return;
     }
 
-    // Get row from cache or by attribute
-    let row = this.rowCache.get(entry.id);
-    if (!row) {
-      row = this.listEl?.querySelector(`[data-entry-id="${entry.id}"]`) as HTMLElement | null ?? undefined;
-    }
+    const row = this.getEntryRow(entry.id);
 
     if (!row) {
       Zotero.debug(
@@ -1524,6 +2313,386 @@ class InspireReferencePanelController {
   }
 
   /**
+   * Try to parse PDF reference list and apply mapping to LabelMatcher.
+   * FTR-PDF-ANNOTATE-MULTI-LABEL: Scans PDF's References section to fix label alignment.
+   * FTR-PDF-PARSE-PRELOAD: Checks preload cache first to avoid duplicate work.
+   * @param parentItemID - The Zotero item ID (parent of PDF)
+   * @returns true if mapping was successfully applied, false otherwise
+   */
+  private async tryParsePDFReferences(parentItemID: number): Promise<boolean> {
+    // FTR-PDF-PARSE-PRELOAD: Check preload cache first to avoid duplicate parsing
+    const reader = getReaderIntegration();
+    const preloadedMapping = reader.getPreloadedPDFMapping(parentItemID);
+    if (preloadedMapping && this.labelMatcher) {
+      this.labelMatcher.setPDFMapping(preloadedMapping);
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Using preloaded mapping (${preloadedMapping.totalLabels} labels)`,
+      );
+      // Also check for author-year mapping
+      const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(parentItemID);
+      if (preloadedAuthorYear) {
+        this.labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
+      }
+      return true;
+    }
+
+    // FTR-PDF-PARSE-PRELOAD: If preload is in progress, wait briefly then check again
+    if (reader.isPDFParsingInProgress(parentItemID)) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Preload in progress, waiting...`,
+      );
+      // Wait up to 2 seconds for preload to complete
+      for (let i = 0; i < 20; i++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (!reader.isPDFParsingInProgress(parentItemID)) {
+          const mapping = reader.getPreloadedPDFMapping(parentItemID);
+          if (mapping && this.labelMatcher) {
+            this.labelMatcher.setPDFMapping(mapping);
+            const authorYear = reader.getPreloadedAuthorYearMapping(parentItemID);
+            if (authorYear) {
+              this.labelMatcher.setAuthorYearMapping(authorYear);
+            }
+            Zotero.debug(
+              `[${config.addonName}] [PDF-PARSE] Preload completed, using cached mapping`,
+            );
+            return true;
+          }
+          break;
+        }
+      }
+    }
+
+    const { getPDFReferencesParser } = await import("./inspire/pdfAnnotate/pdfReferencesParser");
+
+    // Get the parent item and find its PDF attachment
+    const item = Zotero.Items.get(parentItemID);
+    if (!item) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Item ${parentItemID} not found`,
+      );
+      return false;
+    }
+
+    // Find PDF attachment
+    const attachments = item.getAttachments();
+    let pdfPath: string | null = null;
+    let pdfAttachmentID: number | null = null;
+
+    for (const attachmentID of attachments) {
+      const attachment = Zotero.Items.get(attachmentID);
+      if (attachment?.attachmentContentType === "application/pdf") {
+        const filePath = await attachment.getFilePathAsync();
+        if (filePath) {
+          pdfPath = filePath;
+          pdfAttachmentID = attachmentID;
+        }
+        break;
+      }
+    }
+
+    if (!pdfPath || !pdfAttachmentID) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] No PDF attachment found for item ${parentItemID}`,
+      );
+      return false;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-PARSE] Found PDF: ${pdfPath} (attachment ${pdfAttachmentID})`,
+    );
+
+    // Extract text from PDF (last few pages where References usually are)
+    try {
+      // Use Zotero's fulltext cache to extract text
+      const pdfText = await this.extractPDFTextForReferences(pdfPath, pdfAttachmentID);
+      if (!pdfText) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Could not extract text from PDF`,
+        );
+        return false;
+      }
+
+      // Parse the reference list
+      const parser = getPDFReferencesParser();
+      const mapping = parser.parseReferencesSection(pdfText);
+
+      if (mapping && this.labelMatcher) {
+        this.labelMatcher.setPDFMapping(mapping);
+
+        // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
+        getReaderIntegration().setPreloadedPDFMapping(parentItemID, mapping);
+
+        // FTR-PDF-MATCHING: Calculate and store max label for concatenated range detection
+        // Set for attachment ID since reader.itemID is the attachment
+        const labelNums = Array.from(mapping.labelCounts.keys())
+          .map(l => parseInt(l, 10))
+          .filter(n => !isNaN(n));
+        if (labelNums.length > 0 && pdfAttachmentID) {
+          const maxLabel = Math.max(...labelNums);
+          getReaderIntegration().setMaxKnownLabel(pdfAttachmentID, maxLabel);
+        }
+
+        const multiCount = Array.from(mapping.labelCounts.values()).filter((c) => c > 1).length;
+        this.showToast(
+          getString("pdf-annotate-parse-success", {
+            args: {
+              total: mapping.totalLabels,
+              multi: multiCount,
+            },
+          }),
+        );
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Successfully applied PDF mapping`,
+        );
+        // Don't return yet - also try author-year parsing for RMP-style papers
+      }
+
+      // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Always try author-year format parsing
+      // This is needed for RMP-style papers that use author-year citations like "(Cho et al., 2011a)"
+      // even if numeric parsing succeeded (the paper may have both numeric and author-year citations)
+      if (this.labelMatcher) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Trying author-year format parsing (regardless of numeric result)...`,
+        );
+
+        const authorYearMapping = parser.parseAuthorYearReferencesSection(pdfText);
+        if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
+          this.labelMatcher.setAuthorYearMapping(authorYearMapping);
+          // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
+          getReaderIntegration().setPreloadedAuthorYearMapping(parentItemID, authorYearMapping);
+          Zotero.debug(
+            `[${config.addonName}] [PDF-PARSE] Successfully applied author-year mapping with ${authorYearMapping.authorYearMap.size} entries`,
+          );
+        } else {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-PARSE] Author-year parsing found ${authorYearMapping?.authorYearMap.size ?? 0} entries (not enough)`,
+          );
+        }
+      }
+
+      // Return true if we got either numeric or author-year mapping
+      if (mapping && mapping.totalLabels > 0) {
+        return true;
+      }
+
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] No valid mapping created from PDF`,
+      );
+      return false;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Error: ${err}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Extract text from PDF for reference list parsing.
+   * Reads from Zotero's fulltext cache files (.zotero-ft-cache) directly.
+   * 
+   * @param pdfPath - Path to the PDF file
+   * @param _attachmentID - The Zotero attachment item ID (unused, kept for API compatibility)
+   */
+  private async extractPDFTextForReferences(
+    pdfPath: string,
+    _attachmentID: number,
+  ): Promise<string | null> {
+    try {
+      // Method 1: Try to read the fulltext cache file directly
+      // Zotero stores fulltext cache in the same directory as the PDF
+      // with the naming pattern: .zotero-ft-cache
+      const cacheFileName = ".zotero-ft-cache";
+      const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf("/"));
+      const cachePath = `${pdfDir}/${cacheFileName}`;
+      
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Looking for fulltext cache at: ${cachePath}`,
+      );
+
+      try {
+        // Check if cache file exists
+        const cacheExists = await IOUtils.exists(cachePath);
+        if (cacheExists) {
+          // Read the cache file
+          const cacheData = await IOUtils.read(cachePath);
+          const decoder = new TextDecoder("utf-8");
+          const text = decoder.decode(cacheData);
+          
+          if (text && text.length > 100) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-PARSE] Got ${text.length} chars from fulltext cache file (full text, no tail truncation)`,
+            );
+            return text;
+          }
+          Zotero.debug(
+            `[${config.addonName}] [PDF-PARSE] Cache file exists but has insufficient content (${text?.length || 0} chars)`,
+          );
+        } else {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-PARSE] No fulltext cache file found at ${cachePath}`,
+          );
+        }
+      } catch (e) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Error reading cache file: ${e}`,
+        );
+      }
+
+      // Method 2: Try using Zotero's Fulltext.getItemWords (if available)
+      // This returns an array of words, which we can join
+       
+      const fulltext = Zotero.Fulltext as any;
+      if (fulltext) {
+        // Try getItemWords first (returns words array)
+        if (typeof fulltext.getItemWords === "function") {
+          try {
+            const words = await fulltext.getItemWords(_attachmentID);
+            if (words && words.length > 0) {
+              const text = words.join(" ");
+              Zotero.debug(
+                `[${config.addonName}] [PDF-PARSE] Got ${text.length} chars from getItemWords (full text, no tail truncation)`,
+              );
+              return text;
+            }
+          } catch (e) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-PARSE] getItemWords error: ${e}`,
+            );
+          }
+        }
+        
+        // Try getTextForItem (alternative API)
+        if (typeof fulltext.getTextForItem === "function") {
+          try {
+            const text = await fulltext.getTextForItem(_attachmentID);
+            if (text && text.length > 100) {
+              Zotero.debug(
+                `[${config.addonName}] [PDF-PARSE] Got ${text.length} chars from getTextForItem (full text, no tail truncation)`,
+              );
+              return text;
+            }
+          } catch (e) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-PARSE] getTextForItem error: ${e}`,
+            );
+          }
+        }
+        
+        // List available Fulltext methods for debugging
+        const methods = Object.keys(fulltext).filter(k => typeof fulltext[k] === "function");
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Available Zotero.Fulltext methods: ${methods.slice(0, 20).join(", ")}${methods.length > 20 ? "..." : ""}`,
+        );
+      }
+
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Could not extract text from PDF`,
+      );
+      return null;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Text extraction error: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Highlight multiple entry rows.
+   * FTR-PDF-ANNOTATE-MULTI-LABEL: New method to support multi-label highlighting.
+   * Sets the first entry as focused, and highlights all entries with temporary animation.
+   * @param indices - Array of entry indices to highlight
+   */
+  private highlightEntryRows(indices: number[]): void {
+    if (!indices.length) return;
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: highlighting ${indices.length} entries`,
+    );
+
+    // Detect dark mode for appropriate colors
+    const isDarkMode = Zotero.getMainWindow?.()?.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+
+    // Clear any existing highlights (using inline style marker)
+    const prevHighlights = this.listEl?.querySelectorAll("[data-zinspire-highlight]");
+    prevHighlights?.forEach((el) => {
+      const htmlEl = el as HTMLElement;
+      htmlEl.removeAttribute("data-zinspire-highlight");
+      htmlEl.style.backgroundColor = "";
+      htmlEl.style.boxShadow = "";
+      htmlEl.style.borderRadius = "";
+    });
+
+    // Set first entry as focused (persistent selection)
+    const firstEntry = this.allEntries[indices[0]];
+    if (firstEntry) {
+      this.setFocusedEntry(firstEntry.id);
+    }
+
+    // FTR-MISSING-FIX: Use inline styles because CSS files may not load reliably in Zotero
+    // Define highlight styles (matching zoteroPane.css .zinspire-entry-highlight)
+    const highlightStyles = isDarkMode
+      ? {
+          backgroundColor: "rgba(0, 96, 223, 0.25)",
+          boxShadow: "0 0 0 2px #0052cc",
+          borderRadius: "4px",
+        }
+      : {
+          backgroundColor: "#e0f0ff",
+          boxShadow: "0 0 0 2px #0060df",
+          borderRadius: "4px",
+        };
+
+    // Collect all row elements to highlight
+    const rowsToHighlight: HTMLElement[] = [];
+    for (const index of indices) {
+      const entry = this.allEntries[index];
+      if (!entry) continue;
+
+      const row = this.getEntryRow(entry.id);
+
+      if (row) {
+        // Apply inline styles for highlight
+        row.setAttribute("data-zinspire-highlight", "true");
+        row.style.backgroundColor = highlightStyles.backgroundColor;
+        row.style.boxShadow = highlightStyles.boxShadow;
+        row.style.borderRadius = highlightStyles.borderRadius;
+        rowsToHighlight.push(row);
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: added highlight to entry ${entry.id}, isConnected=${row.isConnected}`,
+        );
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: WARNING - row not found for entry ${entry.id}`,
+        );
+      }
+    }
+
+    // Auto-remove temporary highlight after animation (longer delay for multiple)
+    const highlightDuration = indices.length > 1 ? 3000 : 2500;
+    setTimeout(() => {
+      for (const row of rowsToHighlight) {
+        row.removeAttribute("data-zinspire-highlight");
+        // Only clear styles if this row is NOT the focused entry
+        // (focused entry should keep its focus style)
+        const isFocusedRow = row.getAttribute("data-entry-id") === this.focusedEntryID;
+        if (!isFocusedRow) {
+          row.style.backgroundColor = "";
+          row.style.boxShadow = "";
+          row.style.borderRadius = "";
+        } else {
+          // Re-apply focus style for the focused entry
+          this.applyFocusedEntryStyle(row, true);
+        }
+      }
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] highlightEntryRows: removed temporary highlights from ${rowsToHighlight.length} entries`,
+      );
+    }, highlightDuration);
+  }
+
+  /**
    * Set focused entry and update visual state.
    * FTR-FOCUSED-SELECTION: Persistent selection for PDF citation lookup and keyboard navigation.
    * Uses inline styles because CSS files may not load properly in Zotero.
@@ -1532,12 +2701,16 @@ class InspireReferencePanelController {
   private setFocusedEntry(entryID?: string): void {
     // Remove previous focus
     if (this.focusedEntryID) {
-      const prevRow = this.rowCache.get(this.focusedEntryID);
+      let prevRow = this.rowCache.get(this.focusedEntryID);
+      // FTR-PDF-ANNOTATE-MULTI-LABEL: If cached row is disconnected, try to find it in DOM
+      if (prevRow && !prevRow.isConnected) {
+        prevRow = this.listEl?.querySelector(`[data-entry-id="${this.focusedEntryID}"]`) as HTMLElement | undefined;
+        if (prevRow) {
+          this.rowCache.set(this.focusedEntryID, prevRow);
+        }
+      }
       if (prevRow) {
         this.applyFocusedEntryStyle(prevRow, false);
-        Zotero.debug(
-          `[${config.addonName}] [FOCUSED-SELECTION] Removed focus from ${this.focusedEntryID}`,
-        );
       }
     }
 
@@ -1545,21 +2718,25 @@ class InspireReferencePanelController {
     this.focusedEntryID = entryID;
 
     if (entryID) {
-      const row = this.rowCache.get(entryID);
+      let row = this.rowCache.get(entryID);
+      // FTR-PDF-ANNOTATE-MULTI-LABEL: If cached row is disconnected, try to find it in DOM
+      if (row && !row.isConnected) {
+        row = this.listEl?.querySelector(`[data-entry-id="${entryID}"]`) as HTMLElement | undefined;
+        if (row) {
+          this.rowCache.set(entryID, row);
+        }
+      }
+      // Try DOM lookup as fallback if not in cache
+      if (!row) {
+        row = this.listEl?.querySelector(`[data-entry-id="${entryID}"]`) as HTMLElement | undefined;
+        if (row) {
+          this.rowCache.set(entryID, row);
+        }
+      }
+
       if (row) {
         this.applyFocusedEntryStyle(row, true);
-        Zotero.debug(
-          `[${config.addonName}] [FOCUSED-SELECTION] Set focus to entry ${entryID}`,
-        );
-      } else {
-        Zotero.debug(
-          `[${config.addonName}] [FOCUSED-SELECTION] WARNING: row not found in cache for entry ${entryID}`,
-        );
       }
-    } else {
-      Zotero.debug(
-        `[${config.addonName}] [FOCUSED-SELECTION] Cleared focus`,
-      );
     }
   }
 
@@ -1601,7 +2778,7 @@ class InspireReferencePanelController {
 
   /**
    * Ensure the INSPIRE References pane is visible in the item pane sidenav.
-   * Finds and clicks the sidenav button for our registered section.
+   * Handles both main window item pane and PDF reader context pane.
    * Returns true if the pane was found and activated, false otherwise.
    */
   private ensureINSPIREPaneVisible(): boolean {
@@ -1615,45 +2792,65 @@ class InspireReferencePanelController {
 
     const doc = mainWindow.document;
 
-    // Use correct Zotero 7 API: ZoteroPane.itemPane has 'collapsed', 'width' attributes
-    const zoteroPane = Zotero.getActiveZoteroPane?.();
-    const itemPaneEl = zoteroPane?.itemPane as HTMLElement | false | undefined;
-    const itemPaneCollapsed = itemPaneEl ? itemPaneEl.getAttribute("collapsed") === "true" : false;
-    const itemPaneOffsetWidth = itemPaneEl ? (itemPaneEl as HTMLElement).offsetWidth : 0;
-    // Item pane is hidden if collapsed=true OR has zero width
-    const itemPaneHidden = itemPaneCollapsed || (itemPaneEl && itemPaneOffsetWidth === 0);
+    // Check if we're in a PDF reader context by looking at the body's parent hierarchy
+    // In reader, body is inside context-pane which is inside the reader tab
+    const isInReader = this.body?.closest(".context-pane") !== null
+      || this.body?.closest("[class*='reader']") !== null
+      || this.currentReaderTabID != null;
+
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: itemPane exists=${!!itemPaneEl}, collapsed=${itemPaneCollapsed}, offsetWidth=${itemPaneOffsetWidth}, hidden=${itemPaneHidden}`,
+      `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: isInReader=${isInReader}, currentReaderTabID=${this.currentReaderTabID}`,
     );
 
-    // If item pane is collapsed, we need to open it first
-    if (itemPaneCollapsed && itemPaneEl) {
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: item pane is collapsed, attempting to open it`,
-      );
-      try {
-        // Remove collapsed attribute
-        itemPaneEl.removeAttribute("collapsed");
+    // If in reader, we need to ensure the context pane (right sidebar) is visible
+    if (isInReader) {
+      const contextPaneOpened = this.ensureReaderContextPaneVisible(doc);
+      if (!contextPaneOpened) {
         Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: removed collapsed attribute from itemPane`,
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: failed to open reader context pane`,
         );
-        
-        // Check if item pane has a valid width - if not, set a default
-        // When item pane was never opened, width attribute is null and content has 0 width
-        const currentWidth = itemPaneEl.getAttribute("width");
-        if (!currentWidth || currentWidth === "0") {
-          // Set a reasonable default width (similar to Zotero's default)
-          const defaultWidth = "350";
-          itemPaneEl.setAttribute("width", defaultWidth);
-          // Also set style.width to ensure immediate effect
-          itemPaneEl.style.width = defaultWidth + "px";
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: set default width=${defaultWidth} on itemPane`,
-          );
-        }
-      } catch (err) {
+        // Don't return false yet - try to find sidenav button anyway
+      }
+    } else {
+      // Main window: Use ZoteroPane.itemPane API
+      const zoteroPane = Zotero.getActiveZoteroPane?.();
+       
+      const itemPaneEl = zoteroPane?.itemPane as (HTMLElement & { collapsed?: boolean }) | false | undefined;
+
+      if (itemPaneEl) {
+        // Check collapsed state - itemPane has a 'collapsed' property in Zotero 7
+        const isCollapsed = itemPaneEl.collapsed === true
+          || itemPaneEl.getAttribute("collapsed") === "true";
+        const offsetWidth = itemPaneEl.offsetWidth ?? 0;
+
         Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: failed to open item pane: ${err}`,
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: itemPane exists=true, collapsed=${isCollapsed}, offsetWidth=${offsetWidth}`,
+        );
+
+        // If item pane is collapsed, we need to open it first
+        if (isCollapsed) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: item pane is collapsed, attempting to open it`,
+          );
+          try {
+            // Use the proper API: set collapsed property to false
+            itemPaneEl.collapsed = false;
+            // Also call updateLayoutConstraints if available
+            if (typeof zoteroPane?.updateLayoutConstraints === "function") {
+              zoteroPane.updateLayoutConstraints();
+            }
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: opened item pane via itemPane.collapsed = false`,
+            );
+          } catch (err) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: failed to open item pane: ${err}`,
+            );
+          }
+        }
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: itemPane not available`,
         );
       }
     }
@@ -1721,6 +2918,108 @@ class InspireReferencePanelController {
 
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: could not find sidenav button for INSPIRE section`,
+    );
+    return false;
+  }
+
+  /**
+   * Ensure the reader's context pane (right sidebar) is visible.
+   * In Zotero 7, the reader has a toggle button to show/hide the context pane.
+   */
+  private ensureReaderContextPaneVisible(doc: Document): boolean {
+    // First, try using ZoteroContextPane API directly (preferred method)
+     
+    const ZoteroContextPane = (Zotero.getMainWindow() as any)?.ZoteroContextPane;
+    if (ZoteroContextPane) {
+      const isCollapsed = ZoteroContextPane.collapsed;
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ensureReaderContextPaneVisible: ZoteroContextPane.collapsed=${isCollapsed}`,
+      );
+      if (isCollapsed) {
+        // Open the context pane by setting collapsed to false
+        ZoteroContextPane.collapsed = false;
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureReaderContextPaneVisible: opened context pane via ZoteroContextPane.collapsed = false`,
+        );
+        return true;
+      }
+      return true; // Already visible
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] ensureReaderContextPaneVisible: ZoteroContextPane API not available, trying fallback methods`,
+    );
+
+    // Fallback: Try multiple selectors for the context pane toggle button
+    // The button is typically in the reader toolbar area
+    const toggleSelectors = [
+      // Context pane toggle button (most common)
+      "#zotero-tb-toggle-item-pane",
+      "[data-l10n-id='toggle-item-pane']",
+      ".context-pane-toggle",
+      // Try by tooltip text
+      "toolbarbutton[tooltiptext*='pane']",
+      "button[aria-label*='pane']",
+      // Generic reader context toggle
+      "[id*='context'][id*='toggle']",
+      "[class*='context'][class*='toggle']",
+    ];
+
+    for (const selector of toggleSelectors) {
+      const toggleBtn = doc.querySelector(selector) as HTMLElement | null;
+      if (toggleBtn) {
+        // Check if context pane is currently collapsed
+        // The button or a parent element typically has aria-pressed or similar state
+        const isExpanded =
+          toggleBtn.getAttribute("aria-pressed") === "true" ||
+          toggleBtn.getAttribute("aria-expanded") === "true" ||
+          toggleBtn.classList.contains("toggled") ||
+          toggleBtn.hasAttribute("checked");
+
+        // Also check if context pane element exists and is visible
+        const contextPane = doc.querySelector(".context-pane, #zotero-context-pane") as HTMLElement | null;
+        const contextPaneVisible = contextPane != null &&
+          contextPane.offsetWidth > 0 &&
+          !contextPane.hasAttribute("collapsed") &&
+          (contextPane.ownerDocument?.defaultView?.getComputedStyle(contextPane)?.display ?? "none") !== "none";
+
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureReaderContextPaneVisible: found toggle button (${selector}), isExpanded=${isExpanded}, contextPaneVisible=${contextPaneVisible}`,
+        );
+
+        // If context pane is not visible, click the toggle
+        if (!contextPaneVisible) {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] ensureReaderContextPaneVisible: clicking toggle to open context pane`,
+          );
+          toggleBtn.click();
+          return true;
+        }
+        return true; // Already visible
+      }
+    }
+
+    // Fallback: Try to find the context pane splitter and check its state
+    const splitter = doc.querySelector("#zotero-context-splitter, .context-pane-splitter") as HTMLElement | null;
+    if (splitter) {
+      const isCollapsed = splitter.getAttribute("state") === "collapsed" ||
+        splitter.getAttribute("collapsed") === "true";
+
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] ensureReaderContextPaneVisible: found splitter, isCollapsed=${isCollapsed}`,
+      );
+
+      if (isCollapsed) {
+        // Try to open by changing splitter state
+        splitter.setAttribute("state", "open");
+        splitter.removeAttribute("collapsed");
+        return true;
+      }
+      return true; // Already visible
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] ensureReaderContextPaneVisible: could not find toggle button or splitter`,
     );
     return false;
   }
@@ -1905,7 +3204,7 @@ class InspireReferencePanelController {
       if (this.filterInput) {
         this.filterInput.value = "";
       }
-      this.hideFilterInlineHint();
+      this.filterInlineHint?.hide();
       if (this.filterDebounceTimer) {
         clearTimeout(this.filterDebounceTimer);
         this.filterDebounceTimer = undefined;
@@ -1958,140 +3257,6 @@ class InspireReferencePanelController {
     }, this.filterDebounceDelay);
   }
 
-  private updateFilterInlineHint(): void {
-    if (!this.filterInput || !this.filterInlineHint || this.filterHistory.length === 0) {
-      this.hideFilterInlineHint();
-      return;
-    }
-
-    const inputValue = this.filterInput.value;
-    if (!inputValue) {
-      this.hideFilterInlineHint();
-      return;
-    }
-
-    const lowerValue = inputValue.toLowerCase();
-    let matchingItem: SearchHistoryItem | undefined;
-    for (const historyItem of this.filterHistory) {
-      if (
-        historyItem.query.toLowerCase().startsWith(lowerValue) &&
-        historyItem.query.length > inputValue.length
-      ) {
-        matchingItem = historyItem;
-        break;
-      }
-    }
-
-    if (!matchingItem) {
-      if (inputValue.trim() === "") {
-        matchingItem = this.filterHistory[0];
-      } else {
-        this.hideFilterInlineHint();
-        return;
-      }
-    }
-
-    if (!matchingItem || matchingItem.query.length <= inputValue.length) {
-      this.hideFilterInlineHint();
-      return;
-    }
-
-    const hintSuffixRaw = matchingItem.query.slice(inputValue.length);
-    if (!hintSuffixRaw) {
-      this.hideFilterInlineHint();
-      return;
-    }
-
-    const hintSuffix = hintSuffixRaw.replace(/ /g, "\u00A0");
-    this.filterCurrentHintText = matchingItem.query;
-
-    const doc = this.getOwnerDocument(this.filterInput);
-    const computedStyle = doc.defaultView?.getComputedStyle(this.filterInput);
-    const wrapper = this.filterInput?.parentElement;
-    
-    if (computedStyle && wrapper) {
-      // DEBUG: Log computed styles
-      Zotero.debug(`[ZInspire] Filter hint DEBUG - input: "${inputValue}", hint: "${hintSuffix}"`);
-      Zotero.debug(`[ZInspire] Filter hint DEBUG - font: ${computedStyle.font}`);
-      Zotero.debug(`[ZInspire] Filter hint DEBUG - fontSize: ${computedStyle.fontSize}, fontFamily: ${computedStyle.fontFamily}`);
-      Zotero.debug(`[ZInspire] Filter hint DEBUG - letterSpacing: ${computedStyle.letterSpacing}, wordSpacing: ${computedStyle.wordSpacing}`);
-      
-      // Use a hidden span in wrapper for accurate measurement
-      // Copy all text-related styles for accurate measurement
-      const measureSpan = doc.createElement("span");
-      measureSpan.style.cssText = `
-        position: absolute;
-        visibility: hidden;
-        white-space: pre;
-        font: ${computedStyle.font};
-        font-size: ${computedStyle.fontSize};
-        font-family: ${computedStyle.fontFamily};
-        font-weight: ${computedStyle.fontWeight};
-        font-style: ${computedStyle.fontStyle};
-        font-variant: ${computedStyle.fontVariant};
-        font-stretch: ${computedStyle.fontStretch};
-        letter-spacing: ${computedStyle.letterSpacing};
-        word-spacing: ${computedStyle.wordSpacing};
-        text-transform: ${computedStyle.textTransform};
-        text-rendering: ${computedStyle.textRendering};
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-      `;
-      measureSpan.textContent = inputValue.replace(/ /g, "\u00A0");
-      wrapper.appendChild(measureSpan);
-      const textWidth = measureSpan.offsetWidth;
-      wrapper.removeChild(measureSpan);
-
-      // Get horizontal spacing
-      const paddingLeft = parseFloat(computedStyle.paddingLeft) || 8;
-      const borderLeft = parseFloat(computedStyle.borderLeftWidth) || 0;
-      
-      // Get vertical spacing for alignment
-      const paddingTop = parseFloat(computedStyle.paddingTop) || 4;
-      const borderTop = parseFloat(computedStyle.borderTopWidth) || 0;
-
-      // Calculate input position relative to wrapper
-      const inputRect = this.filterInput.getBoundingClientRect();
-      const wrapperRect = wrapper.getBoundingClientRect();
-      
-      const inputLeftOffset = inputRect.left - wrapperRect.left;
-      const inputTopOffset = inputRect.top - wrapperRect.top;
-      
-      // Correct horizontal position
-      const finalLeft = inputLeftOffset + borderLeft + paddingLeft + textWidth;
-      
-      // Correct vertical position: align with text top instead of centering
-      // This avoids issues where input text isn't perfectly centered vertically
-      const finalTop = inputTopOffset + borderTop + paddingTop;
-
-      this.filterInlineHint.style.font = computedStyle.font;
-      this.filterInlineHint.style.fontSize = computedStyle.fontSize;
-      this.filterInlineHint.style.fontFamily = computedStyle.fontFamily;
-      this.filterInlineHint.style.lineHeight = computedStyle.lineHeight;
-      this.filterInlineHint.style.letterSpacing = computedStyle.letterSpacing;
-      this.filterInlineHint.textContent = hintSuffix;
-      
-      this.filterInlineHint.style.left = `${finalLeft}px`;
-      // Use top alignment + remove transform for precise text baseline matching
-      this.filterInlineHint.style.top = `${finalTop}px`;
-      this.filterInlineHint.style.transform = "none";
-      
-      this.filterInlineHint.style.display = "block";
-    } else {
-      const textWidth = inputValue.length * 7;
-      this.filterInlineHint.textContent = hintSuffix;
-      this.filterInlineHint.style.left = `${9 + textWidth}px`;
-      this.filterInlineHint.style.display = "block";
-    }
-  }
-
-  private hideFilterInlineHint(): void {
-    if (this.filterInlineHint) {
-      this.filterInlineHint.style.display = "none";
-    }
-    this.filterCurrentHintText = "";
-  }
-
   private getOwnerDocument(element?: Element | null): Document {
     return (
       element?.ownerDocument ||
@@ -2121,6 +3286,18 @@ class InspireReferencePanelController {
     button.textContent = filtersEmoji;
     button.setAttribute("aria-label", filtersLabel);
     button.setAttribute("title", filtersLabel);
+    // Apply button styling
+    button.style.cssText = `
+      padding: 4px 8px;
+      font-size: 14px;
+      border: 1px solid var(--fill-quinary, #d1d5db);
+      border-radius: 4px;
+      background: var(--material-background, #fff);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    `;
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -2136,26 +3313,29 @@ class InspireReferencePanelController {
     this.quickFiltersButton = button as HTMLButtonElement;
     this.quickFiltersBadge = badge as HTMLSpanElement;
 
-    // Create popup as a sibling after filterGroup (in toolbar) for inline flow layout
+    // Create popup as absolute positioned dropdown overlay
     const popup = doc.createElement("div");
     popup.className = "zinspire-quick-filter-popup";
     popup.hidden = true;
-    // Inline styles for flow layout: full width, flex wrap, items don't break mid-option
-    popup.style.display = "none";
-    popup.style.flexBasis = "100%";
-    popup.style.flexWrap = "wrap";
-    popup.style.gap = "4px 8px";
-    popup.style.padding = "6px 0";
-    popup.style.alignItems = "center";
-    // Insert popup after the filterGroup (toolbar is filterGroup's parent)
-    const toolbarEl = toolbar.parentElement;
-    if (toolbarEl) {
-      // Insert as next sibling of filterGroup in toolbar
-      toolbar.insertAdjacentElement("afterend", popup);
-    } else {
-      // Fallback: append to toolbar (filterGroup) if no parent
-      toolbar.appendChild(popup);
-    }
+    // Absolute positioned dropdown overlay - single column, semi-transparent
+    popup.style.cssText = `
+      display: none;
+      flex-direction: column;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid var(--fill-quinary, #d1d5db);
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+      padding: 6px 4px;
+      margin-top: 4px;
+      gap: 2px;
+    `;
+    wrapper.appendChild(popup);
     this.quickFiltersPopup = popup as HTMLDivElement;
 
     this.renderQuickFilterItems(popup as HTMLDivElement);
@@ -2173,22 +3353,32 @@ class InspireReferencePanelController {
     for (const config of QUICK_FILTER_CONFIGS) {
       const item = doc.createElement("label");
       item.className = "zinspire-quick-filter-item";
-      // Inline styles to prevent mid-item line breaks and enable inline flow
-      item.style.display = "inline-flex";
-      item.style.alignItems = "center";
-      item.style.whiteSpace = "nowrap";
-      item.style.flexShrink = "0";
-      item.style.gap = "4px";
-      item.style.padding = "2px 8px";
-      item.style.borderRadius = "4px";
-      item.style.cursor = "pointer";
-      item.style.fontSize = "12px";
+      // Compact row style with hover effect
+      item.style.cssText = `
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background-color 0.1s ease;
+      `;
       const labelText = getString(config.labelKey);
       if (config.tooltipKey) {
         item.title = getString(config.tooltipKey);
       } else {
         item.title = labelText;
       }
+
+      // Hover effect
+      item.addEventListener("mouseenter", () => {
+        item.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+      });
+      item.addEventListener("mouseleave", () => {
+        item.style.backgroundColor = "";
+      });
 
       const checkbox = doc.createElement("input");
       checkbox.type = "checkbox";
@@ -2239,6 +3429,21 @@ class InspireReferencePanelController {
     this.quickFiltersPopupVisible = true;
     this.updateQuickFiltersButtonExpandedState();
     this.updateQuickFilterCheckboxStates();
+
+    // Add outside click handler to close popup
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      const isInsidePopup = this.quickFiltersPopup?.contains(target);
+      const isInsideButton = this.quickFiltersButton?.contains(target);
+      if (!isInsidePopup && !isInsideButton) {
+        this.closeQuickFiltersPopup();
+        document.removeEventListener("click", handleOutsideClick, true);
+      }
+    };
+    // Use setTimeout to avoid immediately closing from the same click
+    setTimeout(() => {
+      document.addEventListener("click", handleOutsideClick, true);
+    }, 0);
   }
 
   private closeQuickFiltersPopup(): void {
@@ -2321,6 +3526,64 @@ class InspireReferencePanelController {
     while (current) {
       applySelectable(current);
       current = current.parentElement;
+    }
+  }
+
+  /**
+   * Apply modern inline styles to navigation buttons (Back/Forward)
+   * @param isIcon - If true, use smaller square padding for icon-only buttons
+   */
+  private applyNavButtonStyle(button: HTMLButtonElement, isIcon = false): void {
+    const padding = isIcon ? "4px 8px" : "4px 10px";
+    const fontSize = isIcon ? "14px" : "12px";
+    button.style.cssText = `
+      padding: ${padding};
+      font-size: ${fontSize};
+      border: 1px solid var(--fill-quinary, #cbd5e1);
+      border-radius: 4px;
+      background: var(--material-background, #fff);
+      color: var(--fill-primary, #334155);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      min-width: ${isIcon ? "28px" : "auto"};
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    // Apply initial visual state based on disabled
+    this.updateNavButtonVisualState(button);
+
+    // Add hover effect (only works when enabled)
+    button.addEventListener("mouseenter", () => {
+      if (!button.disabled) {
+        button.style.backgroundColor = "#e6f2ff";
+        button.style.borderColor = "#0066cc";
+        button.style.color = "#0066cc";
+      }
+    });
+    button.addEventListener("mouseleave", () => {
+      this.updateNavButtonVisualState(button);
+    });
+  }
+
+  /**
+   * Update navigation button visual state based on disabled property
+   */
+  private updateNavButtonVisualState(button: HTMLButtonElement): void {
+    if (button.disabled) {
+      // Disabled: faded, gray, no pointer
+      button.style.opacity = "0.4";
+      button.style.color = "var(--fill-secondary, #94a3b8)";
+      button.style.backgroundColor = "var(--material-background, #fff)";
+      button.style.borderColor = "var(--fill-quinary, #e2e8f0)";
+      button.style.cursor = "not-allowed";
+    } else {
+      // Enabled: full opacity, clickable
+      button.style.opacity = "1";
+      button.style.color = "var(--fill-primary, #334155)";
+      button.style.backgroundColor = "var(--material-background, #fff)";
+      button.style.borderColor = "var(--fill-quinary, #cbd5e1)";
+      button.style.cursor = "pointer";
     }
   }
 
@@ -2521,6 +3784,38 @@ class InspireReferencePanelController {
       }
     };
 
+    // FTR-FOCUSED-SELECTION: Allow Esc to clear focus even when list is not focused (e.g., PDF Look-up)
+    this.boundHandleBodyKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !this.focusedEntryID) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      // Avoid interfering with form inputs where Escape may have its own meaning
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return;
+      }
+
+      this.clearFocusedEntry();
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    // FTR-COPY-LINK: Right-click to copy link URL
+    this.boundHandleListContextMenu = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      // Check if right-clicked on a link (anchor element)
+      const anchor = target.closest("a") as HTMLAnchorElement | null;
+      if (!anchor || !anchor.href || anchor.href === "#") return;
+
+      // Show context menu with copy option
+      event.preventDefault();
+      this.showLinkContextMenu(anchor, event);
+    };
+
     // Attach listeners to listEl
     this.listEl.addEventListener("click", this.boundHandleListClick);
     this.listEl.addEventListener("mouseover", this.boundHandleListMouseOver);
@@ -2528,6 +3823,9 @@ class InspireReferencePanelController {
     this.listEl.addEventListener("mousemove", this.boundHandleListMouseMove);
     this.listEl.addEventListener("dblclick", this.boundHandleListDoubleClick);
     this.listEl.addEventListener("keydown", this.boundHandleListKeyDown);
+    this.listEl.addEventListener("contextmenu", this.boundHandleListContextMenu);
+    // Capture on document to catch Escape even when focus is outside the list (e.g., after PDF Look-up)
+    this.body.ownerDocument?.addEventListener("keydown", this.boundHandleBodyKeyDown, true);
   }
 
   /**
@@ -2559,6 +3857,15 @@ class InspireReferencePanelController {
       this.listEl.removeEventListener("keydown", this.boundHandleListKeyDown);
       this.boundHandleListKeyDown = undefined;
     }
+    if (this.boundHandleBodyKeyDown) {
+      this.body.ownerDocument?.removeEventListener("keydown", this.boundHandleBodyKeyDown, true);
+      this.boundHandleBodyKeyDown = undefined;
+    }
+    // FTR-COPY-LINK: cleanup contextmenu handler
+    if (this.boundHandleListContextMenu) {
+      this.listEl.removeEventListener("contextmenu", this.boundHandleListContextMenu);
+      this.boundHandleListContextMenu = undefined;
+    }
     // Clear any pending click timer
     if (this.markerClickTimer) {
       clearTimeout(this.markerClickTimer);
@@ -2581,7 +3888,7 @@ class InspireReferencePanelController {
     const mainWindow = owningWindow ?? Zotero.getMainWindow?.();
     const schedule = mainWindow?.requestAnimationFrame
       ? mainWindow.requestAnimationFrame.bind(mainWindow)
-      : (cb: FrameRequestCallback) => (mainWindow?.setTimeout?.(cb, 16) ?? setTimeout(cb, 16)) as unknown as number;
+      : (cb: FrameRequestCallback) => (mainWindow?.setTimeout?.(cb, RAF_FALLBACK_MS) ?? setTimeout(cb, RAF_FALLBACK_MS)) as unknown as number;
     const cancel = mainWindow?.cancelAnimationFrame
       ? mainWindow.cancelAnimationFrame.bind(mainWindow)
       : (id: number) => (mainWindow?.clearTimeout?.(id) ?? clearTimeout(id));
@@ -3184,21 +4491,13 @@ class InspireReferencePanelController {
     this.chartSvgWrapper.textContent = "";
     const loadingMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
     loadingMsg.className = "zinspire-chart-no-data";
-    loadingMsg.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      color: #9ca3af;
-      font-size: 12px;
-      font-style: italic;
-    `;
+    loadingMsg.style.cssText = toStyleString(CHART_STYLES.noDataItalic);
     loadingMsg.textContent = "Loading...";
     this.chartSvgWrapper.appendChild(loadingMsg);
   }
 
   // Throttle interval for chart rendering during rapid data updates (ms)
-  private static readonly CHART_THROTTLE_INTERVAL = 300;
+  private static readonly CHART_THROTTLE_INTERVAL = CHART_THROTTLE_MS;
   private lastChartRenderTime = 0;
 
   /**
@@ -3274,21 +4573,14 @@ class InspireReferencePanelController {
     if (!entries.length) {
       const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
       noDataMsg.className = "zinspire-chart-no-data";
-      noDataMsg.style.cssText = `
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 100%;
-        color: #9ca3af;
-        font-size: 12px;
-      `;
+      noDataMsg.style.cssText = toStyleString(CHART_STYLES.noData);
       noDataMsg.textContent = getString("references-panel-chart-no-data");
       this.chartSvgWrapper.appendChild(noDataMsg);
       return;
     }
 
     // Dynamic bar count based on container width
-    const MAX_BAR_WIDTH = 50;
+    const MAX_BAR_WIDTH = CHART_MAX_BAR_WIDTH;
     const MIN_BAR_WIDTH = 20;
     const DEFAULT_MAX_BARS = 10;
     const BAR_GAP = 3;
@@ -3343,7 +4635,7 @@ class InspireReferencePanelController {
     const barGap = 4;
 
     // Calculate bar width first to determine if labels need rotation
-    const MAX_BAR_WIDTH_RENDER = 50;
+    const MAX_BAR_WIDTH_RENDER = CHART_MAX_BAR_WIDTH;
     const MIN_BAR_WIDTH_RENDER = 15;
     const basePadding = { top: 4, right: 8, left: 8 };
     const availableWidth = containerWidth - basePadding.left - basePadding.right;
@@ -3642,17 +4934,17 @@ class InspireReferencePanelController {
           case "0":
             return citationCount === 0;
           case "1-9":
-            return citationCount >= 1 && citationCount <= 9;
+            return citationCount >= CITATION_RANGES.LOW_MIN && citationCount <= CITATION_RANGES.LOW_MAX;
           case "10-49":
-            return citationCount >= 10 && citationCount <= 49;
+            return citationCount >= CITATION_RANGES.MID_LOW_MIN && citationCount <= CITATION_RANGES.MID_LOW_MAX;
           case "50-99":
-            return citationCount >= 50 && citationCount <= 99;
+            return citationCount >= CITATION_RANGES.MID_MIN && citationCount <= CITATION_RANGES.MID_MAX;
           case "100-249":
-            return citationCount >= 100 && citationCount <= 249;
+            return citationCount >= CITATION_RANGES.MID_HIGH_MIN && citationCount <= CITATION_RANGES.MID_HIGH_MAX;
           case "250-499":
-            return citationCount >= 250 && citationCount <= 499;
+            return citationCount >= CITATION_RANGES.HIGH_MIN && citationCount <= CITATION_RANGES.HIGH_MAX;
           case "500+":
-            return citationCount >= 500;
+            return citationCount >= CITATION_RANGES.VERY_HIGH_MIN;
           default:
             return false;
         }
@@ -3669,12 +4961,12 @@ class InspireReferencePanelController {
     // Use totalAuthors which is the actual author count from INSPIRE API
     // This is more reliable than authors.length which is limited for performance
     const authorCount = entry.totalAuthors ?? entry.authors?.length ?? 0;
-    return authorCount > 0 && authorCount <= 10;
+    return authorCount > 0 && authorCount <= SMALL_AUTHOR_GROUP_THRESHOLD;
   }
 
   private matchesHighCitationsFilter(entry: InspireReferenceEntry): boolean {
     const citationCount = this.getCitationValue(entry);
-    return citationCount > 50;
+    return citationCount > HIGH_CITATIONS_THRESHOLD;
   }
 
   private matchesRecentYearsFilter(entry: InspireReferenceEntry, years: number): boolean {
@@ -3779,12 +5071,32 @@ class InspireReferencePanelController {
       this.rateLimiterUnsubscribe = undefined;
     }
     // Note: No outside click handler cleanup needed - popup only closes via button toggle
-    // FTR-PDF-ANNOTATE: Cleanup citation lookup handler
-    if (this.citationLookupHandler) {
-      getReaderIntegration().off("citationLookup", this.citationLookupHandler);
-      this.citationLookupHandler = undefined;
+    // FTR-PDF-ANNOTATE: Cleanup shared citation lookup handler when last instance gone
+    // FTR-RECID-AUTO-UPDATE: Also cleanup recid event handlers
+    if (
+      InspireReferencePanelController.instances.size === 1 &&
+      InspireReferencePanelController.citationListenerRegistered
+    ) {
+      const reader = getReaderIntegration();
+      if (InspireReferencePanelController.sharedCitationHandler) {
+        reader.off("citationLookup", InspireReferencePanelController.sharedCitationHandler);
+        InspireReferencePanelController.sharedCitationHandler = undefined;
+      }
+      if (InspireReferencePanelController.recidAvailableHandler) {
+        reader.off("itemRecidAvailable", InspireReferencePanelController.recidAvailableHandler);
+        InspireReferencePanelController.recidAvailableHandler = undefined;
+      }
+      if (InspireReferencePanelController.noRecidHandler) {
+        reader.off("itemNoRecid", InspireReferencePanelController.noRecidHandler);
+        InspireReferencePanelController.noRecidHandler = undefined;
+      }
+      InspireReferencePanelController.citationListenerRegistered = false;
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Unregistered shared event listeners`,
+      );
     }
     this.labelMatcher = undefined;
+    this.pdfParseAttempted = false;
     InspireReferencePanelController.instances.delete(this);
     if (!InspireReferencePanelController.instances.size) {
       InspireReferencePanelController.navigationStack = [];
@@ -4031,7 +5343,7 @@ class InspireReferencePanelController {
       return;
     }
 
-    const BATCH_SIZE = 50; // Same as existing code for metadata batch fetch
+    const BATCH_SIZE = METADATA_BATCH_SIZE; // Same as existing code for metadata batch fetch
     const allBibTeX: string[] = [];
     let successCount = 0;
 
@@ -4091,14 +5403,17 @@ class InspireReferencePanelController {
       });
     }
 
-    setTimeout(() => progressWin.close(), 2000);
+    setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
   }
 
   /**
    * Show export menu with format options (BibTeX, LaTeX US, LaTeX EU).
    * User can choose to copy to clipboard or export to file.
+   * Uses HTML dropdown positioned relative to the panel container.
    */
   showExportMenu(event: Event) {
+    Zotero.debug(`[${config.addonName}] showExportMenu called`);
+
     // Determine which entries to export
     const hasSelection = this.selectedEntryIDs.size > 0;
     const targetEntries = hasSelection
@@ -4106,7 +5421,8 @@ class InspireReferencePanelController {
       : this.allEntries;
 
     const entriesWithRecid = targetEntries.filter((e) => e.recid);
-    
+    Zotero.debug(`[${config.addonName}] showExportMenu: ${entriesWithRecid.length} entries with recid`);
+
     if (!entriesWithRecid.length) {
       const strings = getCachedStrings();
       const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
@@ -4120,14 +5436,11 @@ class InspireReferencePanelController {
     const doc = this.body.ownerDocument;
 
     // Remove existing popup if any
-    const existingPopup = doc.getElementById("zinspire-export-popup");
+    const popupId = "zinspire-export-popup";
+    const existingPopup = doc.getElementById(popupId);
     if (existingPopup) {
       existingPopup.remove();
     }
-
-    // Create popup menu
-    const popup = doc.createXULElement("menupopup") as XUL.MenuPopup;
-    popup.id = "zinspire-export-popup";
 
     const formats = [
       { id: "bibtex", label: "BibTeX (.bib)", ext: ".bib" },
@@ -4135,53 +5448,125 @@ class InspireReferencePanelController {
       { id: "latex-eu", label: "LaTeX (EU)", ext: ".tex" },
     ];
 
-    // Copy to clipboard section header
-    const copyHeader = doc.createXULElement("menuitem");
+    // Citation Style section - find entries with local items
+    const entriesWithLocalItem = targetEntries.filter((e) => typeof e.localItemID === "number" && e.localItemID > 0);
+
+    // Find the actual button element for popup anchor
+    let button = event.target as HTMLElement;
+
+    // Walk up to find a toolbarbutton or button element (the actual button)
+    while (button && !button.matches("toolbarbutton, button, .section-custom-button")) {
+      button = button.parentElement as HTMLElement;
+    }
+
+    // Try to recover a better anchor when event target is a collapsible-section
+    const targetRect = (event.target as HTMLElement | null)?.getBoundingClientRect?.();
+    const probeButtons = Array.from(
+      doc.querySelectorAll(".section-custom-button")
+    ) as HTMLElement[];
+
+    const usableButtons = probeButtons.filter((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+
+    const customButtons = usableButtons.filter((el) =>
+      el.classList.contains("custom")
+    );
+
+    const pickNearest = (buttons: HTMLElement[]) => {
+      if (!buttons.length) return null;
+      if (!targetRect) return buttons[0];
+      let nearest: HTMLElement = buttons[0];
+      let bestDist = Number.POSITIVE_INFINITY;
+      for (const b of buttons) {
+        const r = b.getBoundingClientRect();
+        const dy = Math.abs(r.top - targetRect.top);
+        const dx = Math.abs(r.left - targetRect.left);
+        const dist = dx * 0.5 + dy; // favor vertical proximity
+        if (dist < bestDist) {
+          bestDist = dist;
+          nearest = b;
+        }
+      }
+      return nearest;
+    };
+
+    const fallbackButton =
+      pickNearest(customButtons) ?? pickNearest(usableButtons);
+
+    const anchorButton = button || fallbackButton;
+
+    if (!anchorButton) {
+      Zotero.debug(`[${config.addonName}] showExportMenu: No anchor button found`);
+      return;
+    }
+
+    // Create XUL menupopup
+    const popup = (doc as any).createXULElement("menupopup") as XUL.MenuPopup;
+    popup.id = popupId;
+
+    // Helper to create XUL menuitem
+    const createMenuItem = (label: string, disabled: boolean, handler?: () => void) => {
+      const item = (doc as any).createXULElement("menuitem");
+      item.setAttribute("label", label);
+      if (disabled) {
+        item.setAttribute("disabled", "true");
+      } else if (handler) {
+        item.addEventListener("command", handler);
+      }
+      return item;
+    };
+
+    // Copy to clipboard section
     const copyLabel = getString("references-panel-export-copy-header");
-    copyHeader.setAttribute("label", hasSelection ? `${copyLabel} (${entriesWithRecid.length})` : copyLabel);
-    copyHeader.setAttribute("disabled", "true");
-    popup.appendChild(copyHeader);
+    popup.appendChild(createMenuItem(
+      hasSelection ? `${copyLabel} (${entriesWithRecid.length})` : copyLabel,
+      true
+    ));
 
     for (const format of formats) {
-      const item = doc.createXULElement("menuitem");
-      item.setAttribute("label", `  ${format.label}`);
-      item.addEventListener("command", () => {
-        this.exportEntries(format.id, "clipboard");
-      });
-      popup.appendChild(item);
+      popup.appendChild(createMenuItem(`  ${format.label}`, false, () => {
+        this.exportEntries(format.id, "clipboard", format.ext);
+      }));
     }
 
     // Separator
-    popup.appendChild(doc.createXULElement("menuseparator"));
+    popup.appendChild((doc as any).createXULElement("menuseparator"));
 
-    // Export to file section header
-    const exportHeader = doc.createXULElement("menuitem");
+    // Export to file section
     const exportLabel = getString("references-panel-export-file-header");
-    exportHeader.setAttribute("label", hasSelection ? `${exportLabel} (${entriesWithRecid.length})` : exportLabel);
-    exportHeader.setAttribute("disabled", "true");
-    popup.appendChild(exportHeader);
+    popup.appendChild(createMenuItem(
+      hasSelection ? `${exportLabel} (${entriesWithRecid.length})` : exportLabel,
+      true
+    ));
 
     for (const format of formats) {
-      const item = doc.createXULElement("menuitem");
-      item.setAttribute("label", `  ${format.label}`);
-      item.addEventListener("command", () => {
+      popup.appendChild(createMenuItem(`  ${format.label}`, false, () => {
         this.exportEntries(format.id, "file", format.ext);
-      });
-      popup.appendChild(item);
+      }));
     }
 
-    // Add popup to document and show near the button
+    // Citation section if local items exist
+    if (entriesWithLocalItem.length > 0) {
+      popup.appendChild((doc as any).createXULElement("menuseparator"));
+      const citationLabel = getString("references-panel-export-citation-header");
+      popup.appendChild(createMenuItem(
+        hasSelection ? `${citationLabel} (${entriesWithLocalItem.length})` : citationLabel,
+        true
+      ));
+
+      popup.appendChild(createMenuItem(
+        `  ${getString("references-panel-export-citation-select-style")}`,
+        false,
+        () => this.openBibliographyDialog(entriesWithLocalItem)
+      ));
+    }
+
+    // Add popup to document and open
     doc.documentElement.appendChild(popup);
-    const anchor = event.target as Element;
-    // openPopup(anchor, position, x, y, isContextMenu, attributesOverride, triggerEvent)
-    // position: "after_start" = below anchor, left-aligned
-    //   - "before_start/end" = above anchor
-    //   - "after_start/end" = below anchor  
-    //   - "start" = left-aligned, "end" = right-aligned
-    // x, y: offset from calculated position
-    // isContextMenu: false (not a context menu)
-    // attributesOverride: false (don't override popup attributes)
-    popup.openPopup(anchor, "after_end", 0, 0, false, false);
+    popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
+    popup.openPopup(anchorButton as any, "after_end", 0, 2, false, false);
   }
 
   /**
@@ -4202,7 +5587,7 @@ class InspireReferencePanelController {
     const entriesWithRecid = targetEntries.filter((e) => e.recid);
     const strings = getCachedStrings();
 
-    const BATCH_SIZE = 50;
+    const BATCH_SIZE = METADATA_BATCH_SIZE;
     const allContent: string[] = [];
     let successCount = 0;
     let failedBatches = 0;
@@ -4245,7 +5630,7 @@ class InspireReferencePanelController {
 
       if (!allContent.length) {
         progressWin.changeLine({ icon: icon, text: strings.bibtexAllFailed, type: "fail" });
-        setTimeout(() => progressWin.close(), 2000);
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
         return;
       }
 
@@ -4255,9 +5640,8 @@ class InspireReferencePanelController {
       if (target === "clipboard") {
         // Warn if content is very large (may exceed clipboard limits)
         const contentSize = new Blob([fullContent]).size;
-        const CLIPBOARD_WARN_SIZE = 500 * 1024; // 500KB threshold
 
-        if (contentSize > CLIPBOARD_WARN_SIZE) {
+        if (contentSize > CLIPBOARD_WARN_SIZE_BYTES) {
           // Content too large, suggest file export
           progressWin.changeLine({
             icon: icon,
@@ -4266,7 +5650,7 @@ class InspireReferencePanelController {
             }),
             type: "fail",
           });
-          setTimeout(() => progressWin.close(), 3000);
+          setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_WARN_MS);
           return;
         }
 
@@ -4312,7 +5696,7 @@ class InspireReferencePanelController {
       progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
     }
 
-    setTimeout(() => progressWin.close(), 2000);
+    setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
   }
 
   /**
@@ -4336,6 +5720,212 @@ class InspireReferencePanelController {
       return fp.file;
     }
     return null;
+  }
+
+  /**
+   * Open Zotero's built-in bibliography dialog for citation style export.
+   * Uses Zotero's native dialog at chrome://zotero/content/bibliography.xhtml
+   * @param entries - Reference entries with localItemID
+   */
+  private async openBibliographyDialog(
+    entries: InspireReferenceEntry[],
+  ): Promise<void> {
+    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+
+    try {
+      // Get Zotero items from localItemIDs
+      const localItemIDs = entries
+        .filter((e) => typeof e.localItemID === "number" && e.localItemID > 0)
+        .map((e) => e.localItemID!);
+
+      if (localItemIDs.length === 0) {
+        const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+        progressWin.win.changeHeadline(config.addonName, icon);
+        progressWin.createLine({
+          icon: icon,
+          text: getString("references-panel-export-citation-no-local"),
+          type: "fail",
+        });
+        progressWin.show();
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+        return;
+      }
+
+      const items = Zotero.Items.get(localItemIDs);
+      if (!items || items.length === 0) {
+        const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+        progressWin.win.changeHeadline(config.addonName, icon);
+        progressWin.createLine({
+          icon: icon,
+          text: getString("references-panel-export-citation-no-local"),
+          type: "fail",
+        });
+        progressWin.show();
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+        return;
+      }
+
+      // Filter to regular items only (not notes/attachments)
+      const regularItems = items.filter((item: Zotero.Item) => item.isRegularItem());
+      if (regularItems.length === 0) {
+        const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+        progressWin.win.changeHeadline(config.addonName, icon);
+        progressWin.createLine({
+          icon: icon,
+          text: getString("references-panel-export-citation-no-local"),
+          type: "fail",
+        });
+        progressWin.show();
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+        return;
+      }
+
+      // Open Zotero's built-in bibliography dialog
+      // The dialog is modal and returns results via the io object
+      const io: {
+        style?: string;
+        locale?: string;
+        method?: string;
+        mode?: string;
+      } = {};
+
+      const win = Zotero.getMainWindow();
+      win.openDialog(
+        "chrome://zotero/content/bibliography.xhtml",
+        "_blank",
+        "chrome,modal,centerscreen",
+        io
+      );
+
+      // Check if user cancelled
+      if (!io.method) {
+        Zotero.debug(`[${config.addonName}] Bibliography dialog cancelled`);
+        return;
+      }
+
+      Zotero.debug(`[${config.addonName}] Bibliography dialog result: style=${io.style}, locale=${io.locale}, method=${io.method}, mode=${io.mode}`);
+
+      // Handle the selected output method
+      const style = io.style;
+      const locale = io.locale;
+      const isCitations = io.mode === "citations";
+
+      if (io.method === "copy-to-clipboard") {
+        // Use Zotero's built-in function to copy to clipboard
+        // Access via window to avoid TypeScript type issues
+        const ZFI = (win as any).Zotero_File_Interface;
+        if (ZFI && typeof ZFI.copyItemsToClipboard === "function") {
+          ZFI.copyItemsToClipboard(regularItems, style, locale, false, isCitations);
+        } else {
+          // Fallback: generate and copy manually
+          const styleObj = Zotero.Styles.get(style);
+          const cslEngine = styleObj.getCiteProc(locale, "text");
+          const bibliography = Zotero.Cite.makeFormattedBibliographyOrCitationList(
+            cslEngine,
+            regularItems,
+            "text",
+            isCitations
+          );
+          await copyToClipboard(bibliography);
+        }
+
+        const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+        progressWin.win.changeHeadline(config.addonName, icon);
+        progressWin.createLine({
+          icon: icon,
+          text: getString("references-panel-export-citation-copied", {
+            args: { count: regularItems.length },
+          }),
+          type: "success",
+        });
+        progressWin.show();
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+      } else if (io.method === "save-as-rtf" || io.method === "save-as-html") {
+        // Generate bibliography using Zotero's cite engine
+        const format = io.method === "save-as-rtf" ? "rtf" : "html";
+        const styleObj = Zotero.Styles.get(style);
+        const cslEngine = styleObj.getCiteProc(locale, format);
+        const bibliography = Zotero.Cite.makeFormattedBibliographyOrCitationList(
+          cslEngine,
+          regularItems,
+          format,
+          isCitations
+        );
+
+        // Save to file
+        const ext = io.method === "save-as-rtf" ? ".rtf" : ".html";
+        const filename = `references_${this.currentRecid || "export"}${ext}`;
+        const filePath = await this.promptSaveFile(filename, ext);
+
+        if (filePath) {
+          if (io.method === "save-as-html") {
+            // Wrap in HTML document
+            let html = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n';
+            html += '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">\n';
+            html += '<head>\n';
+            html += '<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>\n';
+            html += '<title>Bibliography</title>\n';
+            html += '</head>\n';
+            html += '<body>\n';
+            html += bibliography;
+            html += '</body>\n';
+            html += '</html>\n';
+            await Zotero.File.putContentsAsync(filePath, html);
+          } else {
+            await Zotero.File.putContentsAsync(filePath, bibliography);
+          }
+
+          const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+          progressWin.win.changeHeadline(config.addonName, icon);
+          progressWin.createLine({
+            icon: icon,
+            text: getString("references-panel-export-saved", {
+              args: { count: regularItems.length, format: format.toUpperCase() },
+            }),
+            type: "success",
+          });
+          progressWin.show();
+          setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+        }
+      } else if (io.method === "print") {
+        // Generate HTML bibliography for printing
+        const styleObj = Zotero.Styles.get(style);
+        const cslEngine = styleObj.getCiteProc(locale, "html");
+        const bibliography = Zotero.Cite.makeFormattedBibliographyOrCitationList(
+          cslEngine,
+          regularItems,
+          "html",
+          isCitations
+        );
+
+        // Use Zotero's HiddenBrowser for printing
+        const HiddenBrowser = ChromeUtils.importESModule("chrome://zotero/content/HiddenBrowser.mjs").HiddenBrowser;
+        const browser = new HiddenBrowser({ useHiddenFrame: false });
+        await browser.load("data:text/html;charset=utf-8," + encodeURIComponent(bibliography));
+        await browser.print({
+          overrideSettings: {
+            headerStrLeft: "",
+            headerStrCenter: "",
+            headerStrRight: "",
+            footerStrLeft: "",
+            footerStrCenter: "",
+            footerStrRight: "",
+          },
+        });
+        browser.destroy();
+      }
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] Bibliography dialog error: ${e}`);
+      const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+      progressWin.win.changeHeadline(config.addonName, icon);
+      progressWin.createLine({
+        icon: icon,
+        text: getString("references-panel-export-clipboard-failed"),
+        type: "fail",
+      });
+      progressWin.show();
+      setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+    }
   }
 
   async handleItemChange(
@@ -4389,6 +5979,10 @@ class InspireReferencePanelController {
         this.lastSelectedEntryID = undefined;
         this.updateBatchToolbarVisibility();
 
+        // FTR-SMART-UPDATE-AUTO-CHECK: Clear notification and pending diff
+        this.clearAutoCheckNotification();
+        this.autoCheckPendingDiff = undefined;
+
         // In search mode, don't clear entries - preserve search results
         if (this.viewMode !== "search") {
           this.clearEntryCitedContext();
@@ -4402,7 +5996,7 @@ class InspireReferencePanelController {
           if (this.filterInput) {
             this.filterInput.value = "";
           }
-          this.hideFilterInlineHint();
+          this.filterInlineHint?.hide();
           this.renderChartLoading(); // Show loading state in chart
           this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
         } else {
@@ -4430,6 +6024,16 @@ class InspireReferencePanelController {
         this.updateSortSelector();
         return;
       }
+
+      // FTR-SMART-UPDATE-AUTO-CHECK: Trigger auto-check when item changes
+      // Run in parallel with references loading (don't await)
+      // Pass the already-obtained recid to avoid redundant lookup
+      if (itemChanged) {
+        this.performAutoCheck(item, recid).catch((err) => {
+          Zotero.debug(`[${config.addonName}] Auto-check failed: ${err}`);
+        });
+      }
+
       if (this.currentRecid !== recid) {
         this.currentRecid = recid;
         this.updateSortSelector();
@@ -4839,9 +6443,11 @@ class InspireReferencePanelController {
       InspireReferencePanelController.navigationStack.length > 0;
     const navigating = InspireReferencePanelController.isNavigatingHistory;
     this.backButton.disabled = !hasHistory || navigating;
+    this.updateNavButtonVisualState(this.backButton);
     if (this.forwardButton) {
       const hasForward = InspireReferencePanelController.forwardStack.length > 0;
       this.forwardButton.disabled = !hasForward || navigating;
+      this.updateNavButtonVisualState(this.forwardButton);
     }
   }
 
@@ -5286,8 +6892,9 @@ class InspireReferencePanelController {
     const entries: InspireReferenceEntry[] = [];
     const query = encodeURIComponent(`refersto:recid:${recid}`);
     const sortParam = sort ? `&sort=${sort}` : "";
+    // FTR-API-FIELD-OPTIMIZATION: Use centralized field configuration
     // Include authors.ids for BAI extraction (most reliable for author search)
-    const fieldsParam = "&fields=control_number,titles.title,authors.full_name,authors.ids,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
+    const fieldsParam = buildFieldsParam(API_FIELDS_LIST_DISPLAY);
 
     // Helper to fetch a single page
     const fetchPage = async (pageNum: number, pageSize: number): Promise<any[]> => {
@@ -5396,8 +7003,9 @@ class InspireReferencePanelController {
     const entries: InspireReferenceEntry[] = [];
     const query = encodeURIComponent(queryString);
     const sortParam = sort ? `&sort=${sort}` : "";
+    // FTR-API-FIELD-OPTIMIZATION: Use centralized field configuration
     // Include authors.ids for BAI extraction (most reliable for author search)
-    const fieldsParam = "&fields=control_number,titles.title,authors.full_name,authors.ids,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
+    const fieldsParam = buildFieldsParam(API_FIELDS_LIST_DISPLAY);
 
     // Helper to fetch a single page
     const fetchPage = async (pageNum: number, pageSize: number): Promise<any[]> => {
@@ -5544,7 +7152,7 @@ class InspireReferencePanelController {
 
     // Increased chunk size for fewer SQL queries (was 100, now 500)
     // SQLite handles IN clauses with 500+ parameters efficiently
-    const CHUNK_SIZE = 500;
+    const CHUNK_SIZE = LOCAL_STATUS_BATCH_SIZE;
     const recidMap = new Map<string, number>();
 
     for (let i = 0; i < recids.length; i += CHUNK_SIZE) {
@@ -5712,14 +7320,15 @@ class InspireReferencePanelController {
       titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
     }
 
-    // Update meta (show/hide) - PERF-13: use existing element
+    // Update meta with clickable links (DOI/arXiv) - PERF-13: rebuild content
     const meta = row.querySelector(".zinspire-ref-entry__meta") as HTMLElement;
     if (meta) {
-      if (entry.summary) {
-        meta.textContent = entry.summary;
+      const hasMeta = entry.publicationInfo || entry.arxivDetails || entry.doi;
+      if (hasMeta) {
+        this.buildMetaContent(meta, entry);
         meta.style.display = "";
       } else {
-        meta.textContent = "";
+        meta.innerHTML = "";
         meta.style.display = "none";
       }
     }
@@ -5948,6 +7557,10 @@ class InspireReferencePanelController {
 
     const arxiv = extractArxivFromMetadata(metadata);
     const summary = buildPublicationSummary(publicationInfo, arxiv, year, errata);
+    // Extract primary DOI from metadata
+    const doi = Array.isArray(metadata?.dois) && metadata.dois.length
+      ? (typeof metadata.dois[0] === "string" ? metadata.dois[0] : metadata.dois[0]?.value)
+      : undefined;
     const entry: InspireReferenceEntry = {
       id: `cited-${index}-${recid ?? Date.now()}`,
       recid,
@@ -5975,6 +7588,7 @@ class InspireReferencePanelController {
       publicationInfo,
       publicationInfoErrata: errata,
       arxivDetails: arxiv,
+      doi,
     };
     entry.displayText = buildDisplayText(entry);
     // Defer searchText calculation to first filter for better initial load performance
@@ -6118,14 +7732,14 @@ class InspireReferencePanelController {
       // This improves perceived performance for references with 100+ entries
       // PERF FIX: Always use pagination when there are many entries, even with filters
       // Without this, DOM operations (clearing 10000+ elements) can take seconds
-      // Use higher threshold (500) when filtering for better UX with smaller result sets
+      // Use higher threshold when filtering for better UX with smaller result sets
       const hasFilter =
         filterGroups.length > 0 ||
         this.chartSelectedBins.size > 0 ||
         this.authorFilterEnabled ||
         this.publishedOnlyFilterEnabled ||
         this.quickFilters.size > 0;
-      const paginationThreshold = hasFilter ? 500 : RENDER_PAGE_SIZE;
+      const paginationThreshold = hasFilter ? RENDER_PAGE_SIZE_FILTERED : RENDER_PAGE_SIZE;
       const usePagination = filtered.length > paginationThreshold;
       const entriesToRender = usePagination
         ? filtered.slice(0, paginationThreshold)
@@ -6555,6 +8169,35 @@ class InspireReferencePanelController {
       },
       container,
     ) as HTMLButtonElement;
+
+    // Apply initial inline styles for pill button tabs
+    button.style.cssText = `
+      padding: 4px 12px;
+      font-size: 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      background-color: var(--material-background, #fff);
+      color: var(--fill-secondary, #64748b);
+      font-weight: 400;
+      border: 1px solid var(--fill-quinary, #d1d5db);
+    `;
+
+    // Add hover effect
+    button.addEventListener("mouseenter", () => {
+      if (button.getAttribute("data-active") !== "true") {
+        button.style.borderColor = "#94a3b8";
+        button.style.color = "var(--fill-primary, #334155)";
+      }
+    });
+    button.addEventListener("mouseleave", () => {
+      if (button.getAttribute("data-active") !== "true") {
+        button.style.borderColor = "var(--fill-quinary, #d1d5db)";
+        button.style.color = "var(--fill-secondary, #64748b)";
+      }
+    });
+
     button.addEventListener("click", () => {
       this.activateViewMode(mode).catch(() => void 0);
     });
@@ -6717,9 +8360,12 @@ class InspireReferencePanelController {
     }
     const isEntryMode = this.viewMode === "entryCited";
     this.entryViewBackButton.hidden = !isEntryMode;
+    // Must also set display to override inline-flex from applyNavButtonStyle
+    this.entryViewBackButton.style.display = isEntryMode ? "inline-flex" : "none";
     if (isEntryMode) {
+      // Update tooltip with target tab name
       const previousTabLabel = this.getTabLabel(this.entryCitedPreviousMode);
-      this.entryViewBackButton.textContent = getString(
+      this.entryViewBackButton.title = getString(
         "references-panel-entry-back",
         {
           args: { tab: previousTabLabel },
@@ -6946,212 +8592,48 @@ class InspireReferencePanelController {
     // Create wrapper for input + inline hint positioning
     const inputWrapper = doc.createElement("div");
     inputWrapper.className = "zinspire-search-input-wrapper";
-    inputWrapper.style.cssText = `
-      position: relative;
-      flex: 1 1 auto;
-      min-width: 150px;
-      display: flex;
-      align-items: center;
-      background: var(--material-background, #ffffff);
-      border-radius: 4px;
-    `;
+    inputWrapper.style.cssText = INLINE_HINT_WRAPPER_STYLE + `min-width: 150px;`;
 
     // Search input field - needs transparent background for hint to show through
     this.searchInput = doc.createElement("input");
     this.searchInput.type = "text";
     this.searchInput.className = "zinspire-search-input";
     this.searchInput.placeholder = getString("references-panel-search-placeholder");
-    // Disable browser autocomplete to use our inline hint instead
-    this.searchInput.setAttribute("autocomplete", "off");
-    this.searchInput.setAttribute("autocorrect", "off");
-    this.searchInput.setAttribute("autocapitalize", "off");
-    this.searchInput.setAttribute("spellcheck", "false");
-    this.searchInput.style.cssText = `
-      width: 100%;
-      padding: 4px 8px;
-      border: 1px solid var(--zotero-gray-4, #d1d1d5);
-      border-radius: 4px;
-      font-size: 12px;
-      background-color: transparent !important;
-      background: transparent !important;
-      -moz-appearance: none !important;
-      appearance: none !important;
-      position: relative;
-      z-index: 2;
-      font-family: system-ui, -apple-system, sans-serif;
-    `;
+    configureInlineHintInput(this.searchInput);
+    this.searchInput.style.cssText = INLINE_HINT_INPUT_STYLE;
 
-    // Create inline hint overlay (gray text showing suggestion)
-    // Uses higher z-index with pointer-events:none so hint shows above input but doesn't block interaction
-    const inlineHint = doc.createElement("span");
-    inlineHint.className = "zinspire-search-inline-hint zinspire-inline-hint";
-    inlineHint.style.cssText = `
-      position: absolute;
-      left: 9px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--fill-secondary, #888);
-      font-size: 12px;
-      pointer-events: none;
-      white-space: pre;
-      overflow: hidden;
-      z-index: 3;
-      display: none;
-      font-family: system-ui, -apple-system, sans-serif;
-      line-height: 1;
-    `;
-
-    // Track current hint for Tab/ArrowRight completion
-    let currentHintText = "";
-
-    // Update inline hint based on input
-    const updateInlineHint = () => {
-      const inputValue = this.searchInput?.value || "";
-
-      if (!inputValue || this.searchHistory.length === 0) {
-        inlineHint.style.display = "none";
-        currentHintText = "";
-        return;
-      }
-
-      // Find matching history entry
-      let matchingHint = "";
-      for (const historyItem of this.searchHistory) {
-        const historyQuery = historyItem.query;
-        if (historyQuery.toLowerCase().startsWith(inputValue.toLowerCase()) && historyQuery.length > inputValue.length) {
-          matchingHint = historyQuery;
-          break;
-        }
-      }
-
-      if (!matchingHint) {
-        inlineHint.style.display = "none";
-        currentHintText = "";
-        return;
-      }
-
-      // Show hint: display only the remaining suggestion after what user typed
-      const rawSuffix = matchingHint.slice(inputValue.length);
-      // Use replace to handle multiple spaces and preserve them
-      const hintSuffix = rawSuffix.replace(/ /g, '\u00A0');
-      currentHintText = matchingHint;
-
-      // Calculate position based on input text width using hidden span in wrapper
-      const computedStyle = this.searchInput?.ownerDocument.defaultView?.getComputedStyle(this.searchInput);
-      const wrapper = this.searchInput?.parentElement;
-      if (computedStyle && this.searchInput && wrapper) {
-        // DEBUG: Log computed styles and input layout
-        Zotero.debug(`[ZInspire] Search hint DEBUG - input: "${inputValue}", hint: "${hintSuffix}"`);
-        Zotero.debug(`[ZInspire] Search hint DEBUG - font: ${computedStyle.font}`);
-        Zotero.debug(`[ZInspire] Search hint DEBUG - fontSize: ${computedStyle.fontSize}, fontFamily: ${computedStyle.fontFamily}`);
-        Zotero.debug(`[ZInspire] Search hint DEBUG - letterSpacing: ${computedStyle.letterSpacing}, wordSpacing: ${computedStyle.wordSpacing}`);
-        Zotero.debug(`[ZInspire] Search hint DEBUG - input.scrollLeft: ${this.searchInput.scrollLeft}, input.clientLeft: ${this.searchInput.clientLeft}`);
-        Zotero.debug(`[ZInspire] Search hint DEBUG - input.offsetLeft: ${this.searchInput.offsetLeft}, input.clientWidth: ${this.searchInput.clientWidth}`);
-        
-        // Use a hidden span in wrapper for accurate measurement
-        // Copy all text-related styles for accurate measurement
-        const measureSpan = doc.createElement("span");
-        measureSpan.style.cssText = `
-          position: absolute;
-          visibility: hidden;
-          white-space: pre;
-          font: ${computedStyle.font};
-          font-size: ${computedStyle.fontSize};
-          font-family: ${computedStyle.fontFamily};
-          font-weight: ${computedStyle.fontWeight};
-          font-style: ${computedStyle.fontStyle};
-          font-variant: ${computedStyle.fontVariant};
-          font-stretch: ${computedStyle.fontStretch};
-          letter-spacing: ${computedStyle.letterSpacing};
-          word-spacing: ${computedStyle.wordSpacing};
-          text-transform: ${computedStyle.textTransform};
-          text-rendering: ${computedStyle.textRendering};
-          -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
-        `;
-        measureSpan.textContent = inputValue.replace(/ /g, '\u00A0');
-        wrapper.appendChild(measureSpan);
-        const textWidth = measureSpan.offsetWidth;
-        wrapper.removeChild(measureSpan);
-
-        // Get horizontal spacing
-        const paddingLeft = parseFloat(computedStyle.paddingLeft) || 8;
-        const borderLeft = parseFloat(computedStyle.borderLeftWidth) || 0;
-
-        // Get vertical spacing for alignment
-        const paddingTop = parseFloat(computedStyle.paddingTop) || 4;
-        const borderTop = parseFloat(computedStyle.borderTopWidth) || 0;
-
-        // Calculate input position relative to wrapper
-        const inputRect = this.searchInput.getBoundingClientRect();
-        const wrapperRect = wrapper.getBoundingClientRect();
-        const inputLeftOffset = inputRect.left - wrapperRect.left;
-        const inputTopOffset = inputRect.top - wrapperRect.top;
-        
-        // Correct position: inputLeftOffset + borderLeft + paddingLeft + textWidth
-        const finalLeft = inputLeftOffset + borderLeft + paddingLeft + textWidth;
-        
-        // Correct vertical position: align with text top instead of centering
-        const finalTop = inputTopOffset + borderTop + paddingTop;
-
-        inlineHint.textContent = hintSuffix;
-        inlineHint.style.left = `${finalLeft}px`;
-        
-        // Use top alignment + remove transform for precise text baseline matching
-        inlineHint.style.top = `${finalTop}px`;
-        inlineHint.style.transform = "none";
-        
-        inlineHint.style.display = "block";
-
-        // Match font style of input
-        inlineHint.style.font = computedStyle.font;
-        inlineHint.style.fontSize = computedStyle.fontSize;
-        inlineHint.style.fontFamily = computedStyle.fontFamily;
-        inlineHint.style.lineHeight = computedStyle.lineHeight;
-        inlineHint.style.letterSpacing = computedStyle.letterSpacing;
-
-        Zotero.debug(`[${config.addonName}] Inline hint: "${hintSuffix}" at ${finalLeft}px`);
-      } else {
-        // Fallback: use approximate character width
-        const charWidth = 7; // approximate width per character
-        const textWidth = inputValue.length * charWidth;
-
-        inlineHint.textContent = hintSuffix;
-        inlineHint.style.left = `${9 + textWidth}px`;
-        inlineHint.style.display = "block";
-
-        Zotero.debug(`[${config.addonName}] Inline hint (fallback): "${hintSuffix}" at ${9 + textWidth}px`);
-      }
-    };
+    // Create inline hint helper for search input
+    const searchInlineHint = new InlineHintHelper({
+      input: this.searchInput,
+      wrapper: inputWrapper,
+      history: this.searchHistory,
+      getHistory: () => this.searchHistory,
+    });
+    searchInlineHint.getElement().classList.add("zinspire-search-inline-hint");
 
     // Handle keyboard events
     this.searchInput.addEventListener("keydown", (event) => {
       Zotero.debug(`[${config.addonName}] Panel search input keydown: key=${event.key}`);
 
       // Tab or ArrowRight at end of input: accept inline hint
-      if ((event.key === "Tab" || event.key === "ArrowRight") && currentHintText) {
+      if ((event.key === "Tab" || event.key === "ArrowRight") && searchInlineHint.currentHintText) {
         const cursorAtEnd = this.searchInput?.selectionStart === this.searchInput?.value.length;
-        if (cursorAtEnd && this.searchInput) {
+        if (cursorAtEnd && searchInlineHint.accept()) {
           event.preventDefault();
-          this.searchInput.value = currentHintText;
-          inlineHint.style.display = "none";
-          currentHintText = "";
           return;
         }
       }
 
       // Escape: hide inline hint
       if (event.key === "Escape") {
-        inlineHint.style.display = "none";
-        currentHintText = "";
+        searchInlineHint.hide();
         this.hideSearchHistoryDropdown();
       }
 
       // Enter: execute search
       if (event.key === "Enter") {
         event.preventDefault();
-        inlineHint.style.display = "none";
-        currentHintText = "";
+        searchInlineHint.hide();
         const query = this.searchInput?.value.trim();
         Zotero.debug(`[${config.addonName}] Panel search Enter pressed, query="${query}"`);
         if (query) {
@@ -7170,7 +8652,7 @@ class InspireReferencePanelController {
 
     // Update hint on input
     this.searchInput.addEventListener("input", () => {
-      updateInlineHint();
+      searchInlineHint.update();
       // Hide dropdown when user is typing (inline hint is shown instead)
       this.hideSearchHistoryDropdown();
     });
@@ -7178,7 +8660,7 @@ class InspireReferencePanelController {
     // Focus: just update hint, don't show dropdown automatically
     this.searchInput.addEventListener("focus", () => {
       Zotero.debug(`[${config.addonName}] Panel search input focused, history count: ${this.searchHistory.length}`);
-      updateInlineHint();
+      searchInlineHint.update();
       // Don't auto-show dropdown - user can click ▼ button or press ArrowDown
     });
 
@@ -7186,13 +8668,11 @@ class InspireReferencePanelController {
     this.searchInput.addEventListener("blur", () => {
       // Delay to allow click on hint/dropdown
       setTimeout(() => {
-        inlineHint.style.display = "none";
-        currentHintText = "";
+        searchInlineHint.hide();
       }, 150);
     });
 
     inputWrapper.appendChild(this.searchInput);
-    inputWrapper.appendChild(inlineHint);
 
     // Create search button
     const searchButton = doc.createElement("button");
@@ -7672,7 +9152,8 @@ class InspireReferencePanelController {
     const entries: InspireReferenceEntry[] = [];
     const encodedQuery = encodeURIComponent(query);
     const sortParam = `&sort=${sort}`;
-    const fieldsParam = "&fields=control_number,titles.title,authors.full_name,authors.ids,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
+    // FTR-API-FIELD-OPTIMIZATION: Use centralized field configuration
+    const fieldsParam = buildFieldsParam(API_FIELDS_LIST_DISPLAY);
 
     // Fetch first page to get total count
     const firstUrl = `${INSPIRE_API_BASE}/literature?q=${encodedQuery}&size=${CITED_BY_PAGE_SIZE}&page=1${sortParam}${fieldsParam}`;
@@ -7779,6 +9260,11 @@ class InspireReferencePanelController {
     const inspireUrl = recid ? `${INSPIRE_LITERATURE_URL}/${recid}` : "";
     const fallbackUrl = buildFallbackUrlFromMetadata(meta, arxivDetails);
 
+    // Extract primary DOI from metadata
+    const doi = Array.isArray(meta?.dois) && meta.dois.length
+      ? (typeof meta.dois[0] === "string" ? meta.dois[0] : meta.dois[0]?.value)
+      : undefined;
+
     const entry: InspireReferenceEntry = {
       id: `search-${index}-${recid || Date.now()}`,
       recid,
@@ -7800,6 +9286,7 @@ class InspireReferencePanelController {
       publicationInfo,
       publicationInfoErrata: errata,
       arxivDetails,
+      doi,
     };
 
     // Build displayText for proper filtering (matches behavior in buildEntry and buildEntryFromSearch)
@@ -8162,14 +9649,15 @@ class InspireReferencePanelController {
       titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
     }
 
-    // Update meta (show/hide)
+    // Update meta with clickable links (DOI/arXiv)
     const meta = row.querySelector(".zinspire-ref-entry__meta") as HTMLElement;
     if (meta) {
-      if (entry.summary) {
-        meta.textContent = entry.summary;
+      const hasMeta = entry.publicationInfo || entry.arxivDetails || entry.doi;
+      if (hasMeta) {
+        this.buildMetaContent(meta, entry);
         meta.style.display = "";
       } else {
-        meta.textContent = "";
+        meta.innerHTML = "";
         meta.style.display = "none";
       }
     }
@@ -8349,6 +9837,216 @@ class InspireReferencePanelController {
       etAlSpan.textContent = " et al.";
       container.appendChild(etAlSpan);
     }
+  }
+
+  /**
+   * Create a clickable external link element.
+   * Shared helper for title links, DOI links, arXiv links, etc.
+   * - Blue color, underline on hover
+   * - Left click opens in browser via Zotero.launchURL()
+   * - Right click shows context menu (handled by event delegation)
+   */
+  private createExternalLink(
+    doc: Document,
+    text: string,
+    url: string,
+  ): HTMLAnchorElement {
+    const link = doc.createElement("a");
+    link.href = url;
+    link.textContent = text;
+    applyMetaLinkStyle(link);
+    // Hover underline
+    link.addEventListener("mouseenter", () => {
+      link.style.textDecoration = "underline";
+    });
+    link.addEventListener("mouseleave", () => {
+      link.style.textDecoration = "none";
+    });
+    // Left click opens in browser (Zotero doesn't support target="_blank")
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      Zotero.launchURL(url);
+    });
+    return link;
+  }
+
+  /**
+   * Build meta content with clickable links for DOI and arXiv.
+   * - Journal info links to DOI if available
+   * - arXiv tag links to arXiv abstract page
+   * - Erratum info also links to its DOI if available
+   */
+  private buildMetaContent(
+    container: HTMLElement,
+    entry: InspireReferenceEntry,
+  ): void {
+    const doc = this.listEl.ownerDocument;
+    container.innerHTML = "";
+
+    // Build journal info part
+    const journalText = formatPublicationInfo(entry.publicationInfo, entry.year);
+    if (journalText) {
+      if (entry.doi) {
+        const doiUrl = `${DOI_ORG_URL}/${entry.doi}`;
+        container.appendChild(this.createExternalLink(doc, journalText, doiUrl));
+      } else {
+        const journalSpan = doc.createElement("span");
+        journalSpan.textContent = journalText;
+        container.appendChild(journalSpan);
+      }
+    }
+
+    // Build arXiv part
+    const arxivDetails = formatArxivDetails(entry.arxivDetails);
+    if (arxivDetails?.id) {
+      if (journalText) {
+        // Add space separator
+        const space = doc.createElement("span");
+        space.textContent = " ";
+        container.appendChild(space);
+      }
+      const arxivUrl = `${ARXIV_ABS_URL}/${arxivDetails.id}`;
+      const arxivText = `[arXiv:${arxivDetails.id}]`;
+      container.appendChild(this.createExternalLink(doc, arxivText, arxivUrl));
+    }
+
+    // Build erratum part
+    if (entry.publicationInfoErrata?.length) {
+      const errataSummaries: string[] = [];
+      for (const errataEntry of entry.publicationInfoErrata) {
+        const text = formatPublicationInfo(errataEntry.info, entry.year, {
+          omitJournal: true,
+        });
+        if (text) {
+          errataSummaries.push(`${errataEntry.label}: ${text}`);
+        }
+      }
+      if (errataSummaries.length) {
+        // Add space before erratum bracket
+        const space = doc.createElement("span");
+        space.textContent = " [";
+        container.appendChild(space);
+
+        for (let i = 0; i < entry.publicationInfoErrata.length; i++) {
+          const errataEntry = entry.publicationInfoErrata[i];
+          const text = formatPublicationInfo(errataEntry.info, entry.year, {
+            omitJournal: true,
+          });
+          if (!text) continue;
+
+          if (i > 0) {
+            const sep = doc.createElement("span");
+            sep.textContent = "; ";
+            container.appendChild(sep);
+          }
+
+          const labelText = `${errataEntry.label}: ${text}`;
+          if (errataEntry.doi) {
+            const errataUrl = `${DOI_ORG_URL}/${errataEntry.doi}`;
+            container.appendChild(this.createExternalLink(doc, labelText, errataUrl));
+          } else {
+            const errataSpan = doc.createElement("span");
+            errataSpan.textContent = labelText;
+            container.appendChild(errataSpan);
+          }
+        }
+
+        const closeBracket = doc.createElement("span");
+        closeBracket.textContent = "]";
+        container.appendChild(closeBracket);
+      }
+    }
+  }
+
+  /**
+   * Show a context menu for link with copy option.
+   * FTR-COPY-LINK: Right-click on any link to copy its URL.
+   */
+  private showLinkContextMenu(anchor: HTMLAnchorElement, event: MouseEvent): void {
+    const doc = this.listEl.ownerDocument;
+    const url = anchor.href;
+
+    // Remove existing popup if any
+    const popupId = "zinspire-link-context-popup";
+    const existingPopup = doc.getElementById(popupId);
+    if (existingPopup) {
+      existingPopup.remove();
+    }
+
+    // Create XUL menupopup
+    const popup = (doc as any).createXULElement("menupopup") as XUL.MenuPopup;
+    popup.id = popupId;
+
+    // Copy link option
+    const copyItem = (doc as any).createXULElement("menuitem");
+    copyItem.setAttribute("label", getString("references-panel-copy-link"));
+    copyItem.addEventListener("command", () => {
+      this.copyToClipboard(url);
+    });
+    popup.appendChild(copyItem);
+
+    // Open in browser option
+    const openItem = (doc as any).createXULElement("menuitem");
+    openItem.setAttribute("label", getString("references-panel-open-link"));
+    openItem.addEventListener("command", () => {
+      Zotero.launchURL?.(url);
+    });
+    popup.appendChild(openItem);
+
+    // Add popup to document and open at mouse position
+    doc.documentElement.appendChild(popup);
+    popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
+    popup.openPopupAtScreen(event.screenX, event.screenY, true);
+  }
+
+  /**
+   * Copy text to clipboard using Zotero's clipboard utility.
+   */
+  private copyToClipboard(text: string): void {
+    try {
+      // Use Zotero's clipboard utility (XPCOM)
+      const CC = Components.classes as any;
+      const CI = Components.interfaces as any;
+      const clipboardService = CC["@mozilla.org/widget/clipboard;1"]
+        ?.getService(CI.nsIClipboard);
+      const transferable = CC["@mozilla.org/widget/transferable;1"]
+        ?.createInstance(CI.nsITransferable);
+
+      if (transferable && clipboardService) {
+        transferable.init(null);
+        transferable.addDataFlavor("text/plain");
+
+        const str = CC["@mozilla.org/supports-string;1"]
+          ?.createInstance(CI.nsISupportsString);
+        if (str) {
+          str.data = text;
+          transferable.setTransferData("text/plain", str);
+          clipboardService.setData(transferable, null, clipboardService.kGlobalClipboard);
+          this.showToast(getString("references-panel-link-copied"));
+          return;
+        }
+      }
+    } catch (e) {
+      Zotero.debug?.(`[${config.addonName}] Clipboard fallback: ${e}`);
+    }
+
+    // Fallback: try navigator.clipboard API
+    try {
+      const mainWindow = Zotero.getMainWindow?.() as Window | undefined;
+      if (mainWindow?.navigator?.clipboard) {
+        mainWindow.navigator.clipboard.writeText(text).then(() => {
+          this.showToast(getString("references-panel-link-copied"));
+        }).catch(() => {
+          this.showToast(getString("references-panel-copy-failed"));
+        });
+        return;
+      }
+    } catch (e) {
+      // Ignore
+    }
+
+    this.showToast(getString("references-panel-copy-failed"));
   }
 
   private async handleLinkAction(
@@ -8569,13 +10267,13 @@ class InspireReferencePanelController {
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
-    // Generate cache key: priority BAI > recid > name
+    // Generate cache key: priority BAI > name > recid
+    // Note: INSPIRE doesn't currently support author recid queries, so it's lowest priority
     let authorQuery: string;
     if (authorInfo.bai) {
       authorQuery = `bai:${authorInfo.bai}`;
-    } else if (authorInfo.recid) {
-      authorQuery = `recid:${authorInfo.recid}`;
     } else {
+      // Use name-based query; recid is kept as cache key fallback only (not used for API)
       authorQuery = convertFullNameToSearchQuery(authorInfo.fullName);
     }
     if (!authorQuery) {
@@ -9262,7 +10960,7 @@ class InspireReferencePanelController {
       return; // Skip if previous frame hasn't rendered yet
     }
     const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
-    const raf = win.requestAnimationFrame || ((cb: FrameRequestCallback) => win.setTimeout(cb, 16));
+    const raf = win.requestAnimationFrame || ((cb: FrameRequestCallback) => win.setTimeout(cb, RAF_FALLBACK_MS));
     this.tooltipRAF = raf(() => {
       this.tooltipRAF = undefined;
       if (this.abstractTooltip && this.abstractTooltip.style.display !== "none") {
@@ -9919,6 +11617,247 @@ class InspireReferencePanelController {
       // Update UI
       this.updateAllCheckboxes();
       this.updateBatchToolbarVisibility();
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Smart Update Auto-check (FTR-SMART-UPDATE-AUTO-CHECK)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Perform auto-check for INSPIRE updates when item is selected.
+   * Optimized for speed: uses direct recid lookup with minimal fields.
+   * Only runs if:
+   * - Auto-check is enabled in preferences
+   * - Item has not been checked recently (throttled)
+   * - Item has a valid recid
+   *
+   * @param item - The Zotero item to check
+   * @param knownRecid - Optional pre-fetched recid to avoid redundant lookup
+   */
+  private async performAutoCheck(item: Zotero.Item, knownRecid?: string) {
+    // Check if auto-check is enabled
+    if (!isAutoCheckEnabled()) {
+      return;
+    }
+
+    const itemId = item.id;
+
+    // Throttle: skip if checked recently
+    const now = Date.now();
+    const lastCheck = this.autoCheckLastCheckTime.get(itemId);
+    if (lastCheck && (now - lastCheck) < this.autoCheckThrottleMs) {
+      Zotero.debug(`[${config.addonName}] Auto-check: throttled for item ${itemId} (checked ${Math.round((now - lastCheck) / 1000)}s ago)`);
+      return;
+    }
+
+    // Update last check time
+    this.autoCheckLastCheckTime.set(itemId, now);
+
+    // Cancel any pending check
+    this.autoCheckAbort?.abort();
+
+    // Setup AbortController (available in Zotero's main window)
+    let AbortControllerClass = typeof AbortController !== "undefined" ? AbortController : null;
+    if (!AbortControllerClass) {
+      const win = Zotero.getMainWindow();
+      if (win && (win as any).AbortController) {
+        AbortControllerClass = (win as any).AbortController;
+      }
+    }
+    this.autoCheckAbort = AbortControllerClass ? new AbortControllerClass() : undefined;
+    const signal = this.autoCheckAbort?.signal;
+
+    // Clear existing notification
+    this.clearAutoCheckNotification();
+
+    // Use provided recid or derive from item (deriveRecidFromItem is synchronous)
+    const itemRecid = knownRecid || deriveRecidFromItem(item);
+    const itemTitle = item.getField("title") as string || "(Untitled)";
+
+    if (!itemRecid) {
+      Zotero.debug(`[${config.addonName}] Auto-check: no recid for item ${itemId}, skipping`);
+      return;
+    }
+
+    Zotero.debug(`[${config.addonName}] Auto-check: starting for item ${itemId}, recid=${itemRecid}, title="${itemTitle.substring(0, 40)}..."`);
+
+    try {
+      const t0 = performance.now();
+
+      // Fetch INSPIRE metadata using the item's own recid
+      const metaInspire = await fetchInspireMetaByRecid(
+        itemRecid,
+        signal,
+        "autoCheck",
+      );
+
+      if (signal?.aborted) return;
+
+      const t1 = performance.now();
+      Zotero.debug(`[${config.addonName}] Auto-check: fetch took ${Math.round(t1 - t0)}ms for item ${itemId}`);
+
+      if (metaInspire === -1 || (metaInspire as jsobject).recid === undefined) {
+        Zotero.debug(`[${config.addonName}] Auto-check: no INSPIRE record for item ${itemId}`);
+        return;
+      }
+
+      // Verify we're comparing the same record (recid should match)
+      const fetchedRecid = String((metaInspire as jsobject).recid);
+      if (fetchedRecid !== itemRecid) {
+        Zotero.debug(`[${config.addonName}] Auto-check: ERROR - recid mismatch! item=${itemRecid}, fetched=${fetchedRecid}`);
+        return;
+      }
+
+      // Compare with the item's local data (always use the original item, not current selection)
+      const diff = compareItemWithInspire(item, metaInspire as jsobject);
+      if (!diff.hasChanges) {
+        Zotero.debug(`[${config.addonName}] Auto-check: no changes for item ${itemId}`);
+        return;
+      }
+
+      Zotero.debug(`[${config.addonName}] Auto-check: found ${diff.changes.length} changes for item ${itemId}`);
+
+      // Filter protected fields
+      const protectionConfig = getFieldProtectionConfig();
+      const allowedChanges = filterProtectedChanges(diff, protectionConfig);
+
+      if (allowedChanges.length === 0) {
+        Zotero.debug(`[${config.addonName}] Auto-check: all ${diff.changes.length} changes are protected for item ${itemId}`);
+        return;
+      }
+
+      Zotero.debug(`[${config.addonName}] Auto-check: ${allowedChanges.length} allowed changes for item ${itemId}`);
+
+      // Store pending diff for later use (includes recid for verification during apply)
+      this.autoCheckPendingDiff = { diff, allowedChanges, itemRecid };
+
+      // Show notification (even if user has switched to another item)
+      // The notification will update the correct item when user clicks "View Changes"
+      this.showAutoCheckNotification(item, itemRecid, diff, allowedChanges);
+
+    } catch (err) {
+      if ((err as any)?.name !== "AbortError") {
+        Zotero.debug(`[${config.addonName}] Auto-check error for item ${itemId}: ${err}`);
+      }
+    }
+  }
+
+  /**
+   * Show the auto-check update notification bar
+   */
+  private showAutoCheckNotification(
+    item: Zotero.Item,
+    itemRecid: string,
+    diff: SmartUpdateDiff,
+    allowedChanges: FieldChange[],
+  ) {
+    if (!this.statusEl?.parentElement) return;
+
+    // Clear existing notification first
+    this.clearAutoCheckNotification();
+
+    const container = this.statusEl.parentElement;
+    const notification = showUpdateNotification(
+      container,
+      diff,
+      allowedChanges,
+      // onViewChanges
+      async () => {
+        Zotero.debug(`[${config.addonName}] Auto-check: View Changes clicked`);
+        this.clearAutoCheckNotification();
+
+        if (!this.autoCheckPendingDiff) {
+          Zotero.debug(`[${config.addonName}] Auto-check: ERROR - autoCheckPendingDiff is undefined!`);
+          return;
+        }
+
+        try {
+          const { diff, allowedChanges, itemRecid: pendingRecid } = this.autoCheckPendingDiff;
+          Zotero.debug(`[${config.addonName}] Auto-check: showing dialog for ${allowedChanges.length} changes`);
+
+          const result = await showSmartUpdatePreviewDialog(diff, allowedChanges);
+          Zotero.debug(`[${config.addonName}] Auto-check: dialog result confirmed=${result.confirmed}, fields=${result.selectedFields.length}`);
+
+          if (result.confirmed && result.selectedFields.length > 0) {
+            // Apply selected updates
+            const selectedChanges = allowedChanges.filter(c =>
+              result.selectedFields.includes(c.field)
+            );
+            await this.applyAutoCheckUpdates(item, pendingRecid, selectedChanges);
+          }
+        } catch (err) {
+          Zotero.debug(`[${config.addonName}] Auto-check: ERROR in View Changes handler: ${err}`);
+        } finally {
+          this.autoCheckPendingDiff = undefined;
+        }
+      },
+      // onDismiss
+      () => {
+        this.clearAutoCheckNotification();
+        this.autoCheckPendingDiff = undefined;
+      },
+    );
+
+    // Insert notification at the top of the panel body
+    container.insertBefore(notification, container.firstChild);
+    this.autoCheckNotification = notification;
+  }
+
+  /**
+   * Clear the auto-check notification bar
+   */
+  private clearAutoCheckNotification() {
+    if (this.autoCheckNotification) {
+      this.autoCheckNotification.remove();
+      this.autoCheckNotification = undefined;
+    }
+  }
+
+  /**
+   * Apply selected updates from auto-check
+   * @param item - The Zotero item to update
+   * @param expectedRecid - The recid that was used for comparison (for verification)
+   * @param selectedChanges - The field changes to apply
+   */
+  private async applyAutoCheckUpdates(
+    item: Zotero.Item,
+    expectedRecid: string,
+    selectedChanges: FieldChange[],
+  ) {
+    if (selectedChanges.length === 0) return;
+
+    try {
+      // Re-fetch metadata to ensure we have the latest (using full fields for complete update)
+      const metaInspire = await getInspireMeta(item, "full");
+      if (metaInspire === -1 || (metaInspire as jsobject).recid === undefined) {
+        Zotero.debug(`[${config.addonName}] Auto-check apply: failed to fetch metadata for item ${item.id}`);
+        return;
+      }
+
+      // Verify recid matches to ensure we're updating with correct data
+      const fetchedRecid = String((metaInspire as jsobject).recid);
+      if (fetchedRecid !== expectedRecid) {
+        Zotero.debug(`[${config.addonName}] Auto-check apply: ERROR - recid mismatch! expected=${expectedRecid}, fetched=${fetchedRecid}`);
+        this.showToast("Update failed: record mismatch");
+        return;
+      }
+
+      // Import selective update function
+      const { setInspireMetaSelective } = await import("./inspire/itemUpdater");
+
+      // Apply updates
+      await setInspireMetaSelective(item, metaInspire as jsobject, "full", selectedChanges);
+      await saveItemWithPendingInspireNote(item);
+
+      Zotero.debug(`[${config.addonName}] Auto-check apply: successfully updated ${selectedChanges.length} fields for item ${item.id}`);
+      this.showToast(getString("smart-update-auto-check-changes", {
+        args: { count: selectedChanges.length },
+      }) + " ✓");
+
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] Auto-check apply error: ${err}`);
+      this.showToast("Update failed");
     }
   }
 }
