@@ -1,5 +1,4 @@
 **/build
-package-lock.json
 zotero-cmd.json
 **/.DS_Store
 *.code-workspace
