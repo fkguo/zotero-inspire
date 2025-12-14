@@ -1,3 +1,5 @@
+import type { FluentMessageId } from "../../../typings/i10n";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // API Constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10,7 +12,11 @@ export const CROSSREF_API_URL = "https://api.crossref.org/works";
 // ─────────────────────────────────────────────────────────────────────────────
 // Sort Options
 // ─────────────────────────────────────────────────────────────────────────────
-export const REFERENCE_SORT_OPTIONS = ["default", "yearDesc", "citationDesc"] as const;
+export const REFERENCE_SORT_OPTIONS = [
+  "default",
+  "yearDesc",
+  "citationDesc",
+] as const;
 export type ReferenceSortOption = (typeof REFERENCE_SORT_OPTIONS)[number];
 export const INSPIRE_SORT_OPTIONS = ["mostrecent", "mostcited"] as const;
 export type InspireSortOption = (typeof INSPIRE_SORT_OPTIONS)[number];
@@ -23,7 +29,7 @@ export const DEFAULT_CITED_BY_SORT: InspireSortOption = "mostrecent";
 // Page sizing: use consistent page size to avoid pagination offset bugs
 // INSPIRE API calculates offset as (page-1) * size, so different sizes cause gaps
 export const CITED_BY_PAGE_SIZE = 250; // Consistent page size for all pages
-export const CITED_BY_MAX_PAGES = 40;  // Max pages to fetch (40 * 250 = 10000)
+export const CITED_BY_MAX_PAGES = 40; // Max pages to fetch (40 * 250 = 10000)
 export const CITED_BY_MAX_RESULTS = 10000;
 export const CITED_BY_PARALLEL_BATCH_SIZE = 5; // Number of pages to fetch in parallel (increased for faster loading)
 // Frontend pagination: render entries in chunks for better performance
@@ -141,10 +147,14 @@ export const FILTER_HISTORY_PREF_KEY = "inspireFilterHistory";
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Guards
 // ─────────────────────────────────────────────────────────────────────────────
-export const isReferenceSortOption = (value: string): value is ReferenceSortOption =>
+export const isReferenceSortOption = (
+  value: string,
+): value is ReferenceSortOption =>
   (REFERENCE_SORT_OPTIONS as readonly string[]).includes(value);
 
-export const isInspireSortOption = (value: string): value is InspireSortOption =>
+export const isInspireSortOption = (
+  value: string,
+): value is InspireSortOption =>
   (INSPIRE_SORT_OPTIONS as readonly string[]).includes(value);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -222,14 +232,17 @@ export const QUICK_FILTER_TYPES: QuickFilterType[] = [
 export const QUICK_FILTER_PREF_KEY = "quick_filters_last_used";
 
 export function isQuickFilterType(value: unknown): value is QuickFilterType {
-  return typeof value === "string" && QUICK_FILTER_TYPES.includes(value as QuickFilterType);
+  return (
+    typeof value === "string" &&
+    QUICK_FILTER_TYPES.includes(value as QuickFilterType)
+  );
 }
 
 export interface QuickFilterConfig {
   type: QuickFilterType;
   emoji: string;
-  labelKey: string;
-  tooltipKey?: string;
+  labelKey: FluentMessageId;
+  tooltipKey?: FluentMessageId;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,7 +255,8 @@ export interface QuickFilterConfig {
  * Minimal fields for citation count updates only.
  * ~200 bytes vs ~5KB full response
  */
-export const API_FIELDS_CITATIONS = "control_number,citation_count,citation_count_without_self_citations";
+export const API_FIELDS_CITATIONS =
+  "control_number,citation_count,citation_count_without_self_citations";
 
 /**
  * Fields for reference list display (panel entries).
@@ -343,4 +357,3 @@ export const QUICK_FILTER_CONFIGS: QuickFilterConfig[] = [
     tooltipKey: "references-panel-quick-filter-preprint-tooltip",
   },
 ];
-

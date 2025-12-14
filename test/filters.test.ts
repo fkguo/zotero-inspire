@@ -23,7 +23,9 @@ import {
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 
 // Helper to create a minimal entry for testing
-function createEntry(overrides: Partial<InspireReferenceEntry> = {}): InspireReferenceEntry {
+function createEntry(
+  overrides: Partial<InspireReferenceEntry> = {},
+): InspireReferenceEntry {
   return {
     id: "test-id",
     recid: 12345,
@@ -170,10 +172,18 @@ describe("matchesRecentYears", () => {
   });
 
   it("matches papers from last 5 years", () => {
-    expect(matchesRecentYears(createEntry({ year: "2024" }), ctx, 5)).toBe(true);
-    expect(matchesRecentYears(createEntry({ year: "2023" }), ctx, 5)).toBe(true);
-    expect(matchesRecentYears(createEntry({ year: "2020" }), ctx, 5)).toBe(true);
-    expect(matchesRecentYears(createEntry({ year: "2019" }), ctx, 5)).toBe(false);
+    expect(matchesRecentYears(createEntry({ year: "2024" }), ctx, 5)).toBe(
+      true,
+    );
+    expect(matchesRecentYears(createEntry({ year: "2023" }), ctx, 5)).toBe(
+      true,
+    );
+    expect(matchesRecentYears(createEntry({ year: "2020" }), ctx, 5)).toBe(
+      true,
+    );
+    expect(matchesRecentYears(createEntry({ year: "2019" }), ctx, 5)).toBe(
+      false,
+    );
   });
 
   it("returns false for invalid year", () => {
@@ -350,10 +360,10 @@ describe("applyQuickFilters", () => {
     const lowCiteEntry = createEntry({ citationCount: 10 });
 
     expect(
-      applyQuickFilters(highCiteEntry, new Set(["highCitations"]), ctx)
+      applyQuickFilters(highCiteEntry, new Set(["highCitations"]), ctx),
     ).toBe(true);
     expect(
-      applyQuickFilters(lowCiteEntry, new Set(["highCitations"]), ctx)
+      applyQuickFilters(lowCiteEntry, new Set(["highCitations"]), ctx),
     ).toBe(false);
   });
 
@@ -368,8 +378,8 @@ describe("applyQuickFilters", () => {
       applyQuickFilters(
         entry,
         new Set(["highCitations", "recent1Year", "publishedOnly"]),
-        ctx
-      )
+        ctx,
+      ),
     ).toBe(true);
   });
 
@@ -381,11 +391,7 @@ describe("applyQuickFilters", () => {
     });
 
     expect(
-      applyQuickFilters(
-        entry,
-        new Set(["highCitations", "recent1Year"]),
-        ctx
-      )
+      applyQuickFilters(entry, new Set(["highCitations", "recent1Year"]), ctx),
     ).toBe(false);
   });
 });

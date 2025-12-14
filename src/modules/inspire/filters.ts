@@ -31,7 +31,7 @@ export interface FilterContext {
  * Create a default filter context.
  */
 export function createDefaultFilterContext(
-  getCitationValue?: (entry: InspireReferenceEntry) => number
+  getCitationValue?: (entry: InspireReferenceEntry) => number,
 ): FilterContext {
   return {
     currentYear: new Date().getFullYear(),
@@ -81,12 +81,18 @@ export function hasJournalInfo(entry: InspireReferenceEntry): boolean {
 /**
  * Filter predicate function type.
  */
-export type FilterPredicate = (entry: InspireReferenceEntry, context: FilterContext) => boolean;
+export type FilterPredicate = (
+  entry: InspireReferenceEntry,
+  context: FilterContext,
+) => boolean;
 
 /**
  * High citations filter: papers with > threshold citations.
  */
-export function matchesHighCitations(entry: InspireReferenceEntry, context: FilterContext): boolean {
+export function matchesHighCitations(
+  entry: InspireReferenceEntry,
+  context: FilterContext,
+): boolean {
   const citationCount = context.getCitationValue(entry);
   return citationCount > HIGH_CITATIONS_THRESHOLD;
 }
@@ -97,7 +103,7 @@ export function matchesHighCitations(entry: InspireReferenceEntry, context: Filt
 export function matchesRecentYears(
   entry: InspireReferenceEntry,
   context: FilterContext,
-  years: number
+  years: number,
 ): boolean {
   const normalizedYears = Math.max(1, years);
   const thresholdYear = context.currentYear - (normalizedYears - 1);
@@ -160,8 +166,10 @@ export function matchesSmallAuthorGroup(entry: InspireReferenceEntry): boolean {
  * Returns undefined for unknown filter types.
  */
 export function getQuickFilterPredicate(
-  filterType: QuickFilterType
-): ((entry: InspireReferenceEntry, context: FilterContext) => boolean) | undefined {
+  filterType: QuickFilterType,
+):
+  | ((entry: InspireReferenceEntry, context: FilterContext) => boolean)
+  | undefined {
   switch (filterType) {
     case "highCitations":
       return matchesHighCitations;
@@ -191,7 +199,7 @@ export function getQuickFilterPredicate(
 export function applyQuickFilters(
   entry: InspireReferenceEntry,
   activeFilters: Set<QuickFilterType>,
-  context: FilterContext
+  context: FilterContext,
 ): boolean {
   if (activeFilters.size === 0) {
     return true;
@@ -215,7 +223,10 @@ export function applyQuickFilters(
  * Mutual exclusivity rules for quick filters.
  * If filter A is enabled, filters in the array should be disabled.
  */
-export const QUICK_FILTER_EXCLUSIONS: Record<QuickFilterType, QuickFilterType[]> = {
+export const QUICK_FILTER_EXCLUSIONS: Record<
+  QuickFilterType,
+  QuickFilterType[]
+> = {
   highCitations: [],
   recent5Years: ["recent1Year"],
   recent1Year: ["recent5Years"],
@@ -230,6 +241,8 @@ export const QUICK_FILTER_EXCLUSIONS: Record<QuickFilterType, QuickFilterType[]>
  * Enforce mutual exclusivity constraints when enabling a filter.
  * Returns the set of filters that should be disabled.
  */
-export function getExcludedFilters(filterType: QuickFilterType): QuickFilterType[] {
+export function getExcludedFilters(
+  filterType: QuickFilterType,
+): QuickFilterType[] {
   return QUICK_FILTER_EXCLUSIONS[filterType] ?? [];
 }

@@ -120,6 +120,8 @@ references-panel-toast-linked = Related item linked successfully
 references-panel-toast-added = Reference added to your library
 references-panel-toast-missing = Article not found in INSPIRE-HEP
 references-panel-toast-no-pdf = This item has no PDF attachment
+references-panel-toast-selected = Item selected in library
+references-panel-toast-bibtex-success = BibTeX copied to clipboard
 references-panel-unknown-author = Unknown author
 references-panel-year-unknown = n.d.
 references-panel-no-title = Title unavailable
@@ -140,6 +142,9 @@ references-panel-entry-select = Select a reference entry to view citing records
 references-panel-entry-label-default = Selected reference
 references-panel-loading-abstract = Loading abstract...
 references-panel-no-abstract = No abstract available
+# Hover Preview Card (FTR-HOVER-PREVIEW)
+references-panel-preview-loading = Loading details...
+references-panel-preview-abstract-truncated = [truncated]
 references-panel-author-papers-label = Papers by { $author }
 references-panel-author-click-hint = Click to view papers by { $author }
 references-panel-copy-bibtex = Copy BibTeX
@@ -149,6 +154,15 @@ references-panel-copy-link = Copy link
 references-panel-open-link = Open in browser
 references-panel-link-copied = Link copied to clipboard
 references-panel-copy-failed = Failed to copy to clipboard
+
+# Preview Card Action Buttons (FTR-HOVER-PREVIEW)
+references-panel-status-local = In Library
+references-panel-status-online = Online
+references-panel-button-add = Add to Library
+references-panel-button-link = Link
+references-panel-button-unlink = Unlink
+references-panel-button-select = Select
+references-panel-button-open-pdf = Open PDF
 
 update-cancelled = Update cancelled by user
 update-cancelled-stats = Updated { $completed }/{ $total } items before cancellation
@@ -335,3 +349,5 @@ smart-update-auto-check-changes =
 pdf-annotate-ambiguous-title = Multiple matches for "{ $citation }"
 pdf-annotate-ambiguous-message = This citation matches multiple papers. Please select the correct one:
 pdf-annotate-ambiguous-cancel = Cancel
+# FTR-AMBIGUOUS-AUTHOR-YEAR: Preview message for ambiguous author-year match
+pdf-annotate-ambiguous-preview-hint = Author-year match only; click to select

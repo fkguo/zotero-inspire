@@ -87,10 +87,7 @@ export function applyMetaLinkStyle(el: HTMLAnchorElement): void {
 /**
  * Apply styles to the tab button based on active state (pill button style)
  */
-export function applyTabButtonStyle(
-  el: HTMLElement,
-  isActive: boolean,
-): void {
+export function applyTabButtonStyle(el: HTMLElement, isActive: boolean): void {
   // Base styles applied to all tab buttons
   el.style.padding = "4px 12px";
   el.style.fontSize = "12px";
@@ -164,6 +161,81 @@ export function applyAbstractTooltipStyle(el: HTMLElement): void {
   el.style.display = "none";
   // Smooth scrollbar styling
   el.style.scrollbarWidth = "thin";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hover Preview Card Styles (FTR-HOVER-PREVIEW)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Apply styles to the hover preview card container
+ * Shows detailed paper information when hovering over a reference row
+ */
+export function applyPreviewCardStyle(el: HTMLElement): void {
+  el.style.position = "fixed";
+  el.style.zIndex = "99999";
+  el.style.maxWidth = "420px";
+  el.style.minWidth = "320px";
+  el.style.maxHeight = "400px";
+  el.style.overflowY = "auto";
+  el.style.padding = "12px 14px";
+  el.style.backgroundColor = "var(--material-background, #fff)";
+  el.style.color = "var(--fill-primary, #1a2a3a)";
+  el.style.border = "1px solid var(--fill-quinary, #c8d4e0)";
+  el.style.borderRadius = "8px";
+  el.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.15)";
+  el.style.fontSize = "13px";
+  el.style.lineHeight = "1.5";
+  el.style.pointerEvents = "auto";
+  el.style.display = "none";
+  el.style.scrollbarWidth = "thin";
+}
+
+/**
+ * Apply styles to preview card title
+ */
+export function applyPreviewCardTitleStyle(el: HTMLElement): void {
+  el.style.fontSize = "14px";
+  el.style.fontWeight = "600";
+  el.style.lineHeight = "1.4";
+  el.style.marginBottom = "8px";
+  el.style.color = "var(--fill-primary, #1a2a3a)";
+  el.style.wordWrap = "break-word";
+}
+
+/**
+ * Apply styles to preview card section (authors, publication info, etc.)
+ */
+export function applyPreviewCardSectionStyle(el: HTMLElement): void {
+  el.style.fontSize = "12px";
+  el.style.lineHeight = "1.4";
+  el.style.marginBottom = "6px";
+  el.style.color = "var(--fill-secondary, #4a5568)";
+}
+
+/**
+ * Apply styles to preview card identifiers row (arXiv, DOI)
+ */
+export function applyPreviewCardIdentifiersStyle(el: HTMLElement): void {
+  el.style.fontSize = "12px";
+  el.style.marginBottom = "6px";
+  el.style.display = "flex";
+  el.style.flexWrap = "wrap";
+  el.style.gap = "8px";
+  el.style.alignItems = "center";
+}
+
+/**
+ * Apply styles to preview card abstract
+ */
+export function applyPreviewCardAbstractStyle(el: HTMLElement): void {
+  el.style.fontSize = "12px";
+  el.style.lineHeight = "1.5";
+  el.style.color = "var(--fill-secondary, #4a5568)";
+  el.style.marginTop = "8px";
+  el.style.paddingTop = "8px";
+  el.style.borderTop = "1px solid var(--fill-quinary, #e2e8f0)";
+  el.style.fontStyle = "italic";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -529,7 +601,9 @@ export function showTargetPickerUI(
     tagsWrapper.appendChild(tagsInput);
 
     const tagsSuggestionPanel = doc.createElement("div");
-    tagsSuggestionPanel.classList.add("zinspire-collection-picker__tags-autocomplete");
+    tagsSuggestionPanel.classList.add(
+      "zinspire-collection-picker__tags-autocomplete",
+    );
     tagsSuggestionPanel.style.position = "absolute";
     tagsSuggestionPanel.style.left = "0";
     tagsSuggestionPanel.style.right = "0";
@@ -547,7 +621,7 @@ export function showTargetPickerUI(
     tagsWrapper.appendChild(tagsSuggestionPanel);
 
     // Ensure placeholder is visible (might be white on white depending on theme)
-    // tagsInput.style.color = "inherit"; 
+    // tagsInput.style.color = "inherit";
     // tagsInput.style.backgroundColor = "inherit";
 
     // Use HTML namespace for datalist to ensure it works in XHTML context (Zotero 7)
@@ -624,7 +698,10 @@ export function showTargetPickerUI(
       }
       const query = getCurrentTagQuery();
       const allowEmptyQuery =
-        force || !!query || /[,;]\s*$/.test(tagsInput.value) || !tagsInput.value.trim();
+        force ||
+        !!query ||
+        /[,;]\s*$/.test(tagsInput.value) ||
+        !tagsInput.value.trim();
       if (!query && !allowEmptyQuery) {
         hideTagSuggestions();
         return;
@@ -654,7 +731,9 @@ export function showTargetPickerUI(
       matches.forEach((name, index) => {
         const button = doc.createElement("button");
         button.type = "button";
-        button.classList.add("zinspire-collection-picker__tags-autocomplete-item");
+        button.classList.add(
+          "zinspire-collection-picker__tags-autocomplete-item",
+        );
         button.textContent = name;
         button.style.display = "block";
         button.style.width = "100%";
@@ -678,7 +757,9 @@ export function showTargetPickerUI(
 
     const addTagCandidate = (rawName: unknown) => {
       const normalized =
-        typeof rawName === "string" ? rawName.trim() : String(rawName ?? "").trim();
+        typeof rawName === "string"
+          ? rawName.trim()
+          : String(rawName ?? "").trim();
       if (!normalized) {
         return;
       }
@@ -694,7 +775,10 @@ export function showTargetPickerUI(
       ) as HTMLOptionElement;
       option.value = normalized;
       tagsDataList.appendChild(option);
-      if (doc.activeElement === tagsInput && tagsSuggestionPanel.style.display !== "none") {
+      if (
+        doc.activeElement === tagsInput &&
+        tagsSuggestionPanel.style.display !== "none"
+      ) {
         renderTagSuggestions(true);
       }
     };
@@ -913,7 +997,7 @@ export function showTargetPickerUI(
       targets.find((row) => row.type === "library")?.id ||
       null;
     let selectedLibraryID: number | null = selectedLibraryRowID
-      ? rowMap.get(selectedLibraryRowID)?.libraryID ?? null
+      ? (rowMap.get(selectedLibraryRowID)?.libraryID ?? null)
       : null;
     const selectedCollectionRowIDs = new Set<string>();
     if (focusedID) {
@@ -1339,7 +1423,9 @@ export function showAmbiguousCitationPicker(
     // updateFocus will be called after buttons are created
     const updateFocus = () => {
       buttons.forEach((btn, idx) => {
-        const radioIndicator = (btn as any)._radioIndicator as HTMLElement | undefined;
+        const radioIndicator = (btn as any)._radioIndicator as
+          | HTMLElement
+          | undefined;
         const innerDot = (btn as any)._innerDot as HTMLElement | undefined;
         if (idx === focusedIndex) {
           btn.style.backgroundColor = "#e6f2ff";
@@ -1349,7 +1435,8 @@ export function showAmbiguousCitationPicker(
         } else {
           btn.style.backgroundColor = "var(--material-background, #fff)";
           btn.style.borderColor = "var(--material-border, #ccc)";
-          if (radioIndicator) radioIndicator.style.borderColor = "var(--material-border, #ccc)";
+          if (radioIndicator)
+            radioIndicator.style.borderColor = "var(--material-border, #ccc)";
           if (innerDot) innerDot.style.opacity = "0";
         }
       });
@@ -1370,7 +1457,8 @@ export function showAmbiguousCitationPicker(
       button.style.backgroundColor = "var(--material-background, #fff)";
       button.style.cursor = "pointer";
       button.style.textAlign = "left";
-      button.style.transition = "background-color 0.15s ease, border-color 0.15s ease";
+      button.style.transition =
+        "background-color 0.15s ease, border-color 0.15s ease";
       button.style.gap = "12px";
 
       // Radio-style indicator
@@ -1455,9 +1543,10 @@ export function showAmbiguousCitationPicker(
         titleLine.style.maxWidth = "100%";
         // Truncate title if too long
         const maxTitleLength = 60;
-        const truncatedTitle = candidate.title.length > maxTitleLength
-          ? candidate.title.substring(0, maxTitleLength) + "..."
-          : candidate.title;
+        const truncatedTitle =
+          candidate.title.length > maxTitleLength
+            ? candidate.title.substring(0, maxTitleLength) + "..."
+            : candidate.title;
         titleLine.textContent = truncatedTitle;
         titleLine.title = candidate.title; // Full title on hover
         content.appendChild(titleLine);

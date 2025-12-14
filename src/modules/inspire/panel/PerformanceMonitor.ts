@@ -115,7 +115,9 @@ export class PerformanceMonitor {
     const metric = this.activeTimers.get(timerId);
     if (!metric) {
       if (this.options.debugMode) {
-        Zotero.debug(`[${config.addonName}] [Perf] Timer not found: ${timerId}`);
+        Zotero.debug(
+          `[${config.addonName}] [Perf] Timer not found: ${timerId}`,
+        );
       }
       return undefined;
     }
@@ -129,12 +131,16 @@ export class PerformanceMonitor {
 
     // Check for slow operation
     if (metric.duration > this.options.slowOperationThreshold) {
-      this.options.onSlowOperation(metric.name, metric.duration, this.options.slowOperationThreshold);
+      this.options.onSlowOperation(
+        metric.name,
+        metric.duration,
+        this.options.slowOperationThreshold,
+      );
     }
 
     if (this.options.debugMode) {
       Zotero.debug(
-        `[${config.addonName}] [Perf] Completed: ${metric.name} in ${metric.duration.toFixed(2)}ms`
+        `[${config.addonName}] [Perf] Completed: ${metric.name} in ${metric.duration.toFixed(2)}ms`,
       );
     }
 
@@ -151,7 +157,7 @@ export class PerformanceMonitor {
   async measureAsync<T>(
     name: string,
     fn: () => Promise<T>,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
   ): Promise<T> {
     const timerId = this.start(name, metadata);
     try {
@@ -190,7 +196,9 @@ export class PerformanceMonitor {
       return undefined;
     }
 
-    const durations = history.map((m) => m.duration!).filter((d) => d !== undefined);
+    const durations = history
+      .map((m) => m.duration!)
+      .filter((d) => d !== undefined);
     if (durations.length === 0) {
       return undefined;
     }
@@ -248,7 +256,7 @@ export class PerformanceMonitor {
           `count=${stat.count}, ` +
           `avg=${stat.avgDuration.toFixed(2)}ms, ` +
           `min=${stat.minDuration.toFixed(2)}ms, ` +
-          `max=${stat.maxDuration.toFixed(2)}ms`
+          `max=${stat.maxDuration.toFixed(2)}ms`,
       );
     }
     Zotero.debug(`[${config.addonName}] [Perf] ────────────────────────────`);
@@ -336,7 +344,9 @@ let globalMonitor: PerformanceMonitor | undefined;
 /**
  * Get or create the global performance monitor.
  */
-export function getPerformanceMonitor(options?: PerformanceMonitorOptions): PerformanceMonitor {
+export function getPerformanceMonitor(
+  options?: PerformanceMonitorOptions,
+): PerformanceMonitor {
   if (!globalMonitor) {
     globalMonitor = new PerformanceMonitor(options);
   }
@@ -362,7 +372,7 @@ export function resetPerformanceMonitor(): void {
 export function wrapWithMonitoring<T extends (...args: any[]) => any>(
   fn: T,
   name: string,
-  monitor?: PerformanceMonitor
+  monitor?: PerformanceMonitor,
 ): T {
   const mon = monitor || getPerformanceMonitor();
   return function (this: any, ...args: Parameters<T>): ReturnType<T> {
@@ -384,13 +394,14 @@ export function wrapWithMonitoring<T extends (...args: any[]) => any>(
 /**
  * Helper to wrap an async method with performance monitoring.
  */
-export function wrapAsyncWithMonitoring<T extends (...args: any[]) => Promise<any>>(
-  fn: T,
-  name: string,
-  monitor?: PerformanceMonitor
-): T {
+export function wrapAsyncWithMonitoring<
+  T extends (...args: any[]) => Promise<any>,
+>(fn: T, name: string, monitor?: PerformanceMonitor): T {
   const mon = monitor || getPerformanceMonitor();
-  return async function (this: any, ...args: Parameters<T>): Promise<ReturnType<T>> {
+  return async function (
+    this: any,
+    ...args: Parameters<T>
+  ): Promise<ReturnType<T>> {
     return mon.measureAsync(name, () => fn.apply(this, args));
   } as T;
 }

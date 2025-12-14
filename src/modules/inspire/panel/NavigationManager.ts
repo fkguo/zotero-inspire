@@ -98,14 +98,19 @@ export class NavigationManager {
    * Check if back navigation is available.
    */
   canGoBack(): boolean {
-    return NavigationManager.backStack.length > 0 && !NavigationManager.isNavigating;
+    return (
+      NavigationManager.backStack.length > 0 && !NavigationManager.isNavigating
+    );
   }
 
   /**
    * Check if forward navigation is available.
    */
   canGoForward(): boolean {
-    return NavigationManager.forwardStack.length > 0 && !NavigationManager.isNavigating;
+    return (
+      NavigationManager.forwardStack.length > 0 &&
+      !NavigationManager.isNavigating
+    );
   }
 
   /**
@@ -137,7 +142,8 @@ export class NavigationManager {
       context.currentReaderTabID;
 
     const scrollState = this.captureScrollState();
-    const finalTabType = liveTabType === "reader" ? "reader" : context.currentTabType;
+    const finalTabType =
+      liveTabType === "reader" ? "reader" : context.currentTabType;
 
     stack.push({
       itemID: context.currentItemID,
@@ -207,7 +213,9 @@ export class NavigationManager {
 
       // If the snapshot was from a reader tab, try to switch to it directly
       if (snapshot.tabType === "reader" && snapshot.readerTabID) {
-        const readerTabExists = ReaderTabHelper.getReaderByTabID(snapshot.readerTabID);
+        const readerTabExists = ReaderTabHelper.getReaderByTabID(
+          snapshot.readerTabID,
+        );
         if (readerTabExists) {
           ReaderTabHelper.selectTab(snapshot.readerTabID);
           ReaderTabHelper.focusReader(readerTabExists);
@@ -283,7 +291,9 @@ export class NavigationManager {
 
       // If the snapshot was from a reader tab, try to switch to it directly
       if (snapshot.tabType === "reader" && snapshot.readerTabID) {
-        const readerTabExists = ReaderTabHelper.getReaderByTabID(snapshot.readerTabID);
+        const readerTabExists = ReaderTabHelper.getReaderByTabID(
+          snapshot.readerTabID,
+        );
         if (readerTabExists) {
           ReaderTabHelper.selectTab(snapshot.readerTabID);
           ReaderTabHelper.focusReader(readerTabExists);
@@ -328,7 +338,9 @@ export class NavigationManager {
    * Get and clear the pending scroll restore state.
    * Returns the scroll state if there's a pending restore for the given item.
    */
-  getPendingScrollRestore(itemID: number): (ScrollState & { itemID: number }) | undefined {
+  getPendingScrollRestore(
+    itemID: number,
+  ): (ScrollState & { itemID: number }) | undefined {
     // Check instance-specific first
     if (this.pendingLocalScrollRestore?.itemID === itemID) {
       const result = this.pendingLocalScrollRestore;
@@ -397,7 +409,9 @@ export class NavigationManager {
 
     const doc = body.ownerDocument;
     const isElementNode = (value: unknown): value is Element =>
-      Boolean(value && typeof value === "object" && (value as Node).nodeType === 1);
+      Boolean(
+        value && typeof value === "object" && (value as Node).nodeType === 1,
+      );
 
     const scrollSnapshots: ScrollSnapshot[] = [];
     let current: Element | null = body;
@@ -444,7 +458,9 @@ export class NavigationManager {
     };
   }
 
-  private captureNavigationSnapshot(context: NavigationContext): NavigationSnapshot | null {
+  private captureNavigationSnapshot(
+    context: NavigationContext,
+  ): NavigationSnapshot | null {
     if (!context.currentItemID) {
       return null;
     }
@@ -471,7 +487,11 @@ export class NavigationManager {
   // ─────────────────────────────────────────────────────────────────────────────
 
   private async reopenReaderTab(snapshot: NavigationSnapshot): Promise<void> {
-    if (!snapshot.itemID || !Zotero.Reader || typeof Zotero.Reader.open !== "function") {
+    if (
+      !snapshot.itemID ||
+      !Zotero.Reader ||
+      typeof Zotero.Reader.open !== "function"
+    ) {
       return;
     }
 
@@ -500,7 +520,7 @@ export class NavigationManager {
 
       if (!attachmentID) {
         Zotero.debug(
-          `[${config.addonName}] NavigationManager: No attachment found for item ${snapshot.itemID}`
+          `[${config.addonName}] NavigationManager: No attachment found for item ${snapshot.itemID}`,
         );
         return;
       }
@@ -515,7 +535,7 @@ export class NavigationManager {
       }
     } catch (err) {
       Zotero.debug(
-        `[${config.addonName}] NavigationManager: Failed to reopen reader for item ${snapshot.itemID}: ${err}`
+        `[${config.addonName}] NavigationManager: Failed to reopen reader for item ${snapshot.itemID}: ${err}`,
       );
     }
   }

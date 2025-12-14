@@ -11,8 +11,8 @@
  */
 export interface AuthorSearchInfo {
   fullName: string;
-  bai?: string;    // INSPIRE BAI (e.g., "Feng.Kun.Guo.1") - most precise
-  recid?: string;  // INSPIRE author recid (lowest priority, not currently supported by INSPIRE API)
+  bai?: string; // INSPIRE BAI (e.g., "Feng.Kun.Guo.1") - most precise
+  recid?: string; // INSPIRE author recid (lowest priority, not currently supported by INSPIRE API)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,21 +34,21 @@ export interface InspireReferenceEntry {
   summary?: string;
   year: string;
   authors: string[];
-  totalAuthors?: number;  // Total author count (for detecting "et al." need)
-  authorSearchInfos?: AuthorSearchInfo[];  // Author info for precise search
+  totalAuthors?: number; // Total author count (for detecting "et al." need)
+  authorSearchInfos?: AuthorSearchInfo[]; // Author info for precise search
   authorText: string;
   displayText: string;
   searchText: string;
   localItemID?: number;
   isRelated?: boolean;
   citationCount?: number;
-  citationCountWithoutSelf?: number;  // Citation count excluding self-citations
+  citationCountWithoutSelf?: number; // Citation count excluding self-citations
   publicationInfo?: any;
   publicationInfoErrata?: Array<{ info: any; label: string; doi?: string }>;
   arxivDetails?: InspireArxivDetails | string | null;
   abstract?: string;
   abstractLoading?: boolean;
-  doi?: string;  // DOI for journal link and duplicate detection
+  doi?: string; // DOI for journal link and duplicate detection
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,7 +103,11 @@ export interface ChartBin {
 // View Mode Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type InspireViewMode = "references" | "citedBy" | "entryCited" | "search";
+export type InspireViewMode =
+  | "references"
+  | "citedBy"
+  | "entryCited"
+  | "search";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Search History Types
@@ -193,14 +197,14 @@ export type LocalCacheType = "refs" | "cited" | "author";
  * Uses short property names to reduce file size.
  */
 export interface LocalCacheFile<T> {
-  v: number;           // version
-  t: LocalCacheType;   // type
-  k: string;           // key (recid or author BAI)
-  ts: number;          // timestamp (Date.now())
-  ttl: number;         // TTL in hours (-1 = permanent)
-  d: T;                // data
-  c?: boolean;         // complete flag (true = fetch completed successfully)
-  n?: number;          // total count from API (for smart caching: if n <= limit, data is complete)
+  v: number; // version
+  t: LocalCacheType; // type
+  k: string; // key (recid or author BAI)
+  ts: number; // timestamp (Date.now())
+  ttl: number; // TTL in hours (-1 = permanent)
+  d: T; // data
+  c?: boolean; // complete flag (true = fetch completed successfully)
+  n?: number; // total count from API (for smart caching: if n <= limit, data is complete)
 }
 
 /**
@@ -214,6 +218,5 @@ export type CacheSource = "api" | "memory" | "local";
 export interface CachedData<T> {
   data: T;
   source: CacheSource;
-  ageHours?: number;   // Age in hours (for local cache)
+  ageHours?: number; // Age in hours (for local cache)
 }
-

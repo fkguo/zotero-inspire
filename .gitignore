@@ -6,6 +6,12 @@ zotero-cmd.json
 CLAUDE.md
 .cursor/
 .claude/
+.vscode/
 localdocs/
 tmp/
 node_modules/
+
+# Scaffold recommended
+.env
+.scaffold/
+

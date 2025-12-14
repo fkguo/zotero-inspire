@@ -61,7 +61,10 @@ export interface BatchImportManagerOptions {
   /** Callback to get filtered entries (current view) */
   getFilteredEntries: () => InspireReferenceEntry[];
   /** Callback to import a single reference by recid */
-  importReference: (recid: string, target: BatchSaveTarget) => Promise<Zotero.Item | null>;
+  importReference: (
+    recid: string,
+    target: BatchSaveTarget,
+  ) => Promise<Zotero.Item | null>;
   /** Callback to prompt for save target (shows picker UI) */
   promptForSaveTarget: (anchor: HTMLElement) => Promise<BatchSaveTarget | null>;
   /** Callback to show a toast notification */
@@ -141,7 +144,9 @@ export class BatchImportManager {
     if (event.shiftKey && this.lastSelectedEntryID) {
       // Shift+Click: select range
       const filteredEntries = this.options.getFilteredEntries();
-      const lastIndex = filteredEntries.findIndex((e) => e.id === this.lastSelectedEntryID);
+      const lastIndex = filteredEntries.findIndex(
+        (e) => e.id === this.lastSelectedEntryID,
+      );
       const currentIndex = filteredEntries.findIndex((e) => e.id === entry.id);
 
       if (lastIndex >= 0 && currentIndex >= 0) {
@@ -198,7 +203,9 @@ export class BatchImportManager {
    * Handle batch import button click.
    * Returns the import result or null if cancelled.
    */
-  async handleBatchImport(anchor: HTMLElement): Promise<BatchImportResult | null> {
+  async handleBatchImport(
+    anchor: HTMLElement,
+  ): Promise<BatchImportResult | null> {
     if (this.selectedEntryIDs.size === 0) {
       this.options.showToast(getString("references-panel-batch-no-selection"));
       return null;
@@ -206,7 +213,7 @@ export class BatchImportManager {
 
     const allEntries = this.options.getAllEntries();
     const selectedEntries = allEntries.filter(
-      (e) => this.selectedEntryIDs.has(e.id) && e.recid
+      (e) => this.selectedEntryIDs.has(e.id) && e.recid,
     );
 
     if (selectedEntries.length === 0) {
@@ -220,7 +227,10 @@ export class BatchImportManager {
     // If there are duplicates, show dialog
     let entriesToImport = selectedEntries;
     if (duplicates.size > 0) {
-      const result = await this.showDuplicateDialog(selectedEntries, duplicates);
+      const result = await this.showDuplicateDialog(
+        selectedEntries,
+        duplicates,
+      );
       if (!result) {
         return null; // User cancelled
       }
@@ -265,7 +275,7 @@ export class BatchImportManager {
    * Detect duplicates for selected entries.
    */
   private async detectDuplicates(
-    entries: InspireReferenceEntry[]
+    entries: InspireReferenceEntry[],
   ): Promise<Map<string, DuplicateInfo>> {
     const duplicates = new Map<string, DuplicateInfo>();
 
@@ -275,7 +285,10 @@ export class BatchImportManager {
       // All entries already have localItemID
       for (const entry of entries) {
         if (entry.localItemID) {
-          duplicates.set(entry.id, { localItemID: entry.localItemID, matchType: "recid" });
+          duplicates.set(entry.id, {
+            localItemID: entry.localItemID,
+            matchType: "recid",
+          });
         }
       }
       return duplicates;
@@ -295,7 +308,9 @@ export class BatchImportManager {
         entryByRecid.set(entry.recid, entry);
       }
       const arxivId =
-        typeof entry.arxivDetails === "object" ? entry.arxivDetails?.id : undefined;
+        typeof entry.arxivDetails === "object"
+          ? entry.arxivDetails?.id
+          : undefined;
       if (arxivId) {
         arxivIds.push(arxivId);
         entryByArxiv.set(arxivId, entry);
@@ -308,17 +323,24 @@ export class BatchImportManager {
 
     // Batch query for each identifier type (priority: recid > arXiv > DOI)
     const [recidMatches, arxivMatches, doiMatches] = await Promise.all([
-      recids.length > 0 ? findItemsByRecids(recids) : Promise.resolve(new Map<string, number>()),
+      recids.length > 0
+        ? findItemsByRecids(recids)
+        : Promise.resolve(new Map<string, number>()),
       arxivIds.length > 0
         ? findItemsByArxivs(arxivIds)
         : Promise.resolve(new Map<string, number>()),
-      dois.length > 0 ? findItemsByDOIs(dois) : Promise.resolve(new Map<string, number>()),
+      dois.length > 0
+        ? findItemsByDOIs(dois)
+        : Promise.resolve(new Map<string, number>()),
     ]);
 
     // Add already-local entries
     for (const entry of entries) {
       if (entry.localItemID) {
-        duplicates.set(entry.id, { localItemID: entry.localItemID, matchType: "recid" });
+        duplicates.set(entry.id, {
+          localItemID: entry.localItemID,
+          matchType: "recid",
+        });
       }
     }
 
@@ -356,7 +378,7 @@ export class BatchImportManager {
    */
   private showDuplicateDialog(
     entries: InspireReferenceEntry[],
-    duplicates: Map<string, DuplicateInfo>
+    duplicates: Map<string, DuplicateInfo>,
   ): Promise<InspireReferenceEntry[] | null> {
     return new Promise((resolve) => {
       const doc = this.options.getDocument();
@@ -407,9 +429,12 @@ export class BatchImportManager {
         fontSize: "12px",
         marginBottom: "12px",
       });
-      message.textContent = getString("references-panel-batch-duplicate-message", {
-        args: { count: duplicates.size },
-      });
+      message.textContent = getString(
+        "references-panel-batch-duplicate-message",
+        {
+          args: { count: duplicates.size },
+        },
+      );
       content.appendChild(message);
 
       // List of duplicates
@@ -465,7 +490,7 @@ export class BatchImportManager {
           marginTop: "2px",
         });
         matchEl.textContent = getString(
-          `references-panel-batch-duplicate-match-${match.matchType}`
+          `references-panel-batch-duplicate-match-${match.matchType}`,
         );
         info.appendChild(matchEl);
 
@@ -491,30 +516,40 @@ export class BatchImportManager {
           padding: "6px 12px",
           fontSize: "12px",
           cursor: "pointer",
-          background: primary ? "var(--zotero-blue-5, #0060df)" : "var(--zotero-gray-1, #ffffff)",
+          background: primary
+            ? "var(--zotero-blue-5, #0060df)"
+            : "var(--zotero-gray-1, #ffffff)",
           color: primary ? "#ffffff" : "var(--zotero-gray-7, #2b2b30)",
-          borderColor: primary ? "var(--zotero-blue-5, #0060df)" : "var(--zotero-gray-4, #d1d1d5)",
+          borderColor: primary
+            ? "var(--zotero-blue-5, #0060df)"
+            : "var(--zotero-gray-4, #d1d1d5)",
         });
         btn.textContent = text;
         return btn;
       };
 
       // Skip All
-      const skipAllBtn = createBtn(getString("references-panel-batch-duplicate-skip-all"));
+      const skipAllBtn = createBtn(
+        getString("references-panel-batch-duplicate-skip-all"),
+      );
       skipAllBtn.addEventListener("click", () => {
         for (const cb of checkboxMap.values()) cb.checked = false;
       });
       actions.appendChild(skipAllBtn);
 
       // Import All
-      const importAllBtn = createBtn(getString("references-panel-batch-duplicate-import-all"));
+      const importAllBtn = createBtn(
+        getString("references-panel-batch-duplicate-import-all"),
+      );
       importAllBtn.addEventListener("click", () => {
         for (const cb of checkboxMap.values()) cb.checked = true;
       });
       actions.appendChild(importAllBtn);
 
       // Cancel
-      const cancelBtn = createBtn(getString("references-panel-batch-duplicate-cancel"));
+      const cancelBtn = createBtn(
+        getString("references-panel-batch-duplicate-cancel"),
+      );
       cancelBtn.addEventListener("click", () => {
         overlay.remove();
         resolve(null);
@@ -524,7 +559,7 @@ export class BatchImportManager {
       // Confirm
       const confirmBtn = createBtn(
         getString("references-panel-batch-duplicate-confirm"),
-        true
+        true,
       );
       confirmBtn.addEventListener("click", () => {
         const result: InspireReferenceEntry[] = [];
@@ -573,7 +608,7 @@ export class BatchImportManager {
    */
   private async runBatchImport(
     entries: InspireReferenceEntry[],
-    target: BatchSaveTarget
+    target: BatchSaveTarget,
   ): Promise<BatchImportResult> {
     const total = entries.length;
     let done = 0;
@@ -592,7 +627,9 @@ export class BatchImportManager {
       }
     }
 
-    this.importAbort = AbortControllerClass ? new AbortControllerClass() : undefined;
+    this.importAbort = AbortControllerClass
+      ? new AbortControllerClass()
+      : undefined;
     const signal = this.importAbort?.signal || {
       aborted: false,
       addEventListener: () => {},
@@ -615,7 +652,9 @@ export class BatchImportManager {
     const progressWindow = new ProgressWindowHelper(config.addonName);
     progressWindow.win.changeHeadline(config.addonName, icon);
     progressWindow.createLine({
-      text: getString("references-panel-batch-importing", { args: { done: 0, total } }),
+      text: getString("references-panel-batch-importing", {
+        args: { done: 0, total },
+      }),
       progress: 0,
     });
     progressWindow.show(-1);
@@ -630,7 +669,10 @@ export class BatchImportManager {
         const entry = entries[currentIndex];
 
         try {
-          const newItem = await this.options.importReference(entry.recid!, target);
+          const newItem = await this.options.importReference(
+            entry.recid!,
+            target,
+          );
           if (newItem) {
             entry.localItemID = newItem.id;
             entry.displayText = buildDisplayText(entry);
@@ -649,7 +691,9 @@ export class BatchImportManager {
         done++;
         const percent = Math.round((done / total) * 100);
         progressWindow.changeLine({
-          text: getString("references-panel-batch-importing", { args: { done, total } }),
+          text: getString("references-panel-batch-importing", {
+            args: { done, total },
+          }),
           progress: percent,
         });
       }
@@ -671,15 +715,21 @@ export class BatchImportManager {
       // Show result toast
       if (signal.aborted) {
         this.options.showToast(
-          getString("references-panel-batch-import-cancelled", { args: { done, total } })
+          getString("references-panel-batch-import-cancelled", {
+            args: { done, total },
+          }),
         );
       } else if (failed > 0) {
         this.options.showToast(
-          getString("references-panel-batch-import-partial", { args: { success, total, failed } })
+          getString("references-panel-batch-import-partial", {
+            args: { success, total, failed },
+          }),
         );
       } else {
         this.options.showToast(
-          getString("references-panel-batch-import-success", { args: { count: success } })
+          getString("references-panel-batch-import-success", {
+            args: { count: success },
+          }),
         );
       }
 

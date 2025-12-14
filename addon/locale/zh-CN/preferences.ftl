@@ -40,6 +40,12 @@ pref-chart-enable-desc = 在面板顶部显示交互式统计图表（按年份/
 pref-chart-default-collapsed =
     .label = 默认折叠
 
+pref-keyboard-shortcuts-title = 键盘快捷键
+pref-keyboard-shortcuts-desc = 使用键盘导航和操作条目
+pref-keyboard-shortcuts-nav = ↑/↓ 或 j/k：导航条目 · Home/End：跳转到首项/末项 · ←/→：后退/前进
+pref-keyboard-shortcuts-action = Enter：打开 PDF 或选中条目 · Space/l：切换关联 · Ctrl+C：复制 BibTeX
+pref-keyboard-shortcuts-tab = Tab/Shift+Tab：切换标签页 · Escape：清除焦点
+
 pref-search-history-clear =
     .label = 清除搜索历史
 pref-search-history-cleared = 历史已清除
@@ -92,5 +98,30 @@ pref-local-cache-clear =
     .label = 清除缓存
 pref-local-cache-cleared = 缓存已清除（{ $count } 个文件）
 pref-local-cache-stats = { $count } 个文件，{ $size }
+
+pref-smart-update = 智能更新
+pref-smart-update-enable =
+    .label = 启用智能更新模式
+pref-smart-update-enable-desc = 仅更新已变更的字段。保留用户编辑内容，更新前显示预览。
+pref-smart-update-preview =
+    .label = 更新前显示预览对话框
+pref-smart-update-preview-desc = 查看检测到的变更并选择要更新的字段。
+pref-smart-update-auto-check =
+    .label = 选中条目时自动检查更新
+pref-smart-update-auto-check-desc = 选中条目时自动从 INSPIRE 检查新元数据。如发现变更则显示更新通知。
+pref-smart-update-protect-title = 受保护字段
+pref-smart-update-protect-desc = 如果您已输入数据，则跳过这些字段（不会覆盖您的编辑）。
+pref-smart-update-protect-field-title =
+    .label = 标题
+pref-smart-update-protect-field-authors =
+    .label = 作者
+pref-smart-update-protect-field-abstract =
+    .label = 摘要
+pref-smart-update-protect-field-journal =
+    .label = 期刊
+pref-smart-update-protected-names-title = 受保护的作者姓名
+pref-smart-update-protected-names-desc = 此列表中的作者姓名在更新时将被保留。带变音符号的姓名（如 ä、ö、ü、ß 等）会自动检测。
+pref-smart-update-protected-names-input =
+    .placeholder = 例如：Meißner, Müller, O'Brien
 
 pref-help = { $name } 版本 { $version } { $time }

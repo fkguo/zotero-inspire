@@ -9,8 +9,8 @@
 
 ### 1.1 Three View Modes
 
-| Mode                  | Description                                                              |
-| --------------------- | ------------------------------------------------------------------------ |
+| Mode            | Description                                                              |
+| --------------- | ------------------------------------------------------------------------ |
 | **References**  | Shows papers cited by the current item (from INSPIRE's references data)  |
 | **Cited By**    | Shows papers that cite the current item                                  |
 | **Entry Cited** | Shows papers citing a specific reference, or papers by a specific author |
@@ -102,36 +102,36 @@ A statistics visualization chart is displayed at the top of the panel (between t
 
 ### 1.4 Interaction Features
 
-| Action                       | Behavior                                           |
-| ---------------------------- | -------------------------------------------------- |
-| Click local status (●/⊕)   | Open existing item in library, or add missing item |
+| Action                        | Behavior                                           |
+| ----------------------------- | -------------------------------------------------- |
+| Click local status (●/⊕)      | Open existing item in library, or add missing item |
 | Double-click local status (●) | Open PDF directly if available                     |
-| Click link icon              | Add/remove related item relationship               |
-| Click author name            | View all papers by that author                     |
-| Click title                  | Open in INSPIRE (or arXiv/DOI fallback)            |
-| Click citation count         | View papers citing this entry                      |
-| Click BibTeX button          | Copy BibTeX to clipboard                           |
-| Hover over title             | Show abstract tooltip                              |
-| Click refresh button         | Reload current view (bypass cache)                 |
-| Click copy all BibTeX button | Copy all visible entries as BibTeX                 |
+| Click link icon               | Add/remove related item relationship               |
+| Click author name             | View all papers by that author                     |
+| Click title                   | Open in INSPIRE (or arXiv/DOI fallback)            |
+| Click citation count          | View papers citing this entry                      |
+| Click BibTeX button           | Copy BibTeX to clipboard                           |
+| Hover over title              | Show abstract tooltip                              |
+| Click refresh button          | Reload current view (bypass cache)                 |
+| Click copy all BibTeX button  | Copy all visible entries as BibTeX                 |
 
 ### 1.5 Caching
 
 All data caches use LRU (Least Recently Used) eviction to prevent unbounded memory growth.
 
-| Cache                | Type | Max Size | Purpose                                          |
-| -------------------- | ---- | -------- | ------------------------------------------------ |
-| `referencesCache`  | LRU | 100 | Caches fetched references by recid + sort        |
-| `citedByCache`     | LRU | 50 | Caches cited-by results by recid + sort          |
-| `entryCitedCache`  | LRU | 50 | Caches entry-cited/author-papers results         |
-| `metadataCache`    | LRU | 500 | Caches individual record metadata                |
-| `recidLookupCache` | LRU | 500 | Caches recid lookups to avoid repeated API calls |
-| `processedDataCache` | LRU | 20 | Caches PDF processed data per item              |
-| `pageDataCache`    | LRU | 50 | Caches PDF page data per item+page              |
-| `pdfMappingCache`  | LRU | 30 | Caches PDF numeric reference mapping            |
-| `pdfAuthorYearMappingCache` | LRU | 30 | Caches PDF author-year mapping      |
-| `rowCache`         | Map | - | Caches DOM elements for rendered rows (cleared on re-render) |
-| `searchTextCache`  | WeakMap | - | Caches search text per entry (auto GC'd) |
+| Cache                       | Type    | Max Size | Purpose                                                      |
+| --------------------------- | ------- | -------- | ------------------------------------------------------------ |
+| `referencesCache`           | LRU     | 100      | Caches fetched references by recid + sort                    |
+| `citedByCache`              | LRU     | 50       | Caches cited-by results by recid + sort                      |
+| `entryCitedCache`           | LRU     | 50       | Caches entry-cited/author-papers results                     |
+| `metadataCache`             | LRU     | 500      | Caches individual record metadata                            |
+| `recidLookupCache`          | LRU     | 500      | Caches recid lookups to avoid repeated API calls             |
+| `processedDataCache`        | LRU     | 20       | Caches PDF processed data per item                           |
+| `pageDataCache`             | LRU     | 50       | Caches PDF page data per item+page                           |
+| `pdfMappingCache`           | LRU     | 30       | Caches PDF numeric reference mapping                         |
+| `pdfAuthorYearMappingCache` | LRU     | 30       | Caches PDF author-year mapping                               |
+| `rowCache`                  | Map     | -        | Caches DOM elements for rendered rows (cleared on re-render) |
+| `searchTextCache`           | WeakMap | -        | Caches search text per entry (auto GC'd)                     |
 
 #### LRU Cache Statistics (v2.1.0)
 
@@ -139,11 +139,11 @@ All LRU caches now track hit/miss statistics for performance analysis:
 
 ```typescript
 interface CacheStats {
-  hits: number;      // Number of cache hits
-  misses: number;    // Number of cache misses
-  hitRate: number;   // hits / (hits + misses)
-  size: number;      // Current entries in cache
-  maxSize: number;   // Maximum cache capacity
+  hits: number; // Number of cache hits
+  misses: number; // Number of cache misses
+  hitRate: number; // hits / (hits + misses)
+  size: number; // Current entries in cache
+  maxSize: number; // Maximum cache capacity
 }
 ```
 
@@ -161,7 +161,7 @@ Access cache statistics via debug console commands (see Section 8.5).
 - **Gzip compression (1.1.3+)**: Large cache files are automatically compressed via pako (`.json.gz`), shrinking disk usage by ~80%. A “Compress cache files (gzip)” preference allows opting out when raw JSON files are needed.
 - **Metadata enrichment throttle (1.1.4+)**: Preferences expose batch size (25–110 recids per request) and parallel request count (1–5) used when fetching missing titles/authors/citation counts. Increasing the limits speeds up enrichment but can hit INSPIRE limits (HTTP 400/502).
 - **Integrity sampling**: When reading from disk, the service randomly samples a few entries (title + identifier) to detect corruption; invalid files are deleted and refetched automatically.
-- The right-click **Download references cache** command (items or collections) uses the same helper to pre-populate the local cache and displays a progress window summarizing successes/failures. **Performance improved (v1.1.3+)**: reduces disk writes by 2/3 (writes once instead of three times). 
+- The right-click **Download references cache** command (items or collections) uses the same helper to pre-populate the local cache and displays a progress window summarizing successes/failures. **Performance improved (v1.1.3+)**: reduces disk writes by 2/3 (writes once instead of three times).
 
 ### 1.6 Performance Optimizations
 
@@ -174,16 +174,16 @@ Access cache statistics via debug console commands (see Section 8.5).
 
 #### v1.1.1 Performance Enhancements
 
-| Optimization | Description |
-|--------------|-------------|
-| **Filter Input Debouncing** | 150ms delay reduces re-renders during fast typing |
-| **Citation Count Parallel Fetching** | 3 batches fetched in parallel per round |
-| **Search Text Caching** | WeakMap caches `buildEntrySearchText()` results |
-| **Chart Lazy Calculation** | Uses `setTimeout(0)` / `requestIdleCallback` |
-| **Row Element Pooling** | Pool of up to 150 row elements for reuse |
-| **LRU Cache Limits** | Bounded caches prevent memory leaks |
-| **Local Status Query Optimization** | SQL batch size increased to 500 |
-| **Infinite Scroll** | IntersectionObserver auto-loads more entries |
+| Optimization                         | Description                                       |
+| ------------------------------------ | ------------------------------------------------- |
+| **Filter Input Debouncing**          | 150ms delay reduces re-renders during fast typing |
+| **Citation Count Parallel Fetching** | 3 batches fetched in parallel per round           |
+| **Search Text Caching**              | WeakMap caches `buildEntrySearchText()` results   |
+| **Chart Lazy Calculation**           | Uses `setTimeout(0)` / `requestIdleCallback`      |
+| **Row Element Pooling**              | Pool of up to 150 row elements for reuse          |
+| **LRU Cache Limits**                 | Bounded caches prevent memory leaks               |
+| **Local Status Query Optimization**  | SQL batch size increased to 500                   |
+| **Infinite Scroll**                  | IntersectionObserver auto-loads more entries      |
 
 ### 1.5 PDF Reader Integration (v2.0.0)
 
@@ -197,19 +197,28 @@ When selecting text containing citation markers in the Zotero PDF Reader, the ad
 
 #### Supported Citation Formats
 
-| Format | Examples |
-|--------|----------|
-| Single number | `[1]`, `[42]` |
-| Multiple numbers | `[1,2,3]`, `[1, 2, 3]` |
-| Number range | `[1-5]`, `[1–5]` |
-| Mixed format | `[1,3-5,7]` |
-| Author-year | `[Smith 2024]`, `[WGR17]` |
-| arXiv ID | `[arXiv:2301.12345]`, `[hep-ph/9901234]` |
-| Superscript digits | ¹²³⁴⁵⁶⁷⁸⁹⁰ |
+| Format             | Examples                                 |
+| ------------------ | ---------------------------------------- |
+| Single number      | `[1]`, `[42]`                            |
+| Multiple numbers   | `[1,2,3]`, `[1, 2, 3]`                   |
+| Number range       | `[1-5]`, `[1–5]`                         |
+| Mixed format       | `[1,3-5,7]`                              |
+| Author-year        | `[Smith 2024]`, `[WGR17]`                |
+| arXiv ID           | `[arXiv:2301.12345]`, `[hep-ph/9901234]` |
+| Superscript digits | ¹²³⁴⁵⁶⁷⁸⁹⁰                               |
+
+#### Hover Preview
+
+When hovering over citation lookup buttons in the PDF reader, a preview card appears showing entry details:
+
+- **Preview card contents**: Title, authors, abstract, publication info, identifiers
+- **Author-year consistency**: Preview shows exactly the same entry as clicking would scroll to
+- **Ambiguous match hint**: For author-year citations with multiple candidates, displays "Author-year match only; click to select"
 
 #### Panel Integration
 
 When clicking the lookup button:
+
 1. Automatically switches to References tab
 2. Highlights the corresponding reference entry (temporary pulse + persistent focus)
 3. Scrolls to that entry position
@@ -244,29 +253,29 @@ All INSPIRE operations are organized in a unified **INSPIRE** submenu (v1.1.4+) 
 
 Right-click one or more items, then select **INSPIRE** to access:
 
-| Category | Operation | Description |
-|----------|-----------|-------------|
-| **Update Metadata** | `With abstracts` | Full metadata update including abstract |
-| | `Without abstracts` | Metadata update excluding abstract |
-| | `Citation counts only` | Only update citation counts (with/without self-citations; falls back to CrossRef if INSPIRE record not found) |
-| **Cache** | `Download references cache` (v1.1.3+) | Prefetch INSPIRE references for the selected items into the local cache (shows progress and success/failure stats) |
-| **Copy** (v1.1.4+) | `Copy BibTeX` | Fetch and copy BibTeX from INSPIRE |
-| | `Copy INSPIRE link` | Copy INSPIRE literature URL (`https://inspirehep.net/literature/{recid}`) |
-| | `Copy citation key` | Copy item's citation key |
-| | `Copy Zotero link` | Copy Zotero select link (`zotero://select/...`) |
-| **Actions** | `Cancel update` | Cancel any ongoing update operation |
+| Category            | Operation                             | Description                                                                                                        |
+| ------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Update Metadata** | `With abstracts`                      | Full metadata update including abstract                                                                            |
+|                     | `Without abstracts`                   | Metadata update excluding abstract                                                                                 |
+|                     | `Citation counts only`                | Only update citation counts (with/without self-citations; falls back to CrossRef if INSPIRE record not found)      |
+| **Cache**           | `Download references cache` (v1.1.3+) | Prefetch INSPIRE references for the selected items into the local cache (shows progress and success/failure stats) |
+| **Copy** (v1.1.4+)  | `Copy BibTeX`                         | Fetch and copy BibTeX from INSPIRE                                                                                 |
+|                     | `Copy INSPIRE link`                   | Copy INSPIRE literature URL (`https://inspirehep.net/literature/{recid}`)                                          |
+|                     | `Copy citation key`                   | Copy item's citation key                                                                                           |
+|                     | `Copy Zotero link`                    | Copy Zotero select link (`zotero://select/...`)                                                                    |
+| **Actions**         | `Cancel update`                       | Cancel any ongoing update operation                                                                                |
 
 ### 2.2 Collection Menu
 
 Right-click a collection, then select **INSPIRE** to access:
 
-| Category | Operation | Description |
-|----------|-----------|-------------|
-| **Update Metadata** | `With abstracts` | Update all items in collection with full metadata |
-| | `Without abstracts` | Update all items excluding abstracts |
-| | `Citation counts only` | Update citation counts for all items |
-| **Cache** | `Download references cache` (v1.1.3+) | Prefetch references for every item in the collection into the local cache (same progress UI as the item command) |
-| **Actions** | `Cancel update` | Cancel any ongoing update operation |
+| Category            | Operation                             | Description                                                                                                      |
+| ------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Update Metadata** | `With abstracts`                      | Update all items in collection with full metadata                                                                |
+|                     | `Without abstracts`                   | Update all items excluding abstracts                                                                             |
+|                     | `Citation counts only`                | Update citation counts for all items                                                                             |
+| **Cache**           | `Download references cache` (v1.1.3+) | Prefetch references for every item in the collection into the local cache (same progress UI as the item command) |
+| **Actions**         | `Cancel update`                       | Cancel any ongoing update operation                                                                              |
 
 **Note**: Copy actions are only available in the item menu, as they operate on individual items.
 
@@ -352,11 +361,11 @@ updateRowStatus() / updateRowCitationCount()
 
 The plugin integrates with Zotero's main search bar to enable INSPIRE searches using the `inspire:` prefix.
 
-| Feature | Description |
-|---------|-------------|
-| **Trigger** | Type `inspire:` followed by query, press Enter |
-| **Syntax** | Native INSPIRE query syntax (e.g., `a Witten`, `t quark mass`) |
-| **Results** | Displayed in new "🔍 Search" tab in References Panel |
+| Feature     | Description                                                    |
+| ----------- | -------------------------------------------------------------- |
+| **Trigger** | Type `inspire:` followed by query, press Enter                 |
+| **Syntax**  | Native INSPIRE query syntax (e.g., `a Witten`, `t quark mass`) |
+| **Results** | Displayed in new "🔍 Search" tab in References Panel           |
 
 ### 6.2 Event Interception
 
@@ -379,11 +388,11 @@ target.value = "";
 
 ### 6.3 Search History
 
-| Setting | Value |
-|---------|-------|
-| Max entries | 10 |
-| Storage | Zotero preferences (`inspireSearchHistory`) |
-| Format | JSON array of query strings |
+| Setting     | Value                                       |
+| ----------- | ------------------------------------------- |
+| Max entries | 10                                          |
+| Storage     | Zotero preferences (`inspireSearchHistory`) |
+| Format      | JSON array of query strings                 |
 
 ### 6.4 Search Mode UI
 
@@ -452,14 +461,14 @@ A major internal refactoring focused on code quality, modularity, and maintainab
 
 Extracted 6 independent manager classes from the monolithic `InspireReferencePanelController`:
 
-| Manager | Responsibility | Lines |
-|---------|----------------|-------|
-| `ChartManager` | Statistics chart rendering and interaction | ~500 |
-| `FilterManager` | Text filtering, Quick Filters, author/published filters | ~400 |
-| `NavigationManager` | Back/forward navigation with scroll state preservation | ~300 |
-| `ExportManager` | BibTeX/LaTeX export to clipboard or file | ~500 |
-| `BatchImportManager` | Batch selection, duplicate detection, and import | ~520 |
-| `RowPoolManager` | Row pooling and template management (PERF-13 core) | ~290 |
+| Manager              | Responsibility                                          | Lines |
+| -------------------- | ------------------------------------------------------- | ----- |
+| `ChartManager`       | Statistics chart rendering and interaction              | ~500  |
+| `FilterManager`      | Text filtering, Quick Filters, author/published filters | ~400  |
+| `NavigationManager`  | Back/forward navigation with scroll state preservation  | ~300  |
+| `ExportManager`      | BibTeX/LaTeX export to clipboard or file                | ~500  |
+| `BatchImportManager` | Batch selection, duplicate detection, and import        | ~520  |
+| `RowPoolManager`     | Row pooling and template management (PERF-13 core)      | ~290  |
 
 ### 8.2 Performance Monitoring
 
@@ -488,12 +497,12 @@ const report = monitor.getReport();
 
 Added 153 unit tests using Vitest framework across 4 test files:
 
-| Test File | Tests | Coverage |
-|-----------|-------|----------|
-| `test/textUtils.test.ts` | 25 | Text normalization and filtering |
-| `test/filters.test.ts` | 56 | Filter predicates and Quick Filters |
-| `test/apiTypes.test.ts` | 38 | API type guards and utility functions |
-| `test/matchStrategies.test.ts` | 34 | PDF citation matching strategies |
+| Test File                      | Tests | Coverage                              |
+| ------------------------------ | ----- | ------------------------------------- |
+| `test/textUtils.test.ts`       | 25    | Text normalization and filtering      |
+| `test/filters.test.ts`         | 56    | Filter predicates and Quick Filters   |
+| `test/apiTypes.test.ts`        | 38    | API type guards and utility functions |
+| `test/matchStrategies.test.ts` | 34    | PDF citation matching strategies      |
 
 ### 8.4 Code Quality Improvements
 
@@ -593,7 +602,7 @@ monitor.logCacheStats();
 monitor.resetCacheStats();
 
 // Periodic monitoring
-monitor.start(30000);  // Log every 30 seconds
+monitor.start(30000); // Log every 30 seconds
 monitor.stop();
 ```
 
@@ -601,13 +610,13 @@ monitor.stop();
 
 Available in Zotero Error Console (`Tools` → `Developer` → `Error Console`):
 
-| Command | Description |
-|---------|-------------|
-| `Zotero.ZoteroInspire.getCacheStats()` | Returns cache statistics object |
-| `Zotero.ZoteroInspire.logCacheStats()` | Logs formatted stats to debug output |
-| `Zotero.ZoteroInspire.resetCacheStats()` | Resets all hit/miss counters |
+| Command                                       | Description                                |
+| --------------------------------------------- | ------------------------------------------ |
+| `Zotero.ZoteroInspire.getCacheStats()`        | Returns cache statistics object            |
+| `Zotero.ZoteroInspire.logCacheStats()`        | Logs formatted stats to debug output       |
+| `Zotero.ZoteroInspire.resetCacheStats()`      | Resets all hit/miss counters               |
 | `Zotero.ZoteroInspire.startMemoryMonitor(ms)` | Starts periodic logging (default: 30000ms) |
-| `Zotero.ZoteroInspire.stopMemoryMonitor()` | Stops periodic logging |
+| `Zotero.ZoteroInspire.stopMemoryMonitor()`    | Stops periodic logging                     |
 
 #### Registered Caches
 
@@ -621,5 +630,4 @@ The following caches are automatically registered on startup:
 
 ---
 
-*Last updated: 2025-12-12 (v2.1.0)*
-
+_Last updated: 2025-12-14 (v2.1.1)_

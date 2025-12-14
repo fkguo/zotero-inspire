@@ -11,19 +11,59 @@ import { deriveRecidFromItem } from "../apiUtils";
 import { CACHE_TTL } from "../constants";
 import { localCache } from "../localCache";
 import { MemoryMonitor } from "../memoryMonitor";
-import { fetchReferencesEntries, enrichReferencesEntries } from "../referencesService";
-import { getPDFReferencesParser, type PDFReferenceMapping, type AuthorYearReferenceMapping } from "./pdfReferencesParser";
+import {
+  fetchReferencesEntries,
+  enrichReferencesEntries,
+} from "../referencesService";
+import {
+  getPDFReferencesParser,
+  type PDFReferenceMapping,
+  type AuthorYearReferenceMapping,
+} from "./pdfReferencesParser";
 import type { InspireReferenceEntry } from "../types";
-import { LRUCache } from "../utils";
+import { LRUCache, ReaderTabHelper } from "../utils";
 import type {
   ParsedCitation,
   CitationLookupEvent,
+  CitationPreviewEvent,
   CitationType,
   ReaderState,
   ZoteroChar,
   ZoteroPageData,
   ZoteroProcessedData,
+  ZoteroOverlayReference,
 } from "./types";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FTR-OVERLAY-REFS: Overlay Mapping Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * FTR-OVERLAY-REFS: Mapping from numeric citation labels to Zotero overlay references.
+ * This is built from Zotero's citation overlay data and provides direct
+ * label→reference text mapping for numeric citations like [1], [2], etc.
+ *
+ * NOTE: Only used for numeric citations. Author-year citations use plugin's
+ * matchAuthorYear() which has better disambiguation.
+ *
+ * FTR-OVERLAY-MULTI-REF: A single label (e.g., [1]) can map to multiple references
+ * when the citation contains multiple papers separated by semicolons.
+ * Example: "[1] Weinberg...; Gasser...; Nucl. Phys. B250..."
+ */
+export interface OverlayReferenceMapping {
+  /** Map from numeric label string (e.g., "1", "2") to overlay reference data array
+   * FTR-OVERLAY-MULTI-REF: Changed from single reference to array to support
+   * citations that contain multiple papers under one label */
+  labelToReference: Map<string, ZoteroOverlayReference[]>;
+  /** Total number of mapped labels */
+  totalMappedLabels: number;
+  /** Total number of citation overlays found */
+  totalCitationOverlays: number;
+  /** Total number of individual references across all labels */
+  totalReferences: number;
+  /** Whether the mapping is considered reliable (enough overlays found) */
+  isReliable: boolean;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TransientState - Unified state management for easy cleanup
@@ -110,19 +150,28 @@ export class ReaderIntegration {
   private currentReaderParentItemID?: number;
   /** FTR-REFACTOR: Cache processed PDF data per item (expensive to re-fetch) */
   private static readonly PROCESSED_DATA_CACHE_SIZE = 20;
-  private processedDataCache = new LRUCache<number, { data: ZoteroProcessedData; timestamp: number }>(
-    ReaderIntegration.PROCESSED_DATA_CACHE_SIZE
-  );
+  private processedDataCache = new LRUCache<
+    number,
+    { data: ZoteroProcessedData; timestamp: number }
+  >(ReaderIntegration.PROCESSED_DATA_CACHE_SIZE);
   /** FTR-REFACTOR: Cache page data per item+page (for frequently accessed pages) */
-  private pageDataCache = new LRUCache<string, { data: ZoteroPageData; timestamp: number }>(50);
+  private pageDataCache = new LRUCache<
+    string,
+    { data: ZoteroPageData; timestamp: number }
+  >(50);
   /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF numeric mapping per parent item */
   private static readonly PDF_MAPPING_CACHE_SIZE = 30;
   private pdfMappingCache = new LRUCache<number, PDFReferenceMapping>(
-    ReaderIntegration.PDF_MAPPING_CACHE_SIZE
+    ReaderIntegration.PDF_MAPPING_CACHE_SIZE,
   );
   /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF author-year mapping per parent item */
-  private pdfAuthorYearMappingCache = new LRUCache<number, AuthorYearReferenceMapping>(
-    ReaderIntegration.PDF_MAPPING_CACHE_SIZE
+  private pdfAuthorYearMappingCache = new LRUCache<
+    number,
+    AuthorYearReferenceMapping
+  >(ReaderIntegration.PDF_MAPPING_CACHE_SIZE);
+  /** FTR-OVERLAY-REFS: Cache overlay reference mapping per parent item (numeric citations only) */
+  private overlayMappingCache = new LRUCache<number, OverlayReferenceMapping>(
+    ReaderIntegration.PDF_MAPPING_CACHE_SIZE,
   );
 
   /**
@@ -180,7 +229,11 @@ export class ReaderIntegration {
       monitor.registerCache("processedData", this.processedDataCache);
       monitor.registerCache("pageData", this.pageDataCache);
       monitor.registerCache("pdfMapping", this.pdfMappingCache);
-      monitor.registerCache("pdfAuthorYearMapping", this.pdfAuthorYearMappingCache);
+      monitor.registerCache(
+        "pdfAuthorYearMapping",
+        this.pdfAuthorYearMappingCache,
+      );
+      monitor.registerCache("overlayMapping", this.overlayMappingCache);
 
       // FTR-CITATION-FORMAT-DETECT: Register tab notifier to detect when PDF is opened
       this.registerTabNotifier();
@@ -268,6 +321,7 @@ export class ReaderIntegration {
     this.pageDataCache.clear();
     this.pdfMappingCache.clear();
     this.pdfAuthorYearMappingCache.clear();
+    this.overlayMappingCache.clear();
 
     this.initialized = false;
     ReaderIntegration.instance = null;
@@ -343,15 +397,24 @@ export class ReaderIntegration {
     const parser = getCitationParser();
     const enableFuzzy = getPref("pdf_fuzzy_citation") === true;
     // FTR-PDF-MATCHING: Get max known label for concatenated range detection
-    const maxKnownLabel = reader?.itemID ? this.getMaxKnownLabel(reader.itemID) : undefined;
+    const maxKnownLabel = reader?.itemID
+      ? this.getMaxKnownLabel(reader.itemID)
+      : undefined;
     // FTR-CITATION-FORMAT-DETECT: Get cached citation format for this item
-    const detectedFormat = reader?.itemID ? this.getCitationFormat(reader.itemID) : undefined;
+    const detectedFormat = reader?.itemID
+      ? this.getCitationFormat(reader.itemID)
+      : undefined;
     const isAuthorYearDoc = detectedFormat === "author-year";
     debugLog(
       `[${config.addonName}] [PDF-ANNOTATE] maxKnownLabel for itemID ${reader?.itemID}: ${maxKnownLabel ?? "undefined"}, detectedFormat: ${detectedFormat ?? "not yet detected"}`,
     );
     let allLabels: string[] = [];
-    let citationType: "numeric" | "author-year" | "arxiv" | "mixed" | "unknown" = "numeric";
+    let citationType:
+      | "numeric"
+      | "author-year"
+      | "arxiv"
+      | "mixed"
+      | "unknown" = "numeric";
     // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Preserve subCitations from parseSelection
     let subCitations: ParsedCitation["subCitations"] = undefined;
     let originalRaw: string | undefined = undefined;
@@ -362,7 +425,12 @@ export class ReaderIntegration {
       // Pass maxKnownLabel for concatenated range detection (e.g., [62-64] copied as [6264])
       // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Increased threshold from 50 to 100 to capture author-year citations
       // FTR-CITATION-FORMAT-DETECT: Pass isAuthorYearDoc to prioritize author-year detection
-      const citation = parser.parseSelection(selectedText, enableFuzzy, maxKnownLabel, isAuthorYearDoc);
+      const citation = parser.parseSelection(
+        selectedText,
+        enableFuzzy,
+        maxKnownLabel,
+        isAuthorYearDoc,
+      );
       if (citation && citation.labels.length > 0) {
         allLabels = citation.labels;
         citationType = citation.type;
@@ -386,7 +454,12 @@ export class ReaderIntegration {
       // fallback to parseSelection for aggressive pattern matching
       // FTR-CITATION-FORMAT-DETECT: Pass isAuthorYearDoc to prioritize author-year detection
       if (allLabels.length === 0 && enableFuzzy) {
-        const fuzzyCitation = parser.parseSelection(selectedText, true, maxKnownLabel, isAuthorYearDoc);
+        const fuzzyCitation = parser.parseSelection(
+          selectedText,
+          true,
+          maxKnownLabel,
+          isAuthorYearDoc,
+        );
         if (fuzzyCitation && fuzzyCitation.labels.length > 0) {
           allLabels = fuzzyCitation.labels;
           citationType = fuzzyCitation.type;
@@ -406,9 +479,11 @@ export class ReaderIntegration {
     // Build a combined citation object for UI
     // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Preserve subCitations and use original raw for display
     const citation: ParsedCitation = {
-      raw: originalRaw ?? (citationType === "author-year"
-        ? allLabels[0] // For author-year, use the full label as raw
-        : allLabels.map(l => `[${l}]`).join(", ")),
+      raw:
+        originalRaw ??
+        (citationType === "author-year"
+          ? allLabels[0] // For author-year, use the full label as raw
+          : allLabels.map((l) => `[${l}]`).join(", ")),
       type: citationType,
       labels: allLabels,
       position: null,
@@ -479,7 +554,7 @@ export class ReaderIntegration {
     const label = doc.createElement("span");
     label.textContent = "Refs.";
     Object.assign(label.style, {
-      fontSize: "12px",  // FTR-FOCUSED-SELECTION: increased from 11px
+      fontSize: "12px", // FTR-FOCUSED-SELECTION: increased from 11px
       fontWeight: "500",
       color: "var(--fill-secondary, #666)",
       marginRight: "4px",
@@ -514,7 +589,7 @@ export class ReaderIntegration {
       justifyContent: "center",
       minWidth: "20px",
       padding: "2px 4px",
-      fontSize: "11px",  // FTR-FOCUSED-SELECTION: increased from 10px
+      fontSize: "11px", // FTR-FOCUSED-SELECTION: increased from 10px
       fontWeight: "500",
       borderRadius: "3px",
       border: "1px solid var(--fill-quinary, #d1d1d5)",
@@ -527,12 +602,16 @@ export class ReaderIntegration {
       button.style.background = "var(--accent-color, #4a90d9)";
       button.style.color = "#fff";
       button.style.borderColor = "var(--accent-color, #4a90d9)";
+      // FTR-HOVER-PREVIEW: Schedule preview card
+      this.schedulePreviewShow(button, reader, label, "numeric");
     });
 
     button.addEventListener("mouseleave", () => {
       button.style.background = "var(--material-background, #ffffff)";
       button.style.color = "inherit";
       button.style.borderColor = "var(--fill-quinary, #d1d1d5)";
+      // FTR-HOVER-PREVIEW: Hide preview card
+      this.hidePreview();
     });
 
     button.addEventListener("click", () => {
@@ -566,9 +645,10 @@ export class ReaderIntegration {
 
     // Use raw text for display (e.g., "Guerrieri et al. (2014)")
     // Truncate if too long for button display
-    const displayText = citation.raw.length > 30
-      ? citation.raw.substring(0, 27) + "..."
-      : citation.raw;
+    const displayText =
+      citation.raw.length > 30
+        ? citation.raw.substring(0, 27) + "..."
+        : citation.raw;
 
     const textSpan = doc.createElement("span");
     textSpan.textContent = displayText;
@@ -592,14 +672,22 @@ export class ReaderIntegration {
 
     button.addEventListener("mouseenter", () => {
       button.style.background = "var(--fill-quinary, #f0f0f0)";
+      // FTR-HOVER-PREVIEW: Schedule preview card
+      // FTR-FIX: Pass citation.labels so panel can use its existing matching logic
+      this.schedulePreviewShow(button, reader, citation.raw, "author-year", citation.labels);
     });
 
     button.addEventListener("mouseleave", () => {
       button.style.background = "var(--material-background, #ffffff)";
+      // FTR-HOVER-PREVIEW: Hide preview card
+      this.hidePreview();
     });
 
     // On click, send the full citation with all labels for author-year matching
     button.addEventListener("click", () => {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Author-year button CLICKED: raw="${citation.raw}", labels=[${citation.labels.join(",")}]`,
+      );
       this.lookupCitation(reader, citation);
     });
 
@@ -617,7 +705,8 @@ export class ReaderIntegration {
     citation: ParsedCitation,
   ): HTMLElement {
     const container = doc.createElement("div");
-    container.className = "zinspire-lookup-container zinspire-author-year-multi";
+    container.className =
+      "zinspire-lookup-container zinspire-author-year-multi";
     Object.assign(container.style, {
       display: "flex",
       flexDirection: "row",
@@ -642,9 +731,10 @@ export class ReaderIntegration {
       button.className = "zinspire-lookup-author-year-btn";
 
       // Truncate if too long
-      const displayText = subCitation.displayText.length > 25
-        ? subCitation.displayText.substring(0, 22) + "..."
-        : subCitation.displayText;
+      const displayText =
+        subCitation.displayText.length > 25
+          ? subCitation.displayText.substring(0, 22) + "..."
+          : subCitation.displayText;
       button.textContent = displayText;
       button.title = `Look up "${subCitation.displayText}" in INSPIRE Refs.`;
 
@@ -667,12 +757,17 @@ export class ReaderIntegration {
         button.style.background = "var(--accent-color, #4a90d9)";
         button.style.color = "#fff";
         button.style.borderColor = "var(--accent-color, #4a90d9)";
+        // FTR-HOVER-PREVIEW: Schedule preview card
+        // FTR-FIX: Pass subCitation.labels so panel can use its existing matching logic
+        this.schedulePreviewShow(button, reader, subCitation.displayText, "author-year", subCitation.labels);
       });
 
       button.addEventListener("mouseleave", () => {
         button.style.background = "var(--material-background, #ffffff)";
         button.style.color = "inherit";
         button.style.borderColor = "var(--fill-quinary, #d1d1d5)";
+        // FTR-HOVER-PREVIEW: Hide preview card
+        this.hidePreview();
       });
 
       // On click, lookup with this sub-citation's specific labels
@@ -701,7 +796,7 @@ export class ReaderIntegration {
     svg.setAttribute("width", String(size));
     svg.setAttribute("height", String(size));
     svg.style.flexShrink = "0";
-    
+
     // Background
     const rect = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
     rect.setAttribute("width", "16");
@@ -709,7 +804,7 @@ export class ReaderIntegration {
     rect.setAttribute("rx", "2");
     rect.setAttribute("fill", "#1a1a1a");
     svg.appendChild(rect);
-    
+
     // Letter "i" - dot
     const circle = doc.createElementNS("http://www.w3.org/2000/svg", "circle");
     circle.setAttribute("cx", "4");
@@ -717,7 +812,7 @@ export class ReaderIntegration {
     circle.setAttribute("r", "1.3");
     circle.setAttribute("fill", "#fff");
     svg.appendChild(circle);
-    
+
     // Letter "i" - stem
     const iStem = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
     iStem.setAttribute("x", "2.6");
@@ -727,13 +822,13 @@ export class ReaderIntegration {
     iStem.setAttribute("rx", "0.5");
     iStem.setAttribute("fill", "#fff");
     svg.appendChild(iStem);
-    
+
     // Letter "N"
     const nPath = doc.createElementNS("http://www.w3.org/2000/svg", "path");
     nPath.setAttribute("d", "M7 12.5V3.5h2l3.5 6V3.5h1.8v9h-2l-3.5-6v6H7z");
     nPath.setAttribute("fill", "#3b82f6");
     svg.appendChild(nPath);
-    
+
     return svg;
   }
 
@@ -751,11 +846,11 @@ export class ReaderIntegration {
     // Add icon and text
     const icon = this.createInlineIcon(doc, 14);
     button.appendChild(icon);
-    
+
     const textSpan = doc.createElement("span");
     textSpan.textContent = `Refs. [${label}]`;
     button.appendChild(textSpan);
-    
+
     button.title = `Look up [${label}] in INSPIRE Refs.`;
 
     // Style the button
@@ -764,7 +859,7 @@ export class ReaderIntegration {
       alignItems: "center",
       gap: "4px",
       padding: "4px 8px",
-      fontSize: "13px",  // FTR-FOCUSED-SELECTION: increased from 12px
+      fontSize: "13px", // FTR-FOCUSED-SELECTION: increased from 12px
       borderRadius: "4px",
       border: "1px solid var(--fill-quinary, #d1d1d5)",
       background: "var(--material-background, #ffffff)",
@@ -774,10 +869,14 @@ export class ReaderIntegration {
 
     button.addEventListener("mouseenter", () => {
       button.style.background = "var(--fill-quinary, #f0f0f0)";
+      // FTR-HOVER-PREVIEW: Schedule preview card
+      this.schedulePreviewShow(button, reader, label, "numeric");
     });
 
     button.addEventListener("mouseleave", () => {
       button.style.background = "var(--material-background, #ffffff)";
+      // FTR-HOVER-PREVIEW: Hide preview card
+      this.hidePreview();
     });
 
     button.addEventListener("click", () => {
@@ -797,7 +896,10 @@ export class ReaderIntegration {
   /**
    * Get selected text from Reader using multiple methods
    */
-  private getSelectedText(reader: any, params?: { annotation?: any }): string | null {
+  private getSelectedText(
+    reader: any,
+    params?: { annotation?: any },
+  ): string | null {
     // Method 1: Try params.annotation.text (Zotero's standard way for highlight annotations)
     if (params?.annotation?.text) {
       debugLog(
@@ -809,7 +911,8 @@ export class ReaderIntegration {
     // Method 2: Try reader's internal state
     try {
       // Check _state or similar internal properties
-      const internalReader = reader?._iframeWindow?.wrappedJSObject?.PDFViewerApplication;
+      const internalReader =
+        reader?._iframeWindow?.wrappedJSObject?.PDFViewerApplication;
       if (internalReader) {
         const selection = internalReader?.pdfViewer?.currentScaleValue;
         debugLog(
@@ -920,15 +1023,16 @@ export class ReaderIntegration {
         readerTabID: reader.tabID,
       };
 
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] lookupCitation: about to emit citationLookup event for type="${citation.type}", labels=[${citation.labels.join(",")}]`,
+      );
       this.emit("citationLookup", event);
 
       Zotero.debug(
         `[${config.addonName}] Citation lookup: labels=[${citation.labels.join(",")}] parentItemID=${parentItemID}`,
       );
     } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] Failed to lookup citation: ${err}`,
-      );
+      Zotero.debug(`[${config.addonName}] Failed to lookup citation: ${err}`);
     }
   }
 
@@ -979,6 +1083,158 @@ export class ReaderIntegration {
           );
         }
       }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-HOVER-PREVIEW: Preview Card Event Emission
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Timeout for preview show delay */
+  private previewShowTimeout?: ReturnType<typeof setTimeout>;
+  /** Current preview button (to avoid duplicate events) */
+  private currentPreviewButton?: HTMLElement;
+  /** Preview show delay in ms */
+  private readonly previewShowDelay = 300;
+
+  /**
+   * Schedule preview card show after delay.
+   * FTR-HOVER-PREVIEW: Emits citationPreviewRequest event to panel controller.
+   * FTR-FIX: Now accepts labels array for proper author-year matching.
+   */
+  private schedulePreviewShow(
+    button: HTMLElement,
+    reader: any,
+    label: string,
+    citationType: "numeric" | "author-year" | "arxiv",
+    labels?: string[],
+  ): void {
+    // Cancel any pending preview
+    this.cancelPreviewShow();
+
+    // Skip if already showing for this button
+    if (this.currentPreviewButton === button) {
+      return;
+    }
+
+    this.previewShowTimeout = setTimeout(() => {
+      this.currentPreviewButton = button;
+      this.emitPreviewRequest(button, reader, label, citationType, labels);
+    }, this.previewShowDelay);
+  }
+
+  /**
+   * Cancel scheduled preview show.
+   */
+  private cancelPreviewShow(): void {
+    if (this.previewShowTimeout) {
+      clearTimeout(this.previewShowTimeout);
+      this.previewShowTimeout = undefined;
+    }
+  }
+
+  /**
+   * Hide preview card immediately.
+   * FTR-HOVER-PREVIEW: Emits citationPreviewHide event.
+   */
+  private hidePreview(): void {
+    this.cancelPreviewShow();
+    this.currentPreviewButton = undefined;
+    this.emit("citationPreviewHide", {});
+  }
+
+  /**
+   * Emit preview request event with button position.
+   * FTR-HOVER-PREVIEW: Converts iframe-relative coordinates to main window coordinates.
+   * FTR-FIX: Now accepts labels array for proper author-year matching.
+   */
+  private emitPreviewRequest(
+    button: HTMLElement,
+    reader: any,
+    label: string,
+    citationType: "numeric" | "author-year" | "arxiv",
+    labels?: string[],
+  ): void {
+    try {
+      const itemID = reader.itemID;
+      const item = Zotero.Items.get(itemID);
+      const parentItemID = item?.parentItemID || itemID;
+
+      // Get button position in its document's viewport coordinates
+      const rect = button.getBoundingClientRect();
+
+      // Determine if we need to add iframe offset
+      // The button is in a popup - check if popup is in main window or iframe
+      let offsetX = 0;
+      let offsetY = 0;
+
+      // Get the main Zotero window for reference
+      const mainWindow = Zotero.getMainWindow();
+      const buttonDoc = button.ownerDocument;
+      const buttonWindow = buttonDoc?.defaultView;
+
+      // Check if button is in a different window than main window
+      const isInMainWindow = buttonWindow === (mainWindow as unknown as Window);
+
+      if (!isInMainWindow) {
+        // Button is in iframe - need to calculate offset
+        // Try multiple methods to get the iframe element
+        try {
+          // Method 1: reader._iframe
+          let iframe = reader._iframe;
+
+          // Method 2: reader._internalReader?._iframe
+          if (!iframe && reader._internalReader?._iframe) {
+            iframe = reader._internalReader._iframe;
+          }
+
+          // Method 3: Find iframe by checking window ancestry
+          if (!iframe && mainWindow) {
+            // Search for iframe whose contentWindow matches buttonWindow
+            const iframes = mainWindow.document.querySelectorAll("iframe");
+            for (const f of iframes) {
+              if ((f as HTMLIFrameElement).contentWindow === buttonWindow) {
+                iframe = f;
+                break;
+              }
+            }
+          }
+
+          if (iframe) {
+            const iframeRect = iframe.getBoundingClientRect();
+            offsetX = iframeRect.left;
+            offsetY = iframeRect.top;
+          }
+        } catch (e) {
+          Zotero.debug(
+            `[${config.addonName}] [HOVER-PREVIEW] Could not get iframe position: ${e}`,
+          );
+        }
+      }
+
+      const event: CitationPreviewEvent = {
+        parentItemID,
+        label,
+        labels: labels ?? [label], // Default to [label] if not provided
+        citationType,
+        buttonRect: {
+          top: rect.top + offsetY,
+          left: rect.left + offsetX,
+          bottom: rect.bottom + offsetY,
+          right: rect.right + offsetX,
+        },
+        readerTabID: reader.tabID,
+      };
+
+      Zotero.debug(
+        `[${config.addonName}] [HOVER-PREVIEW] emitPreviewRequest: label=${label}, isInMainWindow=${isInMainWindow}, rect=(${rect.top.toFixed(0)},${rect.left.toFixed(0)}), offset=(${offsetY.toFixed(0)},${offsetX.toFixed(0)}), final=(${event.buttonRect.top.toFixed(0)},${event.buttonRect.left.toFixed(0)})`,
+      );
+
+      this.emit("citationPreviewRequest", event);
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [HOVER-PREVIEW] Error emitting preview request: ${err}`,
+      );
     }
   }
 
@@ -1080,7 +1336,10 @@ export class ReaderIntegration {
    * @param recid - INSPIRE record ID
    * @param attachmentItemID - Optional Zotero attachment item ID for maxKnownLabel
    */
-  private async preloadReferencesForRecid(recid: string, attachmentItemID?: number): Promise<void> {
+  private async preloadReferencesForRecid(
+    recid: string,
+    attachmentItemID?: number,
+  ): Promise<void> {
     // Check if local cache is enabled
     if (!localCache.isEnabled()) {
       Zotero.debug(
@@ -1162,13 +1421,15 @@ export class ReaderIntegration {
     this.transientState.pdfParsingPromises.set(parentItemID, parsePromise);
 
     // Clean up promise map when done
-    parsePromise.finally(() => {
-      this.transientState.pdfParsingPromises.delete(parentItemID);
-    }).catch((err) => {
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] PDF parsing preload failed: ${err}`,
-      );
-    });
+    parsePromise
+      .finally(() => {
+        this.transientState.pdfParsingPromises.delete(parentItemID);
+      })
+      .catch((err) => {
+        Zotero.debug(
+          `[${config.addonName}] [PRELOAD] PDF parsing preload failed: ${err}`,
+        );
+      });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1240,7 +1501,8 @@ export class ReaderIntegration {
       }
 
       // Also try author-year parsing
-      const authorYearMapping = parser.parseAuthorYearReferencesSection(pdfText);
+      const authorYearMapping =
+        parser.parseAuthorYearReferencesSection(pdfText);
       if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
         this.pdfAuthorYearMappingCache.set(parentItemID, authorYearMapping);
         Zotero.debug(
@@ -1260,7 +1522,9 @@ export class ReaderIntegration {
    * Extract PDF text from Zotero's fulltext cache.
    * @param pdfPath - Path to the PDF file
    */
-  private async extractPDFTextFromCache(pdfPath: string): Promise<string | null> {
+  private async extractPDFTextFromCache(
+    pdfPath: string,
+  ): Promise<string | null> {
     try {
       const cacheFileName = ".zotero-ft-cache";
       const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf("/"));
@@ -1285,7 +1549,9 @@ export class ReaderIntegration {
    * Get preloaded PDF numeric mapping for an item.
    * @param parentItemID - The parent item ID (not attachment)
    */
-  getPreloadedPDFMapping(parentItemID: number): PDFReferenceMapping | undefined {
+  getPreloadedPDFMapping(
+    parentItemID: number,
+  ): PDFReferenceMapping | undefined {
     return this.pdfMappingCache.get(parentItemID);
   }
 
@@ -1293,7 +1559,9 @@ export class ReaderIntegration {
    * Get preloaded PDF author-year mapping for an item.
    * @param parentItemID - The parent item ID (not attachment)
    */
-  getPreloadedAuthorYearMapping(parentItemID: number): AuthorYearReferenceMapping | undefined {
+  getPreloadedAuthorYearMapping(
+    parentItemID: number,
+  ): AuthorYearReferenceMapping | undefined {
     return this.pdfAuthorYearMappingCache.get(parentItemID);
   }
 
@@ -1310,7 +1578,10 @@ export class ReaderIntegration {
    * @param parentItemID - The parent item ID
    * @param mapping - The PDF reference mapping
    */
-  setPreloadedPDFMapping(parentItemID: number, mapping: PDFReferenceMapping): void {
+  setPreloadedPDFMapping(
+    parentItemID: number,
+    mapping: PDFReferenceMapping,
+  ): void {
     this.pdfMappingCache.set(parentItemID, mapping);
   }
 
@@ -1319,8 +1590,188 @@ export class ReaderIntegration {
    * @param parentItemID - The parent item ID
    * @param mapping - The author-year mapping
    */
-  setPreloadedAuthorYearMapping(parentItemID: number, mapping: AuthorYearReferenceMapping): void {
+  setPreloadedAuthorYearMapping(
+    parentItemID: number,
+    mapping: AuthorYearReferenceMapping,
+  ): void {
     this.pdfAuthorYearMappingCache.set(parentItemID, mapping);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-OVERLAY-REFS: Zotero Overlay Reference Mapping (Numeric Citations Only)
+  // Builds label→reference mapping from Zotero's citation overlay data.
+  // This provides direct, accurate matching for numeric citations like [1], [2].
+  // Author-Year citations should NOT use this (use matchAuthorYear() instead).
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Build a mapping from numeric citation labels to reference text using Zotero's overlay data.
+   * This is the most accurate method for numeric citations as Zotero has already
+   * established the citation→reference relationship.
+   *
+   * IMPORTANT: This method is for NUMERIC citations only ([1], [1-5], etc.).
+   * Author-Year citations should use the plugin's matchAuthorYear() which has
+   * better disambiguation (journal/volume/page matching, initials matching).
+   *
+   * @param reader - The Zotero Reader instance
+   * @returns Overlay reference mapping, or null if overlay data is unavailable
+   */
+  async buildMappingFromOverlays(
+    reader: any,
+  ): Promise<OverlayReferenceMapping | null> {
+    try {
+      // Check cache first
+      const itemID = reader?.itemID;
+      if (!itemID) return null;
+
+      const item = Zotero.Items.get(itemID);
+      if (!item) return null;
+
+      const parentItemID = item.parentItemID || itemID;
+
+      // Check if already cached
+      const cached = this.overlayMappingCache.get(parentItemID);
+      if (cached) {
+        debugLog(
+          `[${config.addonName}] [OVERLAY-REFS] Using cached overlay mapping for item ${parentItemID}`,
+        );
+        return cached;
+      }
+
+      // Get processed data which contains all overlays
+      const processedData = await this.getProcessedData(reader);
+      if (!processedData?.pages) {
+        Zotero.debug(
+          `[${config.addonName}] [OVERLAY-REFS] No processed data available for overlay mapping`,
+        );
+        return null;
+      }
+
+      // Build the mapping
+      // FTR-OVERLAY-MULTI-REF: Changed to store arrays of references per label
+      const labelToReference = new Map<string, ZoteroOverlayReference[]>();
+      let totalCitationOverlays = 0;
+      let totalReferences = 0;
+
+      // Iterate through all pages
+      for (const pageData of Object.values(processedData.pages)) {
+        if (!pageData?.overlays?.length) continue;
+
+        for (const overlay of pageData.overlays) {
+          // Only process citation type overlays with references
+          if (overlay.type !== "citation" || !overlay.references?.length) {
+            continue;
+          }
+
+          totalCitationOverlays++;
+
+          // Extract numeric label from the citation marker (word chars)
+          const labelText = overlay.word?.map((c) => c.c).join("") || "";
+
+          // Extract numeric labels from the citation text
+          // Handles [1], [1,2], [1-3], etc.
+          const numericMatches = labelText.match(/\d+/g);
+          if (!numericMatches) continue;
+
+          // FTR-OVERLAY-MULTI-REF: For each numeric label, collect ALL its references
+          // A single label like [1] can contain multiple papers: "Weinberg...; Gasser...; ..."
+          for (const numStr of numericMatches) {
+            // Get or create the array for this label
+            let refs = labelToReference.get(numStr);
+            if (!refs) {
+              refs = [];
+              labelToReference.set(numStr, refs);
+            }
+
+            // Find references with matching index
+            const matchingRefs = overlay.references.filter(
+              (ref) => ref.index === parseInt(numStr, 10),
+            );
+
+            if (matchingRefs.length > 0) {
+              // Add all matching references (avoiding duplicates by text)
+              for (const ref of matchingRefs) {
+                if (!refs.some((r) => r.text === ref.text)) {
+                  refs.push(ref);
+                  totalReferences++;
+                }
+              }
+            } else if (overlay.references.length >= 1 && numericMatches.length === 1) {
+              // Single label with multiple references - add ALL of them
+              // This handles cases like [1] containing 3 papers separated by semicolons
+              for (const ref of overlay.references) {
+                if (!refs.some((r) => r.text === ref.text)) {
+                  refs.push(ref);
+                  totalReferences++;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Create the mapping result
+      const mapping: OverlayReferenceMapping = {
+        labelToReference,
+        totalMappedLabels: labelToReference.size,
+        totalCitationOverlays,
+        totalReferences,
+        // Consider reliable if we found at least 3 overlays with references
+        isReliable: labelToReference.size >= 3,
+      };
+
+      // Cache the result
+      this.overlayMappingCache.set(parentItemID, mapping);
+
+      Zotero.debug(
+        `[${config.addonName}] [OVERLAY-REFS] Built overlay mapping for item ${parentItemID}: ` +
+          `${mapping.totalMappedLabels} labels, ${mapping.totalReferences} total references from ${mapping.totalCitationOverlays} citation overlays ` +
+          `(reliable: ${mapping.isReliable})`,
+      );
+
+      return mapping;
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [OVERLAY-REFS] Failed to build overlay mapping: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get cached overlay reference mapping for an item.
+   * @param parentItemID - The parent item ID (not attachment)
+   * @returns Cached mapping or undefined
+   */
+  getOverlayMapping(parentItemID: number): OverlayReferenceMapping | undefined {
+    return this.overlayMappingCache.get(parentItemID);
+  }
+
+  /**
+   * Check if overlay mapping exists and is reliable for an item.
+   * @param parentItemID - The parent item ID
+   * @returns true if reliable overlay mapping exists
+   */
+  hasReliableOverlayMapping(parentItemID: number): boolean {
+    const mapping = this.overlayMappingCache.get(parentItemID);
+    return mapping?.isReliable === true;
+  }
+
+  /**
+   * Get reference text from overlay mapping for a numeric label.
+   * FTR-OVERLAY-MULTI-REF: Now returns all reference texts joined by newlines.
+   * @param parentItemID - The parent item ID
+   * @param label - Numeric label string (e.g., "1", "2")
+   * @returns Reference texts joined by newlines, or undefined if not found
+   */
+  getReferenceTextFromOverlay(
+    parentItemID: number,
+    label: string,
+  ): string | undefined {
+    const mapping = this.overlayMappingCache.get(parentItemID);
+    const refs = mapping?.labelToReference.get(label);
+    if (!refs || refs.length === 0) return undefined;
+    return refs.map((r) => r.text).join("\n");
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1382,8 +1833,12 @@ export class ReaderIntegration {
       }
 
       // Path 2: _iframeWindow.wrappedJSObject.PDFViewerApplication
-      if (reader?._iframeWindow?.wrappedJSObject?.PDFViewerApplication?.pdfDocument) {
-        return reader._iframeWindow.wrappedJSObject.PDFViewerApplication.pdfDocument;
+      if (
+        reader?._iframeWindow?.wrappedJSObject?.PDFViewerApplication
+          ?.pdfDocument
+      ) {
+        return reader._iframeWindow.wrappedJSObject.PDFViewerApplication
+          .pdfDocument;
       }
 
       // Path 3: Direct _iframeWindow.PDFViewerApplication
@@ -1419,7 +1874,10 @@ export class ReaderIntegration {
       const cacheKey = itemID ? `${itemID}:${pageIndex}` : null;
       if (cacheKey) {
         const cached = this.pageDataCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL.READER_INTEGRATION_MS) {
+        if (
+          cached &&
+          Date.now() - cached.timestamp < CACHE_TTL.READER_INTEGRATION_MS
+        ) {
           debugLog(
             `[${config.addonName}] [STRUCTURED-DATA] Using cached pageData for ${cacheKey}`,
           );
@@ -1448,7 +1906,10 @@ export class ReaderIntegration {
 
       // FTR-REFACTOR: Cache the result (LRUCache handles eviction automatically)
       if (cacheKey && result) {
-        this.pageDataCache.set(cacheKey, { data: result, timestamp: Date.now() });
+        this.pageDataCache.set(cacheKey, {
+          data: result,
+          timestamp: Date.now(),
+        });
         debugLog(
           `[${config.addonName}] [STRUCTURED-DATA] Cached pageData for ${cacheKey} (cache size: ${this.pageDataCache.size})`,
         );
@@ -1477,7 +1938,10 @@ export class ReaderIntegration {
       const itemID = reader?.itemID;
       if (itemID) {
         const cached = this.processedDataCache.get(itemID);
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL.READER_INTEGRATION_MS) {
+        if (
+          cached &&
+          Date.now() - cached.timestamp < CACHE_TTL.READER_INTEGRATION_MS
+        ) {
           debugLog(
             `[${config.addonName}] [STRUCTURED-DATA] Using cached processedData for item ${itemID}`,
           );
@@ -1506,7 +1970,10 @@ export class ReaderIntegration {
 
       // FTR-REFACTOR: Cache the result
       if (itemID && result) {
-        this.processedDataCache.set(itemID, { data: result, timestamp: Date.now() });
+        this.processedDataCache.set(itemID, {
+          data: result,
+          timestamp: Date.now(),
+        });
         debugLog(
           `[${config.addonName}] [STRUCTURED-DATA] Cached processedData for item ${itemID}`,
         );
@@ -1600,8 +2067,7 @@ export class ReaderIntegration {
    */
   getCurrentReader(): any | null {
     try {
-      // @ts-ignore - Zotero_Tabs is a global
-      const selectedTabID = Zotero_Tabs?.selectedID;
+      const selectedTabID = ReaderTabHelper.getSelectedTabID();
       if (!selectedTabID) return null;
 
       return Zotero.Reader.getByTabID(selectedTabID);
@@ -1755,7 +2221,9 @@ export class ReaderIntegration {
         },
       };
 
-      this.itemNotifierID = Zotero.Notifier.registerObserver(callback, ["item"]);
+      this.itemNotifierID = Zotero.Notifier.registerObserver(callback, [
+        "item",
+      ]);
       Zotero.debug(
         `[${config.addonName}] [RECID-AUTO-UPDATE] Registered item notifier: ${this.itemNotifierID}`,
       );
@@ -1831,7 +2299,10 @@ export class ReaderIntegration {
       }
 
       // Skip citation format detection if already detected or currently scanning
-      if (this.transientState.citationFormatByItem.has(itemID) || this.transientState.scanningFormatItems.has(itemID)) {
+      if (
+        this.transientState.citationFormatByItem.has(itemID) ||
+        this.transientState.scanningFormatItems.has(itemID)
+      ) {
         // Still trigger background preload even if format was already detected
         this.triggerBackgroundPreload(reader);
         return;
@@ -1971,11 +2442,17 @@ export class ReaderIntegration {
 
           for (const pageIndex of pagesToSample.slice(0, maxPagesToSample)) {
             try {
-              const pageData = await this.getStructuredPageData(reader, pageIndex);
+              const pageData = await this.getStructuredPageData(
+                reader,
+                pageIndex,
+              );
               if (pageData?.chars?.length) {
                 const pageText = this.extractTextFromChars(pageData.chars);
                 if (pageText.length > 100) {
-                  const result = this.analyzeTextForCitationFormat(pageText, parser);
+                  const result = this.analyzeTextForCitationFormat(
+                    pageText,
+                    parser,
+                  );
                   numericCount += result.numeric;
                   authorYearCount += result.authorYear;
                   sampledPages++;
@@ -2021,7 +2498,9 @@ export class ReaderIntegration {
    * Zotero PDF.js can detect citation markers and their types.
    * Returns null if overlays don't provide enough information.
    */
-  private async detectFormatFromOverlays(reader: any): Promise<CitationType | null> {
+  private async detectFormatFromOverlays(
+    reader: any,
+  ): Promise<CitationType | null> {
     try {
       // Sample a few pages for overlay data
       const pagesToCheck = [1, 2, 3, 4, 5]; // Early pages where citations typically appear
@@ -2086,6 +2565,7 @@ export class ReaderIntegration {
   /**
    * Get fulltext from Zotero's cache file (.zotero-ft-cache).
    * This is the most efficient method as it uses pre-indexed text.
+   * Uses Zotero.Fulltext.getItemCacheFile() API when available.
    */
   private async getFulltextFromCache(reader: any): Promise<string | null> {
     try {
@@ -2095,15 +2575,32 @@ export class ReaderIntegration {
       const item = Zotero.Items.get(itemID);
       if (!item) return null;
 
-      // Get the attachment file path
+      // Prefer Zotero.Fulltext.getItemCacheFile() API (more reliable)
+      if (typeof Zotero.Fulltext?.getItemCacheFile === "function") {
+        try {
+          const cacheFile = Zotero.Fulltext.getItemCacheFile(item);
+          if (cacheFile?.exists?.()) {
+            const content = await Zotero.File.getContentsAsync(cacheFile.path);
+            const text = typeof content === "string" ? content : null;
+            if (text && text.length > 100) {
+              Zotero.debug(
+                `[${config.addonName}] [FORMAT-DETECT] Got ${text.length} chars from fulltext cache (via API)`,
+              );
+              return text;
+            }
+          }
+        } catch {
+          // Fall through to manual path construction
+        }
+      }
+
+      // Fallback: manual path construction for older Zotero versions
       const filePath = await item.getFilePathAsync?.();
       if (!filePath) return null;
 
-      // Construct cache file path
       const pdfDir = filePath.substring(0, filePath.lastIndexOf("/"));
       const cachePath = `${pdfDir}/.zotero-ft-cache`;
 
-      // Check if cache file exists
       const cacheExists = await IOUtils.exists(cachePath);
       if (!cacheExists) {
         Zotero.debug(
@@ -2112,7 +2609,6 @@ export class ReaderIntegration {
         return null;
       }
 
-      // Read cache file
       const cacheData = await IOUtils.read(cachePath);
       const decoder = new TextDecoder("utf-8");
       const text = decoder.decode(cacheData);
@@ -2158,19 +2654,25 @@ export class ReaderIntegration {
 
     // Count author-year citations (Author, Year), Author et al. (Year), etc.
     // Pattern 1: (Author, YYYY) or (Authors, YYYY)
-    const inParenMatches = text.match(/\([A-Z][a-zA-Z'''-]+(?:(?:\s*,\s*|\s+and\s+)[A-Z][a-zA-Z'''-]+)*(?:\s+et\s+al\.?)?\s*,\s*\d{4}[a-z]?\)/gi);
+    const inParenMatches = text.match(
+      /\([A-Z][a-zA-Z'''-]+(?:(?:\s*,\s*|\s+and\s+)[A-Z][a-zA-Z'''-]+)*(?:\s+et\s+al\.?)?\s*,\s*\d{4}[a-z]?\)/gi,
+    );
     if (inParenMatches) {
       authorYear += inParenMatches.length;
     }
 
     // Pattern 2: Author et al. (YYYY)
-    const etAlMatches = text.match(/[A-Z][a-zA-Z'''-]+\s+et\s+al\.?\s*\(\d{4}[a-z]?\)/gi);
+    const etAlMatches = text.match(
+      /[A-Z][a-zA-Z'''-]+\s+et\s+al\.?\s*\(\d{4}[a-z]?\)/gi,
+    );
     if (etAlMatches) {
       authorYear += etAlMatches.length;
     }
 
     // Pattern 3: Author and Author (YYYY)
-    const twoAuthorMatches = text.match(/[A-Z][a-zA-Z'''-]+\s+and\s+[A-Z][a-zA-Z'''-]+\s*\(\d{4}[a-z]?\)/gi);
+    const twoAuthorMatches = text.match(
+      /[A-Z][a-zA-Z'''-]+\s+and\s+[A-Z][a-zA-Z'''-]+\s*\(\d{4}[a-z]?\)/gi,
+    );
     if (twoAuthorMatches) {
       authorYear += twoAuthorMatches.length;
     }
@@ -2197,7 +2699,9 @@ export class ReaderIntegration {
    * @returns true if author-year format was detected
    */
   isAuthorYearFormat(itemID: number): boolean {
-    return this.transientState.citationFormatByItem.get(itemID) === "author-year";
+    return (
+      this.transientState.citationFormatByItem.get(itemID) === "author-year"
+    );
   }
 }
 
@@ -2205,4 +2709,3 @@ export class ReaderIntegration {
 export function getReaderIntegration(): ReaderIntegration {
   return ReaderIntegration.getInstance();
 }
-

@@ -119,7 +119,7 @@ function convertMathML(html: string): string {
       (_match, content) => {
         // Find the base and exponent parts
         const parts: string[] = [];
-        let remaining = content;
+        const remaining = content;
         // Extract each element (roughly)
         const tagRegex = /<(mi|mo|mn|mrow|mtext)[^>]*>([\s\S]*?)<\/\1>/gi;
         let m;
@@ -254,7 +254,7 @@ function convertMathML(html: string): string {
   };
 
   // Process each <math>...</math> block
-  let result = html.replace(/<math[\s\S]*?<\/math>/gi, (mathBlock) => {
+  const result = html.replace(/<math[\s\S]*?<\/math>/gi, (mathBlock) => {
     return extractMathContent(mathBlock);
   });
 
@@ -279,13 +279,19 @@ export function cleanMathTitle(title?: string | null): string {
   text = text.replace(/\\prime/g, "'");
 
   // Handle font commands with braces: \text{...}, \mathrm{...}, etc.
-  text = text.replace(/\\(text|mathrm|bf|it|mathcal|cal|rm|sf|tt)\{([^}]+)\}/g, "$2");
+  text = text.replace(
+    /\\(text|mathrm|bf|it|mathcal|cal|rm|sf|tt)\{([^}]+)\}/g,
+    "$2",
+  );
   text = text.replace(/\\(cal|mathcal)\s+([A-Za-z])/g, "$2");
 
   // Handle declarative font commands without braces: \rm, \bf, \it, \sf, \tt
   // These affect all following text, so we just remove them
   // e.g., "1 \rm S" → "1 S" → "1S" (after trimInternal)
-  text = text.replace(/\\(rm|bf|it|sf|tt|normalfont|textrm|textbf|textit|textsf|texttt)(?![a-zA-Z])/g, "");
+  text = text.replace(
+    /\\(rm|bf|it|sf|tt|normalfont|textrm|textbf|textit|textsf|texttt)(?![a-zA-Z])/g,
+    "",
+  );
 
   const superscriptMap: Record<string, string> = {
     0: "⁰",
@@ -392,7 +398,7 @@ export function cleanMathTitle(title?: string | null): string {
     x: "ₓ",
   };
   text = text.replace(
-    /_([0-9a-zA-Z+\-*])|\_\\(pm|mp)/g,
+    /_([0-9a-zA-Z+\-*])|_\\(pm|mp)/g,
     (match, char: string, latex: string) => {
       if (char) {
         if (char === "*") return "⁎";
@@ -488,7 +494,7 @@ export function cleanMathTitle(title?: string | null): string {
     .replace(/\\hbar/g, "ℏ")
     .replace(/\\dagger/g, "†")
     .replace(/\\bar\{([^}]+)\}/g, "$1\u0304")
-    .replace(/-{2,}>/g, "→")  // ---> or --> to →
+    .replace(/-{2,}>/g, "→") // ---> or --> to →
     .replace(/->/g, "→");
 
   text = text.replace(/\$([^$]+)\$/g, (_match, content) => {
@@ -512,21 +518,35 @@ export function cleanMathTitle(title?: string | null): string {
 
   // Handle old-style square root notation: s**(1/2) → √s, x**(1/2) → √x
   text = text.replace(/(\w)\*\*\(1\/2\)/g, "√$1");
-  text = text.replace(/\*\*\(1\/2\)/g, "^(1/2)");  // Fallback for standalone
+  text = text.replace(/\*\*\(1\/2\)/g, "^(1/2)"); // Fallback for standalone
 
   // Handle old-style exponent notation: **2 → ² (superscript)
   text = text.replace(/\*\*(\d+)/g, (_match, num) => {
     const superscriptMap: Record<string, string> = {
-      "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
-      "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+      "0": "⁰",
+      "1": "¹",
+      "2": "²",
+      "3": "³",
+      "4": "⁴",
+      "5": "⁵",
+      "6": "⁶",
+      "7": "⁷",
+      "8": "⁸",
+      "9": "⁹",
     };
-    return num.split("").map((d: string) => superscriptMap[d] || d).join("");
+    return num
+      .split("")
+      .map((d: string) => superscriptMap[d] || d)
+      .join("");
   });
 
   // Handle old-style INSPIRE format: 0.9-GeV → 0.9 GeV (remove hyphen before units)
   // Also handle "10. GeV" → "10 GeV" (trailing decimal point)
   // Must be done before Title Case conversion
-  text = text.replace(/(\d)-?(TEV|GEV|MEV|KEV|EV|GEV\*\*2|MEV\*\*2)\b/gi, "$1 $2");
+  text = text.replace(
+    /(\d)-?(TEV|GEV|MEV|KEV|EV|GEV\*\*2|MEV\*\*2)\b/gi,
+    "$1 $2",
+  );
   text = text.replace(/(\d)\.\s+(TEV|GEV|MEV|KEV|EV)\b/gi, "$1 $2");
 
   // Handle approximate symbol: ~ → ≈ (when used as "approximately")
@@ -560,22 +580,25 @@ function convertParticleNotation(text: string): string {
   // Note: "pion" and "kaon" are excluded - they should remain as words
   // Only convert symbol forms like "pi+", "K+" etc.
   const particleMap: Record<string, string> = {
-    "pi": "π",  // but not "pion"
-    "mu": "μ", "muon": "μ",
-    "tau": "τ", "tauon": "τ",
-    "eta": "η",
-    "rho": "ρ",
-    "omega": "ω",
-    "phi": "φ",
-    "sigma": "Σ",
-    "lambda": "Λ",
-    "xi": "Ξ",
-    "delta": "Δ",
-    "nu": "ν", "neutrino": "ν",
-    "gamma": "γ",
-    "upsilon": "Υ",
-    "psi": "ψ",
-    "chi": "χ",
+    pi: "π", // but not "pion"
+    mu: "μ",
+    muon: "μ",
+    tau: "τ",
+    tauon: "τ",
+    eta: "η",
+    rho: "ρ",
+    omega: "ω",
+    phi: "φ",
+    sigma: "Σ",
+    lambda: "Λ",
+    xi: "Ξ",
+    delta: "Δ",
+    nu: "ν",
+    neutrino: "ν",
+    gamma: "γ",
+    upsilon: "Υ",
+    psi: "ψ",
+    chi: "χ",
   };
 
   // Convert particle+charge patterns: pi+ → π⁺, Pi- → π⁻, pi0 → π⁰
@@ -583,10 +606,13 @@ function convertParticleNotation(text: string): string {
   for (const [name, symbol] of Object.entries(particleMap)) {
     // Match particle name (case-insensitive) followed by optional prime(s) and charge
     // Use word boundary at start only; charge/prime characters are non-word chars
-    const pattern = new RegExp(`\\b${name}('+)?(\\+{1,2}|-{1,2}|0)?(?![a-zA-Z])`, "gi");
+    const pattern = new RegExp(
+      `\\b${name}('+)?(\\+{1,2}|-{1,2}|0)?(?![a-zA-Z])`,
+      "gi",
+    );
     text = text.replace(pattern, (_match, primes, charge) => {
       let result = symbol;
-      if (primes) result += primes;  // Keep the prime marks
+      if (primes) result += primes; // Keep the prime marks
       if (charge) {
         for (const c of charge) {
           if (c === "+") result += "⁺";
@@ -601,7 +627,7 @@ function convertParticleNotation(text: string): string {
   // Convert common particle pairs: e+e- → e⁺e⁻, p+p- → p⁺p⁻
   // Also handle: e+ e- (with space)
   text = text.replace(/\b([epKBD])\+\s*\1-/gi, (match, p) => {
-    const particle = p.toLowerCase() === "e" ? "e" : p;  // Keep e lowercase
+    const particle = p.toLowerCase() === "e" ? "e" : p; // Keep e lowercase
     return particle + "⁺" + particle + "⁻";
   });
   text = text.replace(/\b([epKBD])-\s*\1\+/gi, (match, p) => {
@@ -610,10 +636,10 @@ function convertParticleNotation(text: string): string {
   });
 
   // Convert single particle charges: e+, e-, p+, K+, K-, B+, B-, D+, D-, W+, W-, Z
-  text = text.replace(/\b([eE])([\+\-])/g, (_match, _p, charge) => {
+  text = text.replace(/\b([eE])([+-])/g, (_match, _p, charge) => {
     return "e" + (charge === "+" ? "⁺" : "⁻");
   });
-  text = text.replace(/\b([pKBDWH])([\+\-])\b/g, (_match, particle, charge) => {
+  text = text.replace(/\b([pKBDWH])([+-])\b/g, (_match, particle, charge) => {
     return particle + (charge === "+" ? "⁺" : "⁻");
   });
 
@@ -658,34 +684,134 @@ function convertAllCapsToTitleCase(text: string): string {
 
   // Common words that should stay lowercase in Title Case (except at start)
   const lowercaseWords = new Set([
-    "a", "an", "the", "and", "but", "or", "nor", "for", "yet", "so",
-    "at", "by", "in", "of", "on", "to", "up", "as", "is", "if",
-    "into", "onto", "upon", "with", "from", "over", "under",
+    "a",
+    "an",
+    "the",
+    "and",
+    "but",
+    "or",
+    "nor",
+    "for",
+    "yet",
+    "so",
+    "at",
+    "by",
+    "in",
+    "of",
+    "on",
+    "to",
+    "up",
+    "as",
+    "is",
+    "if",
+    "into",
+    "onto",
+    "upon",
+    "with",
+    "from",
+    "over",
+    "under",
   ]);
 
   // Physics acronyms and terms that should stay uppercase
   const keepUppercase = new Set([
-    "QCD", "QED", "QFT", "SM", "BSM", "SUSY", "MSSM", "NMSSM",
-    "LHC", "ATLAS", "CMS", "ALICE", "LHCB", "BELLE", "BABAR",
-    "LEP", "HERA", "RHIC", "TEVATRON", "CERN", "SLAC", "DESY", "KEK", "FERMILAB",
-    "PDF", "NLO", "NNLO", "LO", "EW", "EFT", "UV", "IR",
-    "CP", "CPT", "CPV", "CKM", "PMNS", "GUT", "TOE",
-    "DM", "DE", "WIMP", "MACHO", "PBH",
-    "CMB", "BBN", "BAO", "SNE", "GRB", "AGN", "BH",
-    "LIGO", "VIRGO", "LISA", "ET",
-    "MC", "ML", "NN", "DNN", "CNN", "RNN", "GAN", "VAE",
-    "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
-    "USA", "UK", "EU", "UN",
-    "PP", "PB", "AU", // collision types
+    "QCD",
+    "QED",
+    "QFT",
+    "SM",
+    "BSM",
+    "SUSY",
+    "MSSM",
+    "NMSSM",
+    "LHC",
+    "ATLAS",
+    "CMS",
+    "ALICE",
+    "LHCB",
+    "BELLE",
+    "BABAR",
+    "LEP",
+    "HERA",
+    "RHIC",
+    "TEVATRON",
+    "CERN",
+    "SLAC",
+    "DESY",
+    "KEK",
+    "FERMILAB",
+    "PDF",
+    "NLO",
+    "NNLO",
+    "LO",
+    "EW",
+    "EFT",
+    "UV",
+    "IR",
+    "CP",
+    "CPT",
+    "CPV",
+    "CKM",
+    "PMNS",
+    "GUT",
+    "TOE",
+    "DM",
+    "DE",
+    "WIMP",
+    "MACHO",
+    "PBH",
+    "CMB",
+    "BBN",
+    "BAO",
+    "SNE",
+    "GRB",
+    "AGN",
+    "BH",
+    "LIGO",
+    "VIRGO",
+    "LISA",
+    "ET",
+    "MC",
+    "ML",
+    "NN",
+    "DNN",
+    "CNN",
+    "RNN",
+    "GAN",
+    "VAE",
+    "I",
+    "II",
+    "III",
+    "IV",
+    "V",
+    "VI",
+    "VII",
+    "VIII",
+    "IX",
+    "X",
+    "USA",
+    "UK",
+    "EU",
+    "UN",
+    "PP",
+    "PB",
+    "AU", // collision types
   ]);
 
   // Terms that have specific casing (case-insensitive lookup, value is correct form)
   const specialCasing: Record<string, string> = {
     // Energy units (with and without exponents)
-    "TEV": "TeV", "GEV": "GeV", "MEV": "MeV", "KEV": "keV", "EV": "eV",
-    "TEV²": "TeV²", "GEV²": "GeV²", "MEV²": "MeV²", "KEV²": "keV²", "EV²": "eV²",
+    TEV: "TeV",
+    GEV: "GeV",
+    MEV: "MeV",
+    KEV: "keV",
+    EV: "eV",
+    "TEV²": "TeV²",
+    "GEV²": "GeV²",
+    "MEV²": "MeV²",
+    "KEV²": "keV²",
+    "EV²": "eV²",
     // Particles - keep capitalized
-    "HIGGS": "Higgs",
+    HIGGS: "Higgs",
   };
 
   const words = text.split(/(\s+)/); // Split but keep whitespace
@@ -724,14 +850,39 @@ function convertAllCapsToTitleCase(text: string): string {
 
     // Check for particle names that should stay lowercase (will be converted to symbols later)
     const lowerWord = word.toLowerCase();
-    const particleNames = ["pi", "pion", "mu", "muon", "tau", "tauon", "eta", "rho",
-                           "omega", "phi", "sigma", "lambda", "xi", "delta", "nu",
-                           "neutrino", "gamma", "upsilon", "psi", "chi"];
+    const particleNames = [
+      "pi",
+      "pion",
+      "mu",
+      "muon",
+      "tau",
+      "tauon",
+      "eta",
+      "rho",
+      "omega",
+      "phi",
+      "sigma",
+      "lambda",
+      "xi",
+      "delta",
+      "nu",
+      "neutrino",
+      "gamma",
+      "upsilon",
+      "psi",
+      "chi",
+    ];
     // Single-letter particles with charge: e+, e-, p+, p-
-    const singleLetterParticlePattern = /^[ep][+\-]$/i;
-    if (particleNames.includes(lowerWord) ||
-        particleNames.some(p => lowerWord.startsWith(p) && /^[+\-0]+$/.test(lowerWord.slice(p.length))) ||
-        singleLetterParticlePattern.test(lowerWord)) {
+    const singleLetterParticlePattern = /^[ep][+-]$/i;
+    if (
+      particleNames.includes(lowerWord) ||
+      particleNames.some(
+        (p) =>
+          lowerWord.startsWith(p) &&
+          /^[+\-0]+$/.test(lowerWord.slice(p.length)),
+      ) ||
+      singleLetterParticlePattern.test(lowerWord)
+    ) {
       // Keep particle names lowercase (they'll be converted to symbols later)
       result.push(lowerWord);
       isFirstWord = false;
@@ -755,4 +906,3 @@ function convertAllCapsToTitleCase(text: string): string {
 
   return result.join("");
 }
-

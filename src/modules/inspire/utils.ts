@@ -173,6 +173,7 @@ export class ZInsUtils {
 export class ReaderTabHelper {
   // Get Zotero_Tabs dynamically to avoid initialization timing issues
   private static get tabs() {
+    // eslint-disable-next-line no-restricted-globals
     return typeof Zotero_Tabs !== "undefined" ? Zotero_Tabs : undefined;
   }
 
@@ -210,7 +211,9 @@ export class ReaderTabHelper {
   }
 
   static getReaderByTabID(tabID: string) {
-    return this.readerAPI?.getByTabID?.(tabID) as _ZoteroTypes.ReaderInstance | undefined;
+    return this.readerAPI?.getByTabID?.(tabID) as
+      | _ZoteroTypes.ReaderInstance
+      | undefined;
   }
 
   static getReaderByItemID(itemID?: number) {
@@ -236,7 +239,9 @@ export class ReaderTabHelper {
    * Find reader tab ID by looking at parent item's attachments.
    * Reader tabs are opened for attachment items, not parent items.
    */
-  static getReaderTabIDForParentItem(parentItemID?: number): string | undefined {
+  static getReaderTabIDForParentItem(
+    parentItemID?: number,
+  ): string | undefined {
     if (!parentItemID) {
       return undefined;
     }
@@ -277,10 +282,13 @@ export class ReaderTabHelper {
  */
 export function clearAllHistoryPrefs(): void {
   try {
-    Zotero.Prefs.set(`${config.addonRef}.${SEARCH_HISTORY_PREF_KEY}`, "[]", true);
+    Zotero.Prefs.set(
+      `${config.addonRef}.${SEARCH_HISTORY_PREF_KEY}`,
+      "[]",
+      true,
+    );
     Zotero.debug(`[${config.addonName}] Search history cleared`);
   } catch (err) {
     Zotero.debug(`[${config.addonName}] Failed to clear history: ${err}`);
   }
 }
-

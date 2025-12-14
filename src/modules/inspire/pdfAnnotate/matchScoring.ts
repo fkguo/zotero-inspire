@@ -36,7 +36,7 @@ import {
  * @returns Normalized arXiv ID or null
  */
 export function normalizeArxivId(
-  id?: string | InspireArxivDetails | null
+  id?: string | InspireArxivDetails | null,
 ): string | null {
   if (!id) return null;
   let raw: string | undefined;
@@ -52,7 +52,7 @@ export function normalizeArxivId(
   // Remove URL prefix (https://arxiv.org/abs/ or /pdf/)
   normalized = normalized.replace(
     /^https?:\/\/(?:www\.)?arxiv\.org\/(?:abs|pdf)\//i,
-    ""
+    "",
   );
 
   // Remove arXiv: prefix
@@ -181,10 +181,7 @@ export function longestCommonPrefixLength(a: string, b: string): number {
  * @param b - Second journal string
  * @returns true if journals are similar
  */
-export function journalsSimilar(
-  a?: string | null,
-  b?: string | null
-): boolean {
+export function journalsSimilar(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false;
   const variantsA = buildJournalVariants(a);
   const variantsB = buildJournalVariants(b);
@@ -216,12 +213,15 @@ export function journalsSimilar(
  */
 export function isJournalMatch(
   pdfPaper: PDFPaperInfo,
-  entry: InspireReferenceEntry
+  entry: InspireReferenceEntry,
 ): boolean {
   if (!pdfPaper.journalAbbrev || !pdfPaper.volume) return false;
   const pub = entry.publicationInfo;
   if (!pub) return false;
-  const journalClose = journalsSimilar(pdfPaper.journalAbbrev, pub.journal_title);
+  const journalClose = journalsSimilar(
+    pdfPaper.journalAbbrev,
+    pub.journal_title,
+  );
   const entryVol = pub.journal_volume || pub.volume;
   const volOk = entryVol ? String(entryVol) === String(pdfPaper.volume) : false;
   const entryPage = pub.page_start || pub.artid;
@@ -254,12 +254,17 @@ export function computePublicationPriority(
   const pub = entry.publicationInfo;
   let score = 0;
   const journalMatch =
-    pdfPaper.journalAbbrev && journalsSimilar(pdfPaper.journalAbbrev, pub.journal_title);
+    pdfPaper.journalAbbrev &&
+    journalsSimilar(pdfPaper.journalAbbrev, pub.journal_title);
   if (journalMatch) score += 1;
   const volMatch =
-    pdfPaper.volume && pub.journal_volume && String(pdfPaper.volume) === String(pub.journal_volume);
+    pdfPaper.volume &&
+    pub.journal_volume &&
+    String(pdfPaper.volume) === String(pub.journal_volume);
   const pageMatch =
-    pdfPaper.pageStart && pub.page_start && String(pdfPaper.pageStart) === String(pub.page_start);
+    pdfPaper.pageStart &&
+    pub.page_start &&
+    String(pdfPaper.pageStart) === String(pub.page_start);
   if (volMatch) score += 2;
   if (pageMatch) score += 2;
   if (volMatch && pageMatch) score += 1; // bonus for both
@@ -307,7 +312,7 @@ export interface CompositeScore {
  */
 export function calculateCompositeScore(
   pdfPaper: PDFPaperInfo,
-  entry: InspireReferenceEntry
+  entry: InspireReferenceEntry,
 ): CompositeScore {
   const breakdown = {
     arxiv: 0,
@@ -359,7 +364,9 @@ export function calculateCompositeScore(
   }
 
   const pdfAuthorRaw = pdfPaper.firstAuthorLastName?.toLowerCase();
-  const pdfAuthor = pdfAuthorRaw ? normalizeAuthorCompact(pdfAuthorRaw) : undefined;
+  const pdfAuthor = pdfAuthorRaw
+    ? normalizeAuthorCompact(pdfAuthorRaw)
+    : undefined;
   const pdfRaw = pdfPaper.rawText?.toLowerCase() || "";
 
   // Author match
@@ -383,7 +390,11 @@ export function calculateCompositeScore(
   }
 
   // AuthorText fallback
-  if (pdfAuthor && breakdown.author < SCORE.AUTHOR_PARTIAL && entry.authorText) {
+  if (
+    pdfAuthor &&
+    breakdown.author < SCORE.AUTHOR_PARTIAL &&
+    entry.authorText
+  ) {
     if (entry.authorText.toLowerCase().includes(pdfAuthor)) {
       breakdown.author = SCORE.AUTHOR_IN_TEXT;
       authorMatch = true;
@@ -402,7 +413,7 @@ export function calculateCompositeScore(
   // Year match (graduated scoring)
   if (pdfPaper.year && entry.year) {
     yearDelta = Math.abs(
-      parseInt(pdfPaper.year, 10) - parseInt(entry.year, 10)
+      parseInt(pdfPaper.year, 10) - parseInt(entry.year, 10),
     );
     if (yearDelta === 0) {
       breakdown.year = SCORE.YEAR_EXACT;
@@ -459,7 +470,7 @@ export function calculateCompositeScore(
  */
 export function getStrongMatchKind(
   pdfPaper: PDFPaperInfo,
-  entry: InspireReferenceEntry
+  entry: InspireReferenceEntry,
 ): { kind: "arxiv" | "doi" | "journal"; score: number } | null {
   // arXiv exact
   const pdfArxiv = normalizeArxivId(pdfPaper.arxivId);
@@ -478,9 +489,14 @@ export function getStrongMatchKind(
   // Journal + volume (+page) + author/year
   if (pdfPaper.journalAbbrev && pdfPaper.volume && entry.publicationInfo) {
     const pub = entry.publicationInfo;
-    const journalClose = journalsSimilar(pdfPaper.journalAbbrev, pub.journal_title);
+    const journalClose = journalsSimilar(
+      pdfPaper.journalAbbrev,
+      pub.journal_title,
+    );
     const entryVol = pub.journal_volume || pub.volume;
-    const volOk = entryVol ? String(entryVol) === String(pdfPaper.volume) : false;
+    const volOk = entryVol
+      ? String(entryVol) === String(pdfPaper.volume)
+      : false;
     const entryPage = pub.page_start || pub.artid;
     const pageOk =
       pdfPaper.pageStart && entryPage
@@ -545,7 +561,7 @@ export function scorePdfPaperInfos(
   candidates: PDFPaperInfo[],
   targetAuthors: string[],
   isEtAl: boolean = false,
-  targetAuthorInitials?: Map<string, string>
+  targetAuthorInitials?: Map<string, string>,
 ): Array<{ pdfInfo: PDFPaperInfo; score: number }> {
   if (candidates.length === 0) return [];
   if (candidates.length === 1) {
@@ -568,7 +584,7 @@ export function scorePdfPaperInfos(
     const filtered = candidates.filter(
       (c) =>
         (c.allAuthorLastNames?.length || 0) === 0 ||
-        (c.allAuthorLastNames?.length || 0) > 3
+        (c.allAuthorLastNames?.length || 0) > 3,
     );
     if (filtered.length > 0) {
       filteredCandidates = filtered;
@@ -611,16 +627,19 @@ export function scorePdfPaperInfos(
 
   // Calculate scores for each candidate
   const normalizedTargetAuthors = targetAuthors.map((a) =>
-    normalizeAuthorName(a)
+    normalizeAuthorName(a),
   );
   const scored: Array<{ pdfInfo: PDFPaperInfo; score: number }> = [];
 
   for (const candidate of filteredCandidates) {
     let score = 0;
 
-    if (candidate.allAuthorLastNames && candidate.allAuthorLastNames.length > 0) {
+    if (
+      candidate.allAuthorLastNames &&
+      candidate.allAuthorLastNames.length > 0
+    ) {
       const candidateAuthors = candidate.allAuthorLastNames.map((a) =>
-        normalizeAuthorName(a)
+        normalizeAuthorName(a),
       );
 
       // Count matching authors
@@ -663,8 +682,10 @@ export function scorePdfPaperInfos(
         }
       }
 
-      const extraUnmatchedInCandidate = candidateAuthors.length - matchedCandCount;
-      const unmatchedTargets = normalizedTargetAuthors.length - matchedTargetCount;
+      const extraUnmatchedInCandidate =
+        candidateAuthors.length - matchedCandCount;
+      const unmatchedTargets =
+        normalizedTargetAuthors.length - matchedTargetCount;
       const extraPenalty =
         normalizedTargetAuthors.length === 1 ? 0 : extraUnmatchedInCandidate;
 
@@ -701,7 +722,7 @@ export function selectBestPdfPaperInfo(
   candidates: PDFPaperInfo[],
   targetAuthors: string[],
   isEtAl: boolean = false,
-  targetAuthorInitials?: Map<string, string>
+  targetAuthorInitials?: Map<string, string>,
 ): PDFPaperInfo {
   if (candidates.length === 1) {
     return candidates[0];
@@ -711,7 +732,7 @@ export function selectBestPdfPaperInfo(
     candidates,
     targetAuthors,
     isEtAl,
-    targetAuthorInitials
+    targetAuthorInitials,
   );
   return scored[0]?.pdfInfo ?? candidates[0];
 }
@@ -753,7 +774,7 @@ export function scoreEntryForAuthorYear(
   targetYearBase: string | null,
   isEtAl: boolean,
   targetAuthorInitials?: Map<string, string>,
-  pdfPaperInfo?: { volume?: string; pageStart?: string } | null
+  pdfPaperInfo?: { volume?: string; pageStart?: string } | null,
 ): AuthorYearScore {
   let score = 0;
   let yearMatched = false;
@@ -775,7 +796,7 @@ export function scoreEntryForAuthorYear(
   if (targetAuthors.length > 0 && entry.authors && entry.authors.length > 0) {
     let authorMatchCount = 0;
     const entryAuthorsLower = entry.authors.map((a) =>
-      extractLastName(a).toLowerCase()
+      extractLastName(a).toLowerCase(),
     );
 
     for (const targetAuthor of targetAuthors) {
@@ -785,7 +806,7 @@ export function scoreEntryForAuthorYear(
       }
       if (
         entryAuthorsLower.some(
-          (ea) => ea.includes(targetAuthor) || targetAuthor.includes(ea)
+          (ea) => ea.includes(targetAuthor) || targetAuthor.includes(ea),
         )
       ) {
         authorMatchCount += 0.5;
@@ -843,7 +864,11 @@ export function scoreEntryForAuthorYear(
   }
 
   // Author initials scoring
-  if (targetAuthorInitials && targetAuthorInitials.size > 0 && entry.authorText) {
+  if (
+    targetAuthorInitials &&
+    targetAuthorInitials.size > 0 &&
+    entry.authorText
+  ) {
     let initialMatchScore = 0;
     let initialMismatchPenalty = 0;
 
@@ -886,117 +911,4 @@ export function scoreEntryForAuthorYear(
   }
 
   return { idx, score, yearMatched, entry };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Generic Best Match Utilities
-// FTR-REFACTOR: Higher-order functions to reduce repetitive for-loops
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Result from findBestMatch or findAllMatches.
- */
-export interface ScoredMatch<T> {
-  /** Entry index in the entries array */
-  index: number;
-  /** The matched entry */
-  entry: InspireReferenceEntry;
-  /** Match score */
-  score: number;
-  /** Additional data from the scoring function */
-  data: T;
-}
-
-/**
- * Find the best matching entry using a scoring function.
- * Reduces repetitive for-loops throughout labelMatcher.
- *
- * @param entries - Array of INSPIRE entries to search
- * @param scoreFn - Function that scores each entry, returns null to skip
- * @param options - Optional configuration (minScore, excludeIndices)
- * @returns Best match or null if none found
- *
- * @example
- * ```typescript
- * const best = findBestMatch(entries, (entry, idx) => {
- *   const score = calculateMatchScore(pdfPaper, entry);
- *   if (score < 3) return null;
- *   return { score, data: { yearOk: score > 5 } };
- * }, { minScore: 4 });
- * ```
- */
-export function findBestMatch<T>(
-  entries: InspireReferenceEntry[],
-  scoreFn: (entry: InspireReferenceEntry, index: number) => { score: number; data: T } | null,
-  options: {
-    minScore?: number;
-    excludeIndices?: Set<number>;
-  } = {},
-): ScoredMatch<T> | null {
-  const { minScore = 0, excludeIndices } = options;
-  let best: ScoredMatch<T> | null = null;
-
-  for (let i = 0; i < entries.length; i++) {
-    if (excludeIndices?.has(i)) continue;
-
-    const result = scoreFn(entries[i], i);
-    if (!result || result.score < minScore) continue;
-
-    if (!best || result.score > best.score) {
-      best = {
-        index: i,
-        entry: entries[i],
-        score: result.score,
-        data: result.data,
-      };
-    }
-  }
-  return best;
-}
-
-/**
- * Find all matching entries using a scoring function.
- * Returns results sorted by score descending.
- *
- * @param entries - Array of INSPIRE entries to search
- * @param scoreFn - Function that scores each entry, returns null to skip
- * @param options - Optional configuration (minScore, maxResults, excludeIndices)
- * @returns Array of matches sorted by score descending
- *
- * @example
- * ```typescript
- * const matches = findAllMatches(entries, (entry, idx) => {
- *   const score = calculateMatchScore(pdfPaper, entry);
- *   return score >= 3 ? { score, data: { idx } } : null;
- * }, { maxResults: 5 });
- * ```
- */
-export function findAllMatches<T>(
-  entries: InspireReferenceEntry[],
-  scoreFn: (entry: InspireReferenceEntry, index: number) => { score: number; data: T } | null,
-  options: {
-    minScore?: number;
-    maxResults?: number;
-    excludeIndices?: Set<number>;
-  } = {},
-): ScoredMatch<T>[] {
-  const { minScore = 0, maxResults, excludeIndices } = options;
-  const results: ScoredMatch<T>[] = [];
-
-  for (let i = 0; i < entries.length; i++) {
-    if (excludeIndices?.has(i)) continue;
-
-    const result = scoreFn(entries[i], i);
-    if (!result || result.score < minScore) continue;
-
-    results.push({
-      index: i,
-      entry: entries[i],
-      score: result.score,
-      data: result.data,
-    });
-  }
-
-  results.sort((a, b) => b.score - a.score);
-  return maxResults ? results.slice(0, maxResults) : results;
 }

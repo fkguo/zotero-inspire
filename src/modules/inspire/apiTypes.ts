@@ -315,7 +315,7 @@ export interface CrossRefDate {
  * Type guard for INSPIRE Literature search response.
  */
 export function isInspireLiteratureSearchResponse(
-  obj: unknown
+  obj: unknown,
 ): obj is InspireLiteratureSearchResponse {
   return (
     typeof obj === "object" &&
@@ -329,7 +329,9 @@ export function isInspireLiteratureSearchResponse(
 /**
  * Type guard for INSPIRE Literature hit.
  */
-export function isInspireLiteratureHit(obj: unknown): obj is InspireLiteratureHit {
+export function isInspireLiteratureHit(
+  obj: unknown,
+): obj is InspireLiteratureHit {
   return (
     typeof obj === "object" &&
     obj !== null &&
@@ -342,7 +344,9 @@ export function isInspireLiteratureHit(obj: unknown): obj is InspireLiteratureHi
 /**
  * Type guard for CrossRef works response.
  */
-export function isCrossRefWorksResponse(obj: unknown): obj is CrossRefWorksResponse {
+export function isCrossRefWorksResponse(
+  obj: unknown,
+): obj is CrossRefWorksResponse {
   return (
     typeof obj === "object" &&
     obj !== null &&
@@ -360,7 +364,9 @@ export function isCrossRefWorksResponse(obj: unknown): obj is CrossRefWorksRespo
  * Extract recid from INSPIRE record $ref URL.
  * Example: "https://inspirehep.net/api/literature/123456" -> "123456"
  */
-export function extractRecidFromRef(ref: InspireRecordRef | undefined): string | undefined {
+export function extractRecidFromRef(
+  ref: InspireRecordRef | undefined,
+): string | undefined {
   if (!ref?.$ref) return undefined;
   const match = ref.$ref.match(/\/literature\/(\d+)$/);
   return match?.[1];
@@ -369,7 +375,9 @@ export function extractRecidFromRef(ref: InspireRecordRef | undefined): string |
 /**
  * Get primary title from titles array.
  */
-export function getPrimaryTitle(titles: InspireTitle[] | undefined): string | undefined {
+export function getPrimaryTitle(
+  titles: InspireTitle[] | undefined,
+): string | undefined {
   if (!titles?.length) return undefined;
   // Prefer non-arXiv source title
   const nonArxiv = titles.find((t) => t.source !== "arXiv");
@@ -379,20 +387,26 @@ export function getPrimaryTitle(titles: InspireTitle[] | undefined): string | un
 /**
  * Get primary arXiv ID from eprints array.
  */
-export function getPrimaryArxivId(eprints: InspireArxivEprint[] | undefined): string | undefined {
+export function getPrimaryArxivId(
+  eprints: InspireArxivEprint[] | undefined,
+): string | undefined {
   return eprints?.[0]?.value;
 }
 
 /**
  * Get primary DOI from DOIs array.
  */
-export function getPrimaryDoi(dois: InspireDOI[] | undefined): string | undefined {
+export function getPrimaryDoi(
+  dois: InspireDOI[] | undefined,
+): string | undefined {
   return dois?.[0]?.value;
 }
 
 /**
  * Get primary abstract text.
  */
-export function getPrimaryAbstract(abstracts: InspireAbstract[] | undefined): string | undefined {
+export function getPrimaryAbstract(
+  abstracts: InspireAbstract[] | undefined,
+): string | undefined {
   return abstracts?.[0]?.value;
 }

@@ -42,7 +42,9 @@ export function extractRecidFromRecordRef(ref?: string): string | null {
   return match ? match[1] : null;
 }
 
-export function extractRecidFromUrls(urls?: Array<{ value: string }>): string | null {
+export function extractRecidFromUrls(
+  urls?: Array<{ value: string }>,
+): string | null {
   if (!Array.isArray(urls)) {
     return null;
   }
@@ -67,7 +69,10 @@ export function extractRecidFromUrl(url?: string | null): string | null {
 // URL Building Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function buildReferenceUrl(reference: any, recid?: string | null): string | undefined {
+export function buildReferenceUrl(
+  reference: any,
+  recid?: string | null,
+): string | undefined {
   if (recid) {
     return `${INSPIRE_LITERATURE_URL}/${recid}`;
   }
@@ -96,7 +101,8 @@ export function buildFallbackUrl(
   // Try DOI first (handles both string and {value: string} formats)
   if (Array.isArray(source?.dois) && source.dois.length) {
     const first = source.dois[0];
-    const value = typeof first === "string" ? first : (first?.value as string | undefined);
+    const value =
+      typeof first === "string" ? first : (first?.value as string | undefined);
     if (value) {
       return `${DOI_ORG_URL}/${value}`;
     }
@@ -188,7 +194,9 @@ export function extractArxivFromMetadata(
 // Database Query Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function findItemByRecid(recid: string): Promise<Zotero.Item | null> {
+export async function findItemByRecid(
+  recid: string,
+): Promise<Zotero.Item | null> {
   const fieldID = Zotero.ItemFields.getID("archiveLocation");
   if (!fieldID) {
     return null;
@@ -271,7 +279,9 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  * @param arxivIds Array of arXiv IDs (e.g., ["2305.12345", "hep-ph/0001234"])
  * @returns Map of arXiv ID → local item ID
  */
-export async function findItemsByArxivs(arxivIds: string[]): Promise<Map<string, number>> {
+export async function findItemsByArxivs(
+  arxivIds: string[],
+): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!arxivIds.length) return result;
 
@@ -282,7 +292,7 @@ export async function findItemsByArxivs(arxivIds: string[]): Promise<Map<string,
   for (let i = 0; i < arxivIds.length; i += CHUNK_SIZE) {
     const chunk = arxivIds.slice(i, i + CHUNK_SIZE);
     // Build LIKE patterns for arXiv IDs
-    const patterns = chunk.flatMap(id => [
+    const patterns = chunk.flatMap((id) => [
       `%arXiv:${id}%`,
       `%_eprint:${id}%`,
     ]);
@@ -300,7 +310,10 @@ export async function findItemsByArxivs(arxivIds: string[]): Promise<Map<string,
           const extra = row.value as string;
           // Match arXiv ID from extra field
           for (const arxivId of chunk) {
-            if (extra.includes(`arXiv:${arxivId}`) || extra.includes(`_eprint:${arxivId}`)) {
+            if (
+              extra.includes(`arXiv:${arxivId}`) ||
+              extra.includes(`_eprint:${arxivId}`)
+            ) {
               result.set(arxivId, Number(row.itemID));
               break;
             }
@@ -320,7 +333,9 @@ export async function findItemsByArxivs(arxivIds: string[]): Promise<Map<string,
  * @param dois Array of DOIs (e.g., ["10.1103/PhysRevD.100.123456"])
  * @returns Map of DOI → local item ID
  */
-export async function findItemsByDOIs(dois: string[]): Promise<Map<string, number>> {
+export async function findItemsByDOIs(
+  dois: string[],
+): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!dois.length) return result;
 
@@ -331,8 +346,10 @@ export async function findItemsByDOIs(dois: string[]): Promise<Map<string, numbe
   for (let i = 0; i < dois.length; i += CHUNK_SIZE) {
     const chunk = dois.slice(i, i + CHUNK_SIZE);
     // Normalize DOIs for comparison (lowercase)
-    const normalizedChunk = chunk.map(d => d.toLowerCase());
-    const placeholders = normalizedChunk.map(() => "LOWER(value) = ?").join(" OR ");
+    const normalizedChunk = chunk.map((d) => d.toLowerCase());
+    const placeholders = normalizedChunk
+      .map(() => "LOWER(value) = ?")
+      .join(" OR ");
     const sql = `
       SELECT itemID, value
       FROM itemData
@@ -340,12 +357,15 @@ export async function findItemsByDOIs(dois: string[]): Promise<Map<string, numbe
       WHERE fieldID = ? AND (${placeholders})
     `;
     try {
-      const rows = await Zotero.DB.queryAsync(sql, [fieldID, ...normalizedChunk]);
+      const rows = await Zotero.DB.queryAsync(sql, [
+        fieldID,
+        ...normalizedChunk,
+      ]);
       if (rows) {
         for (const row of rows) {
           const doiValue = (row.value as string).toLowerCase();
           // Find original DOI (case-insensitive match)
-          const originalDoi = chunk.find(d => d.toLowerCase() === doiValue);
+          const originalDoi = chunk.find((d) => d.toLowerCase() === doiValue);
           if (originalDoi) {
             result.set(originalDoi, Number(row.itemID));
           }
@@ -364,7 +384,9 @@ export async function findItemsByDOIs(dois: string[]): Promise<Map<string, numbe
  * @param recids Array of INSPIRE recids
  * @returns Map of recid → local item ID
  */
-export async function findItemsByRecids(recids: string[]): Promise<Map<string, number>> {
+export async function findItemsByRecids(
+  recids: string[],
+): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!recids.length) return result;
 
@@ -401,4 +423,3 @@ export async function findItemsByRecids(recids: string[]): Promise<Map<string, n
 
 // Use LRUCache to prevent unbounded memory growth (max 500 entries)
 export const recidLookupCache = new LRUCache<number, string>(500);
-

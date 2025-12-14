@@ -58,22 +58,6 @@ export const YEAR_DELTA = {
 } as const;
 
 /**
- * API configuration for INSPIRE requests.
- */
-export const API_CONFIG = {
-  /** Batch size for bulk queries */
-  BATCH_SIZE: 5,
-  /** Number of retry attempts */
-  RETRY_COUNT: 3,
-  /** Delay between retries in milliseconds */
-  RETRY_DELAY: 1000,
-  /** Request timeout in milliseconds */
-  TIMEOUT: 30000,
-  /** Maximum references to fetch per request */
-  MAX_REFS_PER_REQUEST: 200,
-} as const;
-
-/**
  * PDF parsing configuration.
  */
 export const PARSE_CONFIG = {
@@ -112,18 +96,6 @@ export const MATCH_CONFIG = {
 } as const;
 
 /**
- * UI feedback configuration.
- */
-export const UI_CONFIG = {
-  /** Duration of highlight animation in milliseconds */
-  HIGHLIGHT_DURATION: 2500,
-  /** Maximum selection length for citation detection */
-  MAX_SELECTION_LENGTH: 2000,
-  /** Short selection threshold (use parseSelection vs parseText) */
-  SHORT_SELECTION_THRESHOLD: 50,
-} as const;
-
-/**
  * Confidence levels for match results.
  */
 export type MatchConfidence = "high" | "medium" | "low";
@@ -132,9 +104,10 @@ export type MatchConfidence = "high" | "medium" | "low";
  * Match methods for tracking how a match was found.
  */
 export type MatchMethod =
-  | "exact"           // Direct label or identifier match
-  | "inferred"        // Index-based fallback
-  | "fuzzy"           // Fuzzy/case-insensitive match
+  | "exact" // Direct label or identifier match
+  | "inferred" // Index-based fallback
+  | "fuzzy" // Fuzzy/case-insensitive match
   | "strict-fallback" // Global search in strict mode
-  | "label"           // INSPIRE label match
-  | "index";          // Pure index match
+  | "label" // INSPIRE label match
+  | "index" // Pure index match
+  | "overlay"; // FTR-OVERLAY-REFS: Matched via Zotero overlay reference data

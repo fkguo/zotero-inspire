@@ -1,6 +1,4 @@
-import {
-  getJournalFullNames,
-} from "../../utils/journalAbbreviations";
+import { getJournalFullNames } from "../../utils/journalAbbreviations";
 import type { ParsedFilterToken, InspireReferenceEntry } from "./types";
 import { buildEntrySearchText } from "./formatters";
 
@@ -8,20 +6,20 @@ import { buildEntrySearchText } from "./formatters";
 // Text Normalization Constants
 // ─────────────────────────────────────────────────────────────────────────────
 const SPECIAL_CHAR_REPLACEMENTS: Record<string, string> = {
-  "ß": "ss",
-  "æ": "ae",
-  "œ": "oe",
-  "ø": "o",
-  "đ": "d",
-  "ð": "d",
-  "þ": "th",
-  "ł": "l",
+  ß: "ss",
+  æ: "ae",
+  œ: "oe",
+  ø: "o",
+  đ: "d",
+  ð: "d",
+  þ: "th",
+  ł: "l",
 };
 const SPECIAL_CHAR_REGEX = /[ßæœøđðþł]/g;
 const GERMAN_UMLAUT_REPLACEMENTS: Record<string, string> = {
-  "ä": "ae",
-  "ö": "oe",
-  "ü": "ue",
+  ä: "ae",
+  ö: "oe",
+  ü: "ue",
 };
 const GERMAN_UMLAUT_REGEX = /[äöü]/g;
 const COMBINING_MARKS_REGEX = /[\u0300-\u036f]/g;
@@ -95,7 +93,11 @@ export const buildFilterTokenVariants = (
 };
 
 const isFilterWhitespace = (char: string): boolean =>
-  char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
+  char === " " ||
+  char === "\t" ||
+  char === "\n" ||
+  char === "\r" ||
+  char === "\f";
 
 export const parseFilterTokens = (value: string): ParsedFilterToken[] => {
   if (!value) {
@@ -164,5 +166,3 @@ export function normalizeYear(year: string | undefined | null): string | null {
   if (!year) return null;
   return year.replace(/[a-z]$/i, "");
 }
-
-

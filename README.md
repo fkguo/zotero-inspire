@@ -16,10 +16,12 @@ This add-on for the excellent open-source reference manager [Zotero](https://git
     - [Smart filtering and sorting](#smart-filtering-and-sorting)
     - [Status indicators at a glance](#status-indicators-at-a-glance)
     - [Interactions and importing](#interactions-and-importing)
+    - [Keyboard Navigation (new in v2.1.1)](#keyboard-navigation-new-in-v211)
     - [Cached data and toolbar controls](#cached-data-and-toolbar-controls)
     - [Back/Forward Navigation](#backforward-navigation)
     - [INSPIRE Search from Search Bar (new in 1.1.2)](#inspire-search-from-search-bar-new-in-112)
-  - [What's new](#whats-new)
+  - [What&#39;s new](#whats-new)
+    - [🆕 Smart Update Mode (v2.1.0)](#-smart-update-mode-v210)
     - [🆕 PDF Reader Citation Detection (v2.0.0)](#-pdf-reader-citation-detection-v200)
     - [Previous releases (1.1.x)](#previous-releases-11x)
   - [Installation](#installation)
@@ -62,7 +64,7 @@ When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE Refe
 ### Status indicators at a glance
 
 - `●` (green) means the entry already exists in your library, while `⊕` (red) signals it is missing and ready for import.
-- The link icon is orange when the entry is already a related item and gray when the relation is absent.
+- The link icon is green when the entry is already a related item and gray when the relation is absent.
 - The clipboard icon (📋) fetches a BibTeX entry from INSPIRE and copies it directly to your clipboard.
 
 ### Interactions and importing
@@ -76,6 +78,30 @@ When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE Refe
 - Use the link icon to relate or unlink items, or the clipboard icon to copy curated BibTeX snippets.
 - Hover over a title to load its abstract tooltip; click the title to open the INSPIRE record in your browser.
 - Clicking any citation count opens the Entry Cited tab, and clicking an author name opens Author Papers, so you can continue exploring and importing without leaving the panel.
+
+### Keyboard Navigation (new in v2.1.1)
+
+The References Panel supports full keyboard navigation for efficient browsing without a mouse:
+
+| Key                     | Action                                                                |
+| ----------------------- | --------------------------------------------------------------------- |
+| `↑` / `k`          | Navigate to previous entry                                            |
+| `↓` / `j`          | Navigate to next entry                                                |
+| `←`                  | Go back in navigation history                                         |
+| `→`                  | Go forward in navigation history                                      |
+| `Home`                | Jump to first entry                                                   |
+| `End`                 | Jump to last entry                                                    |
+| `Enter`               | Open PDF (if available), select item in library, or trigger import    |
+| `Space` / `l`       | Toggle association status (link/unlink related item)                  |
+| `Tab` / `Shift+Tab` | Switch between tabs (References → Cited By → Entry Cited → Search) |
+| `Ctrl/Cmd+C`          | Copy BibTeX of focused entry to clipboard                             |
+| `Escape`              | Clear focused entry selection                                         |
+
+**Tips:**
+
+- Vim users can use `j`/`k` as alternatives to arrow keys
+- The focused entry is highlighted with a blue left border and light background
+- Keyboard navigation works with filtering—navigate through the filtered results
 
 ### Cached data and toolbar controls
 
@@ -128,6 +154,7 @@ A major new feature: **automatic citation detection in the PDF reader**!
 
 - **Select text containing citations** (e.g., "see Refs. [1,2,3]") in the PDF reader
 - The add-on **automatically detects citation patterns** and shows "INSPIRE Refs. [n]" buttons
+- **Hover preview**: Hovering over a citation button shows a preview card with title, authors, and abstract
 - **Click to jump** to the corresponding reference in the References Panel
 - **Supports multiple formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, `[arXiv:2301.12345]`, superscript digits
 - **Optional fuzzy detection** for PDFs with broken text layers (e.g., truncated brackets)
@@ -187,7 +214,8 @@ A major new feature: **automatic citation detection in the PDF reader**!
 
   - **Notice**: the INSPIRE standard journal abbreviations (instead of the fill journal name) will be put into the `Publication` field.
   - INSPIRE uses a unique `recid` for each publication in the database (called `control_number` in the `.json` file obtained via the [INSPIRE API](https://github.com/inspirehep/rest-api-doc)). The INSPIRE `recid` is set to the field of `Loc. in Archive` (and `INSPIRE` to `Archive`) for the selected Zotero item.
-    - This also enables to write look-up engines using this `recid` to exactly reach the INSPIRE page of that publication and its citations. The look-up engines can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.json` file:
+
+    - This also enables to write look-up engines using this `recid` to exactly reach the INSPIRE page of that publication. The look-up engines can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.json` file:
 
       ```json
       {
@@ -200,59 +228,14 @@ A major new feature: **automatic citation detection in the PDF reader**!
       	"_urlNamespaces": {
       		"z": "http://www.zotero.org/namespaces/openSearch#"
       	}
-      },
-      {
-      	"_name": "INSPIRE Citations",
-      	"_alias": "INSPIRE Citations",
-      	"_description": "INSPIRE citing papers",
-      	"_icon": "https://inspirehep.net/favicon.ico", 
-      	"_hidden": false,
-      	"_urlTemplate": "https://inspirehep.net/literature?q=refersto%3Arecid%3A{z:archiveLocation}",
-      	"_urlNamespaces": {
-      		"z": "http://www.zotero.org/namespaces/openSearch#"
-      	}
-      },
-      ```
-    - If the [Actions &amp; Tags](https://github.com/windingwind/zotero-actions-tags) addon is installed, one may also setup the following action to copy the INSPIRE link of the selected item with right click or assigned shortcut keys
-
-      ```js
-      if (!item) {
-      	return "[Copy INSPIRE Link] not an item";
-      }
-      else {
-      if (item.getField("archive") != "INSPIRE") {
-      	return "[Copy INSPIRE Link] item not in INSPIRE-HEP"
-      }
-
-      // get INSPIRE recid
-      let recid
-      recid = item.getField("archiveLocation")
-
-      const clipboard = new Zotero.ActionsTags.api.utils.ClipboardHelper();
-
-      let linkText;
-      // Use title
-      // linkText = item.getField("title");
-      // Use citation key
-      linkText = item.getField("citationKey");
-
-      let link;
-      // Use plain-text
-      // link = `https://inspirehep.net/literature/${recid}`;
-      // Use MarkDown
-      link = `[${linkText}](https://inspirehep.net/literature/${recid})`
-      clipboard
-      	.addText(link, "text/unicode")
-      	.addText(`<a href="https://inspirehep.net/literature/${recid}">${linkText}</a>`, "text/html")
-      	.copy();
-
-      return `[Copy INSPIRE Link] link to ${linkText} copied.`
       }
       ```
   - `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors`, `title`, `abstract`, etc.
+
     - **Note**: All fields are overwritten with INSPIRE data. Use **Smart Update** mode (see Settings below) if you want to protect specific fields from being overwritten.
   - Set the arXiv number of articles that are not published to the `Journal Abbr` field. Items of type `report` or `preprint` are set to `journalArticle`.
   - It will also get the citation counts with and without self-citations for each selected item. One can also choose to update only the citation counts using `Citation counts only` in the right-click menu.
+
     - The current INSPIRE system does not display the citation count without self citations for a given paper. However, this number is in the metadata, and can be extracted with this add-on.
     - Citation counts are changed only when they are different from those of the last fetching.
   - The [Better BibTeX (BBT)](https://retorque.re/zotero-better-bibtex) plugin can pin the citation key from INSPIRE. When we add new arXiv articles, sometimes BBT fails to get the INSPIRE record. In that case, this plugin writes the INSPIRE citation key to the `Extra` field so that it is pinned correctly (the BBT plugin needs to be installed).

@@ -184,14 +184,15 @@ export function formatAuthorName(rawName?: string): string {
  * - If totalAuthors > 50 (large collaboration), show only first author + "et al."
  * - Convert "others" to "et al."
  */
-export function formatAuthors(authors: string[], totalAuthors?: number): string {
+export function formatAuthors(
+  authors: string[],
+  totalAuthors?: number,
+): string {
   if (!authors.length) {
     return getString("references-panel-unknown-author");
   }
   // Filter out "others" and convert to et al. indication
-  const hasOthers = authors.some(
-    (name) => name.toLowerCase() === "others",
-  );
+  const hasOthers = authors.some((name) => name.toLowerCase() === "others");
   const filteredAuthors = authors.filter(
     (name) => name.toLowerCase() !== "others",
   );
@@ -208,7 +209,11 @@ export function formatAuthors(authors: string[], totalAuthors?: number): string 
     return `${formatted[0]} et al.`;
   }
   // If more authors than max, or more authors than displayed, show et al.
-  if (formatted.length > maxAuthors || actualTotal > formatted.length || hasOthers) {
+  if (
+    formatted.length > maxAuthors ||
+    actualTotal > formatted.length ||
+    hasOthers
+  ) {
     const displayCount = Math.min(formatted.length, maxAuthors);
     return `${formatted.slice(0, displayCount).join(", ")} et al.`;
   }
@@ -267,9 +272,10 @@ export function convertFullNameToSearchQuery(fullName: string): string {
 // Publication Info Formatting
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function splitPublicationInfo(
-  raw?: any | any[],
-): { primary?: any; errata?: Array<{ info: any; label: string }> } {
+export function splitPublicationInfo(raw?: any | any[]): {
+  primary?: any;
+  errata?: Array<{ info: any; label: string }>;
+} {
   if (!raw) {
     return {};
   }
@@ -349,8 +355,7 @@ export function formatPublicationInfo(
     info.pagination ||
     (Array.isArray(info.pages) ? info.pages[0] : undefined);
   const pageEnd =
-    info.page_end ||
-    (Array.isArray(info.pages) ? info.pages[1] : undefined);
+    info.page_end || (Array.isArray(info.pages) ? info.pages[1] : undefined);
   if (journal) {
     parts.push(journal);
   }
@@ -359,7 +364,7 @@ export function formatPublicationInfo(
   }
   const normalizedFallbackYear =
     fallbackYear && typeof fallbackYear === "string"
-      ? fallbackYear.match(/\d{4}/)?.[0] ?? fallbackYear
+      ? (fallbackYear.match(/\d{4}/)?.[0] ?? fallbackYear)
       : undefined;
   const resolvedYear =
     info.year ??
@@ -452,9 +457,7 @@ export function normalizeArxivCategories(input?: any): string[] {
   }
   const values = Array.isArray(input) ? input : [input];
   return values
-    .map((value) =>
-      typeof value === "string" ? value.trim() : undefined,
-    )
+    .map((value) => (typeof value === "string" ? value.trim() : undefined))
     .filter((value): value is string => Boolean(value));
 }
 
@@ -495,7 +498,9 @@ export function buildDisplayText(entry: InspireReferenceEntry): string {
   return `${label}${entry.authorText}: ${entry.title};`;
 }
 
-export function extractJournalName(entry: InspireReferenceEntry): string | undefined {
+export function extractJournalName(
+  entry: InspireReferenceEntry,
+): string | undefined {
   const info = entry.publicationInfo;
   if (info?.journal_title) {
     return info.journal_title;
@@ -567,4 +572,3 @@ export function buildEntrySearchText(entry: InspireReferenceEntry): string {
   searchTextCache.set(entry, result);
   return result;
 }
-

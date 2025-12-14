@@ -131,7 +131,9 @@ export class ExportManager {
             }
           }
         } catch (e) {
-          Zotero.debug(`[${config.addonName}] Failed to fetch BibTeX batch: ${e}`);
+          Zotero.debug(
+            `[${config.addonName}] Failed to fetch BibTeX batch: ${e}`,
+          );
         }
       }
 
@@ -200,7 +202,7 @@ export class ExportManager {
     const copyLabel = getString("references-panel-export-copy-header");
     copyHeader.setAttribute(
       "label",
-      hasSelection ? `${copyLabel} (${entriesWithRecid.length})` : copyLabel
+      hasSelection ? `${copyLabel} (${entriesWithRecid.length})` : copyLabel,
     );
     copyHeader.setAttribute("disabled", "true");
     popup.appendChild(copyHeader);
@@ -222,7 +224,9 @@ export class ExportManager {
     const exportLabel = getString("references-panel-export-file-header");
     exportHeader.setAttribute(
       "label",
-      hasSelection ? `${exportLabel} (${entriesWithRecid.length})` : exportLabel
+      hasSelection
+        ? `${exportLabel} (${entriesWithRecid.length})`
+        : exportLabel,
     );
     exportHeader.setAttribute("disabled", "true");
     popup.appendChild(exportHeader);
@@ -249,7 +253,7 @@ export class ExportManager {
   async exportEntries(
     format: ExportFormat,
     target: ExportTarget,
-    fileExt: string = ".bib"
+    fileExt: string = ".bib",
   ): Promise<ExportResult> {
     const entries = this.options.getEntries();
     const selectedIDs = this.options.getSelectedEntryIDs();
@@ -294,7 +298,9 @@ export class ExportManager {
             failedBatches++;
           }
         } catch (e) {
-          Zotero.debug(`[${config.addonName}] Failed to fetch ${format} batch: ${e}`);
+          Zotero.debug(
+            `[${config.addonName}] Failed to fetch ${format} batch: ${e}`,
+          );
           failedBatches++;
         }
       }
@@ -302,17 +308,37 @@ export class ExportManager {
       if (!allContent.length) {
         progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
         setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
-        return { success: false, count: 0, format, message: strings.bibtexAllFailed };
+        return {
+          success: false,
+          count: 0,
+          format,
+          message: strings.bibtexAllFailed,
+        };
       }
 
       const fullContent = allContent.join("\n\n");
       const formatLabel =
-        format === "bibtex" ? "BibTeX" : format === "latex-us" ? "LaTeX(US)" : "LaTeX(EU)";
+        format === "bibtex"
+          ? "BibTeX"
+          : format === "latex-us"
+            ? "LaTeX(US)"
+            : "LaTeX(EU)";
 
       if (target === "clipboard") {
-        return await this.exportToClipboard(fullContent, successCount, formatLabel, progressWin);
+        return await this.exportToClipboard(
+          fullContent,
+          successCount,
+          formatLabel,
+          progressWin,
+        );
       } else {
-        return await this.exportToFile(fullContent, successCount, formatLabel, fileExt, progressWin);
+        return await this.exportToFile(
+          fullContent,
+          successCount,
+          formatLabel,
+          fileExt,
+          progressWin,
+        );
       }
     } catch (e) {
       Zotero.debug(`[${config.addonName}] Export error: ${e}`);
@@ -328,7 +354,7 @@ export class ExportManager {
    */
   async handleSingleBibTeXCopy(
     entry: InspireReferenceEntry,
-    button: HTMLButtonElement
+    button: HTMLButtonElement,
   ): Promise<boolean> {
     if (!entry.recid) {
       return false;
@@ -344,7 +370,10 @@ export class ExportManager {
         const success = await copyToClipboard(bibtex);
         if (success) {
           button.textContent = "✓";
-          this.showToast(getString("references-panel-bibtex-copied"), "success");
+          this.showToast(
+            getString("references-panel-bibtex-copied"),
+            "success",
+          );
           this.restoreButton(button, originalText);
           return true;
         } else {
@@ -370,7 +399,7 @@ export class ExportManager {
     content: string,
     count: number,
     formatLabel: string,
-    progressWin: InstanceType<typeof ztoolkit.ProgressWindow>
+    progressWin: InstanceType<typeof ztoolkit.ProgressWindow>,
   ): Promise<ExportResult> {
     // Warn if content is very large (may exceed clipboard limits)
     const contentSize = new Blob([content]).size;
@@ -415,7 +444,7 @@ export class ExportManager {
     count: number,
     formatLabel: string,
     fileExt: string,
-    progressWin: InstanceType<typeof ztoolkit.ProgressWindow>
+    progressWin: InstanceType<typeof ztoolkit.ProgressWindow>,
   ): Promise<ExportResult> {
     const currentRecid = this.options.getCurrentRecid();
     const filename = `references_${currentRecid || "export"}${fileExt}`;
@@ -446,7 +475,10 @@ export class ExportManager {
   /**
    * Prompt user to save file with FilePicker dialog.
    */
-  private async promptSaveFile(defaultFilename: string, ext: string): Promise<string | null> {
+  private async promptSaveFile(
+    defaultFilename: string,
+    ext: string,
+  ): Promise<string | null> {
     const win = Zotero.getMainWindow();
     const fp = new win.FilePicker();
     fp.init(win, getString("references-panel-export-save-title"), fp.modeSave);
@@ -479,7 +511,10 @@ export class ExportManager {
     return progressWin;
   }
 
-  private showNotification(text: string, type: "default" | "success" | "fail"): void {
+  private showNotification(
+    text: string,
+    type: "default" | "success" | "fail",
+  ): void {
     const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
     const progressWin = new ztoolkit.ProgressWindow(config.addonName);
     progressWin.win.changeHeadline(config.addonName, icon);
@@ -499,7 +534,10 @@ export class ExportManager {
     progressWindow.startCloseTimer(2000);
   }
 
-  private restoreButton(button: HTMLButtonElement, originalText: string | null): void {
+  private restoreButton(
+    button: HTMLButtonElement,
+    originalText: string | null,
+  ): void {
     setTimeout(() => {
       button.textContent = originalText;
       button.disabled = false;

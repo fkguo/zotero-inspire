@@ -1,5 +1,5 @@
 import { ColumnOptions, DialogHelper } from "zotero-plugin-toolkit";
-import {config} from "../package.json"
+import { config } from "../package.json";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
 
@@ -29,11 +29,11 @@ class Addon {
       ztoolkit = createZToolkit();
     } catch (e) {
       Zotero.logError(e as Error);
-      // Fallback or partial initialization if needed, 
+      // Fallback or partial initialization if needed,
       // though usually createZToolkit is essential.
       // We log it so it doesn't crash the whole Addon constructor.
     }
-    
+
     this.data = {
       alive: true,
       config,

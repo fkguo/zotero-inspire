@@ -7,9 +7,7 @@ import {
   buildPublicationSummary,
   splitPublicationInfo,
 } from "./formatters";
-import {
-  extractAuthorNamesFromReference,
-} from "./authorUtils";
+import { extractAuthorNamesFromReference } from "./authorUtils";
 import {
   buildReferenceUrl,
   buildFallbackUrl,
@@ -60,7 +58,10 @@ export async function fetchReferencesEntries(
     if (signal?.aborted) break;
     entries.push(buildReferenceEntry(references[i], i, strings));
 
-    if (onProgress && (entries.length % BATCH_SIZE === 0 || i === totalCount - 1)) {
+    if (
+      onProgress &&
+      (entries.length % BATCH_SIZE === 0 || i === totalCount - 1)
+    ) {
       onProgress(entries, totalCount);
     }
   }
@@ -81,10 +82,8 @@ export function buildReferenceEntry(
     extractRecidFromRecordRef(referenceWrapper?.record?.["$ref"]) ||
     extractRecidFromUrls(reference?.urls);
 
-  const { names: authors, total: totalAuthors } = extractAuthorNamesFromReference(
-    reference,
-    AUTHOR_IDS_EXTRACT_LIMIT,
-  );
+  const { names: authors, total: totalAuthors } =
+    extractAuthorNamesFromReference(reference, AUTHOR_IDS_EXTRACT_LIMIT);
   const arxivDetails = extractArxivFromReference(reference);
   const resolvedYear =
     reference?.publication_info?.year?.toString() ??
@@ -101,9 +100,10 @@ export function buildReferenceEntry(
     errata,
   );
   // Extract primary DOI from reference data
-  const doi = Array.isArray(reference?.dois) && reference.dois.length
-    ? reference.dois[0]
-    : undefined;
+  const doi =
+    Array.isArray(reference?.dois) && reference.dois.length
+      ? reference.dois[0]
+      : undefined;
   const entry: InspireReferenceEntry = {
     id: `${index}-${recid ?? reference?.label ?? Date.now()}`,
     label: reference?.label,
@@ -149,10 +149,10 @@ interface EnrichReferencesOptions {
  * This function is shared by:
  * - References panel controller (live refresh with UI updates)
  * - Background cache download (prefetchReferencesCache) for complete cache
- * 
+ *
  * Only entries with recid are enriched (others don't exist in INSPIRE).
  * Fetches: title, authors, citation count, publication info, arXiv details.
- * 
+ *
  * @param entries - Array of InspireReferenceEntry to enrich (modified in place)
  * @param options - Optional signal for cancellation and progress callback
  */
@@ -167,13 +167,12 @@ export async function enrichReferencesEntries(
   const needsDetails = entries.filter(
     (entry) =>
       entry.recid &&
-      (
-        typeof entry.citationCount !== "number" ||
+      (typeof entry.citationCount !== "number" ||
         !entry.title ||
         entry.title === strings.noTitle ||
         !entry.authors.length ||
-        (entry.authors.length === 1 && entry.authors[0] === strings.unknownAuthor)
-      ),
+        (entry.authors.length === 1 &&
+          entry.authors[0] === strings.unknownAuthor)),
   );
 
   if (!needsDetails.length || signal?.aborted) {
@@ -181,7 +180,7 @@ export async function enrichReferencesEntries(
   }
 
   Zotero.debug(
-    `[${config.addonName}] Enriching ${needsDetails.length} reference entries`
+    `[${config.addonName}] Enriching ${needsDetails.length} reference entries`,
   );
 
   const { batchSize, parallelBatches } = getEnrichmentSettings();
@@ -218,12 +217,12 @@ export async function enrichReferencesEntries(
         if (processed.length && onBatchComplete) {
           onBatchComplete(processed);
         }
-      })
+      }),
     );
   }
 
   Zotero.debug(
-    `[${config.addonName}] Enrichment completed for ${needsDetails.length} entries`
+    `[${config.addonName}] Enrichment completed for ${needsDetails.length} entries`,
   );
 }
 
@@ -238,20 +237,25 @@ async function fetchAndApplyBatchMetadata(
 ): Promise<string[]> {
   if (signal?.aborted || !batchRecids.length) return [];
 
-  const query = batchRecids.map(r => `recid:${r}`).join(" OR ");
+  const query = batchRecids.map((r) => `recid:${r}`).join(" OR ");
   // FTR-API-FIELD-OPTIMIZATION: Use centralized field configuration
   const fieldsParam = buildFieldsParam(API_FIELDS_ENRICHMENT);
   const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batchRecids.length}${fieldsParam}`;
 
   try {
-    const response = await inspireFetch(url, signal ? { signal } : undefined).catch(() => null);
+    const response = await inspireFetch(
+      url,
+      signal ? { signal } : undefined,
+    ).catch(() => null);
     if (!response) {
-      Zotero.debug(`[${config.addonName}] enrich batch failed: no response (recids=${batchRecids.slice(0, 5).join(",")}${batchRecids.length > 5 ? "..." : ""})`);
+      Zotero.debug(
+        `[${config.addonName}] enrich batch failed: no response (recids=${batchRecids.slice(0, 5).join(",")}${batchRecids.length > 5 ? "..." : ""})`,
+      );
       return [];
     }
     if (response.status !== 200) {
       Zotero.debug(
-        `[${config.addonName}] enrich batch HTTP ${response.status} (recids=${batchRecids.slice(0, 5).join(",")}${batchRecids.length > 5 ? "..." : ""})`
+        `[${config.addonName}] enrich batch HTTP ${response.status} (recids=${batchRecids.slice(0, 5).join(",")}${batchRecids.length > 5 ? "..." : ""})`,
       );
       return [];
     }
@@ -278,7 +282,9 @@ async function fetchAndApplyBatchMetadata(
     return processedRecids;
   } catch (err) {
     if ((err as any)?.name !== "AbortError") {
-      Zotero.debug(`[${config.addonName}] Error fetching batch metadata: ${err}`);
+      Zotero.debug(
+        `[${config.addonName}] Error fetching batch metadata: ${err}`,
+      );
     }
   }
   return [];
@@ -300,7 +306,8 @@ function applyMetadataToEntry(
     entry.citationCount = metadata.citation_count;
   }
   if (typeof metadata.citation_count_without_self_citations === "number") {
-    entry.citationCountWithoutSelf = metadata.citation_count_without_self_citations;
+    entry.citationCountWithoutSelf =
+      metadata.citation_count_without_self_citations;
   }
 
   // Title update
@@ -387,4 +394,3 @@ function applyMetadataToEntry(
   // Invalidate searchText so it will be recalculated on next filter
   entry.searchText = "";
 }
-

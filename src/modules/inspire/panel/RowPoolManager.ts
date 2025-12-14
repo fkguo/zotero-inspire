@@ -104,7 +104,10 @@ export class RowPoolManager {
       // Keep structure intact, just reset data attributes
       delete row.dataset.entryId;
       // Clear focus/highlight styles before pooling
-      row.classList.remove("zinspire-entry-focused", "zinspire-entry-highlight");
+      row.classList.remove(
+        "zinspire-entry-focused",
+        "zinspire-entry-highlight",
+      );
       row.style.backgroundColor = "";
       row.style.boxShadow = "";
       this.pool.push(row);
@@ -210,9 +213,13 @@ export class RowPoolManager {
       </div>
     `;
 
-    const textContainer = row.querySelector(".zinspire-ref-entry__text") as HTMLElement;
+    const textContainer = row.querySelector(
+      ".zinspire-ref-entry__text",
+    ) as HTMLElement;
     const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
-    const content = row.querySelector(".zinspire-ref-entry__content") as HTMLElement;
+    const content = row.querySelector(
+      ".zinspire-ref-entry__content",
+    ) as HTMLElement;
 
     // Apply styles via callbacks if provided
     if (textContainer && this.options.applyTextContainerStyle) {
@@ -255,7 +262,10 @@ export class RowPoolManager {
 
     const statsButton = doc.createElement("button");
     statsButton.type = "button";
-    statsButton.classList.add("zinspire-ref-entry__stats", "zinspire-ref-entry__stats-button");
+    statsButton.classList.add(
+      "zinspire-ref-entry__stats",
+      "zinspire-ref-entry__stats-button",
+    );
 
     // Insert elements at correct positions
     if (textContainer && marker && content) {
@@ -316,7 +326,7 @@ export interface ListRenderOptions {
  */
 export function replaceContainerAsync(
   oldContainer: HTMLElement,
-  onCleanup?: () => void
+  onCleanup?: () => void,
 ): HTMLElement {
   const doc = oldContainer.ownerDocument;
   const newContainer = doc.createElement("div");
@@ -348,7 +358,7 @@ export function replaceContainerAsync(
 export function createRowsFragment(
   entries: InspireReferenceEntry[],
   context: ListRenderContext,
-  updateRowContent: (row: HTMLDivElement, entry: InspireReferenceEntry) => void
+  updateRowContent: (row: HTMLDivElement, entry: InspireReferenceEntry) => void,
 ): DocumentFragment {
   const fragment = context.doc.createDocumentFragment();
 

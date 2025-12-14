@@ -18,10 +18,17 @@ const PLUGIN_ICON = `chrome://${config.addonRef}/content/icons/inspire-icon.png`
 const ARXIV_EXTRA_LINE_REGEX = /^.*(arXiv:|_eprint:).*$(\n|)/gim;
 
 import type { jsobject, ItemWithPendingInspireNote } from "./types";
-import { getInspireMeta, getCrossrefCount, fetchBibTeX } from "./metadataService";
+import {
+  getInspireMeta,
+  getCrossrefCount,
+  fetchBibTeX,
+} from "./metadataService";
 import { deriveRecidFromItem, copyToClipboard } from "./apiUtils";
 import { localCache } from "./localCache";
-import { fetchReferencesEntries, enrichReferencesEntries } from "./referencesService";
+import {
+  fetchReferencesEntries,
+  enrichReferencesEntries,
+} from "./referencesService";
 import { inspireFetch } from "./rateLimiter";
 import {
   isSmartUpdateEnabled,
@@ -170,7 +177,9 @@ export class ZInspire {
         e.preventDefault();
         e.stopPropagation();
         this.cancelUpdate();
-        Zotero.debug(`[${config.addonName}] Operation cancelled via Escape key`);
+        Zotero.debug(
+          `[${config.addonName}] Operation cancelled via Escape key`,
+        );
       }
     };
     // Use Zotero main window for global key capture
@@ -197,7 +206,7 @@ export class ZInspire {
     this.resetState("initial");
     this.isCancelled = false;
     this.setupEscapeListener();
-    const items = ZoteroPane.getSelectedItems();
+    const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
     this.toUpdate = items.length;
     this.itemsToUpdate = items;
     this.updateItemsConcurrent(operation);
@@ -207,7 +216,7 @@ export class ZInspire {
     this.resetState("initial");
     this.isCancelled = false;
     this.setupEscapeListener();
-    const collection = ZoteroPane.getSelectedCollection();
+    const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
     if (collection) {
       this.itemsToUpdate = collection.getChildItems();
       this.toUpdate = this.itemsToUpdate.length;
@@ -219,24 +228,36 @@ export class ZInspire {
 
   async downloadReferencesCacheForSelection() {
     try {
-      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForSelection: starting`);
+      Zotero.debug(
+        `[${config.addonName}] downloadReferencesCacheForSelection: starting`,
+      );
       if (!localCache.isEnabled()) {
-        this.showCacheNotification(getString("download-cache-disabled"), "error");
+        this.showCacheNotification(
+          getString("download-cache-disabled"),
+          "error",
+        );
         return;
       }
-      const items = ZoteroPane.getSelectedItems();
+      const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
       const regularItems = items.filter((item) => item?.isRegularItem());
       if (!regularItems.length) {
-        this.showCacheNotification(getString("download-cache-no-selection"), "error");
+        this.showCacheNotification(
+          getString("download-cache-no-selection"),
+          "error",
+        );
         return;
       }
       // Reset cancel state and setup Escape listener
       this.isCancelled = false;
       this.setupEscapeListener();
-      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForSelection: calling prefetch for ${regularItems.length} items`);
+      Zotero.debug(
+        `[${config.addonName}] downloadReferencesCacheForSelection: calling prefetch for ${regularItems.length} items`,
+      );
       await this.prefetchReferencesCache(regularItems);
     } catch (err) {
-      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForSelection: error: ${err}`);
+      Zotero.debug(
+        `[${config.addonName}] downloadReferencesCacheForSelection: error: ${err}`,
+      );
     } finally {
       this.removeEscapeListener();
     }
@@ -244,28 +265,45 @@ export class ZInspire {
 
   async downloadReferencesCacheForCollection() {
     try {
-      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForCollection: starting`);
+      Zotero.debug(
+        `[${config.addonName}] downloadReferencesCacheForCollection: starting`,
+      );
       if (!localCache.isEnabled()) {
-        this.showCacheNotification(getString("download-cache-disabled"), "error");
+        this.showCacheNotification(
+          getString("download-cache-disabled"),
+          "error",
+        );
         return;
       }
-      const collection = ZoteroPane.getSelectedCollection();
+      const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
       if (!collection) {
-        this.showCacheNotification(getString("download-cache-no-selection"), "error");
+        this.showCacheNotification(
+          getString("download-cache-no-selection"),
+          "error",
+        );
         return;
       }
-      const items = collection.getChildItems().filter((item) => item?.isRegularItem());
+      const items = collection
+        .getChildItems()
+        .filter((item) => item?.isRegularItem());
       if (!items.length) {
-        this.showCacheNotification(getString("download-cache-no-selection"), "error");
+        this.showCacheNotification(
+          getString("download-cache-no-selection"),
+          "error",
+        );
         return;
       }
       // Reset cancel state and setup Escape listener
       this.isCancelled = false;
       this.setupEscapeListener();
-      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForCollection: calling prefetch for ${items.length} items`);
+      Zotero.debug(
+        `[${config.addonName}] downloadReferencesCacheForCollection: calling prefetch for ${items.length} items`,
+      );
       await this.prefetchReferencesCache(items);
     } catch (err) {
-      Zotero.debug(`[${config.addonName}] downloadReferencesCacheForCollection: error: ${err}`);
+      Zotero.debug(
+        `[${config.addonName}] downloadReferencesCacheForCollection: error: ${err}`,
+      );
     } finally {
       this.removeEscapeListener();
     }
@@ -324,7 +362,9 @@ export class ZInspire {
         try {
           await this.updateItemInternal(item, operation);
         } catch (err) {
-          Zotero.debug(`[${config.addonName}] updateItemsConcurrent: error updating item ${item.id}: ${err}`);
+          Zotero.debug(
+            `[${config.addonName}] updateItemsConcurrent: error updating item ${item.id}: ${err}`,
+          );
         }
 
         completed++;
@@ -345,13 +385,17 @@ export class ZInspire {
       // Start concurrent workers
       const workers: Promise<void>[] = [];
       const workerCount = Math.min(CONCURRENCY, total);
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: starting ${workerCount} workers`);
+      Zotero.debug(
+        `[${config.addonName}] updateItemsConcurrent: starting ${workerCount} workers`,
+      );
       for (let i = 0; i < workerCount; i++) {
         workers.push(worker());
       }
 
       await Promise.all(workers);
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: all workers finished, completed=${completed}`);
+      Zotero.debug(
+        `[${config.addonName}] updateItemsConcurrent: all workers finished, completed=${completed}`,
+      );
 
       // Finish
       if (!this.isCancelled) {
@@ -359,7 +403,9 @@ export class ZInspire {
         this.numberOfUpdatedItems = total;
         this.current = total - 1;
         this.resetState(operation);
-        Zotero.debug(`[${config.addonName}] updateItemsConcurrent: done, counter=${this.counter}`);
+        Zotero.debug(
+          `[${config.addonName}] updateItemsConcurrent: done, counter=${this.counter}`,
+        );
       } else {
         // Cancelled - show stats
         this.progressWindow.close();
@@ -368,10 +414,14 @@ export class ZInspire {
         this.showCancelledStats(completed, total);
       }
     } catch (err) {
-      Zotero.debug(`[${config.addonName}] updateItemsConcurrent: fatal error: ${err}`);
+      Zotero.debug(
+        `[${config.addonName}] updateItemsConcurrent: fatal error: ${err}`,
+      );
       try {
         this.progressWindow.close();
-      } catch (_e) { /* ignore */ }
+      } catch (_e) {
+        /* ignore */
+      }
       this.numberOfUpdatedItems = this.toUpdate;
     } finally {
       this.removeEscapeListener();
@@ -388,14 +438,18 @@ export class ZInspire {
     statsWindow.win.changeHeadline(getString("update-cancelled"), PLUGIN_ICON);
     statsWindow.createLine({
       icon: PLUGIN_ICON,
-      text: getString("update-cancelled-stats", { args: { completed: completed.toString(), total: total.toString() } }),
+      text: getString("update-cancelled-stats", {
+        args: { completed: completed.toString(), total: total.toString() },
+      }),
     });
     statsWindow.show();
     statsWindow.startCloseTimer(5000);
   }
 
   private async prefetchReferencesCache(items: Zotero.Item[]): Promise<void> {
-    Zotero.debug(`[${config.addonName}] prefetchReferencesCache: starting with ${items.length} items`);
+    Zotero.debug(
+      `[${config.addonName}] prefetchReferencesCache: starting with ${items.length} items`,
+    );
     const recidSet = new Set<string>();
     for (const item of items) {
       const recid = deriveRecidFromItem(item);
@@ -403,7 +457,9 @@ export class ZInspire {
         recidSet.add(recid);
       }
     }
-    Zotero.debug(`[${config.addonName}] prefetchReferencesCache: found ${recidSet.size} unique recids`);
+    Zotero.debug(
+      `[${config.addonName}] prefetchReferencesCache: found ${recidSet.size} unique recids`,
+    );
 
     if (!recidSet.size) {
       this.showCacheNotification(getString("download-cache-no-recid"), "error");
@@ -411,16 +467,25 @@ export class ZInspire {
     }
 
     const total = recidSet.size;
-    Zotero.debug(`[${config.addonName}] prefetchReferencesCache: creating progress window`);
-    const progressWindow = new ProgressWindowHelper(getString("download-cache-progress-title"));
-    progressWindow.win.changeHeadline(getString("download-cache-progress-title"), PLUGIN_ICON);
+    Zotero.debug(
+      `[${config.addonName}] prefetchReferencesCache: creating progress window`,
+    );
+    const progressWindow = new ProgressWindowHelper(
+      getString("download-cache-progress-title"),
+    );
+    progressWindow.win.changeHeadline(
+      getString("download-cache-progress-title"),
+      PLUGIN_ICON,
+    );
     progressWindow.createLine({
       icon: PLUGIN_ICON,
       text: getString("download-cache-start", { args: { total } }),
       progress: 0,
     });
     progressWindow.show(-1); // Disable auto-close timer during download
-    Zotero.debug(`[${config.addonName}] prefetchReferencesCache: progress window shown`);
+    Zotero.debug(
+      `[${config.addonName}] prefetchReferencesCache: progress window shown`,
+    );
 
     let processed = 0;
     let success = 0;
@@ -437,7 +502,9 @@ export class ZInspire {
       processed++;
       progressWindow.changeLine({
         icon: PLUGIN_ICON,
-        text: getString("download-cache-progress", { args: { done: processed, total } }),
+        text: getString("download-cache-progress", {
+          args: { done: processed, total },
+        }),
         progress: Math.round((processed / total) * 100),
       });
 
@@ -463,11 +530,16 @@ export class ZInspire {
         success++;
       } catch (err) {
         failed++;
-        Zotero.debug(`[${config.addonName}] Failed to cache references for ${recid}: ${err}`);
+        Zotero.debug(
+          `[${config.addonName}] Failed to cache references for ${recid}: ${err}`,
+        );
       }
     }
 
-    progressWindow.win.changeHeadline(getString("download-cache-progress-title"), PLUGIN_ICON);
+    progressWindow.win.changeHeadline(
+      getString("download-cache-progress-title"),
+      PLUGIN_ICON,
+    );
     progressWindow.createLine({
       icon: PLUGIN_ICON,
       text: getString("download-cache-success", { args: { success } }),
@@ -490,16 +562,24 @@ export class ZInspire {
     const statsWindow = new ztoolkit.ProgressWindow(config.addonName, {
       closeOnClick: true,
     });
-    statsWindow.win.changeHeadline(getString("download-cache-cancelled-title"), PLUGIN_ICON);
+    statsWindow.win.changeHeadline(
+      getString("download-cache-cancelled-title"),
+      PLUGIN_ICON,
+    );
     statsWindow.createLine({
       icon: PLUGIN_ICON,
-      text: getString("download-cache-cancelled", { args: { done: completed.toString(), total: total.toString() } }),
+      text: getString("download-cache-cancelled", {
+        args: { done: completed.toString(), total: total.toString() },
+      }),
     });
     statsWindow.show();
     statsWindow.startCloseTimer(5000);
   }
 
-  private showCacheNotification(message: string, type: "info" | "error" = "info") {
+  private showCacheNotification(
+    message: string,
+    type: "info" | "error" = "info",
+  ) {
     const window = new ProgressWindowHelper(config.addonName);
     window.win.changeHeadline(config.addonName, PLUGIN_ICON);
     window.createLine({ icon: PLUGIN_ICON, text: message, type });
@@ -519,7 +599,9 @@ export class ZInspire {
 
     this.current++;
 
-    const percent = Math.round((this.numberOfUpdatedItems / this.toUpdate) * 100);
+    const percent = Math.round(
+      (this.numberOfUpdatedItems / this.toUpdate) * 100,
+    );
     this.progressWindow.changeLine({ icon: PLUGIN_ICON, progress: percent });
     this.progressWindow.changeLine({
       icon: PLUGIN_ICON,
@@ -534,11 +616,21 @@ export class ZInspire {
    * Internal method to update a single item (used by concurrent processor)
    */
   private async updateItemInternal(item: Zotero.Item, operation: string) {
-    Zotero.debug(`[${config.addonName}] updateItemInternal: starting, item=${item.id}, operation=${operation}`);
-    if (operation === "full" || operation === "noabstract" || operation === "citations") {
-      Zotero.debug(`[${config.addonName}] updateItemInternal: calling getInspireMeta`);
+    Zotero.debug(
+      `[${config.addonName}] updateItemInternal: starting, item=${item.id}, operation=${operation}`,
+    );
+    if (
+      operation === "full" ||
+      operation === "noabstract" ||
+      operation === "citations"
+    ) {
+      Zotero.debug(
+        `[${config.addonName}] updateItemInternal: calling getInspireMeta`,
+      );
       const metaInspire = await getInspireMeta(item, operation);
-      Zotero.debug(`[${config.addonName}] updateItemInternal: getInspireMeta returned, recid=${metaInspire !== -1 ? (metaInspire as jsobject).recid : 'N/A'}`);
+      Zotero.debug(
+        `[${config.addonName}] updateItemInternal: getInspireMeta returned, recid=${metaInspire !== -1 ? (metaInspire as jsobject).recid : "N/A"}`,
+      );
       if (metaInspire !== -1 && (metaInspire as jsobject).recid !== undefined) {
         if (item.hasTag(getPref("tag_norecid") as string)) {
           item.removeTag(getPref("tag_norecid") as string);
@@ -546,7 +638,10 @@ export class ZInspire {
         if (item.itemType === "report" || item.itemType === "preprint") {
           item.setType(Zotero.ItemTypes.getID("journalArticle") as number);
         }
-        if (item.itemType !== "book" && (metaInspire as jsobject).document_type == "book") {
+        if (
+          item.itemType !== "book" &&
+          (metaInspire as jsobject).document_type == "book"
+        ) {
           item.setType(Zotero.ItemTypes.getID("book") as number);
         }
 
@@ -559,34 +654,54 @@ export class ZInspire {
             const skippedCount = diff.changes.length - allowedChanges.length;
 
             if (skippedCount > 0) {
-              Zotero.debug(`[${config.addonName}] Smart update: skipped ${skippedCount} protected fields`);
+              Zotero.debug(
+                `[${config.addonName}] Smart update: skipped ${skippedCount} protected fields`,
+              );
             }
 
             if (allowedChanges.length > 0) {
               // Show preview dialog only for single-item updates (not batch)
               if (shouldShowPreview() && this.toUpdate === 1) {
-                const result = await showSmartUpdatePreviewDialog(diff, allowedChanges);
+                const result = await showSmartUpdatePreviewDialog(
+                  diff,
+                  allowedChanges,
+                );
                 if (!result.confirmed) {
-                  Zotero.debug(`[${config.addonName}] Smart update: user cancelled preview`);
+                  Zotero.debug(
+                    `[${config.addonName}] Smart update: user cancelled preview`,
+                  );
                   return;
                 }
                 // Filter to only user-selected fields
-                allowedChanges = allowedChanges.filter(c => result.selectedFields.includes(c.field));
+                allowedChanges = allowedChanges.filter((c) =>
+                  result.selectedFields.includes(c.field),
+                );
                 if (allowedChanges.length === 0) {
-                  Zotero.debug(`[${config.addonName}] Smart update: no fields selected by user`);
+                  Zotero.debug(
+                    `[${config.addonName}] Smart update: no fields selected by user`,
+                  );
                   return;
                 }
               }
 
               // Apply only allowed changes
-              await setInspireMetaSelective(item, metaInspire as jsobject, operation, allowedChanges);
+              await setInspireMetaSelective(
+                item,
+                metaInspire as jsobject,
+                operation,
+                allowedChanges,
+              );
               await saveItemWithPendingInspireNote(item);
               this.counter++;
             } else {
-              Zotero.debug(`[${config.addonName}] Smart update: no changes to apply after filtering`);
+              Zotero.debug(
+                `[${config.addonName}] Smart update: no changes to apply after filtering`,
+              );
             }
           } else {
-            Zotero.debug(`[${config.addonName}] Smart update: no changes detected`);
+            Zotero.debug(
+              `[${config.addonName}] Smart update: no changes detected`,
+            );
           }
         } else {
           // Standard update mode
@@ -595,10 +710,17 @@ export class ZInspire {
           this.counter++;
         }
       } else {
-        if (getPref("tag_enable") && getPref("tag_norecid") !== "" && !item.hasTag(getPref("tag_norecid") as string)) {
+        if (
+          getPref("tag_enable") &&
+          getPref("tag_norecid") !== "" &&
+          !item.hasTag(getPref("tag_norecid") as string)
+        ) {
           item.addTag(getPref("tag_norecid") as string, 1);
           await item.saveTx();
-        } else if (!getPref("tag_enable") && item.hasTag(getPref("tag_norecid") as string)) {
+        } else if (
+          !getPref("tag_enable") &&
+          item.hasTag(getPref("tag_norecid") as string)
+        ) {
           item.removeTag(getPref("tag_norecid") as string);
           await item.saveTx();
         }
@@ -616,7 +738,11 @@ export class ZInspire {
   }
 
   async updateItem(item: Zotero.Item, operation: string) {
-    if (operation === "full" || operation === "noabstract" || operation === "citations") {
+    if (
+      operation === "full" ||
+      operation === "noabstract" ||
+      operation === "citations"
+    ) {
       const metaInspire = await getInspireMeta(item, operation);
       if (metaInspire !== -1 && (metaInspire as jsobject).recid !== undefined) {
         if (item.hasTag(getPref("tag_norecid") as string)) {
@@ -626,17 +752,27 @@ export class ZInspire {
         if (item.itemType === "report" || item.itemType === "preprint") {
           item.setType(Zotero.ItemTypes.getID("journalArticle") as number);
         }
-        if (item.itemType !== "book" && (metaInspire as jsobject).document_type == "book") {
+        if (
+          item.itemType !== "book" &&
+          (metaInspire as jsobject).document_type == "book"
+        ) {
           item.setType(Zotero.ItemTypes.getID("book") as number);
         }
         await setInspireMeta(item, metaInspire as jsobject, operation);
         await saveItemWithPendingInspireNote(item);
         this.counter++;
       } else {
-        if (getPref("tag_enable") && getPref("tag_norecid") !== "" && !item.hasTag(getPref("tag_norecid") as string)) {
+        if (
+          getPref("tag_enable") &&
+          getPref("tag_norecid") !== "" &&
+          !item.hasTag(getPref("tag_norecid") as string)
+        ) {
           item.addTag(getPref("tag_norecid") as string, 1);
           item.saveTx();
-        } else if (!getPref("tag_enable") && item.hasTag(getPref("tag_norecid") as string)) {
+        } else if (
+          !getPref("tag_enable") &&
+          item.hasTag(getPref("tag_norecid") as string)
+        ) {
           item.removeTag(getPref("tag_norecid") as string);
           item.saveTx();
         }
@@ -665,7 +801,7 @@ export class ZInspire {
    * Returns null if selection is invalid.
    */
   private getSelectedSingleItem(): Zotero.Item | null {
-    const items = ZoteroPane.getSelectedItems();
+    const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
     const regularItems = items.filter((item) => item?.isRegularItem());
     if (regularItems.length !== 1) {
       this.showCopyNotification(getString("copy-error-no-selection"), "fail");
@@ -678,7 +814,7 @@ export class ZInspire {
    * Get all selected regular items. Shows an error if none are selected.
    */
   private getSelectedRegularItems(): Zotero.Item[] {
-    const items = ZoteroPane.getSelectedItems();
+    const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
     const regularItems = items.filter((item) => item?.isRegularItem());
     if (!regularItems.length) {
       this.showCopyNotification(getString("copy-error-no-selection"), "fail");
@@ -689,7 +825,10 @@ export class ZInspire {
   /**
    * Show a brief notification for copy actions.
    */
-  private showCopyNotification(message: string, type: "success" | "fail" = "success") {
+  private showCopyNotification(
+    message: string,
+    type: "success" | "fail" = "success",
+  ) {
     const window = new ProgressWindowHelper(config.addonName);
     window.createLine({ icon: PLUGIN_ICON, text: message, type });
     window.show();
@@ -717,9 +856,15 @@ export class ZInspire {
     }
 
     try {
-      const bibtex = recids.length === 1 ? await fetchBibTeX(recids[0]) : await this.fetchBibTeXBatch(recids);
+      const bibtex =
+        recids.length === 1
+          ? await fetchBibTeX(recids[0])
+          : await this.fetchBibTeXBatch(recids);
       if (!bibtex) {
-        this.showCopyNotification(getString("copy-error-bibtex-failed"), "fail");
+        this.showCopyNotification(
+          getString("copy-error-bibtex-failed"),
+          "fail",
+        );
         return;
       }
       const entryCount = this.countBibTeXEntries(bibtex) || recids.length;
@@ -730,7 +875,10 @@ export class ZInspire {
           "success",
         );
       } else {
-        this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+        this.showCopyNotification(
+          getString("copy-error-clipboard-failed"),
+          "fail",
+        );
       }
     } catch (err) {
       Zotero.debug(`[${config.addonName}] copyBibTeX error: ${err}`);
@@ -754,9 +902,15 @@ export class ZInspire {
     const url = `${INSPIRE_LITERATURE_URL}/${recid}`;
     const success = await copyToClipboard(url);
     if (success) {
-      this.showCopyNotification(getString("copy-success-inspire-link"), "success");
+      this.showCopyNotification(
+        getString("copy-success-inspire-link"),
+        "success",
+      );
     } else {
-      this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+      this.showCopyNotification(
+        getString("copy-error-clipboard-failed"),
+        "fail",
+      );
     }
   }
 
@@ -773,9 +927,14 @@ export class ZInspire {
       return;
     }
 
-    const citationKey = (item.getField("citationKey") as string | undefined)?.trim();
+    const citationKey = (
+      item.getField("citationKey") as string | undefined
+    )?.trim();
     if (!citationKey) {
-      this.showCopyNotification(getString("copy-error-no-citation-key"), "fail");
+      this.showCopyNotification(
+        getString("copy-error-no-citation-key"),
+        "fail",
+      );
       return;
     }
 
@@ -783,9 +942,15 @@ export class ZInspire {
     const markdown = `[${citationKey}](${url})`;
     const success = await copyToClipboard(markdown);
     if (success) {
-      this.showCopyNotification(getString("copy-success-inspire-link-md"), "success");
+      this.showCopyNotification(
+        getString("copy-success-inspire-link-md"),
+        "success",
+      );
     } else {
-      this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+      this.showCopyNotification(
+        getString("copy-error-clipboard-failed"),
+        "fail",
+      );
     }
   }
 
@@ -797,11 +962,16 @@ export class ZInspire {
     if (!items.length) return;
 
     const citationKeys = items
-      .map((item) => (item.getField("citationKey") as string | undefined)?.trim())
+      .map((item) =>
+        (item.getField("citationKey") as string | undefined)?.trim(),
+      )
       .filter((key): key is string => !!key);
 
     if (!citationKeys.length) {
-      this.showCopyNotification(getString("copy-error-no-citation-key"), "fail");
+      this.showCopyNotification(
+        getString("copy-error-no-citation-key"),
+        "fail",
+      );
       return;
     }
 
@@ -809,11 +979,16 @@ export class ZInspire {
     const success = await copyToClipboard(citationKeys.join(", "));
     if (success) {
       this.showCopyNotification(
-        getString("copy-success-citation-key", { args: { count: copiedCount } }),
+        getString("copy-success-citation-key", {
+          args: { count: copiedCount },
+        }),
         "success",
       );
     } else {
-      this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+      this.showCopyNotification(
+        getString("copy-error-clipboard-failed"),
+        "fail",
+      );
     }
   }
 
@@ -843,9 +1018,15 @@ export class ZInspire {
 
     const success = await copyToClipboard(link);
     if (success) {
-      this.showCopyNotification(getString("copy-success-zotero-link"), "success");
+      this.showCopyNotification(
+        getString("copy-success-zotero-link"),
+        "success",
+      );
     } else {
-      this.showCopyNotification(getString("copy-error-clipboard-failed"), "fail");
+      this.showCopyNotification(
+        getString("copy-error-clipboard-failed"),
+        "fail",
+      );
     }
   }
 
@@ -913,7 +1094,10 @@ export async function setInspireMeta(
       if (metaInspire.journalAbbreviation) {
         if (item.itemType === "journalArticle") {
           item.setField("journalAbbreviation", metaInspire.journalAbbreviation);
-        } else if (metaInspire.document_type[0] === "book" && item.itemType === "book") {
+        } else if (
+          metaInspire.document_type[0] === "book" &&
+          item.itemType === "book"
+        ) {
           item.setField("series", metaInspire.journalAbbreviation);
         } else {
           item.setField("publicationTitle", metaInspire.journalAbbreviation);
@@ -936,7 +1120,10 @@ export async function setInspireMeta(
         item.setField("issue", metaInspire.issue);
       }
       if (metaInspire.DOI) {
-        if (item.itemType === "journalArticle" || item.itemType === "preprint") {
+        if (
+          item.itemType === "journalArticle" ||
+          item.itemType === "preprint"
+        ) {
           item.setField("DOI", metaInspire.DOI);
         } else {
           item.setField("url", `${DOI_ORG_URL}/${metaInspire.DOI}`);
@@ -946,8 +1133,11 @@ export async function setInspireMeta(
       if (metaInspire.isbns && !item.getField("ISBN")) {
         item.setField("ISBN", metaInspire.isbns);
       }
-      if (metaInspire.publisher && !item.getField("publisher") &&
-          (item.itemType == "book" || item.itemType == "bookSection")) {
+      if (
+        metaInspire.publisher &&
+        !item.getField("publisher") &&
+        (item.itemType == "book" || item.itemType == "bookSection")
+      ) {
         item.setField("publisher", metaInspire.publisher);
       }
 
@@ -975,7 +1165,8 @@ export async function setInspireMeta(
         } else {
           arXivInfo = "arXiv:" + arxivId;
         }
-        const numberOfArxiv = (extra.match(ARXIV_EXTRA_LINE_REGEX) || "").length;
+        const numberOfArxiv = (extra.match(ARXIV_EXTRA_LINE_REGEX) || "")
+          .length;
         if (numberOfArxiv !== 1) {
           extra = extra.replace(ARXIV_EXTRA_LINE_REGEX, "");
           if (extra.endsWith("\n")) {
@@ -1004,7 +1195,11 @@ export async function setInspireMeta(
       extra = extra.replace(/^.*type: article.*$\n/gm, "");
 
       if (metaInspire.collaborations && !extra.includes("tex.collaboration")) {
-        extra = extra + "\n" + "tex.collaboration: " + metaInspire.collaborations.join(", ");
+        extra =
+          extra +
+          "\n" +
+          "tex.collaboration: " +
+          metaInspire.collaborations.join(", ");
       }
 
       extra = setCitations(
@@ -1017,9 +1212,13 @@ export async function setInspireMeta(
 
       if (citekey_pref === "inspire") {
         if (extra.includes("Citation Key")) {
-          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0].split(": ")[1];
+          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
+            "")[0].split(": ")[1];
           if (initialCiteKey !== metaInspire.citekey) {
-            extra = extra.replace(/^.*Citation\sKey.*$/gm, `Citation Key: ${metaInspire.citekey}`);
+            extra = extra.replace(
+              /^.*Citation\sKey.*$/gm,
+              `Citation Key: ${metaInspire.citekey}`,
+            );
           }
         } else {
           extra += "\nCitation Key: " + metaInspire.citekey;
@@ -1061,7 +1260,7 @@ export async function setInspireMetaSelective(
   const citekey_pref = getPref("citekey");
 
   // Build a set of allowed field names for quick lookup
-  const allowedFields = new Set(allowedChanges.map(c => c.field));
+  const allowedFields = new Set(allowedChanges.map((c) => c.field));
 
   if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
     // Always set archive info (this is identification, not user content)
@@ -1074,13 +1273,22 @@ export async function setInspireMetaSelective(
       if (allowedFields.has("journalAbbreviation")) {
         if (metaInspire.journalAbbreviation) {
           if (item.itemType === "journalArticle") {
-            item.setField("journalAbbreviation", metaInspire.journalAbbreviation);
-          } else if (metaInspire.document_type?.[0] === "book" && item.itemType === "book") {
+            item.setField(
+              "journalAbbreviation",
+              metaInspire.journalAbbreviation,
+            );
+          } else if (
+            metaInspire.document_type?.[0] === "book" &&
+            item.itemType === "book"
+          ) {
             item.setField("series", metaInspire.journalAbbreviation);
           } else {
             item.setField("publicationTitle", metaInspire.journalAbbreviation);
           }
-        } else if (metaInspire.arxiv?.value && item.itemType === "journalArticle") {
+        } else if (
+          metaInspire.arxiv?.value &&
+          item.itemType === "journalArticle"
+        ) {
           // arXiv fallback for unpublished papers
           const arxivId = metaInspire.arxiv.value;
           let arXivInfo = "";
@@ -1103,7 +1311,11 @@ export async function setInspireMetaSelective(
       }
 
       // Pages
-      if (allowedFields.has("pages") && metaInspire.pages && metaInspire.document_type?.[0] !== "book") {
+      if (
+        allowedFields.has("pages") &&
+        metaInspire.pages &&
+        metaInspire.document_type?.[0] !== "book"
+      ) {
         item.setField("pages", metaInspire.pages);
       }
 
@@ -1119,7 +1331,10 @@ export async function setInspireMetaSelective(
 
       // DOI
       if (allowedFields.has("DOI") && metaInspire.DOI) {
-        if (item.itemType === "journalArticle" || item.itemType === "preprint") {
+        if (
+          item.itemType === "journalArticle" ||
+          item.itemType === "preprint"
+        ) {
           item.setField("DOI", metaInspire.DOI);
         } else {
           item.setField("url", `${DOI_ORG_URL}/${metaInspire.DOI}`);
@@ -1132,8 +1347,11 @@ export async function setInspireMetaSelective(
       }
 
       // Publisher (only if empty)
-      if (metaInspire.publisher && !item.getField("publisher") &&
-          (item.itemType === "book" || item.itemType === "bookSection")) {
+      if (
+        metaInspire.publisher &&
+        !item.getField("publisher") &&
+        (item.itemType === "book" || item.itemType === "bookSection")
+      ) {
         item.setField("publisher", metaInspire.publisher);
       }
 
@@ -1160,11 +1378,14 @@ export async function setInspireMetaSelective(
         let arXivInfo = "";
         if (/^\d/.test(arxivId)) {
           const arxivPrimeryCategory = metaInspire.arxiv.categories?.[0] || "";
-          arXivInfo = arxivPrimeryCategory ? `arXiv:${arxivId} [${arxivPrimeryCategory}]` : `arXiv:${arxivId}`;
+          arXivInfo = arxivPrimeryCategory
+            ? `arXiv:${arxivId} [${arxivPrimeryCategory}]`
+            : `arXiv:${arxivId}`;
         } else {
           arXivInfo = "arXiv:" + arxivId;
         }
-        const numberOfArxiv = (extra.match(ARXIV_EXTRA_LINE_REGEX) || "").length;
+        const numberOfArxiv = (extra.match(ARXIV_EXTRA_LINE_REGEX) || "")
+          .length;
         if (numberOfArxiv !== 1) {
           extra = extra.replace(ARXIV_EXTRA_LINE_REGEX, "");
           if (extra.endsWith("\n")) {
@@ -1190,12 +1411,23 @@ export async function setInspireMetaSelective(
       extra = extra.replace(/^.*type: article.*$\n/gm, "");
 
       // Collaboration
-      if (allowedFields.has("collaboration") && metaInspire.collaborations && !extra.includes("tex.collaboration")) {
-        extra = extra + "\n" + "tex.collaboration: " + metaInspire.collaborations.join(", ");
+      if (
+        allowedFields.has("collaboration") &&
+        metaInspire.collaborations &&
+        !extra.includes("tex.collaboration")
+      ) {
+        extra =
+          extra +
+          "\n" +
+          "tex.collaboration: " +
+          metaInspire.collaborations.join(", ");
       }
 
       // Citations (always update if in allowed list)
-      if (allowedFields.has("citations") || allowedFields.has("citationsWithoutSelf")) {
+      if (
+        allowedFields.has("citations") ||
+        allowedFields.has("citationsWithoutSelf")
+      ) {
         extra = setCitations(
           extra,
           metaInspire.citation_count,
@@ -1206,11 +1438,19 @@ export async function setInspireMetaSelective(
       await queueOrUpsertInspireNote(item, metaInspire.note);
 
       // Citation key
-      if (allowedFields.has("citekey") && citekey_pref === "inspire" && metaInspire.citekey) {
+      if (
+        allowedFields.has("citekey") &&
+        citekey_pref === "inspire" &&
+        metaInspire.citekey
+      ) {
         if (extra.includes("Citation Key")) {
-          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0]?.split(": ")[1];
+          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
+            "")[0]?.split(": ")[1];
           if (initialCiteKey !== metaInspire.citekey) {
-            extra = extra.replace(/^.*Citation\sKey.*$/gm, `Citation Key: ${metaInspire.citekey}`);
+            extra = extra.replace(
+              /^.*Citation\sKey.*$/gm,
+              `Citation Key: ${metaInspire.citekey}`,
+            );
           }
         } else {
           extra += "\nCitation Key: " + metaInspire.citekey;
@@ -1219,12 +1459,20 @@ export async function setInspireMetaSelective(
     }
 
     // Abstract
-    if (allowedFields.has("abstractNote") && operation === "full" && metaInspire.abstractNote) {
+    if (
+      allowedFields.has("abstractNote") &&
+      operation === "full" &&
+      metaInspire.abstractNote
+    ) {
       item.setField("abstractNote", metaInspire.abstractNote);
     }
 
     // Citations-only mode
-    if (operation === "citations" && (allowedFields.has("citations") || allowedFields.has("citationsWithoutSelf"))) {
+    if (
+      operation === "citations" &&
+      (allowedFields.has("citations") ||
+        allowedFields.has("citationsWithoutSelf"))
+    ) {
       extra = setCitations(
         extra,
         metaInspire.citation_count,
@@ -1302,7 +1550,11 @@ async function upsertInspireNote(item: Zotero.Item, noteText: string) {
       break;
     }
 
-    if (!fallbackMatch && targetLooksLikeErratum && normalizedExisting.includes("erratum")) {
+    if (
+      !fallbackMatch &&
+      targetLooksLikeErratum &&
+      normalizedExisting.includes("erratum")
+    ) {
       fallbackMatch = note;
     }
   }
@@ -1335,7 +1587,8 @@ function normalizeInspireNoteContent(note?: string): string {
 
   const decoded = withoutTags.replace(
     /&([a-z]+);/gi,
-    (_match, entity: string) => INSPIRE_NOTE_HTML_ENTITIES[entity.toLowerCase()] ?? " ",
+    (_match, entity: string) =>
+      INSPIRE_NOTE_HTML_ENTITIES[entity.toLowerCase()] ?? " ",
   );
 
   return decoded
@@ -1436,7 +1689,10 @@ function setCitations(
   if (topLinesMatch) {
     const topCitation = Number(topLinesMatch[1]);
     const topCitationWoSelf = Number(topLinesMatch[2]);
-    if (citation_count === topCitation && citation_count_wo_self_citations === topCitationWoSelf) {
+    if (
+      citation_count === topCitation &&
+      citation_count_wo_self_citations === topCitationWoSelf
+    ) {
       return extra;
     }
   }
@@ -1444,7 +1700,9 @@ function setCitations(
   const temp = extra.match(/^\d+\scitations/gm);
   let existingCitations: number[] = [0, 0];
   if (temp !== null && temp.length >= 2) {
-    existingCitations = temp.map((e: any) => Number(e.replace(" citations", "")));
+    existingCitations = temp.map((e: any) =>
+      Number(e.replace(" citations", "")),
+    );
   }
 
   const dateMatch = extra.match(/INSPIRE\s([\d/-]+)/);
@@ -1453,7 +1711,10 @@ function setCitations(
   extra = extra.replace(/^.*citations.*$\n?/gm, "");
   extra = extra.replace(/^\n+/, "");
 
-  if (citation_count === existingCitations[0] && citation_count_wo_self_citations === existingCitations[1]) {
+  if (
+    citation_count === existingCitations[0] &&
+    citation_count_wo_self_citations === existingCitations[1]
+  ) {
     extra =
       `${citation_count} citations (INSPIRE ${existingDate})\n` +
       `${citation_count_wo_self_citations} citations w/o self (INSPIRE ${existingDate})\n` +
@@ -1498,4 +1759,3 @@ function setArxivCategoryTag(item: Zotero.Item) {
     }
   }
 }
-

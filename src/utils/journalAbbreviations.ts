@@ -22,7 +22,12 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["PRL"],
   },
   {
-    names: ["Physical Review D", "Phys. Rev. D", "Phys Rev D", "Physical Review D Particles Fields"],
+    names: [
+      "Physical Review D",
+      "Phys. Rev. D",
+      "Phys Rev D",
+      "Physical Review D Particles Fields",
+    ],
     abbreviations: ["PRD"],
   },
   {
@@ -50,11 +55,17 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["PRApplied"],
   },
   {
-    names: ["Physical Review Accelerators and Beams", "Phys. Rev. Accel. Beams"],
+    names: [
+      "Physical Review Accelerators and Beams",
+      "Phys. Rev. Accel. Beams",
+    ],
     abbreviations: ["PRAB"],
   },
   {
-    names: ["Physical Review Physics Education Research", "Phys. Rev. Phys. Educ. Res."],
+    names: [
+      "Physical Review Physics Education Research",
+      "Phys. Rev. Phys. Educ. Res.",
+    ],
     abbreviations: ["PRPER"],
   },
   {
@@ -110,91 +121,106 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["SciBull", "SB"],
   },
   {
-    names: ["Journal of High Energy Physics", "J. High Energy Phys.", "JHEP"],
+    names: ["Journal of High Energy Physics", "J. High Energy Phys.", "JHEP", "J High Energy Phys"],
     abbreviations: ["JHEP"],
   },
   {
-    names: ["Nuclear Physics B", "Nucl. Phys. B"],
+    names: ["Nuclear Physics B", "Nucl. Phys. B", "Nucl Phys B", "NuclPhysB"],
     abbreviations: ["NPB"],
   },
   {
-    names: ["Nuclear Physics A", "Nucl. Phys. A"],
+    names: ["Nuclear Physics A", "Nucl. Phys. A", "Nucl Phys A", "NuclPhysA"],
     abbreviations: ["NPA"],
   },
   {
-    names: ["Physics Letters B", "Phys. Lett. B"],
+    names: ["Physics Letters B", "Phys. Lett. B", "Phys Lett B", "PhysLettB"],
     abbreviations: ["PLB"],
   },
   {
-    names: ["Physics Letters A", "Phys. Lett. A"],
+    names: ["Physics Letters A", "Phys. Lett. A", "Phys Lett A", "PhysLettA"],
     abbreviations: ["PLA"],
   },
   {
-    names: ["European Physical Journal C", "Eur. Phys. J. C"],
+    names: ["European Physical Journal C", "Eur. Phys. J. C", "Eur Phys J C", "EurPhysJC"],
     abbreviations: ["EPJC"],
   },
   {
-    names: ["European Physical Journal A", "Eur. Phys. J. A"],
+    names: ["European Physical Journal A", "Eur. Phys. J. A", "Eur Phys J A", "EurPhysJA"],
     abbreviations: ["EPJA"],
   },
   {
-    names: ["European Physical Journal B", "Eur. Phys. J. B"],
+    names: ["European Physical Journal B", "Eur. Phys. J. B", "Eur Phys J B", "EurPhysJB"],
     abbreviations: ["EPJB"],
   },
   {
-    names: ["Classical and Quantum Gravity", "Class. Quantum Grav."],
+    names: ["Classical and Quantum Gravity", "Class. Quantum Grav.", "Class Quantum Grav", "ClassQuantumGrav"],
     abbreviations: ["CQG"],
   },
   {
-    names: ["Reviews of Modern Physics", "Rev. Mod. Phys."],
+    names: ["Reviews of Modern Physics", "Rev. Mod. Phys.", "Rev Mod Phys", "RevModPhys"],
     abbreviations: ["RMP"],
   },
   {
-    names: ["Progress of Theoretical Physics", "Prog. Theor. Phys."],
+    names: ["Progress of Theoretical Physics", "Prog. Theor. Phys.", "Prog Theor Phys", "ProgTheorPhys"],
     abbreviations: ["PTP"],
   },
   {
-    names: ["Physics Reports", "Phys. Rep."],
+    names: ["Physics Reports", "Phys. Rep.", "Phys Rep", "PhysRep"],
     abbreviations: ["PhysRep"],
   },
   {
-    names: ["International Journal of Modern Physics A", "Int. J. Mod. Phys. A"],
+    names: [
+      "International Journal of Modern Physics A",
+      "Int. J. Mod. Phys. A",
+      "Int J Mod Phys A",
+      "IntJModPhysA",
+    ],
     abbreviations: ["IJMPA"],
   },
   {
-    names: ["International Journal of Modern Physics D", "Int. J. Mod. Phys. D"],
+    names: [
+      "International Journal of Modern Physics D",
+      "Int. J. Mod. Phys. D",
+      "Int J Mod Phys D",
+      "IntJModPhysD",
+    ],
     abbreviations: ["IJMPD"],
   },
   {
-    names: ["International Journal of Modern Physics E", "Int. J. Mod. Phys. E"],
+    names: [
+      "International Journal of Modern Physics E",
+      "Int. J. Mod. Phys. E",
+      "Int J Mod Phys E",
+      "IntJModPhysE",
+    ],
     abbreviations: ["IJMPE"],
   },
   {
-    names: ["Modern Physics Letters A", "Mod. Phys. Lett. A"],
+    names: ["Modern Physics Letters A", "Mod. Phys. Lett. A", "Mod Phys Lett A", "ModPhysLettA"],
     abbreviations: ["MPLA"],
   },
   {
-    names: ["Chinese Physics C", "Chin. Phys. C"],
+    names: ["Chinese Physics C", "Chin. Phys. C", "Chin Phys C", "ChinPhysC"],
     abbreviations: ["CPC"],
   },
   {
-    names: ["Chinese Physics Letters", "Chin. Phys. Lett."],
+    names: ["Chinese Physics Letters", "Chin. Phys. Lett.", "Chin Phys Lett", "ChinPhysLett"],
     abbreviations: ["CPL"],
   },
   {
-    names: ["Chinese Physics B", "Chin. Phys. B"],
+    names: ["Chinese Physics B", "Chin. Phys. B", "Chin Phys B", "ChinPhysB"],
     abbreviations: ["CPB"],
   },
   {
-    names: ["Chinese Physics A", "Chin. Phys. A"],
+    names: ["Chinese Physics A", "Chin. Phys. A", "Chin Phys A", "ChinPhysA"],
     abbreviations: ["CPA"],
   },
   {
-    names: ["Chinese Journal of Physics", "Chin. J. Phys."],
+    names: ["Chinese Journal of Physics", "Chin. J. Phys.", "Chin J Phys", "ChinJPhys"],
     abbreviations: ["CJP"],
   },
   {
-    names: ["Communications in Theoretical Physics", "Commun. Theor. Phys."],
+    names: ["Communications in Theoretical Physics", "Commun. Theor. Phys.", "Commun Theor Phys", "CommunTheorPhys"],
     abbreviations: ["CTP"],
   },
   {
@@ -202,11 +228,19 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["APS"],
   },
   {
-    names: ["Chinese Journal of Chemical Physics", "Chin. J. Chem. Phys.", "化学物理学报"],
+    names: [
+      "Chinese Journal of Chemical Physics",
+      "Chin. J. Chem. Phys.",
+      "化学物理学报",
+    ],
     abbreviations: ["CJCP"],
   },
   {
-    names: ["High Energy Physics and Nuclear Physics", "High Energy Phys. Nucl. Phys.", "高能物理与核物理"],
+    names: [
+      "High Energy Physics and Nuclear Physics",
+      "High Energy Phys. Nucl. Phys.",
+      "高能物理与核物理",
+    ],
     abbreviations: ["HEPNP"],
   },
   {
@@ -223,28 +257,41 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["SCPMA"],
   },
   {
-    names: ["Journal of Physics G", "J. Phys. G"],
+    names: ["Journal of Physics G", "J. Phys. G", "J Phys G", "JPhysG"],
     abbreviations: ["JPhysG", "JPG"],
   },
   {
-    names: ["New Journal of Physics", "New J. Phys."],
+    names: ["New Journal of Physics", "New J. Phys.", "New J Phys", "NewJPhys"],
     abbreviations: ["NJP"],
   },
   {
-    names: ["Journal of Cosmology and Astroparticle Physics", "J. Cosmol. Astropart. Phys."],
+    names: [
+      "Journal of Cosmology and Astroparticle Physics",
+      "J. Cosmol. Astropart. Phys.",
+      "J Cosmol Astropart Phys",
+      "JCosmolAstropartPhys",
+    ],
     abbreviations: ["JCAP"],
   },
   // Additional HEP journals
   {
-    names: ["Annual Review of Nuclear and Particle Science", "Annu. Rev. Nucl. Part. Sci.", "Ann. Rev. Nucl. Part. Sci."],
+    names: [
+      "Annual Review of Nuclear and Particle Science",
+      "Annu. Rev. Nucl. Part. Sci.",
+      "Ann. Rev. Nucl. Part. Sci.",
+    ],
     abbreviations: ["ARNPS"],
   },
   {
-    names: ["Annals of Physics", "Ann. Phys.", "Ann Phys"],
+    names: ["Annals of Physics", "Ann. Phys.", "Ann Phys", "Ann. Phys. (N.Y.)", "Annals Phys.", "Annals Phys"],
     abbreviations: ["AnnPhys"],
   },
   {
-    names: ["Reports on Progress in Physics", "Rep. Prog. Phys.", "Rept. Prog. Phys."],
+    names: [
+      "Reports on Progress in Physics",
+      "Rep. Prog. Phys.",
+      "Rept. Prog. Phys.",
+    ],
     abbreviations: ["RPP"],
   },
   {
@@ -273,8 +320,46 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     names: ["Physical Review", "Phys. Rev."],
     abbreviations: ["PR"],
   },
+  // Physica journal family
   {
-    names: ["Progress of Theoretical and Experimental Physics", "Prog. Theor. Exp. Phys.", "PTEP"],
+    names: [
+      "Physica A",
+      "Physica A (Amsterdam)",
+      "Physica A: Statistical Mechanics and its Applications",
+      "Physica",
+    ],
+    abbreviations: ["PhysicaA"],
+  },
+  {
+    names: [
+      "Physica B",
+      "Physica B (Amsterdam)",
+      "Physica B: Condensed Matter",
+    ],
+    abbreviations: ["PhysicaB"],
+  },
+  {
+    names: [
+      "Physica C",
+      "Physica C (Amsterdam)",
+      "Physica C: Superconductivity and its Applications",
+    ],
+    abbreviations: ["PhysicaC"],
+  },
+  {
+    names: [
+      "Physica D",
+      "Physica D (Amsterdam)",
+      "Physica D: Nonlinear Phenomena",
+    ],
+    abbreviations: ["PhysicaD"],
+  },
+  {
+    names: [
+      "Progress of Theoretical and Experimental Physics",
+      "Prog. Theor. Exp. Phys.",
+      "PTEP",
+    ],
     abbreviations: ["PTEP"],
   },
   {
@@ -298,7 +383,11 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["CMP"],
   },
   {
-    names: ["Living Reviews in Relativity", "Living Rev. Relativ.", "Living Rev. Rel."],
+    names: [
+      "Living Reviews in Relativity",
+      "Living Rev. Relativ.",
+      "Living Rev. Rel.",
+    ],
     abbreviations: ["LRR"],
   },
   {
@@ -310,7 +399,10 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["ApJL"],
   },
   {
-    names: ["Monthly Notices of the Royal Astronomical Society", "Mon. Not. Roy. Astron. Soc."],
+    names: [
+      "Monthly Notices of the Royal Astronomical Society",
+      "Mon. Not. Roy. Astron. Soc.",
+    ],
     abbreviations: ["MNRAS"],
   },
   {
@@ -349,7 +441,9 @@ export const JOURNAL_ABBREVIATION_MAP: JournalAbbreviationMap = {};
 export const JOURNAL_FULLNAME_MAP: Record<string, string[]> = {};
 
 for (const entry of JOURNAL_ENTRIES) {
-  const uniqueAbbreviations = Array.from(new Set(entry.abbreviations.filter(Boolean)));
+  const uniqueAbbreviations = Array.from(
+    new Set(entry.abbreviations.filter(Boolean)),
+  );
   for (const name of entry.names) {
     const normalizedName = normalizeJournalName(name);
     if (!normalizedName || !uniqueAbbreviations.length) {
@@ -373,11 +467,10 @@ for (const entry of JOURNAL_ENTRIES) {
 
 export function getJournalAbbreviations(journalName: string): string[] {
   const normalized = normalizeJournalName(journalName);
-  return normalized ? JOURNAL_ABBREVIATION_MAP[normalized] ?? [] : [];
+  return normalized ? (JOURNAL_ABBREVIATION_MAP[normalized] ?? []) : [];
 }
 
 export function getJournalFullNames(abbreviation: string): string[] {
   const normalized = normalizeAbbreviation(abbreviation);
-  return normalized ? JOURNAL_FULLNAME_MAP[normalized] ?? [] : [];
+  return normalized ? (JOURNAL_FULLNAME_MAP[normalized] ?? []) : [];
 }
-

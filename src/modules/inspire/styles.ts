@@ -151,7 +151,10 @@ export function applyStyle(element: HTMLElement, styles: CSSProperties): void {
  * @param element - Target HTML element
  * @param stylesList - Array of CSS property objects to apply
  */
-export function applyStyles(element: HTMLElement, ...stylesList: CSSProperties[]): void {
+export function applyStyles(
+  element: HTMLElement,
+  ...stylesList: CSSProperties[]
+): void {
   for (const styles of stylesList) {
     applyStyle(element, styles);
   }
@@ -183,7 +186,7 @@ export function toStyleString(styles: CSSProperties): string {
  * Check if the current Zotero theme is dark mode.
  */
 export function isDarkMode(): boolean {
-  const doc = typeof document !== "undefined" ? document : undefined;
+  const doc = Zotero.getMainWindow?.()?.document;
   if (!doc) return false;
   return (
     doc.documentElement.getAttribute("zotero-platform-darkmode") === "true" ||
@@ -197,10 +200,10 @@ export function isDarkMode(): boolean {
 
 /** Status indicator colors */
 export const STATUS_COLORS = {
-  local: "#1a8f4d",     // Green - item exists locally
+  local: "#1a8f4d", // Green - item exists locally
   notLocal: "#d93025", // Red - item not in local library
-  link: "#0066cc",     // Blue - clickable link
-  muted: "#666",       // Gray - secondary text
+  link: "#0066cc", // Blue - clickable link
+  muted: "#666", // Gray - secondary text
   chartNoData: "#9ca3af", // Light gray - chart placeholder
 } as const;
 

@@ -2,7 +2,12 @@ import { config } from "../package.json";
 import { initLocale, getString } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 import { ZInsMenu, ZInsUtils, ZInspireReferencePane } from "./modules/zinspire";
-import { localCache, getReaderIntegration, recidLookupCache, MemoryMonitor } from "./modules/inspire";
+import {
+  localCache,
+  getReaderIntegration,
+  recidLookupCache,
+  MemoryMonitor,
+} from "./modules/inspire";
 import {
   ENRICH_BATCH_RANGE,
   ENRICH_PARALLEL_RANGE,
@@ -32,8 +37,10 @@ async function onStartup() {
 
   // Purge expired local cache entries in background after startup
   setTimeout(() => {
-    localCache.purgeExpired().catch(err => {
-      Zotero.debug(`[${config.addonName}] Failed to purge expired cache: ${err}`);
+    localCache.purgeExpired().catch((err) => {
+      Zotero.debug(
+        `[${config.addonName}] Failed to purge expired cache: ${err}`,
+      );
     });
   }, 10000); // Delay 10s to avoid startup contention
 }
@@ -50,8 +57,10 @@ function exposeConsoleCommands(): void {
   if (instance) {
     instance.getCacheStats = () => MemoryMonitor.getInstance().getCacheStats();
     instance.logCacheStats = () => MemoryMonitor.getInstance().logCacheStats();
-    instance.resetCacheStats = () => MemoryMonitor.getInstance().resetCacheStats();
-    instance.startMemoryMonitor = (interval?: number) => MemoryMonitor.getInstance().start(interval);
+    instance.resetCacheStats = () =>
+      MemoryMonitor.getInstance().resetCacheStats();
+    instance.startMemoryMonitor = (interval?: number) =>
+      MemoryMonitor.getInstance().start(interval);
     instance.stopMemoryMonitor = () => MemoryMonitor.getInstance().stop();
   }
 }
@@ -103,7 +112,6 @@ async function onNotify(
   extraData: { [key: string]: any },
 ) {
   // You can add your code to the corresponding notify type
-  // ztoolkit.log("notify", event, type, ids, extraData);
   if (event === "add") {
     switch (getPref("meta")) {
       case "full":
@@ -126,14 +134,17 @@ async function onNotify(
  * Update cache statistics display in preferences panel.
  */
 async function updateCacheStatsDisplay(doc: Document) {
-  const statsEl = doc.getElementById("zotero-prefpane-zoteroinspire-cache_stats");
+  const statsEl = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-cache_stats",
+  );
   if (statsEl) {
     const stats = await localCache.getStats();
-    const sizeStr = stats.totalSize < 1024
-      ? `${stats.totalSize} B`
-      : stats.totalSize < 1024 * 1024
-        ? `${(stats.totalSize / 1024).toFixed(1)} KB`
-        : `${(stats.totalSize / 1024 / 1024).toFixed(1)} MB`;
+    const sizeStr =
+      stats.totalSize < 1024
+        ? `${stats.totalSize} B`
+        : stats.totalSize < 1024 * 1024
+          ? `${(stats.totalSize / 1024).toFixed(1)} KB`
+          : `${(stats.totalSize / 1024 / 1024).toFixed(1)} MB`;
     statsEl.textContent = getString("pref-local-cache-stats", {
       args: { count: stats.fileCount, size: sizeStr },
     });
@@ -142,15 +153,15 @@ async function updateCacheStatsDisplay(doc: Document) {
 
 function updateEnrichSettingsDisplay(doc: Document, forceValueSync = false) {
   const infoEl = doc.getElementById(
-    "zotero-prefpane-zoteroinspire-local_cache_enrich_info"
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_info",
   );
   if (!infoEl) return;
 
   const batchInput = doc.getElementById(
-    "zotero-prefpane-zoteroinspire-local_cache_enrich_batch"
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_batch",
   ) as HTMLInputElement | null;
   const parallelInput = doc.getElementById(
-    "zotero-prefpane-zoteroinspire-local_cache_enrich_parallel"
+    "zotero-prefpane-zoteroinspire-local_cache_enrich_parallel",
   ) as HTMLInputElement | null;
   const settings = getEnrichmentSettings();
 
@@ -198,7 +209,7 @@ function parseInputWithFallback(
 
 function updateLocalCacheControls(doc: Document, syncCheckbox = true) {
   const enableCheckbox = doc.getElementById(
-    "zotero-prefpane-zoteroinspire-local_cache_enable"
+    "zotero-prefpane-zoteroinspire-local_cache_enable",
   ) as HTMLInputElement | null;
   let enabled = getPref("local_cache_enable") as boolean;
   if (enableCheckbox) {
@@ -222,7 +233,9 @@ function updateLocalCacheControls(doc: Document, syncCheckbox = true) {
     "zotero-prefpane-zoteroinspire-clear_cache",
   ];
   controlIds.forEach((id) => {
-    const el = doc.getElementById(id) as (HTMLInputElement | HTMLButtonElement | HTMLElement) | null;
+    const el = doc.getElementById(id) as
+      | (HTMLInputElement | HTMLButtonElement | HTMLElement)
+      | null;
     if (!el || el === enableCheckbox) return;
     if ("disabled" in el) {
       (el as HTMLInputElement | HTMLButtonElement).disabled = !enabled;
@@ -234,10 +247,10 @@ function updateLocalCacheControls(doc: Document, syncCheckbox = true) {
 
 function updatePDFParseControls(doc: Document, syncCheckbox = true) {
   const parseCheckbox = doc.getElementById(
-    "zotero-prefpane-zoteroinspire-pdf_parse_refs_list"
+    "zotero-prefpane-zoteroinspire-pdf_parse_refs_list",
   ) as HTMLInputElement | null;
   const forceCheckbox = doc.getElementById(
-    "zotero-prefpane-zoteroinspire-pdf_force_mapping_on_mismatch"
+    "zotero-prefpane-zoteroinspire-pdf_force_mapping_on_mismatch",
   ) as HTMLInputElement | null;
 
   let parseEnabled = getPref("pdf_parse_refs_list") === true;
@@ -264,7 +277,7 @@ function updatePDFParseControls(doc: Document, syncCheckbox = true) {
 
 function updateSmartUpdateControls(doc: Document, syncCheckbox = true) {
   const enableCheckbox = doc.getElementById(
-    "zotero-prefpane-zoteroinspire-smart_update_enable"
+    "zotero-prefpane-zoteroinspire-smart_update_enable",
   ) as HTMLInputElement | null;
 
   let enabled = getPref("smart_update_enable") as boolean;
@@ -315,20 +328,20 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         updatePDFParseControls(doc);
         updateSmartUpdateControls(doc);
         const enableCheckbox = doc.getElementById(
-          "zotero-prefpane-zoteroinspire-local_cache_enable"
+          "zotero-prefpane-zoteroinspire-local_cache_enable",
         ) as HTMLInputElement | null;
         enableCheckbox?.addEventListener("command", () => {
           updateLocalCacheControls(doc, false);
           updateEnrichSettingsDisplay(doc, true);
         });
         const parseCheckbox = doc.getElementById(
-          "zotero-prefpane-zoteroinspire-pdf_parse_refs_list"
+          "zotero-prefpane-zoteroinspire-pdf_parse_refs_list",
         ) as HTMLInputElement | null;
         parseCheckbox?.addEventListener("command", () => {
           updatePDFParseControls(doc, false);
         });
         const forceCheckbox = doc.getElementById(
-          "zotero-prefpane-zoteroinspire-pdf_force_mapping_on_mismatch"
+          "zotero-prefpane-zoteroinspire-pdf_force_mapping_on_mismatch",
         ) as HTMLInputElement | null;
         forceCheckbox?.addEventListener("command", (e) => {
           const cb = e.target as HTMLInputElement;
@@ -336,16 +349,16 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         });
         // Smart Update enable checkbox listener
         const smartUpdateCheckbox = doc.getElementById(
-          "zotero-prefpane-zoteroinspire-smart_update_enable"
+          "zotero-prefpane-zoteroinspire-smart_update_enable",
         ) as HTMLInputElement | null;
         smartUpdateCheckbox?.addEventListener("command", () => {
           updateSmartUpdateControls(doc, false);
         });
         const batchInput = doc.getElementById(
-          "zotero-prefpane-zoteroinspire-local_cache_enrich_batch"
+          "zotero-prefpane-zoteroinspire-local_cache_enrich_batch",
         ) as HTMLInputElement | null;
         const parallelInput = doc.getElementById(
-          "zotero-prefpane-zoteroinspire-local_cache_enrich_parallel"
+          "zotero-prefpane-zoteroinspire-local_cache_enrich_parallel",
         ) as HTMLInputElement | null;
         const refresh = () => updateEnrichSettingsDisplay(doc);
         batchInput?.addEventListener("input", refresh);
@@ -353,13 +366,13 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         // Show current cache directory (actual path being used)
         localCache.getCacheDir().then((dir) => {
           const input = doc.getElementById(
-            "zotero-prefpane-zoteroinspire-local_cache_custom_dir"
+            "zotero-prefpane-zoteroinspire-local_cache_custom_dir",
           ) as HTMLInputElement;
           if (input && dir) {
             const customDir = getPref("local_cache_custom_dir") as string;
             input.value = customDir || "";
-            input.placeholder = dir;  // Show actual path being used
-            input.title = dir;  // Full path in tooltip
+            input.placeholder = dir; // Show actual path being used
+            input.title = dir; // Full path in tooltip
           }
         });
       }
@@ -370,12 +383,17 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
       if (data.window) {
         const win = data.window as Window;
         const doc = win.document;
-        const button = doc.getElementById("zotero-prefpane-zoteroinspire-clear_history");
+        const button = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-clear_history",
+        );
         if (button) {
           const originalLabel = button.getAttribute("data-l10n-id");
           button.setAttribute("data-l10n-id", "pref-search-history-cleared");
           setTimeout(() => {
-            button.setAttribute("data-l10n-id", originalLabel || "pref-search-history-clear");
+            button.setAttribute(
+              "data-l10n-id",
+              originalLabel || "pref-search-history-clear",
+            );
           }, 2000);
         }
       }
@@ -386,14 +404,21 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         if (data.window) {
           const win = data.window as Window;
           const doc = win.document;
-          const button = doc.getElementById("zotero-prefpane-zoteroinspire-clear_cache");
+          const button = doc.getElementById(
+            "zotero-prefpane-zoteroinspire-clear_cache",
+          );
           if (button) {
             const originalLabel = button.getAttribute("data-l10n-id");
             // Use fluent for the cleared message
-            button.textContent = getString("pref-local-cache-cleared", { args: { count } });
+            button.textContent = getString("pref-local-cache-cleared", {
+              args: { count },
+            });
             setTimeout(() => {
-              button.setAttribute("data-l10n-id", originalLabel || "pref-local-cache-clear");
-              button.textContent = "";  // Let fluent handle the text
+              button.setAttribute(
+                "data-l10n-id",
+                originalLabel || "pref-local-cache-clear",
+              );
+              button.textContent = ""; // Let fluent handle the text
             }, 2000);
           }
           // Update stats display
@@ -414,10 +439,12 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
             Services.prompt.alert(
               alertHost as unknown as mozIDOMWindowProxy,
               "File Picker Unavailable",
-              "Unable to open the directory picker. Please try again from the main Zotero window."
+              "Unable to open the directory picker. Please try again from the main Zotero window.",
             );
           }
-          Zotero.debug(`[${config.addonName}] FilePicker is not available in browseCacheDir handler.`);
+          Zotero.debug(
+            `[${config.addonName}] FilePicker is not available in browseCacheDir handler.`,
+          );
           return;
         }
 
@@ -432,7 +459,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
             const testFile = PathUtils.join(fp.file, ".zotero-inspire-test");
             await IOUtils.writeUTF8(testFile, "test");
             await IOUtils.remove(testFile, { ignoreAbsent: true });
-            
+
             // Directory is writable, save preference
             setPref("local_cache_custom_dir", fp.file);
             // Reinitialize cache with new directory
@@ -441,7 +468,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
             const doc = prefWin?.document;
             if (doc) {
               const input = doc.getElementById(
-                "zotero-prefpane-zoteroinspire-local_cache_custom_dir"
+                "zotero-prefpane-zoteroinspire-local_cache_custom_dir",
               ) as HTMLInputElement;
               if (input) {
                 input.value = fp.file;
@@ -457,7 +484,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
               Services.prompt.alert(
                 alertHost as unknown as mozIDOMWindowProxy,
                 "Invalid Directory",
-                `Selected directory is not writable. Please choose a different location.\n\nError: ${err}`
+                `Selected directory is not writable. Please choose a different location.\n\nError: ${err}`,
               );
             }
           }
@@ -473,11 +500,11 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
           const doc = (data.window as Window).document;
           localCache.getCacheDir().then((dir) => {
             const input = doc.getElementById(
-              "zotero-prefpane-zoteroinspire-local_cache_custom_dir"
+              "zotero-prefpane-zoteroinspire-local_cache_custom_dir",
             ) as HTMLInputElement;
             if (input && dir) {
               input.value = "";
-              input.placeholder = dir;  // Show default path
+              input.placeholder = dir; // Show default path
               input.title = dir;
             }
             updateCacheStatsDisplay(doc);
