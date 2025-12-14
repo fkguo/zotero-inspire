@@ -120,4 +120,3 @@ export class ZInsMenu {
     return children;
   }
 }
-

@@ -119,6 +119,8 @@ references-panel-toast-linked = 相关条目已关联
 references-panel-toast-added = 引用已添加到文库
 references-panel-toast-missing = 未在 INSPIRE-HEP 中找到文献
 references-panel-toast-no-pdf = 此条目没有 PDF 附件
+references-panel-toast-selected = 条目已在文库中选中
+references-panel-toast-bibtex-success = BibTeX 已复制到剪贴板
 references-panel-unknown-author = 未知作者
 references-panel-year-unknown = 无日期
 references-panel-no-title = 标题不可用
@@ -139,11 +141,23 @@ references-panel-entry-select = 选择一条引用条目以查看被引记录
 references-panel-entry-label-default = 所选引用
 references-panel-loading-abstract = 正在加载摘要...
 references-panel-no-abstract = 暂无摘要
+# Hover Preview Card (FTR-HOVER-PREVIEW)
+references-panel-preview-loading = 正在加载详情...
+references-panel-preview-abstract-truncated = [已截断]
 references-panel-author-papers-label = { $author } 的论文
 references-panel-author-click-hint = 点击查看 { $author } 的论文
 references-panel-copy-bibtex = 复制 BibTeX
 references-panel-bibtex-copied = BibTeX 已复制到剪贴板
 references-panel-bibtex-failed = 获取 BibTeX 失败
+
+# 预览卡片操作按钮 (FTR-HOVER-PREVIEW)
+references-panel-status-local = 本地库中
+references-panel-status-online = 在线
+references-panel-button-add = 添加到库
+references-panel-button-link = 关联
+references-panel-button-unlink = 取消关联
+references-panel-button-select = 定位
+references-panel-button-open-pdf = 打开 PDF
 
 update-cancelled = 用户取消更新
 update-cancelled-stats = 取消前已更新 { $completed }/{ $total } 条
@@ -281,3 +295,47 @@ pdf-annotate-multi-match =
 pdf-annotate-multi-match-truncated = 找到 [{ $label }] 的 { $count } 条记录（显示前 { $shown } 条）
 pdf-annotate-fallback-warning = INSPIRE 引用可能与 PDF 不同（标签匹配率：{ $rate }%）。使用位置匹配；请考虑向 INSPIRE 提交更正。
 pdf-annotate-parse-success = 已解析 PDF 引用：{ $total } 条（{ $multi } 条多论文引用）
+
+# 智能更新功能 (FTR-SMART-UPDATE)
+smart-update-untitled = （无标题）
+smart-update-value-empty = （空）
+smart-update-field-title = 标题
+smart-update-field-date = 日期
+smart-update-field-journal = 期刊
+smart-update-field-volume = 卷
+smart-update-field-pages = 页码
+smart-update-field-issue = 期号
+smart-update-field-abstract = 摘要
+smart-update-field-doi = DOI
+smart-update-field-arxiv = arXiv
+smart-update-field-citations = 引用次数
+smart-update-field-citations-wo-self = 引用次数（不含自引）
+smart-update-field-citekey = 引用键
+smart-update-field-collaboration = 合作组
+smart-update-field-authors = 作者
+
+# 智能更新预览对话框
+smart-update-preview-title = 智能更新预览
+smart-update-preview-header = { $title } 的变更
+smart-update-preview-info = 选择要更新的字段。取消勾选可跳过该字段。
+smart-update-preview-current = 当前值
+smart-update-preview-new = 新值
+smart-update-preview-apply = 应用
+smart-update-preview-cancel = 取消
+smart-update-preview-no-changes = 未检测到此条目的变更。
+
+# 自动检查更新通知 (FTR-SMART-UPDATE-AUTO-CHECK)
+smart-update-auto-check-available = INSPIRE 有可用更新
+smart-update-auto-check-view = 查看变更
+smart-update-auto-check-dismiss = 忽略
+smart-update-auto-check-changes =
+  { $count ->
+    [one] 1 个字段有新数据
+   *[other] { $count } 个字段有新数据
+  }
+
+# 多义引用选择器 (FTR-AMBIGUOUS-AUTHOR-YEAR)
+pdf-annotate-ambiguous-title = "{ $citation }" 有多个匹配
+pdf-annotate-ambiguous-message = 此引用匹配多篇论文。请选择正确的一篇：
+pdf-annotate-ambiguous-cancel = 取消
+pdf-annotate-ambiguous-preview-hint = 仅作者-年份匹配；点击选择

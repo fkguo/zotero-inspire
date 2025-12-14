@@ -77,7 +77,7 @@ export class FilterManager {
   constructor(options: FilterManagerOptions = {}) {
     this.options = options;
     this.filterContext = createDefaultFilterContext(
-      options.getCitationValue ?? ((entry) => entry.citationCount ?? 0)
+      options.getCitationValue ?? ((entry) => entry.citationCount ?? 0),
     );
 
     // Load saved quick filters from preferences
@@ -227,27 +227,31 @@ export class FilterManager {
    */
   filter(
     entries: InspireReferenceEntry[],
-    options: { skipChartFilter?: boolean } = {}
+    options: { skipChartFilter?: boolean } = {},
   ): InspireReferenceEntry[] {
     const { skipChartFilter = false } = options;
 
     // Parse and apply text filter
     const filterGroups = parseFilterTokens(this.textFilter)
-      .map(({ text, quoted }) => buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }))
+      .map(({ text, quoted }) =>
+        buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }),
+      )
       .filter((variants) => variants.length);
 
     const textFiltered = filterGroups.length
       ? entries.filter((entry) =>
           filterGroups.every((variants) =>
-            variants.some((token) => ensureSearchText(entry).includes(token))
-          )
+            variants.some((token) => ensureSearchText(entry).includes(token)),
+          ),
         )
       : entries;
 
     // Apply chart filter (if callback provided and not skipped)
     const chartFiltered =
       !skipChartFilter && this.options.matchesChartFilter
-        ? textFiltered.filter((entry) => this.options.matchesChartFilter!(entry))
+        ? textFiltered.filter((entry) =>
+            this.options.matchesChartFilter!(entry),
+          )
         : textFiltered;
 
     // Apply author count filter
@@ -286,7 +290,9 @@ export class FilterManager {
   /**
    * Update the filter context (e.g., when citation value calculation changes).
    */
-  updateContext(getCitationValue: (entry: InspireReferenceEntry) => number): void {
+  updateContext(
+    getCitationValue: (entry: InspireReferenceEntry) => number,
+  ): void {
     this.filterContext = createDefaultFilterContext(getCitationValue);
   }
 
@@ -308,7 +314,10 @@ export class FilterManager {
     return citationCount > HIGH_CITATIONS_THRESHOLD;
   }
 
-  private matchesRecentYearsFilter(entry: InspireReferenceEntry, years: number): boolean {
+  private matchesRecentYearsFilter(
+    entry: InspireReferenceEntry,
+    years: number,
+  ): boolean {
     const currentYear = this.filterContext.currentYear;
     const entryYear = parseInt(entry.year || "", 10);
     if (isNaN(entryYear)) return false;
@@ -331,22 +340,33 @@ export class FilterManager {
     return typeof entry.localItemID !== "number" || entry.localItemID <= 0;
   }
 
-  private applyQuickFilters(entries: InspireReferenceEntry[]): InspireReferenceEntry[] {
+  private applyQuickFilters(
+    entries: InspireReferenceEntry[],
+  ): InspireReferenceEntry[] {
     if (this.quickFilters.size === 0) return entries;
 
     return entries.filter((entry) => {
       // High citations filter
-      if (this.quickFilters.has("highCitations") && !this.matchesHighCitationsFilter(entry)) {
+      if (
+        this.quickFilters.has("highCitations") &&
+        !this.matchesHighCitationsFilter(entry)
+      ) {
         return false;
       }
 
       // Recent 5 years filter
-      if (this.quickFilters.has("recent5Years") && !this.matchesRecentYearsFilter(entry, 5)) {
+      if (
+        this.quickFilters.has("recent5Years") &&
+        !this.matchesRecentYearsFilter(entry, 5)
+      ) {
         return false;
       }
 
       // Recent 1 year filter
-      if (this.quickFilters.has("recent1Year") && !this.matchesRecentYearsFilter(entry, 1)) {
+      if (
+        this.quickFilters.has("recent1Year") &&
+        !this.matchesRecentYearsFilter(entry, 1)
+      ) {
         return false;
       }
 
@@ -354,22 +374,34 @@ export class FilterManager {
       // to avoid double-filtering (publishedOnlyFilterEnabled syncs with quickFilters.has("publishedOnly"))
 
       // Preprint only filter
-      if (this.quickFilters.has("preprintOnly") && !this.matchesPreprintOnlyFilter(entry)) {
+      if (
+        this.quickFilters.has("preprintOnly") &&
+        !this.matchesPreprintOnlyFilter(entry)
+      ) {
         return false;
       }
 
       // Related only filter
-      if (this.quickFilters.has("relatedOnly") && !this.matchesRelatedOnlyFilter(entry)) {
+      if (
+        this.quickFilters.has("relatedOnly") &&
+        !this.matchesRelatedOnlyFilter(entry)
+      ) {
         return false;
       }
 
       // Local items filter
-      if (this.quickFilters.has("localItems") && !this.matchesLocalItemsFilter(entry)) {
+      if (
+        this.quickFilters.has("localItems") &&
+        !this.matchesLocalItemsFilter(entry)
+      ) {
         return false;
       }
 
       // Online items filter
-      if (this.quickFilters.has("onlineItems") && !this.matchesOnlineItemsFilter(entry)) {
+      if (
+        this.quickFilters.has("onlineItems") &&
+        !this.matchesOnlineItemsFilter(entry)
+      ) {
         return false;
       }
 
@@ -408,7 +440,10 @@ export class FilterManager {
 
   private saveQuickFiltersToPrefs(): void {
     try {
-      setPref(QUICK_FILTER_PREF_KEY, JSON.stringify(Array.from(this.quickFilters)));
+      setPref(
+        QUICK_FILTER_PREF_KEY,
+        JSON.stringify(Array.from(this.quickFilters)),
+      );
     } catch (e) {
       // Ignore save errors
     }
@@ -416,17 +451,26 @@ export class FilterManager {
 
   private enforceMutualExclusivity(): void {
     // publishedOnly vs preprintOnly
-    if (this.quickFilters.has("publishedOnly") && this.quickFilters.has("preprintOnly")) {
+    if (
+      this.quickFilters.has("publishedOnly") &&
+      this.quickFilters.has("preprintOnly")
+    ) {
       this.quickFilters.delete("preprintOnly");
     }
 
     // recent1Year vs recent5Years
-    if (this.quickFilters.has("recent1Year") && this.quickFilters.has("recent5Years")) {
+    if (
+      this.quickFilters.has("recent1Year") &&
+      this.quickFilters.has("recent5Years")
+    ) {
       this.quickFilters.delete("recent5Years");
     }
 
     // localItems vs onlineItems
-    if (this.quickFilters.has("localItems") && this.quickFilters.has("onlineItems")) {
+    if (
+      this.quickFilters.has("localItems") &&
+      this.quickFilters.has("onlineItems")
+    ) {
       this.quickFilters.delete("onlineItems");
     }
   }

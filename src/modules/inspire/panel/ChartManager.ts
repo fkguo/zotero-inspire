@@ -15,7 +15,12 @@ import {
 import { CHART_STYLES, toStyleString } from "../styles";
 
 // Local citation ranges for chart (array format for iteration)
-const CITATION_RANGES_ARRAY: Array<{ label: string; min: number; max: number; key: string }> = [
+const CITATION_RANGES_ARRAY: Array<{
+  label: string;
+  min: number;
+  max: number;
+  key: string;
+}> = [
   { label: "0", min: 0, max: 0, key: "0" },
   { label: "1-9", min: 1, max: 9, key: "1-9" },
   { label: "10-49", min: 10, max: 49, key: "10-49" },
@@ -97,7 +102,10 @@ export class ChartManager {
 
   constructor(options: ChartManagerOptions) {
     this.options = options;
-    this.collapsed = options.initialCollapsed ?? (getPref("chart_collapsed") as boolean) ?? true;
+    this.collapsed =
+      options.initialCollapsed ??
+      (getPref("chart_default_collapsed") as boolean) ??
+      true;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -206,9 +214,10 @@ export class ChartManager {
 
     const now = performance.now();
     const timeSinceLastRender = now - this.lastRenderTime;
-    const delay = timeSinceLastRender < CHART_THROTTLE_MS
-      ? CHART_THROTTLE_MS - timeSinceLastRender
-      : 0;
+    const delay =
+      timeSinceLastRender < CHART_THROTTLE_MS
+        ? CHART_THROTTLE_MS - timeSinceLastRender
+        : 0;
 
     this.renderTimer = setTimeout(() => {
       this.renderTimer = undefined;
@@ -289,7 +298,8 @@ export class ChartManager {
       // Citation range filter
       if (bin.range) {
         const citationCount = this.options.getCitationValue(entry);
-        if (citationCount >= bin.range[0] && citationCount <= bin.range[1]) return true;
+        if (citationCount >= bin.range[0] && citationCount <= bin.range[1])
+          return true;
       }
     }
 
@@ -354,7 +364,11 @@ export class ChartManager {
     btn.className = "zinspire-chart-collapse-btn";
     btn.type = "button";
     btn.textContent = this.collapsed ? "▶" : "▼";
-    btn.title = getString(this.collapsed ? "references-panel-chart-expand" : "references-panel-chart-collapse");
+    btn.title = getString(
+      this.collapsed
+        ? "references-panel-chart-expand"
+        : "references-panel-chart-collapse",
+    );
     btn.style.cssText = `
       border: 1px solid #cbd5e1;
       background: #f1f5f9;
@@ -369,11 +383,19 @@ export class ChartManager {
     return btn;
   }
 
-  private createToggleButton(doc: Document, mode: ChartViewMode, active: boolean): HTMLButtonElement {
+  private createToggleButton(
+    doc: Document,
+    mode: ChartViewMode,
+    active: boolean,
+  ): HTMLButtonElement {
     const btn = doc.createElement("button");
     btn.className = `zinspire-chart-toggle-btn${active ? " active" : ""}`;
     btn.type = "button";
-    btn.textContent = getString(mode === "year" ? "references-panel-chart-by-year" : "references-panel-chart-by-citation");
+    btn.textContent = getString(
+      mode === "year"
+        ? "references-panel-chart-by-year"
+        : "references-panel-chart-by-citation",
+    );
     btn.dataset.mode = mode;
     btn.style.cssText = `
       border: none;
@@ -477,10 +499,14 @@ export class ChartManager {
 
     // Update button styles
     if (this.container) {
-      const buttons = this.container.querySelectorAll(".zinspire-chart-toggle-btn");
+      const buttons = this.container.querySelectorAll(
+        ".zinspire-chart-toggle-btn",
+      );
       buttons.forEach((btn) => {
         const isActive = (btn as HTMLElement).dataset.mode === mode;
-        (btn as HTMLElement).style.background = isActive ? "#475569" : "#e2e8f0";
+        (btn as HTMLElement).style.background = isActive
+          ? "#475569"
+          : "#e2e8f0";
         (btn as HTMLElement).style.color = isActive ? "white" : "#475569";
       });
     }
@@ -499,10 +525,12 @@ export class ChartManager {
     }
 
     this.collapsed = !this.collapsed;
-    setPref("chart_collapsed", this.collapsed);
+    setPref("chart_default_collapsed", this.collapsed);
 
     if (this.container && this.svgWrapper) {
-      const collapseBtn = this.container.querySelector(".zinspire-chart-collapse-btn");
+      const collapseBtn = this.container.querySelector(
+        ".zinspire-chart-collapse-btn",
+      );
 
       if (this.collapsed) {
         this.svgWrapper.style.display = "none";
@@ -528,25 +556,28 @@ export class ChartManager {
       if (collapseBtn) {
         collapseBtn.textContent = this.collapsed ? "▶" : "▼";
         (collapseBtn as HTMLButtonElement).title = getString(
-          this.collapsed ? "references-panel-chart-expand" : "references-panel-chart-collapse"
+          this.collapsed
+            ? "references-panel-chart-expand"
+            : "references-panel-chart-collapse",
         );
       }
     }
   }
 
   private isEnabled(): boolean {
-    return getPref("chart_enabled") !== false;
+    return getPref("chart_enable") !== false;
   }
 
   private showDisabledMessage(): void {
     // Use Zotero's alert if available
     if (typeof Zotero !== "undefined" && Zotero.alert) {
       // Get the main window for the alert dialog
-      const win = Zotero.getMainWindow?.() ?? (typeof window !== "undefined" ? window : undefined);
+      const win = Zotero.getMainWindow?.() ?? undefined;
       Zotero.alert(
         win,
         getString("references-panel-chart-disabled-title") || "Chart Disabled",
-        getString("references-panel-chart-disabled-message") || "Enable charts in preferences."
+        getString("references-panel-chart-disabled-message") ||
+          "Enable charts in preferences.",
       );
     }
   }
@@ -562,14 +593,23 @@ export class ChartManager {
       for (const entry of entries) {
         const newWidth = entry.contentRect.width;
         if (newWidth < 50) continue;
-        if (this.lastWidth !== undefined && Math.abs(newWidth - this.lastWidth) < 2) {
+        if (
+          this.lastWidth !== undefined &&
+          Math.abs(newWidth - this.lastWidth) < 2
+        ) {
           continue;
         }
         this.lastWidth = newWidth;
 
         this.clearPendingResize();
-        const cancelFn = typeof cancelAnimationFrame !== "undefined" ? cancelAnimationFrame : clearTimeout;
-        const raf = typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : setTimeout;
+        const cancelFn =
+          typeof cancelAnimationFrame !== "undefined"
+            ? cancelAnimationFrame
+            : clearTimeout;
+        const raf =
+          typeof requestAnimationFrame !== "undefined"
+            ? requestAnimationFrame
+            : setTimeout;
         const id = raf(() => this.render()) as number;
         this.resizeFrame = { cancel: cancelFn as (id: number) => void, id };
       }
@@ -589,7 +629,10 @@ export class ChartManager {
   // Private: Stats Computation
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private computeYearStats(entries: InspireReferenceEntry[], maxBars: number = 10): ChartBin[] {
+  private computeYearStats(
+    entries: InspireReferenceEntry[],
+    maxBars: number = 10,
+  ): ChartBin[] {
     const yearCounts = new Map<number, number>();
     const MAX_BARS = maxBars;
     const MIN_COUNT_PER_BIN = 3;
@@ -621,7 +664,10 @@ export class ChartManager {
         label: formatYearLabel(years[0], years[years.length - 1]),
         count,
         years,
-        key: years.length === 1 ? String(years[0]) : `${years[0]}-${years[years.length - 1]}`,
+        key:
+          years.length === 1
+            ? String(years[0])
+            : `${years[0]}-${years[years.length - 1]}`,
       };
     };
 
@@ -634,7 +680,10 @@ export class ChartManager {
       }));
     }
 
-    const targetCountPerBin = Math.max(MIN_COUNT_PER_BIN, Math.ceil(totalCount / MAX_BARS));
+    const targetCountPerBin = Math.max(
+      MIN_COUNT_PER_BIN,
+      Math.ceil(totalCount / MAX_BARS),
+    );
     let bins: ChartBin[] = [];
     let currentYears: number[] = [];
     let currentCount = 0;
@@ -647,7 +696,8 @@ export class ChartManager {
       const remainingYears = sorted.length - i - 1;
       const remainingBins = MAX_BARS - bins.length - 1;
 
-      const shouldCreateBin = currentCount >= targetCountPerBin ||
+      const shouldCreateBin =
+        currentCount >= targetCountPerBin ||
         (remainingYears <= remainingBins && currentCount > 0) ||
         i === sorted.length - 1;
 
@@ -668,12 +718,26 @@ export class ChartManager {
           mergeIdx = i;
         }
       }
-      const allYears = [...(bins[mergeIdx].years || []), ...(bins[mergeIdx + 1].years || [])].sort((a, b) => a - b);
-      bins = [...bins.slice(0, mergeIdx), createBin(allYears), ...bins.slice(mergeIdx + 2)];
+      const allYears = [
+        ...(bins[mergeIdx].years || []),
+        ...(bins[mergeIdx + 1].years || []),
+      ].sort((a, b) => a - b);
+      bins = [
+        ...bins.slice(0, mergeIdx),
+        createBin(allYears),
+        ...bins.slice(mergeIdx + 2),
+      ];
     }
 
-    while (bins.length > 3 && bins[0].count < MIN_COUNT_PER_BIN && bins[0].count + bins[1].count < targetCountPerBin * 1.5) {
-      const allYears = [...(bins[0].years || []), ...(bins[1].years || [])].sort((a, b) => a - b);
+    while (
+      bins.length > 3 &&
+      bins[0].count < MIN_COUNT_PER_BIN &&
+      bins[0].count + bins[1].count < targetCountPerBin * 1.5
+    ) {
+      const allYears = [
+        ...(bins[0].years || []),
+        ...(bins[1].years || []),
+      ].sort((a, b) => a - b);
       bins = [createBin(allYears), ...bins.slice(2)];
     }
 
@@ -697,7 +761,10 @@ export class ChartManager {
     return CITATION_RANGES_ARRAY.map((r) => ({
       label: r.label,
       count: counts.get(r.key) || 0,
-      range: [r.min, r.max === Infinity ? Number.MAX_SAFE_INTEGER : r.max] as [number, number],
+      range: [r.min, r.max === Infinity ? Number.MAX_SAFE_INTEGER : r.max] as [
+        number,
+        number,
+      ],
       key: r.key,
     }));
   }
@@ -728,15 +795,23 @@ export class ChartManager {
     const DEFAULT_MAX_BARS = 10;
 
     const containerWidth = this.svgWrapper.clientWidth || 400;
-    const maxPossibleBars = Math.floor((containerWidth - PADDING + BAR_GAP) / (MAX_BAR_WIDTH + BAR_GAP));
-    const dynamicMaxBars = Math.max(DEFAULT_MAX_BARS, Math.min(maxPossibleBars, 20));
+    const maxPossibleBars = Math.floor(
+      (containerWidth - PADDING + BAR_GAP) / (MAX_BAR_WIDTH + BAR_GAP),
+    );
+    const dynamicMaxBars = Math.max(
+      DEFAULT_MAX_BARS,
+      Math.min(maxPossibleBars, 20),
+    );
 
-    let stats = this.viewMode === "year"
-      ? this.computeYearStats(entries, dynamicMaxBars)
-      : this.computeCitationStats(entries);
+    let stats =
+      this.viewMode === "year"
+        ? this.computeYearStats(entries, dynamicMaxBars)
+        : this.computeCitationStats(entries);
 
     if (!stats.length && this.viewMode === "year" && entries.length > 0) {
-      Zotero.debug(`[${config.addonName}] Chart: No year data for ${entries.length} entries, falling back to citation view`);
+      Zotero.debug(
+        `[${config.addonName}] Chart: No year data for ${entries.length} entries, falling back to citation view`,
+      );
       stats = this.computeCitationStats(entries);
     }
 
@@ -766,7 +841,10 @@ export class ChartManager {
     const PADDING = 16;
 
     const availableWidth = containerWidth - PADDING;
-    const barWidth = Math.min(CHART_MAX_BAR_WIDTH, Math.max(20, (availableWidth - (numBars - 1) * BAR_GAP) / numBars));
+    const barWidth = Math.min(
+      CHART_MAX_BAR_WIDTH,
+      Math.max(20, (availableWidth - (numBars - 1) * BAR_GAP) / numBars),
+    );
 
     for (const stat of stats) {
       const barContainer = doc.createElement("div");
@@ -863,7 +941,8 @@ export class ChartManager {
 
     if (startIdx === -1 || endIdx === -1) return;
 
-    const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+    const [from, to] =
+      startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
     const rangeKeys = keys.slice(from, to + 1);
 
     if (!additive) {
@@ -880,9 +959,12 @@ export class ChartManager {
 
   private updateClearButton(): void {
     if (!this.container) return;
-    const clearBtn = this.container.querySelector(".zinspire-chart-clear-btn") as HTMLButtonElement;
+    const clearBtn = this.container.querySelector(
+      ".zinspire-chart-clear-btn",
+    ) as HTMLButtonElement;
     if (clearBtn) {
-      clearBtn.style.display = this.selectedBins.size > 0 ? "inline-block" : "none";
+      clearBtn.style.display =
+        this.selectedBins.size > 0 ? "inline-block" : "none";
     }
   }
 
@@ -894,10 +976,12 @@ export class ChartManager {
 
     if (this.selectedBins.size > 0 && filtered !== total) {
       this.statsTopLine.textContent = `${filtered} / ${total}`;
-      this.statsBottomLine.textContent = getString("references-panel-chart-filtered") || "filtered";
+      this.statsBottomLine.textContent =
+        getString("references-panel-chart-filtered") || "filtered";
     } else {
       this.statsTopLine.textContent = String(total);
-      this.statsBottomLine.textContent = getString("references-panel-chart-total") || "total";
+      this.statsBottomLine.textContent =
+        getString("references-panel-chart-total") || "total";
     }
   }
 

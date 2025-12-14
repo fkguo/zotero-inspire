@@ -13,13 +13,13 @@ if (!basicTool.getGlobal("Zotero")[config.addonInstance]) {
   defineGlobal("document");
   defineGlobal("ZoteroPane");
   defineGlobal("Zotero_Tabs");
-  defineGlobal("performance")
+  defineGlobal("performance");
   defineGlobal("ztoolkit", () => {
     return _globalThis.addon.data.ztoolkit;
   });
-    _globalThis.inspire = new ZInspire()
+  _globalThis.inspire = new ZInspire();
 
-// @ts-ignore - Plugin instance is not typed
+  // @ts-ignore - Plugin instance is not typed
   Zotero[config.addonInstance] = addon;
   // Trigger addon hook for initialization
 }

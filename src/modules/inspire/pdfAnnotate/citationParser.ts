@@ -54,8 +54,10 @@ const SUPERSCRIPT_MAP: Record<string, string> = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Fuzzy detection patterns (used in detectFuzzyCitations)
-const DOC_REF_PATTERN = /^\s*(figs?|figures?|tabs?|tables?|secs?|sects?|sections?|eqs?|eqns?|equations?|apps?|appendix|appendices|chs?|chaps?|chapters?|parts?|theorems?|lemmas?|corollar(?:y|ies)|defs?|definitions?|props?|propositions?|examples?|exercises?|problems?|notes?|cases?|steps?)\.?\s*[\d,\s–-]+\s*$/i;
-const DOC_REF_INLINE_PATTERN = /\b(figs?|figures?|tabs?|tables?|secs?|sects?|sections?|eqs?|eqns?|equations?|apps?|appendix|appendices|chs?|chaps?|chapters?|parts?|theorems?|lemmas?|corollar(?:y|ies)|defs?|definitions?|props?|propositions?|examples?|exercises?|problems?|notes?|cases?|steps?)\.?\s*([\d,\s–-]+)/gi;
+const DOC_REF_PATTERN =
+  /^\s*(figs?|figures?|tabs?|tables?|secs?|sects?|sections?|eqs?|eqns?|equations?|apps?|appendix|appendices|chs?|chaps?|chapters?|parts?|theorems?|lemmas?|corollar(?:y|ies)|defs?|definitions?|props?|propositions?|examples?|exercises?|problems?|notes?|cases?|steps?)\.?\s*[\d,\s–-]+\s*$/i;
+const DOC_REF_INLINE_PATTERN =
+  /\b(figs?|figures?|tabs?|tables?|secs?|sects?|sections?|eqs?|eqns?|equations?|apps?|appendix|appendices|chs?|chaps?|chapters?|parts?|theorems?|lemmas?|corollar(?:y|ies)|defs?|definitions?|props?|propositions?|examples?|exercises?|problems?|notes?|cases?|steps?)\.?\s*([\d,\s–-]+)/gi;
 const RANGE_REGEX = /\b(\d{1,4})\s*[–-]\s*(\d{1,4})\b/g;
 const LIST_REGEX = /\b\d{1,4}(?:\s*,\s*\d{1,4})+\b/g;
 const AUTHOR_NUMBER_REGEX = /\b([A-Z][a-z]+)\s+(\d{1,4})\b/g;
@@ -71,41 +73,40 @@ const ET_AL_REGEX = /et\s+al\.?/i;
 // These are reconstructed on every extractAuthorYearMatches() call in original code
 const ET_AL_OUTSIDE_REGEX = new RegExp(
   `\\b((?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+(?:(?:\\s*,\\s*|\\s+and\\s+|\\s*,\\s+and\\s+)(?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)*)\\s+et\\s+al\\.?\\s*\\((\\d{4}[a-z]?(?:\\s*,\\s*\\d{4}[a-z]?)*)\\)`,
-  "gi"
+  "gi",
 );
 
 const ET_AL_INCOMPLETE_REGEX = new RegExp(
   `(?:^|[\\s;])([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s+et\\s+al\\.?(?:\\s|\\.|,|;|$)`,
-  "gi"
+  "gi",
 );
 
 const TWO_AUTHORS_INCOMPLETE_REGEX = new RegExp(
   `(?:^|[\\s;])([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)(?:\\s+(?:and|&)\\s+|\\s*,\\s*)([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)(?:\\s|\\.|,|;|$)`,
-  "gi"
+  "gi",
 );
 
 const MULTI_AUTHOR_OUTSIDE_REGEX = new RegExp(
   `\\b([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+(?:(?:\\s*,\\s*|\\s+and\\s+|\\s*,\\s+and\\s+)[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+){2,})\\s*\\((\\d{4}[a-z]?(?:\\s*,\\s*\\d{4}[a-z]?)*)\\)`,
-  "gi"
+  "gi",
 );
 
 const TWO_AUTHORS_REGEX = new RegExp(
   `\\b([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s+(?:and|&)\\s+([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s*\\((\\d{4}[a-z]?(?:\\s*,\\s*\\d{4}[a-z]?)*)\\)`,
-  "gi"
+  "gi",
 );
 
 const SINGLE_AUTHOR_REGEX = new RegExp(
   `\\b([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s*\\((\\d{4}[a-z]?(?:\\s*,\\s*\\d{4}[a-z]?)*)\\)`,
-  "gi"
+  "gi",
 );
 
 const INITIAL_NAME_PATTERN = new RegExp(
-  `^((?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?)` +  // Optional initials
-  `((?:(?:van|von|de|der|del|la|le)\\s+)?` +  // Optional lowercase prefix (van der, de la, etc.)
-  `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]*` +  // First word of surname (capitalized)
-  `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]*)*)$`  // Optional additional words in compound surname
+  `^((?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?)` + // Optional initials
+    `((?:(?:van|von|de|der|del|la|le)\\s+)?` + // Optional lowercase prefix (van der, de la, etc.)
+    `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]*` + // First word of surname (capitalized)
+    `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]*)*)$`, // Optional additional words in compound surname
 );
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Debug logging control
@@ -171,7 +172,10 @@ function expandRange(start: number, end: number): string[] {
  * @param maxKnownLabel - Maximum valid label from PDF parsing (optional)
  * @returns Expanded range labels, or null if not a valid concatenated range
  */
-function tryParseAsConcatenatedRange(label: string, maxKnownLabel?: number): string[] | null {
+function tryParseAsConcatenatedRange(
+  label: string,
+  maxKnownLabel?: number,
+): string[] | null {
   // Must be all digits
   if (!/^\d+$/.test(label)) return null;
 
@@ -203,7 +207,7 @@ function tryParseAsConcatenatedRange(label: string, maxKnownLabel?: number): str
     const endStr = label.substring(i);
 
     // Skip if end part has leading zeros (invalid number format)
-    if (endStr.length > 1 && endStr.startsWith('0')) continue;
+    if (endStr.length > 1 && endStr.startsWith("0")) continue;
 
     const start = parseInt(startStr, 10);
     const end = parseInt(endStr, 10);
@@ -217,19 +221,16 @@ function tryParseAsConcatenatedRange(label: string, maxKnownLabel?: number): str
     // 4. span not too large (≤50)
     if (hasValidThreshold) {
       // Precise mode: use maxKnownLabel as upper bound
-      if (end > maxKnownLabel! || (end - start) > 50) continue;
+      if (end > maxKnownLabel! || end - start > 50) continue;
     } else {
       // Heuristic mode: conservative bounds
       // Only accept splits where both parts are < 100
       // This handles common cases like "6264" -> "62-64"
-      if (start >= 100 || end >= 100 || (end - start) > 50) continue;
+      if (start >= 100 || end >= 100 || end - start > 50) continue;
     }
 
     // Found a valid split! Expand to range
     const expanded = expandRange(start, end);
-    ztoolkit.log(
-      `[PDF-ANNOTATE] Concatenated range detected: "${label}" → ${start}-${end} → [${expanded.join(",")}] (mode=${hasValidThreshold ? 'precise' : 'heuristic'}, maxKnownLabel=${maxKnownLabel ?? 'undefined'})`
-    );
     return expanded;
   }
 
@@ -249,7 +250,10 @@ function tryParseAsConcatenatedRange(label: string, maxKnownLabel?: number): str
  * @param maxKnownLabel - Maximum valid label from PDF (optional)
  * @returns Processed labels with concatenated ranges expanded
  */
-export function postProcessLabels(labels: string[], maxKnownLabel?: number): string[] {
+export function postProcessLabels(
+  labels: string[],
+  maxKnownLabel?: number,
+): string[] {
   const result: string[] = [];
 
   for (const label of labels) {
@@ -285,17 +289,17 @@ function parseMixedCitation(content: string): string[] {
   const labels: string[] = [];
   // Split by comma, then check each part for ranges
   const parts = content.split(/\s*,\s*/);
-  
+
   for (const part of parts) {
     const trimmed = part.trim();
     if (!trimmed) continue;
-    
+
     // Check if it's a range (e.g., "38-41" or "38–41")
     const rangeMatch = trimmed.match(/^(\d+)[-–](\d+)$/);
     if (rangeMatch) {
       const expanded = expandRange(
         parseInt(rangeMatch[1], 10),
-        parseInt(rangeMatch[2], 10)
+        parseInt(rangeMatch[2], 10),
       );
       labels.push(...expanded);
     } else if (/^\d+$/.test(trimmed)) {
@@ -333,7 +337,8 @@ function detectSuperscriptStyleCitations(text: string): string[] {
   // Pattern: letter followed immediately by citation number(s)
   // Captures the number part including ranges and comma-separated lists
   // Examples: "s72" from "factors72", "m89–91" from "term89–91", "s84,86" from "factors84,86"
-  const superscriptStyleRegex = /[a-zA-Z](\d{1,3}(?:[–,-]\d{1,3})*(?:,\d{1,3}(?:[–,-]\d{1,3})*)*)/g;
+  const superscriptStyleRegex =
+    /[a-zA-Z](\d{1,3}(?:[–,-]\d{1,3})*(?:,\d{1,3}(?:[–,-]\d{1,3})*)*)/g;
 
   let match;
   while ((match = superscriptStyleRegex.exec(text)) !== null) {
@@ -363,89 +368,262 @@ function detectSuperscriptStyleCitations(text: string): string[] {
  */
 const EXCLUDED_PREFIXES = new Set([
   // Sections & chapters
-  "section", "sections", "sec", "sect", "secs", "sects",
-  "chapter", "chapters", "chap", "chaps", "ch",
+  "section",
+  "sections",
+  "sec",
+  "sect",
+  "secs",
+  "sects",
+  "chapter",
+  "chapters",
+  "chap",
+  "chaps",
+  "ch",
   // Figures & tables
-  "figure", "figures", "fig", "figs",
-  "table", "tables", "tab", "tabs", "tbl", "tbls",
+  "figure",
+  "figures",
+  "fig",
+  "figs",
+  "table",
+  "tables",
+  "tab",
+  "tabs",
+  "tbl",
+  "tbls",
   // Equations & formulas (including patterns like "Eq. (35)")
-  "equation", "equations", "eq", "eqs", "eqn", "eqns",
-  "formula", "formulas", "formulae",
+  "equation",
+  "equations",
+  "eq",
+  "eqs",
+  "eqn",
+  "eqns",
+  "formula",
+  "formulas",
+  "formulae",
   // Note: "Eq." pattern is also handled by parentheses check below
   // Pages & lines
-  "page", "pages", "pg", "pgs", "pp",
-  "line", "lines", "ln", "lns",
+  "page",
+  "pages",
+  "pg",
+  "pgs",
+  "pp",
+  "line",
+  "lines",
+  "ln",
+  "lns",
   // Appendices & parts
-  "appendix", "appendices", "app", "apps",
-  "part", "parts", "pt", "pts",
+  "appendix",
+  "appendices",
+  "app",
+  "apps",
+  "part",
+  "parts",
+  "pt",
+  "pts",
   // Theorems & proofs (math papers)
-  "theorem", "theorems", "thm", "thms",
-  "lemma", "lemmas", "lem", "lems",
-  "corollary", "corollaries", "cor", "cors",
-  "proposition", "propositions", "prop", "props",
-  "definition", "definitions", "def", "defs",
-  "proof", "proofs", "pf", "pfs",
-  "remark", "remarks", "rem", "rems",
+  "theorem",
+  "theorems",
+  "thm",
+  "thms",
+  "lemma",
+  "lemmas",
+  "lem",
+  "lems",
+  "corollary",
+  "corollaries",
+  "cor",
+  "cors",
+  "proposition",
+  "propositions",
+  "prop",
+  "props",
+  "definition",
+  "definitions",
+  "def",
+  "defs",
+  "proof",
+  "proofs",
+  "pf",
+  "pfs",
+  "remark",
+  "remarks",
+  "rem",
+  "rems",
   // Examples & exercises
-  "example", "examples", "ex", "exs",
-  "exercise", "exercises",
-  "problem", "problems", "prob", "probs",
-  "solution", "solutions", "sol", "sols",
+  "example",
+  "examples",
+  "ex",
+  "exs",
+  "exercise",
+  "exercises",
+  "problem",
+  "problems",
+  "prob",
+  "probs",
+  "solution",
+  "solutions",
+  "sol",
+  "sols",
   // Other document elements
-  "note", "notes",
-  "case", "cases",
-  "item", "items",
-  "step", "steps",
-  "column", "columns", "col", "cols",
-  "row", "rows",
-  "entry", "entries",
-  "index", "indices",
+  "note",
+  "notes",
+  "case",
+  "cases",
+  "item",
+  "items",
+  "step",
+  "steps",
+  "column",
+  "columns",
+  "col",
+  "cols",
+  "row",
+  "rows",
+  "entry",
+  "entries",
+  "index",
+  "indices",
   // Numbering & references
-  "number", "numbers", "num", "nums", "no", "nos",
-  "version", "versions", "ver", "vers",
-  "volume", "volumes", "vol", "vols",
-  "issue", "issues", "iss",
+  "number",
+  "numbers",
+  "num",
+  "nums",
+  "no",
+  "nos",
+  "version",
+  "versions",
+  "ver",
+  "vers",
+  "volume",
+  "volumes",
+  "vol",
+  "vols",
+  "issue",
+  "issues",
+  "iss",
   // Time & dates
-  "year", "years", "yr", "yrs",
-  "day", "days",
-  "month", "months",
-  "january", "february", "march", "april", "may", "june",
-  "july", "august", "september", "october", "november", "december",
-  "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+  "year",
+  "years",
+  "yr",
+  "yrs",
+  "day",
+  "days",
+  "month",
+  "months",
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "sept",
+  "oct",
+  "nov",
+  "dec",
   // Physics-specific
-  "run", "runs",  // "Run 2" at LHC
-  "beam", "beams",
-  "event", "events",
-  "sample", "samples",
-  "generation", "generations", "gen", "gens",  // particle generations
-  "order", "orders", "ord",  // perturbative orders
-  "loop", "loops",  // loop orders in QFT
-  "level", "levels", "lev", "lvl",
-  "tier", "tiers",
-  "phase", "phases",
-  "stage", "stages",
-  "class", "classes",
-  "type", "types",
-  "category", "categories", "cat", "cats",
-  "group", "groups", "grp", "grps",
-  "set", "sets",
+  "run",
+  "runs", // "Run 2" at LHC
+  "beam",
+  "beams",
+  "event",
+  "events",
+  "sample",
+  "samples",
+  "generation",
+  "generations",
+  "gen",
+  "gens", // particle generations
+  "order",
+  "orders",
+  "ord", // perturbative orders
+  "loop",
+  "loops", // loop orders in QFT
+  "level",
+  "levels",
+  "lev",
+  "lvl",
+  "tier",
+  "tiers",
+  "phase",
+  "phases",
+  "stage",
+  "stages",
+  "class",
+  "classes",
+  "type",
+  "types",
+  "category",
+  "categories",
+  "cat",
+  "cats",
+  "group",
+  "groups",
+  "grp",
+  "grps",
+  "set",
+  "sets",
   "series",
-  "mode", "modes",
-  "channel", "channels", "chan",
-  "bin", "bins",  // histogram bins
-  "point", "points", "pt", "pts",  // data points (pt already added)
-  "degree", "degrees", "deg",
-  "dimension", "dimensions", "dim", "dims",
-  "component", "components", "comp",
-  "parameter", "parameters", "param", "params",
-  "model", "models",
-  "scenario", "scenarios",
-  "configuration", "configurations", "config", "configs",
-  "option", "options", "opt", "opts",
-  "method", "methods",
-  "approach", "approaches",
-  "scheme", "schemes",
-  "algorithm", "algorithms", "algo", "alg",
+  "mode",
+  "modes",
+  "channel",
+  "channels",
+  "chan",
+  "bin",
+  "bins", // histogram bins
+  "point",
+  "points",
+  "pt",
+  "pts", // data points (pt already added)
+  "degree",
+  "degrees",
+  "deg",
+  "dimension",
+  "dimensions",
+  "dim",
+  "dims",
+  "component",
+  "components",
+  "comp",
+  "parameter",
+  "parameters",
+  "param",
+  "params",
+  "model",
+  "models",
+  "scenario",
+  "scenarios",
+  "configuration",
+  "configurations",
+  "config",
+  "configs",
+  "option",
+  "options",
+  "opt",
+  "opts",
+  "method",
+  "methods",
+  "approach",
+  "approaches",
+  "scheme",
+  "schemes",
+  "algorithm",
+  "algorithms",
+  "algo",
+  "alg",
 ]);
 
 /**
@@ -474,7 +652,8 @@ export class CitationParser {
       {
         regex: /\[(\d+)[-–](\d+)\]/g,
         type: "numeric",
-        extractLabels: (m) => expandRange(parseInt(m[1], 10), parseInt(m[2], 10)),
+        extractLabels: (m) =>
+          expandRange(parseInt(m[1], 10), parseInt(m[2], 10)),
       },
       // Superscript digits: ¹²³ (single reference) or ¹·²·³ / ¹,²,³ (multiple)
       // Note: consecutive superscripts like ¹²³ are treated as single reference [123]
@@ -487,7 +666,10 @@ export class CitationParser {
           // Check if there are separators (·, comma, space between superscripts)
           if (/[·,\s]/.test(text)) {
             // Multiple references separated by ·, comma, or space
-            return text.split(/[·,\s]+/).map(part => decodeSuperscript(part)).filter(Boolean);
+            return text
+              .split(/[·,\s]+/)
+              .map((part) => decodeSuperscript(part))
+              .filter(Boolean);
           }
           // Single consecutive superscript sequence = single reference number
           const decoded = decodeSuperscript(text);
@@ -513,7 +695,8 @@ export class CitationParser {
         extractLabels: (m) => [m[1]],
       },
       {
-        regex: /\[((?:hep-[a-z]+|astro-ph|gr-qc|nucl-[a-z]+|cond-mat|quant-ph)\/\d+)\]/gi,
+        regex:
+          /\[((?:hep-[a-z]+|astro-ph|gr-qc|nucl-[a-z]+|cond-mat|quant-ph)\/\d+)\]/gi,
         type: "arxiv",
         extractLabels: (m) => [m[1]],
       },
@@ -583,13 +766,22 @@ export class CitationParser {
    * @param preferAuthorYear - When true, prioritize author-year detection over numeric.
    *                           Used when document format is known to be author-year style.
    */
-  parseSelection(selection: string, enableFuzzy = false, maxKnownLabel?: number, preferAuthorYear = false): ParsedCitation | null {
+  parseSelection(
+    selection: string,
+    enableFuzzy = false,
+    maxKnownLabel?: number,
+    preferAuthorYear = false,
+  ): ParsedCitation | null {
     // Clean up selection: trim whitespace
     let trimmed = selection.trim();
-    
+
     // DEBUG: Log raw input to understand what we're parsing
-    debugLog(`[PDF-ANNOTATE] parseSelection raw input (${selection.length} chars): "${selection.slice(0, 150)}..."`);
-    debugLog(`[PDF-ANNOTATE] parseSelection trimmed (${trimmed.length} chars): "${trimmed.slice(0, 150)}..."`);
+    debugLog(
+      `[PDF-ANNOTATE] parseSelection raw input (${selection.length} chars): "${selection.slice(0, 150)}..."`,
+    );
+    debugLog(
+      `[PDF-ANNOTATE] parseSelection trimmed (${trimmed.length} chars): "${trimmed.slice(0, 150)}..."`,
+    );
 
     // FTR-PDF-ANNOTATE-MULTI-LABEL: Fix OCR bracket errors (f5g → [5], f26,30g → [26,30])
     const ocrFixed = fixOCRBrackets(trimmed);
@@ -604,23 +796,33 @@ export class CitationParser {
     // This prevents "Author et al. (2017)" being missed in favor of stray [xxx] patterns.
     // ─────────────────────────────────────────────────────────────────────────
     if (preferAuthorYear) {
-      debugLog(`[PDF-ANNOTATE] preferAuthorYear=true, trying author-year detection first`);
+      debugLog(
+        `[PDF-ANNOTATE] preferAuthorYear=true, trying author-year detection first`,
+      );
       const authorYearResult = this.parseAuthorYearCitation(trimmed);
       if (authorYearResult) {
-        debugLog(`[PDF-ANNOTATE] Author-year citation detected (priority): "${authorYearResult.raw}"`);
+        debugLog(
+          `[PDF-ANNOTATE] Author-year citation detected (priority): "${authorYearResult.raw}"`,
+        );
         return authorYearResult;
       }
-      debugLog(`[PDF-ANNOTATE] No author-year citation found, falling back to numeric detection`);
+      debugLog(
+        `[PDF-ANNOTATE] No author-year citation found, falling back to numeric detection`,
+      );
     }
 
     // Smart cleanup: try to find [xxx] pattern ANYWHERE in the text first
     // This handles cases like "SS [25,26,29]." or "text [1,2,3] more text"
     // FTR-PDF-ANNOTATE-MULTI-LABEL: Collect ALL numeric bracket matches, not just the last one
     // This handles cases like "[7] and [9]" -> should return both labels [7, 9]
-    const allBracketMatches = [...trimmed.matchAll(/\[([^\[\]]+)\]/g)];
-    debugLog(`[PDF-ANNOTATE] allBracketMatches count: ${allBracketMatches.length}`);
+    const allBracketMatches = [...trimmed.matchAll(/\[([^[\]]+)\]/g)];
+    debugLog(
+      `[PDF-ANNOTATE] allBracketMatches count: ${allBracketMatches.length}`,
+    );
     for (const m of allBracketMatches) {
-      debugLog(`[PDF-ANNOTATE]   bracket match: "[${m[1]}]" at index ${m.index}`);
+      debugLog(
+        `[PDF-ANNOTATE]   bracket match: "[${m[1]}]" at index ${m.index}`,
+      );
     }
     if (allBracketMatches.length > 0) {
       // FTR-PDF-ANNOTATE-MULTI-LABEL: Collect ALL labels from ALL numeric bracket matches
@@ -638,13 +840,18 @@ export class CitationParser {
         }
       }
 
-      debugLog(`[PDF-ANNOTATE] Collected labels from bracket matches: [${allCollectedLabels.join(",")}]`);
+      debugLog(
+        `[PDF-ANNOTATE] Collected labels from bracket matches: [${allCollectedLabels.join(",")}]`,
+      );
 
       if (allCollectedLabels.length > 0) {
         // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
-        const processedLabels = postProcessLabels(allCollectedLabels, maxKnownLabel);
+        const processedLabels = postProcessLabels(
+          allCollectedLabels,
+          maxKnownLabel,
+        );
         return {
-          raw: processedLabels.map(l => `[${l}]`).join(","),
+          raw: processedLabels.map((l) => `[${l}]`).join(","),
           type: "numeric",
           labels: processedLabels,
           position: null,
@@ -653,7 +860,9 @@ export class CitationParser {
 
       // If no numeric matches from brackets, DON'T return early - continue to author-year detection
       // This allows text like "see [some note] and Guo et al. (2011)" to still find the author-year citation
-      debugLog(`[PDF-ANNOTATE] No numeric bracket matches, continuing to author-year detection`);
+      debugLog(
+        `[PDF-ANNOTATE] No numeric bracket matches, continuing to author-year detection`,
+      );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -663,15 +872,17 @@ export class CitationParser {
     // ─────────────────────────────────────────────────────────────────────────
     const authorYearResult = this.parseAuthorYearCitation(trimmed);
     if (authorYearResult) {
-      debugLog(`[PDF-ANNOTATE] Author-year citation detected: "${authorYearResult.raw}"`);
+      debugLog(
+        `[PDF-ANNOTATE] Author-year citation detected: "${authorYearResult.raw}"`,
+      );
       return authorYearResult;
     }
 
     // No complete [xxx] found - try cleaning up and parsing
     // Remove common trailing punctuation that might be accidentally selected
     // But be careful not to remove ] if there's an unclosed [
-    const hasUnclosedBracket = (trimmed.match(/\[/g) || []).length > 
-                               (trimmed.match(/\]/g) || []).length;
+    const hasUnclosedBracket =
+      (trimmed.match(/\[/g) || []).length > (trimmed.match(/\]/g) || []).length;
     if (hasUnclosedBracket) {
       // Don't strip ] from the end - it might be the closing bracket we need
       trimmed = trimmed.replace(/[.,;:!?)]+$/, "");
@@ -679,8 +890,8 @@ export class CitationParser {
       trimmed = trimmed.replace(/[.,;:!?)\]]+$/, "");
     }
     // Also remove leading punctuation
-    trimmed = trimmed.replace(/^[(\[]+/, "");
-    
+    trimmed = trimmed.replace(/^[([]+/, "");
+
     // Re-add brackets if they were stripped but content looks like citation
     if (/^[\d,\s–-]+$/.test(trimmed)) {
       // Content is just numbers, commas, and dashes - try parsing as-is first
@@ -697,15 +908,17 @@ export class CitationParser {
 
     // First try normal parsing (for explicit bracket patterns like [20])
     const parsed = this.parseText(trimmed);
-    
+
     // Debug: log all parsed results to understand detection order
     if (parsed.length > 0) {
       debugLog(`[PDF-ANNOTATE] parseText found ${parsed.length} result(s):`);
       for (let i = 0; i < parsed.length; i++) {
-        debugLog(`[PDF-ANNOTATE]   [${i}] raw="${parsed[i].raw}", labels=[${parsed[i].labels.join(",")}]`);
+        debugLog(
+          `[PDF-ANNOTATE]   [${i}] raw="${parsed[i].raw}", labels=[${parsed[i].labels.join(",")}]`,
+        );
       }
     }
-    
+
     if (parsed.length > 0) {
       // Collect ALL labels from ALL parsed results that appear in visible text
       // This handles cases where selection contains multiple citations like [15] and [20]
@@ -717,7 +930,9 @@ export class CitationParser {
           const standalonePattern = new RegExp(`\\b${label}\\b`);
           const inBracket = bracketPattern.test(trimmed);
           const standalone = standalonePattern.test(trimmed);
-          debugLog(`[PDF-ANNOTATE]   checking label "${label}": inBracket=${inBracket}, standalone=${standalone}`);
+          debugLog(
+            `[PDF-ANNOTATE]   checking label "${label}": inBracket=${inBracket}, standalone=${standalone}`,
+          );
           if (inBracket || standalone) {
             if (!allVisibleLabels.includes(label)) {
               allVisibleLabels.push(label);
@@ -725,12 +940,17 @@ export class CitationParser {
           }
         }
       }
-      debugLog(`[PDF-ANNOTATE] allVisibleLabels: [${allVisibleLabels.join(",")}]`);
+      debugLog(
+        `[PDF-ANNOTATE] allVisibleLabels: [${allVisibleLabels.join(",")}]`,
+      );
       if (allVisibleLabels.length > 0) {
         // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
-        const processedLabels = postProcessLabels(allVisibleLabels, maxKnownLabel);
+        const processedLabels = postProcessLabels(
+          allVisibleLabels,
+          maxKnownLabel,
+        );
         return {
-          raw: processedLabels.map(l => `[${l}]`).join(","),
+          raw: processedLabels.map((l) => `[${l}]`).join(","),
           type: "numeric",
           labels: processedLabels,
           position: null,
@@ -755,7 +975,10 @@ export class CitationParser {
     // Try bare range "1-5" without brackets
     const bareRange = trimmed.match(/^(\d+)[-–](\d+)$/);
     if (bareRange) {
-      const rangeLabels = expandRange(parseInt(bareRange[1], 10), parseInt(bareRange[2], 10));
+      const rangeLabels = expandRange(
+        parseInt(bareRange[1], 10),
+        parseInt(bareRange[2], 10),
+      );
       return {
         raw: trimmed,
         type: "numeric",
@@ -766,9 +989,13 @@ export class CitationParser {
 
     // Try mixed format without brackets "1,2,5-8"
     // DEBUG: Log the trimmed text to understand what's being parsed
-    debugLog(`[PDF-ANNOTATE] parseMixedCitation input (first 200 chars): "${trimmed.slice(0, 200)}"`);
+    debugLog(
+      `[PDF-ANNOTATE] parseMixedCitation input (first 200 chars): "${trimmed.slice(0, 200)}"`,
+    );
     const mixedLabels = parseMixedCitation(trimmed);
-    debugLog(`[PDF-ANNOTATE] parseMixedCitation result: [${mixedLabels.join(",")}]`);
+    debugLog(
+      `[PDF-ANNOTATE] parseMixedCitation result: [${mixedLabels.join(",")}]`,
+    );
     if (mixedLabels.length > 0) {
       // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
       const processedLabels = postProcessLabels(mixedLabels, maxKnownLabel);
@@ -789,8 +1016,13 @@ export class CitationParser {
     // ─────────────────────────────────────────────────────────────────────────
     const superscriptStyleLabels = detectSuperscriptStyleCitations(trimmed);
     if (superscriptStyleLabels.length > 0) {
-      debugLog(`[PDF-ANNOTATE] Superscript style citations detected: [${superscriptStyleLabels.join(",")}]`);
-      const processedLabels = postProcessLabels(superscriptStyleLabels, maxKnownLabel);
+      debugLog(
+        `[PDF-ANNOTATE] Superscript style citations detected: [${superscriptStyleLabels.join(",")}]`,
+      );
+      const processedLabels = postProcessLabels(
+        superscriptStyleLabels,
+        maxKnownLabel,
+      );
       return {
         raw: trimmed,
         type: "numeric",
@@ -816,12 +1048,14 @@ export class CitationParser {
     // PRE-CHECK: Exclude document structure references
     // These patterns indicate the text is NOT a citation reference
     // ═══════════════════════════════════════════════════════════════════════
-    
+
     // Pattern: "Fig. 1", "Figure 1,2", "Figs. 1-3", "Tab. 1", "Table 2", etc.
     // If the ENTIRE selection looks like a document reference, skip fuzzy detection
     // Document reference patterns: Fig(s)., Tab(s)., Eq(s)., Sec(s)., etc.
     if (DOC_REF_PATTERN.test(trimmed)) {
-      debugLog(`[PDF-ANNOTATE] Skipping fuzzy: entire text is document reference`);
+      debugLog(
+        `[PDF-ANNOTATE] Skipping fuzzy: entire text is document reference`,
+      );
       return null;
     }
 
@@ -841,7 +1075,9 @@ export class CitationParser {
       const nums = docMatch[2].match(/\d+/g) || [];
       for (const n of nums) {
         docRefNumbers.add(n);
-        debugLog(`[PDF-ANNOTATE] Excluding "${docMatch[1]}. ${n}" as document reference`);
+        debugLog(
+          `[PDF-ANNOTATE] Excluding "${docMatch[1]}. ${n}" as document reference`,
+        );
       }
     }
 
@@ -864,7 +1100,9 @@ export class CitationParser {
             allFuzzyLabels.push(label);
           }
         }
-        debugLog(`[PDF-ANNOTATE] Fuzzy Pattern 0 (Range): found ${start}–${end} -> [${expanded.join(",")}]`);
+        debugLog(
+          `[PDF-ANNOTATE] Fuzzy Pattern 0 (Range): found ${start}–${end} -> [${expanded.join(",")}]`,
+        );
       }
     }
 
@@ -882,16 +1120,16 @@ export class CitationParser {
           allFuzzyLabels.push(label);
         }
       }
-      debugLog(`[PDF-ANNOTATE] Fuzzy Pattern 0b (List): found [${nums.join(",")}]`);
+      debugLog(
+        `[PDF-ANNOTATE] Fuzzy Pattern 0b (List): found [${nums.join(",")}]`,
+      );
     }
 
     // Note: Pattern 0c (Nature/Science superscript style) is now handled in non-fuzzy detection
     // See detectSuperscriptStyleCitations() function called before fuzzy section
 
     // Pattern 1: Explicit reference markers (e.g., "Ref. 19", "Refs. 22,23")
-    const refMarkerMatch = trimmed.match(
-      /\brefs?\.?\s*([\d,\s–-]+)/i
-    );
+    const refMarkerMatch = trimmed.match(/\brefs?\.?\s*([\d,\s–-]+)/i);
     if (refMarkerMatch) {
       const refLabels = parseMixedCitation(refMarkerMatch[1]);
       for (const label of refLabels) {
@@ -899,9 +1137,11 @@ export class CitationParser {
           allFuzzyLabels.push(label);
         }
       }
-      debugLog(`[PDF-ANNOTATE] Fuzzy Pattern 1 (Ref markers): found [${refLabels.join(",")}]`);
+      debugLog(
+        `[PDF-ANNOTATE] Fuzzy Pattern 1 (Ref markers): found [${refLabels.join(",")}]`,
+      );
     }
-    
+
     // Pattern 2: Find ALL author-number patterns (e.g., "Godfrey 17 and ... Fazio 18")
     // Uses module-level EXCLUDED_PREFIXES to avoid recreation on each call
     let authorMatch;
@@ -914,7 +1154,9 @@ export class CitationParser {
         if (num >= 1 && num <= 1499) {
           if (!allFuzzyLabels.includes(authorMatch[2])) {
             allFuzzyLabels.push(authorMatch[2]);
-            debugLog(`[PDF-ANNOTATE] Fuzzy Pattern 2 (Author-number): found "${authorMatch[1]} ${authorMatch[2]}"`);
+            debugLog(
+              `[PDF-ANNOTATE] Fuzzy Pattern 2 (Author-number): found "${authorMatch[1]} ${authorMatch[2]}"`,
+            );
           }
         }
       }
@@ -925,49 +1167,64 @@ export class CitationParser {
     // If we already found explicit references (Ref. X, Author Y), we should
     // still try to find standalone numbers - they're likely citations too
     // ═══════════════════════════════════════════════════════════════════════
-    
+
     const hasExplicitPatterns = allFuzzyLabels.length > 0;
     let skipStandaloneDetection = false;
-    
+
     // Only apply strict exclusion rules if we have NO explicit patterns
     if (!hasExplicitPatterns) {
       // Rule 1: Parentheses - citations use [], not ()
       if (/[()]/.test(trimmed)) {
         skipStandaloneDetection = true;
-        debugLog(`[PDF-ANNOTATE] Exclusion Rule 1: parentheses found, skipping standalone detection`);
+        debugLog(
+          `[PDF-ANNOTATE] Exclusion Rule 1: parentheses found, skipping standalone detection`,
+        );
       }
-      
+
       // Rule 2: Mathematical operators/context
       if (!skipStandaloneDetection && /[=+*/^~]/.test(trimmed)) {
         skipStandaloneDetection = true;
-        debugLog(`[PDF-ANNOTATE] Exclusion Rule 2: math operators found, skipping standalone detection`);
+        debugLog(
+          `[PDF-ANNOTATE] Exclusion Rule 2: math operators found, skipping standalone detection`,
+        );
       }
       // Hyphen/minus: only exclude if it's mathematical (before digit or between digits)
       if (!skipStandaloneDetection && /\d\s*-\s*\d|-\s*\d/.test(trimmed)) {
         skipStandaloneDetection = true;
-        debugLog(`[PDF-ANNOTATE] Exclusion Rule 2b: math hyphen found, skipping standalone detection`);
+        debugLog(
+          `[PDF-ANNOTATE] Exclusion Rule 2b: math hyphen found, skipping standalone detection`,
+        );
       }
-      
+
       // Rule 3: Greek letters (formula context)
-      if (!skipStandaloneDetection && /[αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ]/.test(trimmed)) {
+      if (
+        !skipStandaloneDetection &&
+        /[αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ]/.test(trimmed)
+      ) {
         skipStandaloneDetection = true;
-        debugLog(`[PDF-ANNOTATE] Exclusion Rule 3: Greek letters found, skipping standalone detection`);
+        debugLog(
+          `[PDF-ANNOTATE] Exclusion Rule 3: Greek letters found, skipping standalone detection`,
+        );
       }
-      
+
       // Rule 4: Multiple standalone numbers (data context, e.g., "1267 53 candidates")
       if (!skipStandaloneDetection) {
         const numberMatches = trimmed.match(/\b\d+\b/g) || [];
-        const nonYearNumbers = numberMatches.filter(n => {
+        const nonYearNumbers = numberMatches.filter((n) => {
           const num = parseInt(n, 10);
           return !(num >= 1900 && num <= 2099); // Exclude years
         });
         if (nonYearNumbers.length >= 2) {
           skipStandaloneDetection = true;
-          debugLog(`[PDF-ANNOTATE] Exclusion Rule 4: multiple numbers found (${nonYearNumbers.join(",")}), skipping standalone detection`);
+          debugLog(
+            `[PDF-ANNOTATE] Exclusion Rule 4: multiple numbers found (${nonYearNumbers.join(",")}), skipping standalone detection`,
+          );
         }
       }
     } else {
-      debugLog(`[PDF-ANNOTATE] Has explicit patterns [${allFuzzyLabels.join(",")}], relaxing exclusion rules`);
+      debugLog(
+        `[PDF-ANNOTATE] Has explicit patterns [${allFuzzyLabels.join(",")}], relaxing exclusion rules`,
+      );
     }
 
     // Pattern 3: Standalone numbers
@@ -987,11 +1244,18 @@ export class CitationParser {
           // - Very large numbers (>1499)
           // - Numbers that are part of document references (Fig. 1, etc.)
           if (num >= 1 && num <= 1499 && !(num >= 1900 && num <= 2099)) {
-            if (!docRefNumbers.has(standaloneMatch[1]) && !allFuzzyLabels.includes(standaloneMatch[1])) {
+            if (
+              !docRefNumbers.has(standaloneMatch[1]) &&
+              !allFuzzyLabels.includes(standaloneMatch[1])
+            ) {
               allFuzzyLabels.push(standaloneMatch[1]);
-              debugLog(`[PDF-ANNOTATE] Fuzzy Pattern 3 (Standalone, relaxed): found "${standaloneMatch[1]}"`);
+              debugLog(
+                `[PDF-ANNOTATE] Fuzzy Pattern 3 (Standalone, relaxed): found "${standaloneMatch[1]}"`,
+              );
             } else if (docRefNumbers.has(standaloneMatch[1])) {
-              debugLog(`[PDF-ANNOTATE] Fuzzy Pattern 3: skipping "${standaloneMatch[1]}" (document reference)`);
+              debugLog(
+                `[PDF-ANNOTATE] Fuzzy Pattern 3: skipping "${standaloneMatch[1]}" (document reference)`,
+              );
             }
           }
         }
@@ -1001,10 +1265,16 @@ export class CitationParser {
         let standaloneMatch;
         while ((standaloneMatch = standaloneRegex.exec(trimmed)) !== null) {
           const num = parseInt(standaloneMatch[1], 10);
-          if (num >= 1 && num <= 1499 && !docRefNumbers.has(standaloneMatch[1])) {
+          if (
+            num >= 1 &&
+            num <= 1499 &&
+            !docRefNumbers.has(standaloneMatch[1])
+          ) {
             if (!allFuzzyLabels.includes(standaloneMatch[1])) {
               allFuzzyLabels.push(standaloneMatch[1]);
-              debugLog(`[PDF-ANNOTATE] Fuzzy Pattern 3 (Standalone): found "${standaloneMatch[1]}"`);
+              debugLog(
+                `[PDF-ANNOTATE] Fuzzy Pattern 3 (Standalone): found "${standaloneMatch[1]}"`,
+              );
               break; // Only first in strict mode
             }
           }
@@ -1014,7 +1284,9 @@ export class CitationParser {
 
     // Return all collected labels (from Ref markers, author-number, and standalone)
     if (allFuzzyLabels.length > 0) {
-      debugLog(`[PDF-ANNOTATE] Fuzzy detection final result: [${allFuzzyLabels.join(",")}]`);
+      debugLog(
+        `[PDF-ANNOTATE] Fuzzy detection final result: [${allFuzzyLabels.join(",")}]`,
+      );
       // FTR-PDF-MATCHING: Post-process to detect concatenated ranges
       const processedLabels = postProcessLabels(allFuzzyLabels, maxKnownLabel);
       return {
@@ -1064,7 +1336,13 @@ export class CitationParser {
     const normalizedText = cleanedText.normalize("NFC");
     text = normalizedText;
 
-    const matches: Array<{ full: string; authors: string[]; year: string; isEtAl: boolean; authorInitials?: string[] }> = [];
+    const matches: Array<{
+      full: string;
+      authors: string[];
+      year: string;
+      isEtAl: boolean;
+      authorInitials?: string[];
+    }> = [];
 
     // Preprocess: If text has unbalanced parentheses, try to fix them
     // This handles cases like "des (Author, 2004; Author, 2005" where closing paren is missing
@@ -1074,7 +1352,9 @@ export class CitationParser {
     if (openParens > closeParens) {
       // Add missing closing parentheses at the end
       processedText = text + ")".repeat(openParens - closeParens);
-      debugLog(`[PDF-ANNOTATE] parseAuthorYearCitation: added ${openParens - closeParens} closing paren(s) to fix unbalanced text`);
+      debugLog(
+        `[PDF-ANNOTATE] parseAuthorYearCitation: added ${openParens - closeParens} closing paren(s) to fix unbalanced text`,
+      );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1085,30 +1365,39 @@ export class CitationParser {
     // Check if text contains semicolon-separated year patterns but NO parentheses around years
     // Key distinction: "(Cho et al., 2011; Song et al., 2015)" has enclosing parentheses,
     // while "Ding, 2009; G. Li and Liu, 2013;" has no enclosing parentheses
-    const hasSemicolonSeparatedYears = SEMICOLON_SEPARATED_YEARS_REGEX.test(text) || SEMICOLON_BEFORE_YEAR_REGEX.test(text);
+    const hasSemicolonSeparatedYears =
+      SEMICOLON_SEPARATED_YEARS_REGEX.test(text) ||
+      SEMICOLON_BEFORE_YEAR_REGEX.test(text);
     // Check for enclosing parentheses that wrap the citation(s)
     const trimmedText = text.trim();
-    const hasEnclosingParens = trimmedText.startsWith("(") && trimmedText.includes(")");
+    const hasEnclosingParens =
+      trimmedText.startsWith("(") && trimmedText.includes(")");
     // Check for "(Author, Year)" or "(Author et al., Year)" pattern - year is inside parens
     const hasParenthesizedYears = PARENTHESIZED_YEARS_REGEX.test(text);
 
     if (hasSemicolonSeparatedYears && !hasParenthesizedYears) {
-      debugLog(`[PDF-ANNOTATE] parseAuthorYearCitation: detected semicolon-separated citations without parentheses`);
+      debugLog(
+        `[PDF-ANNOTATE] parseAuthorYearCitation: detected semicolon-separated citations without parentheses`,
+      );
       // Split by semicolon and parse each part
       const parts = text.split(/\s*;\s*/);
       for (const part of parts) {
         // Strip leading/trailing parentheses and whitespace
         // Handles cases like "(Kubarovsky and Voloshin, 2015, 2016;" where opening paren is included
-        const trimmedPart = part.trim().replace(/^[(]+|[)]+$/g, "").trim();
+        const trimmedPart = part
+          .trim()
+          .replace(/^[(]+|[)]+$/g, "")
+          .trim();
         if (!trimmedPart || !/\d{4}/.test(trimmedPart)) continue;
 
         const parsed = this.parseAuthorYearGroup(trimmedPart);
         for (const p of parsed) {
           // Check for duplicate - must consider initials for disambiguation
           // "G. Li, 2013" and "M.-T. Li et al., 2013" are DIFFERENT citations
-          const isDuplicate = matches.some(m => {
+          const isDuplicate = matches.some((m) => {
             // Same first author and year
-            if (m.authors[0] !== p.authors[0] || m.year !== p.year) return false;
+            if (m.authors[0] !== p.authors[0] || m.year !== p.year)
+              return false;
             // If both have initials, compare them
             const mInitial = m.authorInitials?.[0];
             const pInitial = p.authorInitials?.[0];
@@ -1124,7 +1413,9 @@ export class CitationParser {
           });
           if (!isDuplicate) {
             matches.push({ ...p, full: trimmedPart });
-            debugLog(`[PDF-ANNOTATE] Author-year Pattern 0a match: "${p.authors.join(", ")} (${p.year})" from "${trimmedPart}", initials=[${p.authorInitials?.join(",") || ""}]`);
+            debugLog(
+              `[PDF-ANNOTATE] Author-year Pattern 0a match: "${p.authors.join(", ")} (${p.year})" from "${trimmedPart}", initials=[${p.authorInitials?.join(",") || ""}]`,
+            );
           }
         }
       }
@@ -1155,14 +1446,20 @@ export class CitationParser {
       const groups = inner.split(/\s*;\s*/);
 
       for (const group of groups) {
-      const trimmedGroup = group.trim();
+        const trimmedGroup = group.trim();
 
         const parsed = this.parseAuthorYearGroup(trimmedGroup);
         for (const p of parsed) {
           // Check for duplicate
-          if (!matches.some(m => m.authors[0] === p.authors[0] && m.year === p.year)) {
+          if (
+            !matches.some(
+              (m) => m.authors[0] === p.authors[0] && m.year === p.year,
+            )
+          ) {
             matches.push({ ...p, full: content });
-            debugLog(`[PDF-ANNOTATE] Author-year Pattern 0 match: "${p.authors.join(", ")} (${p.year})" from "${group}"`);
+            debugLog(
+              `[PDF-ANNOTATE] Author-year Pattern 0 match: "${p.authors.join(", ")} (${p.year})" from "${group}"`,
+            );
           }
         }
       }
@@ -1181,23 +1478,33 @@ export class CitationParser {
       const authorsStr = match[1].trim();
       const yearsStr = match[2];
       const authorInfos = this.extractAllAuthorNamesWithInitials(authorsStr);
-      const authors = authorInfos.map(a => a.lastName);
-      const authorInitials = authorInfos.map(a => a.initials).filter((i): i is string => i !== undefined);
+      const authors = authorInfos.map((a) => a.lastName);
+      const authorInitials = authorInfos
+        .map((a) => a.initials)
+        .filter((i): i is string => i !== undefined);
 
       // Parse multiple years (e.g., "2009, 2010")
-      const years = yearsStr.split(/\s*,\s*/).map(y => y.trim()).filter(y => /^\d{4}[a-z]?$/.test(y));
+      const years = yearsStr
+        .split(/\s*,\s*/)
+        .map((y) => y.trim())
+        .filter((y) => /^\d{4}[a-z]?$/.test(y));
 
       if (authors.length > 0 && years.length > 0) {
         for (const year of years) {
-          if (!matches.some(m => m.authors[0] === authors[0] && m.year === year)) {
+          if (
+            !matches.some((m) => m.authors[0] === authors[0] && m.year === year)
+          ) {
             matches.push({
               full: match[0],
               authors,
               year,
               isEtAl: true,
-              authorInitials: authorInitials.length > 0 ? authorInitials : undefined
+              authorInitials:
+                authorInitials.length > 0 ? authorInitials : undefined,
             });
-            debugLog(`[PDF-ANNOTATE] Author-year Pattern 1 match: "${match[0]}" -> authors=[${authors.join(",")}], year=${year}, initials=[${authorInitials.join(",")}]`);
+            debugLog(
+              `[PDF-ANNOTATE] Author-year Pattern 1 match: "${match[0]}" -> authors=[${authors.join(",")}], year=${year}, initials=[${authorInitials.join(",")}]`,
+            );
           }
         }
       }
@@ -1213,7 +1520,7 @@ export class CitationParser {
     // Pattern captures: (optional initials + lastName)(, optional initials + lastName)*
     const etAlIncompleteRegex = new RegExp(
       `\\b((?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+(?:(?:\\s*,\\s*|\\s+and\\s+|\\s*,\\s+and\\s+)(?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)*)\\s+et\\s+al\\.?\\s*,?\\s*(\\d{4}[a-z]?)\\)?`,
-      "gi"
+      "gi",
     );
 
     etAlIncompleteRegex.lastIndex = 0;
@@ -1221,11 +1528,14 @@ export class CitationParser {
       const authorsStr = match[1].trim();
       const year = match[2];
       const authorInfos = this.extractAllAuthorNamesWithInitials(authorsStr);
-      const authors = authorInfos.map(a => a.lastName);
-      const authorInitials = authorInfos.map(a => a.initials).filter((i): i is string => i !== undefined);
+      const authors = authorInfos.map((a) => a.lastName);
+      const authorInitials = authorInfos
+        .map((a) => a.initials)
+        .filter((i): i is string => i !== undefined);
 
       // Skip if already matched by Pattern 1 (complete parentheses version)
-      if (matches.some(m => m.authors[0] === authors[0] && m.year === year)) continue;
+      if (matches.some((m) => m.authors[0] === authors[0] && m.year === year))
+        continue;
 
       if (authors.length > 0) {
         matches.push({
@@ -1233,9 +1543,12 @@ export class CitationParser {
           authors,
           year,
           isEtAl: true,
-          authorInitials: authorInitials.length > 0 ? authorInitials : undefined
+          authorInitials:
+            authorInitials.length > 0 ? authorInitials : undefined,
         });
-        debugLog(`[PDF-ANNOTATE] Author-year Pattern 1b match (incomplete): "${match[0]}" -> authors=[${authors.join(",")}], year=${year}, initials=[${authorInitials.join(",")}]`);
+        debugLog(
+          `[PDF-ANNOTATE] Author-year Pattern 1b match (incomplete): "${match[0]}" -> authors=[${authors.join(",")}], year=${year}, initials=[${authorInitials.join(",")}]`,
+        );
       }
     }
 
@@ -1247,7 +1560,7 @@ export class CitationParser {
     // FTR-AUTHOR-INITIAL: Capture optional initials before each author name
     const twoAuthorsIncompleteRegex = new RegExp(
       `\\b((?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s+and\\s+((?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s*,\\s*(\\d{4}[a-z]?)(?:[;,)]|$)`,
-      "gi"
+      "gi",
     );
 
     twoAuthorsIncompleteRegex.lastIndex = 0;
@@ -1259,14 +1572,22 @@ export class CitationParser {
       // Extract author info with initials
       const author1Info = this.extractAllAuthorNamesWithInitials(author1Str);
       const author2Info = this.extractAllAuthorNamesWithInitials(author2Str);
-      const authors = [...author1Info.map(a => a.lastName), ...author2Info.map(a => a.lastName)];
+      const authors = [
+        ...author1Info.map((a) => a.lastName),
+        ...author2Info.map((a) => a.lastName),
+      ];
       const authorInitials = [
-        ...author1Info.map(a => a.initials).filter((i): i is string => i !== undefined),
-        ...author2Info.map(a => a.initials).filter((i): i is string => i !== undefined)
+        ...author1Info
+          .map((a) => a.initials)
+          .filter((i): i is string => i !== undefined),
+        ...author2Info
+          .map((a) => a.initials)
+          .filter((i): i is string => i !== undefined),
       ];
 
       // Skip if already matched by previous patterns
-      if (matches.some(m => m.authors[0] === authors[0] && m.year === year)) continue;
+      if (matches.some((m) => m.authors[0] === authors[0] && m.year === year))
+        continue;
 
       if (authors.length >= 2) {
         matches.push({
@@ -1274,9 +1595,12 @@ export class CitationParser {
           authors,
           year,
           isEtAl: false,
-          authorInitials: authorInitials.length > 0 ? authorInitials : undefined
+          authorInitials:
+            authorInitials.length > 0 ? authorInitials : undefined,
         });
-        debugLog(`[PDF-ANNOTATE] Author-year Pattern 1c match (two authors, incomplete): "${match[0]}" -> authors=[${authors.join(",")}], year=${year}, initials=[${authorInitials.join(",")}]`);
+        debugLog(
+          `[PDF-ANNOTATE] Author-year Pattern 1c match (two authors, incomplete): "${match[0]}" -> authors=[${authors.join(",")}], year=${year}, initials=[${authorInitials.join(",")}]`,
+        );
       }
     }
 
@@ -1287,7 +1611,7 @@ export class CitationParser {
     // Use extended character class to support German ß, umlauts, etc.
     const multiAuthorOutsideRegex = new RegExp(
       `\\b([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+(?:\\s*,\\s*[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)*(?:\\s*,?\\s+and\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+))\\s*\\((\\d{4}[a-z]?(?:\\s*,\\s*\\d{4}[a-z]?)*)\\)`,
-      "gi"
+      "gi",
     );
 
     multiAuthorOutsideRegex.lastIndex = 0;
@@ -1297,16 +1621,23 @@ export class CitationParser {
       const yearsStr = match[2];
 
       // Skip if already matched by et al. pattern
-      if (matches.some(m => m.full === fullMatch)) continue;
+      if (matches.some((m) => m.full === fullMatch)) continue;
 
       const authors = this.extractAllAuthorNames(authorsStr);
-      const years = yearsStr.split(/\s*,\s*/).map(y => y.trim()).filter(y => /^\d{4}[a-z]?$/.test(y));
+      const years = yearsStr
+        .split(/\s*,\s*/)
+        .map((y) => y.trim())
+        .filter((y) => /^\d{4}[a-z]?$/.test(y));
 
       if (authors.length >= 2 && years.length > 0) {
         for (const year of years) {
-          if (!matches.some(m => m.authors[0] === authors[0] && m.year === year)) {
+          if (
+            !matches.some((m) => m.authors[0] === authors[0] && m.year === year)
+          ) {
             matches.push({ full: fullMatch, authors, year, isEtAl: false });
-            debugLog(`[PDF-ANNOTATE] Author-year Pattern 2 match: "${fullMatch}" -> authors=[${authors.join(",")}], year=${year}`);
+            debugLog(
+              `[PDF-ANNOTATE] Author-year Pattern 2 match: "${fullMatch}" -> authors=[${authors.join(",")}], year=${year}`,
+            );
           }
         }
       }
@@ -1319,21 +1650,26 @@ export class CitationParser {
     // Use extended character class to support German ß, umlauts, etc.
     const twoAuthorsRegex = new RegExp(
       `\\b([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s+and\\s+([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s*\\((\\d{4}[a-z]?)\\)`,
-      "gi"
+      "gi",
     );
 
     twoAuthorsRegex.lastIndex = 0;
     while ((match = twoAuthorsRegex.exec(text)) !== null) {
       const full = match[0];
       // Check if already matched by previous patterns
-      if (matches.some(m => m.full.includes(full) || full.includes(m.full))) continue;
+      if (matches.some((m) => m.full.includes(full) || full.includes(m.full)))
+        continue;
 
       const authors = [match[1], match[2]];
       const year = match[3];
 
-      if (!matches.some(m => m.authors[0] === authors[0] && m.year === year)) {
+      if (
+        !matches.some((m) => m.authors[0] === authors[0] && m.year === year)
+      ) {
         matches.push({ full, authors, year, isEtAl: false });
-        debugLog(`[PDF-ANNOTATE] Author-year Pattern 3 match: "${full}" -> authors=[${authors.join(",")}], year=${year}`);
+        debugLog(
+          `[PDF-ANNOTATE] Author-year Pattern 3 match: "${full}" -> authors=[${authors.join(",")}], year=${year}`,
+        );
       }
     }
 
@@ -1345,25 +1681,38 @@ export class CitationParser {
     // Note: negative lookbehind uses fixed strings, not dynamic patterns
     const singleAuthorRegex = new RegExp(
       `(?<![Ss]ection\\s|[Ff]igure\\s|[Tt]able\\s|[Ee]quation\\s|[Rr]ef\\.?\\s)\\b([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{2,})\\s*\\((\\d{4}[a-z]?)\\)`,
-      "gi"
+      "gi",
     );
 
     singleAuthorRegex.lastIndex = 0;
     while ((match = singleAuthorRegex.exec(text)) !== null) {
       const full = match[0];
       // Check if already matched by previous patterns
-      if (matches.some(m => m.full.includes(full) || full.includes(m.full))) continue;
+      if (matches.some((m) => m.full.includes(full) || full.includes(m.full)))
+        continue;
 
       const author = match[1];
       const year = match[2];
 
       // Skip common non-author words
-      const skipWords = new Set(["Section", "Figure", "Table", "Equation", "Chapter", "Appendix", "Part", "Volume", "Issue"]);
+      const skipWords = new Set([
+        "Section",
+        "Figure",
+        "Table",
+        "Equation",
+        "Chapter",
+        "Appendix",
+        "Part",
+        "Volume",
+        "Issue",
+      ]);
       if (skipWords.has(author)) continue;
 
-      if (!matches.some(m => m.authors[0] === author && m.year === year)) {
+      if (!matches.some((m) => m.authors[0] === author && m.year === year)) {
         matches.push({ full, authors: [author], year, isEtAl: false });
-        debugLog(`[PDF-ANNOTATE] Author-year Pattern 4 match: "${full}" -> authors=[${author}], year=${year}`);
+        debugLog(
+          `[PDF-ANNOTATE] Author-year Pattern 4 match: "${full}" -> authors=[${author}], year=${year}`,
+        );
       }
     }
 
@@ -1379,7 +1728,13 @@ export class CitationParser {
    * FTR-PDF-ANNOTATE-AUTHOR-YEAR: Extracted as helper to allow early return from Pattern 0a.
    */
   private buildAuthorYearResult(
-    matches: Array<{ full: string; authors: string[]; year: string; isEtAl: boolean; authorInitials?: string[] }>
+    matches: Array<{
+      full: string;
+      authors: string[];
+      year: string;
+      isEtAl: boolean;
+      authorInitials?: string[];
+    }>,
   ): ParsedCitation {
     // ═══════════════════════════════════════════════════════════════════════════
     // FTR-COMPOUND-SURNAME-DEDUP: Filter out partial matches from compound surnames
@@ -1400,10 +1755,14 @@ export class CitationParser {
 
         // Same year and this author is a proper suffix of the other (compound surname case)
         // "Blin" is suffix of "Hiller Blin" → filter out "Blin"
-        if (year === otherYear &&
-            otherFirstAuthor.length > firstAuthor.length &&
-            otherFirstAuthor.endsWith(" " + firstAuthor)) {
-          debugLog(`[PDF-ANNOTATE] Filtering duplicate compound surname match: "${m.authors[0]}" is suffix of "${matches[i].authors[0]}"`);
+        if (
+          year === otherYear &&
+          otherFirstAuthor.length > firstAuthor.length &&
+          otherFirstAuthor.endsWith(" " + firstAuthor)
+        ) {
+          debugLog(
+            `[PDF-ANNOTATE] Filtering duplicate compound surname match: "${m.authors[0]}" is suffix of "${matches[i].authors[0]}"`,
+          );
           return false;
         }
       }
@@ -1424,11 +1783,12 @@ export class CitationParser {
       const allAuthors = m.authors.join(", ");
 
       // Primary label: "FirstAuthor et al. YYYY" or "FirstAuthor YYYY"
-      const primaryLabel = m.isEtAl || m.authors.length > 2
-        ? `${firstAuthor} et al. ${m.year}`
-        : m.authors.length === 2
-          ? `${m.authors[0]} and ${m.authors[1]} ${m.year}`
-          : `${firstAuthor} ${m.year}`;
+      const primaryLabel =
+        m.isEtAl || m.authors.length > 2
+          ? `${firstAuthor} et al. ${m.year}`
+          : m.authors.length === 2
+            ? `${m.authors[0]} and ${m.authors[1]} ${m.year}`
+            : `${firstAuthor} ${m.year}`;
 
       if (!seenLabels.has(primaryLabel)) {
         seenLabels.add(primaryLabel);
@@ -1447,7 +1807,11 @@ export class CitationParser {
       // This helps distinguish "M.-T. Li" from "G. Li" when both are cited
       // The initials array corresponds to authors array by position
       if (m.authorInitials && m.authorInitials.length > 0) {
-        for (let i = 0; i < m.authors.length && i < m.authorInitials.length; i++) {
+        for (
+          let i = 0;
+          i < m.authors.length && i < m.authorInitials.length;
+          i++
+        ) {
           if (m.authorInitials[i]) {
             const initialName = `${m.authorInitials[i]} ${m.authors[i]}`;
             if (!seenLabels.has(initialName)) {
@@ -1471,11 +1835,12 @@ export class CitationParser {
       }
 
       // Build sub-citation for this match
-      const displayText = m.isEtAl || m.authors.length > 2
-        ? `${m.authors[0]} et al. (${m.year})`
-        : m.authors.length === 2
-          ? `${m.authors[0]} and ${m.authors[1]} (${m.year})`
-          : `${m.authors[0]} (${m.year})`;
+      const displayText =
+        m.isEtAl || m.authors.length > 2
+          ? `${m.authors[0]} et al. (${m.year})`
+          : m.authors.length === 2
+            ? `${m.authors[0]} and ${m.authors[1]} (${m.year})`
+            : `${m.authors[0]} (${m.year})`;
 
       // Build labels specific to this sub-citation
       const subLabels: string[] = [primaryLabel];
@@ -1486,7 +1851,11 @@ export class CitationParser {
       }
       // Add "Initial LastName" format to subLabels for disambiguation
       if (m.authorInitials && m.authorInitials.length > 0) {
-        for (let i = 0; i < m.authors.length && i < m.authorInitials.length; i++) {
+        for (
+          let i = 0;
+          i < m.authors.length && i < m.authorInitials.length;
+          i++
+        ) {
           if (m.authorInitials[i]) {
             const initialName = `${m.authorInitials[i]} ${m.authors[i]}`;
             if (!subLabels.includes(initialName)) {
@@ -1509,11 +1878,12 @@ export class CitationParser {
     const displayParts: string[] = [];
     const seenDisplay = new Set<string>();
     for (const m of filteredMatches) {
-      const displayText = m.isEtAl || m.authors.length > 2
-        ? `${m.authors[0]} et al. (${m.year})`
-        : m.authors.length === 2
-          ? `${m.authors[0]} and ${m.authors[1]} (${m.year})`
-          : `${m.authors[0]} (${m.year})`;
+      const displayText =
+        m.isEtAl || m.authors.length > 2
+          ? `${m.authors[0]} et al. (${m.year})`
+          : m.authors.length === 2
+            ? `${m.authors[0]} and ${m.authors[1]} (${m.year})`
+            : `${m.authors[0]} (${m.year})`;
       if (!seenDisplay.has(displayText)) {
         seenDisplay.add(displayText);
         displayParts.push(displayText);
@@ -1521,8 +1891,9 @@ export class CitationParser {
     }
     const raw = displayParts.join("; ");
 
-
-    debugLog(`[PDF-ANNOTATE] Author-year final result: raw="${raw}", labels=[${labels.join("; ")}], ${filteredMatches.length} citation(s), subCitations=${subCitations.length}`);
+    debugLog(
+      `[PDF-ANNOTATE] Author-year final result: raw="${raw}", labels=[${labels.join("; ")}], ${filteredMatches.length} citation(s), subCitations=${subCitations.length}`,
+    );
 
     return {
       raw,
@@ -1540,8 +1911,18 @@ export class CitationParser {
    * - "Cho, Song, and Lee, 2015" → [{Cho, Song, Lee, 2015}]
    * - "Smith, 2020" → [{Smith, 2020}]
    */
-  private parseAuthorYearGroup(group: string): Array<{ authors: string[]; year: string; isEtAl: boolean; authorInitials?: string[] }> {
-    const results: Array<{ authors: string[]; year: string; isEtAl: boolean; authorInitials?: string[] }> = [];
+  private parseAuthorYearGroup(group: string): Array<{
+    authors: string[];
+    year: string;
+    isEtAl: boolean;
+    authorInitials?: string[];
+  }> {
+    const results: Array<{
+      authors: string[];
+      year: string;
+      isEtAl: boolean;
+      authorInitials?: string[];
+    }> = [];
 
     // Normalize combining marks inside group
     const normalizedGroup = group
@@ -1568,9 +1949,10 @@ export class CitationParser {
 
     // Extract authors with initials for disambiguation
     const authorInfos = this.extractAllAuthorNamesWithInitials(authorsPart);
-    const authors = authorInfos.map(a => a.lastName);
-    const authorInitials = authorInfos.map(a => a.initials).filter((i): i is string => i !== undefined);
-
+    const authors = authorInfos.map((a) => a.lastName);
+    const authorInitials = authorInfos
+      .map((a) => a.initials)
+      .filter((i): i is string => i !== undefined);
 
     if (authors.length === 0) return results;
 
@@ -1580,7 +1962,7 @@ export class CitationParser {
         authors,
         year,
         isEtAl,
-        authorInitials: authorInitials.length > 0 ? authorInitials : undefined
+        authorInitials: authorInitials.length > 0 ? authorInitials : undefined,
       });
     }
 
@@ -1599,7 +1981,7 @@ export class CitationParser {
    */
   private extractAllAuthorNames(authorsStr: string): string[] {
     const authorInfos = this.extractAllAuthorNamesWithInitials(authorsStr);
-    return authorInfos.map(a => a.lastName);
+    return authorInfos.map((a) => a.lastName);
   }
 
   /**
@@ -1613,7 +1995,9 @@ export class CitationParser {
    * - Two authors: "Author and Author"
    * - Multiple authors: "Author, Author, and Author"
    */
-  private extractAllAuthorNamesWithInitials(authorsStr: string): Array<{ lastName: string; initials?: string }> {
+  private extractAllAuthorNamesWithInitials(
+    authorsStr: string,
+  ): Array<{ lastName: string; initials?: string }> {
     // Remove "et al." suffix if present
     const cleaned = authorsStr.replace(/\s+et\s+al\.?$/i, "").trim();
 
@@ -1629,10 +2013,10 @@ export class CitationParser {
     // Compound surnames: allow space between capitalized words (Hiller Blin)
     // Also allow lowercase prefixes like "van", "de", "von" followed by space and capitalized word
     const initialNamePattern = new RegExp(
-      `^((?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?)` +  // Optional initials
-      `((?:(?:van|von|de|der|del|la|le)\\s+)?` +  // Optional lowercase prefix (van der, de la, etc.)
-      `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]*` +  // First word of surname (capitalized)
-      `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]*)*)$`  // Optional additional words in compound surname
+      `^((?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?)` + // Optional initials
+        `((?:(?:van|von|de|der|del|la|le)\\s+)?` + // Optional lowercase prefix (van der, de la, etc.)
+        `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]*` + // First word of surname (capitalized)
+        `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]*)*)$`, // Optional additional words in compound surname
     );
 
     for (const part of parts) {
@@ -1658,4 +2042,3 @@ export function getCitationParser(): CitationParser {
   }
   return parserInstance;
 }
-

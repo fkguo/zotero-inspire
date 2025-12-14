@@ -24,7 +24,7 @@ export const AUTHOR_CHARS = {
 /** Pattern: "M.-T. Li" or "G. Li" - initials followed by last name */
 export const RE_INITIAL_AUTHOR = new RegExp(
   `^([${AUTHOR_CHARS.UPPER}]\\.(?:\\s*-?[${AUTHOR_CHARS.UPPER}]\\.)*)\\s+([${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+(?:\\s+[${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+)*)$`,
-  "iu"
+  "iu",
 );
 
 /**
@@ -33,7 +33,7 @@ export const RE_INITIAL_AUTHOR = new RegExp(
  */
 export const RE_AUTHOR_YEAR_COMBINED = new RegExp(
   `^([${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+(?:\\s+[${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+)*)(?:\\s+et\\s+al\\.)?\\s+(\\d{4}[a-z]?)$`,
-  "iu"
+  "iu",
 );
 
 /**
@@ -42,7 +42,7 @@ export const RE_AUTHOR_YEAR_COMBINED = new RegExp(
  */
 export const RE_TWO_AUTHORS_YEAR = new RegExp(
   `^([${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+(?:\\s+[${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+)*)\\s+and\\s+([${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+(?:\\s+[${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+)*)\\s+(\\d{4}[a-z]?)$`,
-  "iu"
+  "iu",
 );
 
 /** Pattern: standalone year with optional suffix */
@@ -54,13 +54,13 @@ export const RE_YEAR_STANDALONE = /^\d{4}[a-z]?$/;
  */
 export const RE_AUTHOR_STANDALONE = new RegExp(
   `^[${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+(?:\\s+[${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+)*$`,
-  "iu"
+  "iu",
 );
 
 /** Pattern: comma-separated authors */
 export const RE_COMMA_AUTHORS = new RegExp(
   `^[${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+(?:,\\s*[${AUTHOR_CHARS.UPPER}][${AUTHOR_CHARS.ALL}]+)+$`,
-  "iu"
+  "iu",
 );
 
 /** Pattern: year suffix detection */
@@ -70,7 +70,7 @@ export const RE_YEAR_WITH_SUFFIX = /\d{4}[a-z]$/i;
 export const buildDifferentInitialsPattern = (author: string): RegExp =>
   new RegExp(
     `(?:[A-Z]\\.(?:\\s*-?[A-Z]\\.)*\\s*${author}|${author},\\s*[A-Z]\\.(?:\\s*-?[A-Z]\\.)*)`,
-    "i"
+    "i",
   );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,22 +89,37 @@ export function buildInitialsPattern(author: string, initials: string): RegExp {
   const escapedInitials = initials.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(
     `(?:${escapedInitials}\\s*${author}|${author},\\s*${escapedInitials})`,
-    "i"
+    "i",
   );
 }
 
 /**
  * Normalize author name for comparison.
- * Removes diacritics for basic matching.
+ * Handles special characters (ß, ø, æ, œ, ı, etc.) and removes diacritics.
+ *
+ * FIX-MATCH-001: Enhanced handling for non-decomposable characters
  *
  * @param name - Author name to normalize
  * @returns Normalized lowercase name without diacritics
  */
 export function normalizeAuthorName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, ""); // Remove diacritics
+  return (
+    name
+      .toLowerCase()
+      // Handle special characters that don't decompose via NFD
+      .replace(/ß/g, "ss") // German eszett
+      .replace(/ı/g, "i") // Turkish dotless i
+      .replace(/ø/g, "o") // Nordic ø
+      .replace(/æ/g, "ae") // Nordic/Old English æ
+      .replace(/œ/g, "oe") // French œ
+      .replace(/ð/g, "d") // Icelandic eth
+      .replace(/þ/g, "th") // Icelandic thorn
+      .replace(/ł/g, "l") // Polish ł
+      .replace(/đ/g, "d") // Croatian/Vietnamese đ
+      // NFD decomposition and diacritic removal
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+  );
 }
 
 /**
@@ -116,7 +131,10 @@ export function normalizeAuthorName(name: string): string {
  */
 export function normalizeAuthorCompact(str?: string | null): string | null {
   if (!str) return null;
-  return str.toLowerCase().replace(/[.\s-]/g, "").trim();
+  return str
+    .toLowerCase()
+    .replace(/[.\s-]/g, "")
+    .trim();
 }
 
 /**
@@ -219,10 +237,7 @@ export function extractLastName(authorStr: string): string {
   }
 
   // Single word - return as is
-  return author
-    .toLowerCase()
-    .replace(/\./g, "")
-    .replace(/[,;]$/, "");
+  return author.toLowerCase().replace(/\./g, "").replace(/[,;]$/, "");
 }
 
 /**
@@ -234,7 +249,7 @@ export function extractLastName(authorStr: string): string {
 export function isCollaboration(authorStr: string): boolean {
   const lower = authorStr.toLowerCase();
   return /\b(collaboration|collab\.?|group|team|consortium|experiment)\b/i.test(
-    lower
+    lower,
   );
 }
 
@@ -249,7 +264,7 @@ export function isCollaboration(authorStr: string): boolean {
 export function extractCollaborationName(authorStr: string): string {
   // Try to extract the collaboration name before "Collaboration"
   const match = authorStr.match(
-    /^([A-Za-z0-9\s-]+?)\s+(?:collaboration|collab\.?|group)/i
+    /^([A-Za-z0-9\s-]+?)\s+(?:collaboration|collab\.?|group)/i,
   );
   if (match) {
     return match[1].toLowerCase().trim();
@@ -259,7 +274,7 @@ export function extractCollaborationName(authorStr: string): string {
     .toLowerCase()
     .replace(
       /\s+(collaboration|collab\.?|group|team|consortium|experiment).*$/i,
-      ""
+      "",
     )
     .trim();
 }

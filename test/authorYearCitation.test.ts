@@ -38,7 +38,9 @@ describe("Author-Year Citation Detection", () => {
       });
 
       it("should detect multiple authors with comma-and: (Sjostrand, Mrenna, and Skands, 2008)", () => {
-        const result = parser.parseSelection("(Sjostrand, Mrenna, and Skands, 2008)");
+        const result = parser.parseSelection(
+          "(Sjostrand, Mrenna, and Skands, 2008)",
+        );
         expect(result).not.toBeNull();
         expect(result?.type).toBe("author-year");
         expect(result?.labels).toContain("Sjostrand");
@@ -54,7 +56,7 @@ describe("Author-Year Citation Detection", () => {
         expect(result?.labels).toContain("Bahr");
         expect(result?.labels).toContain("2008");
         // Should have "et al." format label
-        expect(result?.labels.some(l => l.includes("et al."))).toBe(true);
+        expect(result?.labels.some((l) => l.includes("et al."))).toBe(true);
       });
 
       it("should detect year with suffix: (Guo et al., 2014b)", () => {
@@ -176,7 +178,9 @@ describe("Author-Year Citation Detection", () => {
     // Complex real-world examples from the debug output
     describe("Real-world examples from RMP papers", () => {
       it("should detect: PYTHIA (Sjostrand, Mrenna, and Skands, 2008)", () => {
-        const result = parser.parseSelection("PYTHIA (Sjostrand, Mrenna, and Skands, 2008)");
+        const result = parser.parseSelection(
+          "PYTHIA (Sjostrand, Mrenna, and Skands, 2008)",
+        );
         expect(result).not.toBeNull();
         expect(result?.type).toBe("author-year");
         expect(result?.labels).toContain("Sjostrand");
@@ -194,7 +198,8 @@ describe("Author-Year Citation Detection", () => {
       });
 
       it("should detect citation in sentence context", () => {
-        const text = "as discussed by Albaladejo, Guo et al. (2017) in their review";
+        const text =
+          "as discussed by Albaladejo, Guo et al. (2017) in their review";
         const result = parser.parseSelection(text);
         expect(result).not.toBeNull();
         expect(result?.type).toBe("author-year");
@@ -262,7 +267,9 @@ describe("Author-Year Citation Detection", () => {
       });
 
       it("should handle German ß in text context", () => {
-        const result = parser.parseSelection("Guo and Meißner (2011). The amplitude f");
+        const result = parser.parseSelection(
+          "Guo and Meißner (2011). The amplitude f",
+        );
         expect(result).not.toBeNull();
         expect(result?.type).toBe("author-year");
         expect(result?.labels).toContain("Meißner");
@@ -284,7 +291,9 @@ describe("Author-Year Citation Detection", () => {
       });
 
       it("should detect semicolon-separated citations: (A et al., 2011; B et al., 2015)", () => {
-        const result = parser.parseSelection("(Cho et al., 2011a; Song et al., 2015)");
+        const result = parser.parseSelection(
+          "(Cho et al., 2011a; Song et al., 2015)",
+        );
         expect(result).not.toBeNull();
         expect(result?.type).toBe("author-year");
         expect(result?.labels).toContain("Cho");
@@ -294,7 +303,9 @@ describe("Author-Year Citation Detection", () => {
       });
 
       it("should detect complex mixed citation: (Cho et al., 2011a, 2011b; Cho, Song, and Lee, 2015)", () => {
-        const result = parser.parseSelection("(Cho et al., 2011a, 2011b; Cho, Song, and Lee, 2015)");
+        const result = parser.parseSelection(
+          "(Cho et al., 2011a, 2011b; Cho, Song, and Lee, 2015)",
+        );
         expect(result).not.toBeNull();
         expect(result?.type).toBe("author-year");
         // Should find all 3 citations
@@ -305,7 +316,9 @@ describe("Author-Year Citation Detection", () => {
       });
 
       it("should detect multi-author outside paren: Larionov, Strikman, and Bleicher (2015)", () => {
-        const result = parser.parseSelection("Larionov, Strikman, and Bleicher (2015)");
+        const result = parser.parseSelection(
+          "Larionov, Strikman, and Bleicher (2015)",
+        );
         expect(result).not.toBeNull();
         expect(result?.type).toBe("author-year");
         expect(result?.labels).toContain("Larionov");
@@ -333,7 +346,8 @@ describe("Author-Year Citation Detection", () => {
 
       it("should handle combined text with multiple citation styles", () => {
         // Real-world RMP text combining different formats
-        const text = "(Cho et al., 2011a, 2011b; Cho, Song, and Lee, 2015). Larionov, Strikman, and Bleicher (2015)";
+        const text =
+          "(Cho et al., 2011a, 2011b; Cho, Song, and Lee, 2015). Larionov, Strikman, and Bleicher (2015)";
         const result = parser.parseSelection(text);
         expect(result).not.toBeNull();
         expect(result?.type).toBe("author-year");
@@ -378,7 +392,8 @@ describe("Author-Year Citation Detection", () => {
 
   describe("Long text selections", () => {
     it("should detect citation in long paragraph", () => {
-      const longText = "This is a very long paragraph of text that discusses various physics topics. The foundational work by Weinstein and Isgur (1982) provided important insights into the quark model. More text follows here to make the selection longer.";
+      const longText =
+        "This is a very long paragraph of text that discusses various physics topics. The foundational work by Weinstein and Isgur (1982) provided important insights into the quark model. More text follows here to make the selection longer.";
       const result = parser.parseSelection(longText);
       expect(result).not.toBeNull();
       expect(result?.type).toBe("author-year");
@@ -388,7 +403,8 @@ describe("Author-Year Citation Detection", () => {
     });
 
     it("should detect citation with surrounding mathematical notation", () => {
-      const text = "The amplitude f(q2) was calculated by Guo and Meißner (2011) using dispersion relations.";
+      const text =
+        "The amplitude f(q2) was calculated by Guo and Meißner (2011) using dispersion relations.";
       const result = parser.parseSelection(text);
       expect(result).not.toBeNull();
       expect(result?.type).toBe("author-year");
@@ -397,7 +413,8 @@ describe("Author-Year Citation Detection", () => {
     });
 
     it("should detect multiple citations in long selection", () => {
-      const text = "As discussed by Cho et al. (2011a) and later extended by Guo and Meißner (2011), the exotic states can be understood.";
+      const text =
+        "As discussed by Cho et al. (2011a) and later extended by Guo and Meißner (2011), the exotic states can be understood.";
       const result = parser.parseSelection(text);
       expect(result).not.toBeNull();
       expect(result?.type).toBe("author-year");
@@ -409,7 +426,8 @@ describe("Author-Year Citation Detection", () => {
     });
 
     it("should detect citation even with non-numeric bracket content", () => {
-      const text = "see [some note] and also the work by Smith (2020) for details";
+      const text =
+        "see [some note] and also the work by Smith (2020) for details";
       const result = parser.parseSelection(text);
       expect(result).not.toBeNull();
       expect(result?.type).toBe("author-year");
@@ -427,7 +445,8 @@ describe("Author-Year Citation Detection", () => {
     });
 
     it("should handle text with newlines", () => {
-      const text = "The amplitude f(q2) was\ncalculated by Guo and Meißner (2011)\nusing dispersion relations.";
+      const text =
+        "The amplitude f(q2) was\ncalculated by Guo and Meißner (2011)\nusing dispersion relations.";
       const result = parser.parseSelection(text);
       expect(result).not.toBeNull();
       expect(result?.type).toBe("author-year");
@@ -442,7 +461,9 @@ describe("Author-Year Citation Detection", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Helper to create a minimal entry for testing
-function createEntry(overrides: Partial<InspireReferenceEntry> = {}): InspireReferenceEntry {
+function createEntry(
+  overrides: Partial<InspireReferenceEntry> = {},
+): InspireReferenceEntry {
   return {
     id: "test-id",
     recid: 12345,
@@ -458,9 +479,24 @@ describe("LabelMatcher.matchAuthorYear", () => {
   describe("Matching with authors array", () => {
     it("should match 'Guerrieri et al. 2014' to entry with first author Guerrieri", () => {
       const entries: InspireReferenceEntry[] = [
-        createEntry({ id: "entry-1", year: "2013", authors: ["Smith, J."], label: "1" }),
-        createEntry({ id: "entry-2", year: "2014", authors: ["Guerrieri, A.L.", "Piccinini, F."], label: "2" }),
-        createEntry({ id: "entry-3", year: "2014", authors: ["Jones, B."], label: "3" }),
+        createEntry({
+          id: "entry-1",
+          year: "2013",
+          authors: ["Smith, J."],
+          label: "1",
+        }),
+        createEntry({
+          id: "entry-2",
+          year: "2014",
+          authors: ["Guerrieri, A.L.", "Piccinini, F."],
+          label: "2",
+        }),
+        createEntry({
+          id: "entry-3",
+          year: "2014",
+          authors: ["Jones, B."],
+          label: "3",
+        }),
       ];
 
       const matcher = new LabelMatcher(entries);
@@ -473,8 +509,18 @@ describe("LabelMatcher.matchAuthorYear", () => {
 
     it("should match 'Weinstein and Isgur 1982' to two-author entry", () => {
       const entries: InspireReferenceEntry[] = [
-        createEntry({ id: "entry-1", year: "1982", authors: ["Weinstein, J.", "Isgur, N."], label: "1" }),
-        createEntry({ id: "entry-2", year: "1982", authors: ["Other, A."], label: "2" }),
+        createEntry({
+          id: "entry-1",
+          year: "1982",
+          authors: ["Weinstein, J.", "Isgur, N."],
+          label: "1",
+        }),
+        createEntry({
+          id: "entry-2",
+          year: "1982",
+          authors: ["Other, A."],
+          label: "2",
+        }),
       ];
 
       const matcher = new LabelMatcher(entries);
@@ -489,8 +535,20 @@ describe("LabelMatcher.matchAuthorYear", () => {
   describe("Matching with authorText only (no authors array)", () => {
     it("should match via authorText when authors array is empty", () => {
       const entries: InspireReferenceEntry[] = [
-        createEntry({ id: "entry-1", year: "2014", authors: [], authorText: "A.L. Guerrieri, F. Piccinini, A. Pilloni, A.D. Polosa", label: "1" }),
-        createEntry({ id: "entry-2", year: "2014", authors: [], authorText: "J. Smith", label: "2" }),
+        createEntry({
+          id: "entry-1",
+          year: "2014",
+          authors: [],
+          authorText: "A.L. Guerrieri, F. Piccinini, A. Pilloni, A.D. Polosa",
+          label: "1",
+        }),
+        createEntry({
+          id: "entry-2",
+          year: "2014",
+          authors: [],
+          authorText: "J. Smith",
+          label: "2",
+        }),
       ];
 
       const matcher = new LabelMatcher(entries);
@@ -503,7 +561,13 @@ describe("LabelMatcher.matchAuthorYear", () => {
 
     it("should not match when author name not found in authorText", () => {
       const entries: InspireReferenceEntry[] = [
-        createEntry({ id: "entry-1", year: "2014", authors: [], authorText: "J. Smith, B. Jones", label: "1" }),
+        createEntry({
+          id: "entry-1",
+          year: "2014",
+          authors: [],
+          authorText: "J. Smith, B. Jones",
+          label: "1",
+        }),
       ];
 
       const matcher = new LabelMatcher(entries);
@@ -517,9 +581,24 @@ describe("LabelMatcher.matchAuthorYear", () => {
   describe("Year matching", () => {
     it("should prefer exact year match", () => {
       const entries: InspireReferenceEntry[] = [
-        createEntry({ id: "entry-1", year: "2013", authors: ["Guerrieri, A."], label: "1" }),
-        createEntry({ id: "entry-2", year: "2014", authors: ["Guerrieri, A."], label: "2" }),
-        createEntry({ id: "entry-3", year: "2015", authors: ["Guerrieri, A."], label: "3" }),
+        createEntry({
+          id: "entry-1",
+          year: "2013",
+          authors: ["Guerrieri, A."],
+          label: "1",
+        }),
+        createEntry({
+          id: "entry-2",
+          year: "2014",
+          authors: ["Guerrieri, A."],
+          label: "2",
+        }),
+        createEntry({
+          id: "entry-3",
+          year: "2015",
+          authors: ["Guerrieri, A."],
+          label: "3",
+        }),
       ];
 
       const matcher = new LabelMatcher(entries);
@@ -532,7 +611,12 @@ describe("LabelMatcher.matchAuthorYear", () => {
 
     it("should handle year suffix (2017a, 2017b)", () => {
       const entries: InspireReferenceEntry[] = [
-        createEntry({ id: "entry-1", year: "2017", authors: ["Chen, Y."], label: "1" }),
+        createEntry({
+          id: "entry-1",
+          year: "2017",
+          authors: ["Chen, Y."],
+          label: "1",
+        }),
       ];
 
       const matcher = new LabelMatcher(entries);
@@ -547,7 +631,12 @@ describe("LabelMatcher.matchAuthorYear", () => {
   describe("Edge cases", () => {
     it("should return empty array when no year provided", () => {
       const entries: InspireReferenceEntry[] = [
-        createEntry({ id: "entry-1", year: "2014", authors: ["Guerrieri, A."], label: "1" }),
+        createEntry({
+          id: "entry-1",
+          year: "2014",
+          authors: ["Guerrieri, A."],
+          label: "1",
+        }),
       ];
 
       const matcher = new LabelMatcher(entries);
@@ -562,7 +651,12 @@ describe("LabelMatcher.matchAuthorYear", () => {
 
     it("should handle case-insensitive author matching", () => {
       const entries: InspireReferenceEntry[] = [
-        createEntry({ id: "entry-1", year: "2014", authors: ["GUERRIERI, A.L."], label: "1" }),
+        createEntry({
+          id: "entry-1",
+          year: "2014",
+          authors: ["GUERRIERI, A.L."],
+          label: "1",
+        }),
       ];
 
       const matcher = new LabelMatcher(entries);
@@ -608,22 +702,33 @@ describe("LabelMatcher.matchAuthorYear", () => {
       matcher.setAuthorYearMapping({
         parsedAt: Date.now(),
         authorYearMap: new Map([
-          ["cho 2011a", [{
-            rawText: "Cho, S., et al., 2011a, Phys. Rev. Lett. 106, 212001.",
-            firstAuthorLastName: "Cho",
-            year: "2011a",
-            journalAbbrev: "Phys. Rev. Lett.",
-            volume: "106",
-            pageStart: "212001",
-          }]],
-          ["cho 2011b", [{
-            rawText: "Cho, S., et al., 2011b, Phys. Rev. C 84, 064910.",
-            firstAuthorLastName: "Cho",
-            year: "2011b",
-            journalAbbrev: "Phys. Rev. C",
-            volume: "84",
-            pageStart: "064910",
-          }]],
+          [
+            "cho 2011a",
+            [
+              {
+                rawText:
+                  "Cho, S., et al., 2011a, Phys. Rev. Lett. 106, 212001.",
+                firstAuthorLastName: "Cho",
+                year: "2011a",
+                journalAbbrev: "Phys. Rev. Lett.",
+                volume: "106",
+                pageStart: "212001",
+              },
+            ],
+          ],
+          [
+            "cho 2011b",
+            [
+              {
+                rawText: "Cho, S., et al., 2011b, Phys. Rev. C 84, 064910.",
+                firstAuthorLastName: "Cho",
+                year: "2011b",
+                journalAbbrev: "Phys. Rev. C",
+                volume: "84",
+                pageStart: "064910",
+              },
+            ],
+          ],
         ]),
         totalReferences: 2,
         confidence: "high",
@@ -632,12 +737,20 @@ describe("LabelMatcher.matchAuthorYear", () => {
       expect(matcher.hasAuthorYearMapping()).toBe(true);
 
       // Test 2011a match - should find entry with PRL 106, 212001
-      const results2011a = matcher.matchAuthorYear(["Cho et al. 2011a", "Cho", "2011a"]);
+      const results2011a = matcher.matchAuthorYear([
+        "Cho et al. 2011a",
+        "Cho",
+        "2011a",
+      ]);
       expect(results2011a.length).toBeGreaterThan(0);
       expect(results2011a[0].entryId).toBe("entry-cho-2011a");
 
       // Test 2011b match - should find entry with PRC 84, 064910
-      const results2011b = matcher.matchAuthorYear(["Cho et al. 2011b", "Cho", "2011b"]);
+      const results2011b = matcher.matchAuthorYear([
+        "Cho et al. 2011b",
+        "Cho",
+        "2011b",
+      ]);
       expect(results2011b.length).toBeGreaterThan(0);
       expect(results2011b[0].entryId).toBe("entry-cho-2011b");
     });
@@ -657,7 +770,11 @@ describe("LabelMatcher.matchAuthorYear", () => {
 
       expect(matcher.hasAuthorYearMapping()).toBe(false);
 
-      const results = matcher.matchAuthorYear(["Cho et al. 2011", "Cho", "2011"]);
+      const results = matcher.matchAuthorYear([
+        "Cho et al. 2011",
+        "Cho",
+        "2011",
+      ]);
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].entryId).toBe("entry-1");
       // Should be fuzzy match since no PDF mapping
@@ -697,22 +814,34 @@ describe("LabelMatcher.matchAuthorYear", () => {
       matcher.setAuthorYearMapping({
         parsedAt: Date.now(),
         authorYearMap: new Map([
-          ["braaten 2005a", [{
-            rawText: "Braaten, E., and M. Kusunoki, 2005a, Phys. Rev. D 71, 074005.",
-            firstAuthorLastName: "Braaten",
-            year: "2005a",
-            journalAbbrev: "Phys. Rev. D",
-            volume: "71",
-            pageStart: "074005",
-          }]],
-          ["braaten 2005b", [{
-            rawText: "Braaten, E., and M. Kusunoki, 2005b, Phys. Rev. D 72, 014012.",
-            firstAuthorLastName: "Braaten",
-            year: "2005b",
-            journalAbbrev: "Phys. Rev. D",
-            volume: "72",
-            pageStart: "014012",
-          }]],
+          [
+            "braaten 2005a",
+            [
+              {
+                rawText:
+                  "Braaten, E., and M. Kusunoki, 2005a, Phys. Rev. D 71, 074005.",
+                firstAuthorLastName: "Braaten",
+                year: "2005a",
+                journalAbbrev: "Phys. Rev. D",
+                volume: "71",
+                pageStart: "074005",
+              },
+            ],
+          ],
+          [
+            "braaten 2005b",
+            [
+              {
+                rawText:
+                  "Braaten, E., and M. Kusunoki, 2005b, Phys. Rev. D 72, 014012.",
+                firstAuthorLastName: "Braaten",
+                year: "2005b",
+                journalAbbrev: "Phys. Rev. D",
+                volume: "72",
+                pageStart: "014012",
+              },
+            ],
+          ],
         ]),
         totalReferences: 2,
         confidence: "high",
@@ -721,12 +850,22 @@ describe("LabelMatcher.matchAuthorYear", () => {
       expect(matcher.hasAuthorYearMapping()).toBe(true);
 
       // Test 2005a match - should find entry with PRD 71, 074005
-      const results2005a = matcher.matchAuthorYear(["Braaten and Kusunoki 2005a", "Braaten", "Kusunoki", "2005a"]);
+      const results2005a = matcher.matchAuthorYear([
+        "Braaten and Kusunoki 2005a",
+        "Braaten",
+        "Kusunoki",
+        "2005a",
+      ]);
       expect(results2005a.length).toBeGreaterThan(0);
       expect(results2005a[0].entryId).toBe("entry-braaten-2005a");
 
       // Test 2005b match - should find entry with PRD 72, 014012
-      const results2005b = matcher.matchAuthorYear(["Braaten and Kusunoki 2005b", "Braaten", "Kusunoki", "2005b"]);
+      const results2005b = matcher.matchAuthorYear([
+        "Braaten and Kusunoki 2005b",
+        "Braaten",
+        "Kusunoki",
+        "2005b",
+      ]);
       expect(results2005b.length).toBeGreaterThan(0);
       expect(results2005b[0].entryId).toBe("entry-braaten-2005b");
 
@@ -772,14 +911,20 @@ describe("LabelMatcher.matchAuthorYear", () => {
         parsedAt: Date.now(),
         authorYearMap: new Map([
           // Only include 2005b - this ensures fuzzy matching is used with PDF info
-          ["braaten 2005b", [{
-            rawText: "Braaten, E., and M. Kusunoki, 2005b, Phys. Rev. D 72, 014012.",
-            firstAuthorLastName: "Braaten",
-            year: "2005b",
-            journalAbbrev: "Phys. Rev. D",
-            volume: "72",
-            pageStart: "014012",
-          }]],
+          [
+            "braaten 2005b",
+            [
+              {
+                rawText:
+                  "Braaten, E., and M. Kusunoki, 2005b, Phys. Rev. D 72, 014012.",
+                firstAuthorLastName: "Braaten",
+                year: "2005b",
+                journalAbbrev: "Phys. Rev. D",
+                volume: "72",
+                pageStart: "014012",
+              },
+            ],
+          ],
         ]),
         totalReferences: 1,
         confidence: "high",
@@ -787,7 +932,12 @@ describe("LabelMatcher.matchAuthorYear", () => {
 
       // Test 2005b match - should find entry with PRD 72, 014012 via fuzzy matching
       // with volume disambiguation (since precise match is looking for exact journal match)
-      const results2005b = matcher.matchAuthorYear(["Braaten and Kusunoki 2005b", "Braaten", "Kusunoki", "2005b"]);
+      const results2005b = matcher.matchAuthorYear([
+        "Braaten and Kusunoki 2005b",
+        "Braaten",
+        "Kusunoki",
+        "2005b",
+      ]);
       expect(results2005b.length).toBeGreaterThan(0);
       // Should match 2005b (vol 72) not 2005a (vol 71)
       expect(results2005b[0].entryId).toBe("entry-braaten-2005b");

@@ -293,7 +293,8 @@
 }
 
 /* Add visual separation when search input container is visible (search mode) */
-.zinspire-ref-panel__search-input:not([style*="display: none"]) ~ .zinspire-ref-panel__filter {
+.zinspire-ref-panel__search-input:not([style*="display: none"])
+  ~ .zinspire-ref-panel__filter {
   margin-left: 8px;
 }
 
@@ -1053,43 +1054,43 @@
     background: var(--zotero-gray-8, #2a2a2e);
     color: var(--zotero-gray-1, #ffffff);
   }
-  
+
   .zinspire-batch-toolbar__btn:hover {
     background: var(--zotero-gray-7, #38383d);
   }
-  
+
   .zinspire-batch-toolbar__btn--primary {
     background: var(--zotero-blue-5, #0060df);
     color: #ffffff;
     border-color: var(--zotero-blue-5, #0060df);
   }
-  
+
   .zinspire-duplicate-dialog__content {
     background: var(--material-background, var(--zotero-gray-8, #2a2a2e));
   }
-  
+
   .zinspire-duplicate-dialog__title {
     color: var(--fill-primary, #ffffff);
   }
-  
+
   .zinspire-duplicate-dialog__list {
     border-color: var(--fill-quinary, #4a4a4f);
   }
-  
+
   .zinspire-duplicate-dialog__item {
     border-color: var(--fill-quinary, #4a4a4f);
   }
-  
+
   .zinspire-duplicate-dialog__item-title {
     color: var(--fill-primary, #ffffff);
   }
-  
+
   .zinspire-duplicate-dialog__btn {
     border-color: var(--zotero-gray-6, #4a4a4f);
     background: var(--zotero-gray-7, #38383d);
     color: var(--zotero-gray-1, #ffffff);
   }
-  
+
   .zinspire-duplicate-dialog__btn:hover {
     background: var(--zotero-gray-6, #4a4a4f);
   }
@@ -1239,25 +1240,36 @@
   }
 }
 
-:root[zotero-platform-darkmode="true"] .zinspire-ref-entry.zinspire-entry-focused,
+:root[zotero-platform-darkmode="true"]
+  .zinspire-ref-entry.zinspire-entry-focused,
 [data-color-scheme="dark"] .zinspire-ref-entry.zinspire-entry-focused {
   background-color: rgba(0, 96, 223, 0.25) !important;
   border-left-color: #3584e4 !important;
 }
 
 /* Hover effect on row (visual feedback for clickable rows) */
-.zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(.zinspire-entry-focused) {
+.zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(
+    .zinspire-entry-focused
+  ) {
   background-color: var(--fill-quinary, rgba(0, 0, 0, 0.03));
   border-radius: 4px;
 }
 
 @media (prefers-color-scheme: dark) {
-  .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(.zinspire-entry-focused) {
+  .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(
+      .zinspire-entry-focused
+    ) {
     background-color: rgba(255, 255, 255, 0.05);
   }
 }
 
-:root[zotero-platform-darkmode="true"] .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(.zinspire-entry-focused),
-[data-color-scheme="dark"] .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(.zinspire-entry-focused) {
+:root[zotero-platform-darkmode="true"]
+  .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(
+    .zinspire-entry-focused
+  ),
+[data-color-scheme="dark"]
+  .zinspire-ref-entry:hover:not(.zinspire-entry-highlight):not(
+    .zinspire-entry-focused
+  ) {
   background-color: rgba(255, 255, 255, 0.05);
 }

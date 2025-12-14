@@ -7,10 +7,25 @@
 
 import { config } from "../../../../package.json";
 import type { InspireReferenceEntry } from "../types";
-import type { MatchResult, AlignmentIssue, AlignmentReport, AmbiguousCandidate } from "./types";
-import type { PDFReferenceMapping, PDFPaperInfo, AuthorYearReferenceMapping } from "./pdfReferencesParser";
+import type {
+  MatchResult,
+  AlignmentIssue,
+  AlignmentReport,
+  AmbiguousCandidate,
+} from "./types";
+import type {
+  PDFReferenceMapping,
+  PDFPaperInfo,
+  AuthorYearReferenceMapping,
+} from "./pdfReferencesParser";
+import type { OverlayReferenceMapping } from "./readerIntegration";
 import { getPref } from "../../../utils/prefs";
-import { SCORE, YEAR_DELTA, MATCH_CONFIG, type MatchConfidence } from "./constants";
+import {
+  SCORE,
+  YEAR_DELTA,
+  MATCH_CONFIG,
+  type MatchConfidence,
+} from "./constants";
 import { normalizeYear } from "../textUtils";
 
 // Import shared utilities from authorUtils
@@ -39,23 +54,8 @@ import {
 } from "./matchScoring";
 import { computePublicationPriority } from "./matchScoring";
 
-// Re-export the pattern for backward compatibility
+// Alias for buildDifferentInitialsPattern (used in matchAuthorYear)
 const RE_DIFFERENT_INITIALS = buildDifferentInitialsPattern;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Types for Global Best Match
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Result from findGlobalBestMatch
- */
-interface GlobalBestMatchResult {
-  idx: number;
-  score: number;
-  method: "arxiv" | "doi" | "journal" | "year" | "score";
-  yearDelta: number | null;
-  confidence: "high" | "medium" | "low";
-}
 
 /**
  * Matches PDF citation labels to INSPIRE reference entries.
@@ -105,6 +105,8 @@ export class LabelMatcher {
   private hasDuplicateLabels: boolean = false;
   /** FTR-PDF-ANNOTATE-AUTHOR-YEAR: Author-year PDF mapping for precise matching */
   private authorYearMapping?: AuthorYearReferenceMapping;
+  /** FTR-OVERLAY-REFS: Zotero overlay reference mapping for numeric citations */
+  private overlayMapping?: OverlayReferenceMapping;
 
   constructor(entries: InspireReferenceEntry[]) {
     this.entries = entries;
@@ -192,8 +194,8 @@ export class LabelMatcher {
 
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] LabelMatcher: built identifier indexes - ` +
-      `arxiv=${this.arxivIndex.size}, doi=${this.doiIndex.size}, ` +
-      `journalVol=${this.journalVolIndex.size}, journalVolPage=${this.journalVolPageIndex.size}`,
+        `arxiv=${this.arxivIndex.size}, doi=${this.doiIndex.size}, ` +
+        `journalVol=${this.journalVolIndex.size}, journalVolPage=${this.journalVolPageIndex.size}`,
     );
   }
 
@@ -227,7 +229,10 @@ export class LabelMatcher {
    * Find entries by journal+volume using pre-computed index.
    * @returns Array of entry indices (may be empty)
    */
-  private findByJournalVol(journal: string | undefined | null, volume: string | undefined | null): number[] {
+  private findByJournalVol(
+    journal: string | undefined | null,
+    volume: string | undefined | null,
+  ): number[] {
     if (!journal || !volume) return [];
     const normalizedJournal = normalizeJournal(journal);
     if (!normalizedJournal) return [];
@@ -287,7 +292,271 @@ export class LabelMatcher {
    * Check if author-year mapping has been applied.
    */
   hasAuthorYearMapping(): boolean {
-    return this.authorYearMapping !== undefined && this.authorYearMapping.authorYearMap.size > 0;
+    return (
+      this.authorYearMapping !== undefined &&
+      this.authorYearMapping.authorYearMap.size > 0
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-OVERLAY-REFS: Zotero Overlay Reference Mapping (Numeric Citations Only)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Set overlay reference mapping from Zotero's citation overlays.
+   * FTR-OVERLAY-REFS: Enables precise matching for numeric citations using
+   * Zotero's pre-built citation→reference relationships.
+   *
+   * IMPORTANT: This is only for NUMERIC citations ([1], [2], etc.).
+   * Author-Year citations should use matchAuthorYear() instead.
+   */
+  setOverlayMapping(mapping: OverlayReferenceMapping): void {
+    this.overlayMapping = mapping;
+    Zotero.debug(
+      `[${config.addonName}] [PDF-ANNOTATE] LabelMatcher: applied overlay mapping with ${mapping.totalMappedLabels} labels, reliable=${mapping.isReliable}`,
+    );
+  }
+
+  /**
+   * Check if overlay mapping has been applied and is reliable.
+   */
+  hasReliableOverlayMapping(): boolean {
+    return this.overlayMapping?.isReliable === true;
+  }
+
+  /**
+   * Try to match a numeric label using Zotero's overlay reference data.
+   * This extracts identifiers (arXiv, DOI) from the reference text and
+   * uses the pre-built identifier indexes for O(1) lookup.
+   *
+   * FTR-OVERLAY-MULTI-REF: Now returns an array of matches to support
+   * citations that contain multiple papers under one label.
+   * Example: "[1] Weinberg...; Gasser...; Nucl. Phys. B250..."
+   *
+   * @param label - Numeric label string (e.g., "1", "2")
+   * @returns Array of match results (may be empty if no matches found)
+   */
+  private tryMatchByOverlay(label: string): MatchResult[] {
+    if (!this.overlayMapping?.isReliable) return [];
+
+    const overlayRefs = this.overlayMapping.labelToReference.get(label);
+    if (!overlayRefs || overlayRefs.length === 0) return [];
+
+    const results: MatchResult[] = [];
+    const seenIndices = new Set<number>();
+
+    // FTR-OVERLAY-MULTI-REF: Process each reference in the overlay
+    // Note: A single overlayRef.text may contain multiple papers separated by semicolons
+    // Example: "[1] Weinberg, Physica A 96, 327; Gasser, Ann. Phys. 158, 142; Nucl. Phys. B250, 465"
+    for (const overlayRef of overlayRefs) {
+      if (!overlayRef?.text) continue;
+
+      const refText = overlayRef.text;
+
+      // FTR-OVERLAY-MULTI-REF: Split by semicolons to handle multiple papers in one reference
+      // But also try the full text in case semicolons are part of author names
+      const textSegments = refText.split(/;\s*/).filter((s) => s.trim().length > 10);
+      // If splitting produced nothing useful, use the full text
+      if (textSegments.length === 0) {
+        textSegments.push(refText);
+      }
+
+      Zotero.debug(
+        `[${config.addonName}] [OVERLAY-REFS] Processing label [${label}]: ${textSegments.length} text segment(s) from "${refText.substring(0, 100)}..."`,
+      );
+
+      // Process each text segment (may be a single paper or multiple)
+      for (const segment of textSegments) {
+        // FTR-OVERLAY-ERRATUM: Detect and skip erratum segments
+        // Erratum citations are abbreviated references to the same paper, not separate papers
+        // Examples:
+        // - "B602, 641(E) (2001)" - erratum for Nucl. Phys. B paper
+        // - "Erratum: ibid. 602, 641 (2001)"
+        // - "89, 019903(E) (2014)"
+        //
+        // Patterns:
+        // 1. Contains "(E)" - explicit erratum marker
+        // 2. Contains "Erratum" or "erratum"
+        // 3. Starts with just volume number without journal name (e.g., "B602" or "89,")
+        const isErratum =
+          /\(E\)/.test(segment) ||
+          /\berratum\b/i.test(segment) ||
+          /^\s*[A-Z]?\d+\s*,/.test(segment); // Starts with optional letter + number + comma
+
+        if (isErratum) {
+          Zotero.debug(
+            `[${config.addonName}] [OVERLAY-REFS] Skipping erratum segment: "${segment.substring(0, 50)}..."`,
+          );
+          continue; // Skip erratum segments - they're part of the previous paper
+        }
+
+        // Try to extract arXiv ID from this segment
+        // Common patterns: arXiv:XXXX.XXXXX, arXiv:hep-th/XXXXXXX
+        const arxivMatch = segment.match(
+          /arXiv[:\s]*([\d.]+|[a-z-]+\/\d+)/i,
+        );
+        if (arxivMatch) {
+          const normalized = normalizeArxivId(arxivMatch[1]);
+          if (normalized) {
+            const idx = this.arxivIndex.get(normalized);
+            if (idx !== undefined && !seenIndices.has(idx)) {
+              seenIndices.add(idx);
+              Zotero.debug(
+                `[${config.addonName}] [OVERLAY-REFS] Matched label [${label}] via arXiv ${normalized}`,
+              );
+              results.push({
+                pdfLabel: label,
+                entryIndex: idx,
+                entryId: this.entries[idx]?.id,
+                confidence: "high",
+                matchMethod: "overlay",
+                matchedIdentifier: { type: "arxiv", value: normalized },
+              });
+              continue; // Move to next segment
+            }
+          }
+        }
+
+        // Try to extract DOI from this segment
+        // Common pattern: 10.XXXX/...
+        const doiMatch = segment.match(/\b(10\.\d{4,}\/[^\s,;]+)/);
+        if (doiMatch) {
+          const normalized = normalizeDoi(doiMatch[1]);
+          if (normalized) {
+            const idx = this.doiIndex.get(normalized);
+            if (idx !== undefined && !seenIndices.has(idx)) {
+              seenIndices.add(idx);
+              Zotero.debug(
+                `[${config.addonName}] [OVERLAY-REFS] Matched label [${label}] via DOI ${normalized}`,
+              );
+              results.push({
+                pdfLabel: label,
+                entryIndex: idx,
+                entryId: this.entries[idx]?.id,
+                confidence: "high",
+                matchMethod: "overlay",
+                matchedIdentifier: { type: "doi", value: normalized },
+              });
+              continue; // Move to next segment
+            }
+          }
+        }
+
+        // Try journal+volume+page matching
+        // FTR-OVERLAY-REFS-FIX: Use flexible journal matching with journalsSimilar()
+        //
+        // Common patterns in reference text:
+        // - "Physica A (Amsterdam) 96, 327 (1979)"
+        // - "Ann. Phys. (N.Y.) 158, 142 (1984)"
+        // - "Phys. Rev. D 96, 054001 (2017)"
+        // - "JHEP 05, 123 (2020)"
+        // - "Nucl. Phys. B250, 465 (1985)" - note: volume may be attached to journal name
+
+        // Step 1: Try the original specific patterns first (high precision)
+        // FTR-OVERLAY-PAGE-SUFFIX: Support alphanumeric page/artid numbers:
+        // - "96C" (conference proceedings like Nucl. Phys. A)
+        // - "123C01" (PTEP style artid)
+        // - "054001" (standard Physical Review artid)
+        let journalMatched = false;
+        const journalMatch = segment.match(
+          /(?:Phys\.?\s*Rev\.?|Nucl\.?\s*Phys\.?|JHEP|JCAP|Eur\.?\s*Phys\.?\s*J\.?|Class\.?\s*Quantum\s*Grav\.?|Phys\.?\s*Lett\.?)[^\d]*(\d+)[^\d]*(\d+[A-Za-z]?\d*)/i,
+        );
+        if (journalMatch) {
+          const journal = normalizeJournal(journalMatch[0].split(/\d/)[0].trim());
+          const volume = journalMatch[1];
+          const page = journalMatch[2];
+
+          if (journal && volume && page) {
+            const key = `${journal}:${volume}:${page}`;
+            const idx = this.journalVolPageIndex.get(key);
+            if (idx !== undefined && !seenIndices.has(idx)) {
+              seenIndices.add(idx);
+              Zotero.debug(
+                `[${config.addonName}] [OVERLAY-REFS] Matched label [${label}] via journal ${journal}:${volume}:${page}`,
+              );
+              results.push({
+                pdfLabel: label,
+                entryIndex: idx,
+                entryId: this.entries[idx]?.id,
+                confidence: "high",
+                matchMethod: "overlay",
+                matchedIdentifier: {
+                  type: "journal",
+                  value: `${journal} ${volume}, ${page}`,
+                },
+              });
+              journalMatched = true;
+            }
+          }
+        }
+
+        // Step 2: Fallback to flexible journal matching using journalsSimilar()
+        // Extract generic patterns: "JournalName Volume, Page" or "JournalName Volume (Year) Page"
+        // FTR-OVERLAY-PAGE-SUFFIX: Support alphanumeric artid like "96C", "123C01"
+        if (!journalMatched) {
+          const genericJournalMatch = segment.match(
+            /([A-Za-z][A-Za-z.\s()]+?)\s+(\d+)\s*[,:(\s]\s*(\d+[A-Za-z]?\d*)/,
+          );
+          if (genericJournalMatch) {
+            const possibleJournal = genericJournalMatch[1].trim();
+            const volume = genericJournalMatch[2];
+            const page = genericJournalMatch[3];
+
+            // Search entries with matching volume and page, verify journal with journalsSimilar()
+            for (let i = 0; i < this.entries.length; i++) {
+              if (seenIndices.has(i)) continue;
+
+              const entry = this.entries[i];
+              if (!entry.publicationInfo) continue;
+
+              const pub = entry.publicationInfo;
+              const entryVol = pub.journal_volume || pub.volume;
+              const entryPage = pub.page_start || pub.artid;
+
+              if (
+                entryVol &&
+                String(entryVol) === volume &&
+                entryPage &&
+                String(entryPage) === page
+              ) {
+                // Volume and page match, now check journal name similarity
+                if (journalsSimilar(possibleJournal, pub.journal_title)) {
+                  seenIndices.add(i);
+                  Zotero.debug(
+                    `[${config.addonName}] [OVERLAY-REFS] Matched label [${label}] via flexible journal: "${possibleJournal}" ~ "${pub.journal_title}", vol=${volume}, page=${page}`,
+                  );
+                  results.push({
+                    pdfLabel: label,
+                    entryIndex: i,
+                    entryId: entry.id,
+                    confidence: "high",
+                    matchMethod: "overlay",
+                    matchedIdentifier: {
+                      type: "journal",
+                      value: `${pub.journal_title} ${volume}, ${page}`,
+                    },
+                  });
+                  break; // Found match for this segment, move to next
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (results.length > 0) {
+      // FTR-OVERLAY-ERRATUM: Clear any stale "missing" entries for this label
+      // The overlay matching correctly handles erratum segments, so the earlier
+      // PDF mapping's "missing" data may be incorrect (e.g., reporting erratum as missing)
+      this.pdfMissingByLabel.delete(label);
+
+      Zotero.debug(
+        `[${config.addonName}] [OVERLAY-REFS] Label [${label}]: matched ${results.length} of ${overlayRefs.length} references`,
+      );
+    }
+
+    return results;
   }
 
   /**
@@ -311,16 +580,14 @@ export class LabelMatcher {
     const totalInspire = this.entries.length;
     let mismatch = 0;
     let ratio = 1;
-    let pendingStrictDecision:
-      | {
-          strictPref: boolean;
-          mismatchDetected: boolean;
-          wellAligned: boolean;
-          finalTotal?: number;
-          mismatch?: number;
-          ratio?: number;
-        }
-      | null = null;
+    let pendingStrictDecision: {
+      strictPref: boolean;
+      mismatchDetected: boolean;
+      wellAligned: boolean;
+      finalTotal?: number;
+      mismatch?: number;
+      ratio?: number;
+    } | null = null;
     const labelCounts = sortedLabels.map(
       (n) => this.pdfMapping!.labelCounts.get(String(n)) || 1,
     );
@@ -355,7 +622,8 @@ export class LabelMatcher {
         const pdfCountRaw = labelCounts[i];
         const paperInfos = labelPaperInfos.get(label) || [];
         const nonErrataInfos = paperInfos.filter((p) => !p.isErratum);
-        const pdfCount = nonErrataInfos.length > 0 ? nonErrataInfos.length : pdfCountRaw;
+        const pdfCount =
+          nonErrataInfos.length > 0 ? nonErrataInfos.length : pdfCountRaw;
 
         // If no paper info available, use default count
         if (paperInfos.length === 0) {
@@ -381,7 +649,11 @@ export class LabelMatcher {
         // FTR-MISSING-FIX: Track which PDF paper indices have been matched (not just count)
         const matchedPaperIndices = new Set<number>();
 
-        for (let pdfPaperIdx = 0; pdfPaperIdx < nonErrataInfos.length; pdfPaperIdx++) {
+        for (
+          let pdfPaperIdx = 0;
+          pdfPaperIdx < nonErrataInfos.length;
+          pdfPaperIdx++
+        ) {
           const pdfPaper = nonErrataInfos[pdfPaperIdx];
           if (pdfPaper.isErratum && matchedCount > 0) {
             // Skip counting erratum entries; they share the base paper
@@ -394,7 +666,10 @@ export class LabelMatcher {
           for (let j = 0; j < availableInspireEntries.length; j++) {
             if (usedIndices.has(j)) continue; // Skip already matched entries
 
-            const score = this.calculateMatchScore(pdfPaper, availableInspireEntries[j]);
+            const score = this.calculateMatchScore(
+              pdfPaper,
+              availableInspireEntries[j],
+            );
             if (score > bestMatchScore) {
               bestMatchScore = score;
               bestMatchIdx = j;
@@ -402,7 +677,10 @@ export class LabelMatcher {
           }
 
           // Accept match if score is good enough
-          if (bestMatchIdx !== null && bestMatchScore >= SCORE.VALIDATION_ACCEPT) {
+          if (
+            bestMatchIdx !== null &&
+            bestMatchScore >= SCORE.VALIDATION_ACCEPT
+          ) {
             usedIndices.add(bestMatchIdx);
             matchedCount++;
             matchedPaperIndices.add(pdfPaperIdx);
@@ -424,19 +702,29 @@ export class LabelMatcher {
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] [DBG] Label [${label}] expanding window: start=${startIdx}, end=${endIdx}, pdfCount=${pdfCount}, entriesWindow=${availableInspireEntries.length}`,
           );
-          for (let pdfPaperIdx = 0; pdfPaperIdx < paperInfos.length; pdfPaperIdx++) {
+          for (
+            let pdfPaperIdx = 0;
+            pdfPaperIdx < paperInfos.length;
+            pdfPaperIdx++
+          ) {
             const pdfPaper = paperInfos[pdfPaperIdx];
             let bestMatchIdx: number | null = null;
             let bestMatchScore = 0;
             for (let j = 0; j < availableInspireEntries.length; j++) {
               if (usedIndices.has(j)) continue;
-              const score = this.calculateMatchScore(pdfPaper, availableInspireEntries[j]);
+              const score = this.calculateMatchScore(
+                pdfPaper,
+                availableInspireEntries[j],
+              );
               if (score > bestMatchScore) {
                 bestMatchScore = score;
                 bestMatchIdx = j;
               }
             }
-            if (bestMatchIdx !== null && bestMatchScore >= SCORE.VALIDATION_ACCEPT) {
+            if (
+              bestMatchIdx !== null &&
+              bestMatchScore >= SCORE.VALIDATION_ACCEPT
+            ) {
               usedIndices.add(bestMatchIdx);
               matchedCount++;
               matchedPaperIndices.add(pdfPaperIdx);
@@ -453,7 +741,10 @@ export class LabelMatcher {
         let effectiveCount = matchedCount > 0 ? pdfCount : pdfCount;
         if (matchedCount === 0 && pdfCount > 0) {
           // If validation fails completely, keep at least 1 slot to preserve sequence
-          effectiveCount = Math.min(pdfCount, Math.max(1, totalInspire - currentInspireIdx));
+          effectiveCount = Math.min(
+            pdfCount,
+            Math.max(1, totalInspire - currentInspireIdx),
+          );
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] Label [${label}]: validation 0/${pdfCount}, reserving ${effectiveCount} slot(s) to avoid index collapse`,
           );
@@ -463,11 +754,13 @@ export class LabelMatcher {
 
         // FTR-MISSING-FIX: Record actually unmatched papers (not just tail slice)
         if (nonErrataInfos.length > 0) {
-          const unmatchedPapers = nonErrataInfos.filter((_, idx) => !matchedPaperIndices.has(idx));
+          const unmatchedPapers = nonErrataInfos.filter(
+            (_, idx) => !matchedPaperIndices.has(idx),
+          );
           if (unmatchedPapers.length > 0) {
             this.pdfMissingByLabel.set(label, unmatchedPapers);
             Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] [${label}] Unmatched papers: ${unmatchedPapers.map(p => `${p.firstAuthorLastName || "?"} ${p.year || "?"}`).join(", ")}`,
+              `[${config.addonName}] [PDF-ANNOTATE] [${label}] Unmatched papers: ${unmatchedPapers.map((p) => `${p.firstAuthorLastName || "?"} ${p.year || "?"}`).join(", ")}`,
             );
           } else {
             this.pdfMissingByLabel.delete(label);
@@ -522,15 +815,15 @@ export class LabelMatcher {
         );
       }
 
-    // Decide strict mode after coverage is known (computed after mapping)
-    pendingStrictDecision = {
-      strictPref,
-      mismatchDetected,
-      wellAligned,
-      finalTotal,
-      mismatch,
-      ratio,
-    };
+      // Decide strict mode after coverage is known (computed after mapping)
+      pendingStrictDecision = {
+        strictPref,
+        mismatchDetected,
+        wellAligned,
+        finalTotal,
+        mismatch,
+        ratio,
+      };
     } else if (totalPDFExpected > totalInspire) {
       // No paper infos available, fall back to conservative reduction
       Zotero.debug(
@@ -585,8 +878,10 @@ export class LabelMatcher {
     // Now that currentIdx is final, recompute coverage and decide strict mode
     const coverage = totalInspire > 0 ? currentIdx / totalInspire : 0;
     if (pendingStrictDecision) {
-      const { strictPref, mismatchDetected, wellAligned } = pendingStrictDecision;
-      this.pdfOverParsed = (pendingStrictDecision.finalTotal ?? finalTotal) > totalInspire;
+      const { strictPref, mismatchDetected, wellAligned } =
+        pendingStrictDecision;
+      this.pdfOverParsed =
+        (pendingStrictDecision.finalTotal ?? finalTotal) > totalInspire;
       this.pdfOverParsedRatio =
         totalInspire > 0
           ? (pendingStrictDecision.finalTotal ?? finalTotal) / totalInspire
@@ -621,7 +916,11 @@ export class LabelMatcher {
     inspireEntries: InspireReferenceEntry[],
   ): number | null {
     // We need at least one piece of info to match
-    if (!pdfPaper.firstAuthorLastName && !pdfPaper.year && !pdfPaper.pageStart) {
+    if (
+      !pdfPaper.firstAuthorLastName &&
+      !pdfPaper.year &&
+      !pdfPaper.pageStart
+    ) {
       return null;
     }
 
@@ -636,13 +935,13 @@ export class LabelMatcher {
       if (pdfPaper.firstAuthorLastName) {
         checks++;
         const pdfAuthor = pdfPaper.firstAuthorLastName.toLowerCase();
-        
+
         // Check against first author in INSPIRE
         if (entry.authors && entry.authors.length > 0) {
           const firstAuthorFull = entry.authors[0].toLowerCase();
           // Extract last name from INSPIRE author (handles "S. Okubo" or "Okubo, S.")
           const inspireLastName = extractLastName(firstAuthorFull);
-          
+
           // Exact last name match
           if (pdfAuthor === inspireLastName) {
             score += 4; // Perfect author match
@@ -655,7 +954,7 @@ export class LabelMatcher {
             score += 3; // Good author match
           }
         }
-        
+
         // Also check authorText for broader matching
         if (score < 3 && entry.authorText) {
           const authorText = entry.authorText.toLowerCase();
@@ -740,11 +1039,10 @@ export class LabelMatcher {
     const paperInfosRaw = this.pdfPaperInfos?.get(normalizedLabel);
     const nonErrataInfos = paperInfosRaw?.filter((p) => !p.isErratum) ?? [];
     const paperInfos =
-      nonErrataInfos.length > 0
-        ? nonErrataInfos
-        : paperInfosRaw;
+      nonErrataInfos.length > 0 ? nonErrataInfos : paperInfosRaw;
     const expectedCount = paperInfos ? paperInfos.length : 0;
-    const overParsedActive = this.pdfOverParsed && this.pdfOverParsedRatio > 1.05;
+    const overParsedActive =
+      this.pdfOverParsed && this.pdfOverParsedRatio > 1.05;
 
     // FTR-MISSING-FIX: Track which PDF paper indices have been matched (function-level scope)
     const matchedPaperIndices = new Set<number>();
@@ -753,6 +1051,22 @@ export class LabelMatcher {
     const maxInspireLabel = this.getMaxInspireLabel();
     const noLabelsInInspire = maxInspireLabel === 0;
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // FTR-OVERLAY-REFS: Try overlay matching first for numeric labels
+    // Zotero's overlay provides the most accurate citation→reference mapping
+    // This is only used for numeric citations - Author-Year uses matchAuthorYear()
+    // FTR-OVERLAY-MULTI-REF: Now returns array to support multiple papers per label
+    // ─────────────────────────────────────────────────────────────────────────────
+    if (this.hasReliableOverlayMapping()) {
+      const overlayMatches = this.tryMatchByOverlay(normalizedLabel);
+      if (overlayMatches.length > 0) {
+        // Overlay matches found - return immediately as this is the most reliable source
+        // FTR-OVERLAY-MULTI-REF: Returns all matched papers under this label
+        return overlayMatches;
+      }
+      // No overlay match - continue with other strategies
+    }
+
     const preferPdfMapping =
       this.pdfLabelMap &&
       !noLabelsInInspire && // Don't prefer sequence-based PDF mapping when no labels exist
@@ -760,20 +1074,30 @@ export class LabelMatcher {
         this.pdfMappingUsable ||
         this.hasDuplicateLabels ||
         alignment.recommendation !== "USE_INSPIRE_LABEL");
-    const preferSeqMapping = this.pdfLabelMap && preferPdfMapping && !overParsedActive;
-
+    const preferSeqMapping =
+      this.pdfLabelMap && preferPdfMapping && !overParsedActive;
 
     // Diagnose where matching label/arXiv might reside in INSPIRE entries and pre-add aligned labels
     if (paperInfos?.length) {
       const firstPaper = paperInfos[0];
       const targetArxiv = normalizeArxivId(firstPaper.arxivId);
-      const labelMatches: Array<{ idx: number; entryId: string | undefined; inspireLabel: string | null; arxiv: string | null }> = [];
+      const labelMatches: Array<{
+        idx: number;
+        entryId: string | undefined;
+        inspireLabel: string | null;
+        arxiv: string | null;
+      }> = [];
       for (let i = 0; i < this.entries.length; i++) {
         const entry = this.entries[i];
         const entryLabel = entry.label ?? null;
         const entryArxiv = normalizeArxivId(entry.arxivDetails) ?? null;
         if (entryLabel && entryLabel.trim() === normalizedLabel) {
-          labelMatches.push({ idx: i, entryId: entry.id, inspireLabel: entryLabel, arxiv: entryArxiv });
+          labelMatches.push({
+            idx: i,
+            entryId: entry.id,
+            inspireLabel: entryLabel,
+            arxiv: entryArxiv,
+          });
         }
         if (targetArxiv && entryArxiv && entryArxiv === targetArxiv) {
           // keep for potential future use; currently unused
@@ -797,11 +1121,15 @@ export class LabelMatcher {
     // NOTE: Only log as VERSION-MISMATCH when labels exist but PDF label exceeds max
     // If maxInspireLabel is 0, it means INSPIRE has no labels (not a version mismatch)
     const numLabelForDiag = parseInt(normalizedLabel, 10);
-    if (!isNaN(numLabelForDiag) && !noLabelsInInspire && numLabelForDiag > maxInspireLabel) {
+    if (
+      !isNaN(numLabelForDiag) &&
+      !noLabelsInInspire &&
+      numLabelForDiag > maxInspireLabel
+    ) {
       Zotero.debug(
         `[${config.addonName}] [PDF-ANNOTATE] [VERSION-MISMATCH] Label [${normalizedLabel}] exceeds INSPIRE max ${maxInspireLabel}. ` +
-        `paperInfos=${paperInfos ? `${paperInfos.length} paper(s)` : 'NONE'}. ` +
-        `arXiv=${paperInfos?.[0]?.arxivId || 'N/A'}, DOI=${paperInfos?.[0]?.doi || 'N/A'}`,
+          `paperInfos=${paperInfos ? `${paperInfos.length} paper(s)` : "NONE"}. ` +
+          `arXiv=${paperInfos?.[0]?.arxivId || "N/A"}, DOI=${paperInfos?.[0]?.doi || "N/A"}`,
       );
     }
 
@@ -809,7 +1137,8 @@ export class LabelMatcher {
     let hasStrong = false;
     if (paperInfos?.length) {
       const nonErrataInfos = paperInfos.filter((p) => !p.isErratum);
-      const papersForStrong = nonErrataInfos.length > 0 ? nonErrataInfos : paperInfos;
+      const papersForStrong =
+        nonErrataInfos.length > 0 ? nonErrataInfos : paperInfos;
       const mappedIndices = this.pdfLabelMap?.get(normalizedLabel);
       const indicesToCheckPrimary =
         mappedIndices && mappedIndices.length
@@ -822,12 +1151,20 @@ export class LabelMatcher {
         score: number;
         entryLabel: string | null;
       }> = [];
-      let best: { idx: number; kind: "arxiv" | "doi" | "journal"; score: number; entry: InspireReferenceEntry } | null = null;
+      let best: {
+        idx: number;
+        kind: "arxiv" | "doi" | "journal";
+        score: number;
+        entry: InspireReferenceEntry;
+      } | null = null;
       const searchBuckets: number[][] = [];
       searchBuckets.push(indicesToCheckPrimary);
       if (mappedIndices && mappedIndices.length) {
         const min = Math.max(0, Math.min(...mappedIndices) - 1);
-        const max = Math.min(this.entries.length - 1, Math.max(...mappedIndices) + 1);
+        const max = Math.min(
+          this.entries.length - 1,
+          Math.max(...mappedIndices) + 1,
+        );
         const window: number[] = [];
         for (let i = min; i <= max; i++) window.push(i);
         searchBuckets.push(window);
@@ -838,20 +1175,36 @@ export class LabelMatcher {
       for (const pdfPaper of papersForStrong) {
         for (const bucket of searchBuckets) {
           for (const i of bucket) {
-          const mk = getStrongMatchKind(pdfPaper, this.entries[i]);
-          if (!mk) continue;
-          const priority = mk.kind === "arxiv" ? 3 : mk.kind === "doi" ? 2 : 1;
-          const bestPri = best ? (best.kind === "arxiv" ? 3 : best.kind === "doi" ? 2 : 1) : 0;
-          candidateLogs.push({
-            pdfIdx: paperInfos.indexOf(pdfPaper),
-            entryIdx: i,
-            kind: mk.kind,
-            score: mk.score,
-            entryLabel: this.entries[i].label ?? null,
-          });
-          if (!best || priority > bestPri || (priority === bestPri && mk.score > best.score)) {
-            best = { idx: i, kind: mk.kind, score: mk.score, entry: this.entries[i] };
-          }
+            const mk = getStrongMatchKind(pdfPaper, this.entries[i]);
+            if (!mk) continue;
+            const priority =
+              mk.kind === "arxiv" ? 3 : mk.kind === "doi" ? 2 : 1;
+            const bestPri = best
+              ? best.kind === "arxiv"
+                ? 3
+                : best.kind === "doi"
+                  ? 2
+                  : 1
+              : 0;
+            candidateLogs.push({
+              pdfIdx: paperInfos.indexOf(pdfPaper),
+              entryIdx: i,
+              kind: mk.kind,
+              score: mk.score,
+              entryLabel: this.entries[i].label ?? null,
+            });
+            if (
+              !best ||
+              priority > bestPri ||
+              (priority === bestPri && mk.score > best.score)
+            ) {
+              best = {
+                idx: i,
+                kind: mk.kind,
+                score: mk.score,
+                entry: this.entries[i],
+              };
+            }
           }
         }
       }
@@ -859,7 +1212,9 @@ export class LabelMatcher {
         hasStrong = true;
         if (expectedCount === 0 || results.length < expectedCount) {
           // FTR-PDF-MATCHING: Build identifier info for diagnostic feedback
-          let matchedIdentifier: { type: "arxiv" | "doi" | "journal"; value: string } | undefined;
+          let matchedIdentifier:
+            | { type: "arxiv" | "doi" | "journal"; value: string }
+            | undefined;
           if (best.kind === "arxiv") {
             const arxivId = normalizeArxivId(best.entry.arxivDetails);
             if (arxivId) matchedIdentifier = { type: "arxiv", value: arxivId };
@@ -868,13 +1223,24 @@ export class LabelMatcher {
             if (doi) matchedIdentifier = { type: "doi", value: doi };
           } else if (best.kind === "journal") {
             const pub = best.entry.publicationInfo;
-            if (pub) matchedIdentifier = { type: "journal", value: `${pub.journal_title || ""} ${pub.journal_volume || ""}`.trim() };
+            if (pub)
+              matchedIdentifier = {
+                type: "journal",
+                value:
+                  `${pub.journal_title || ""} ${pub.journal_volume || ""}`.trim(),
+              };
           }
 
           // FTR-MISSING-FIX: Calculate and track the source paper index
-          const pdfPaperIdx = paperInfos ? paperInfos.indexOf(papersForStrong[papersForStrong.findIndex(p =>
-            getStrongMatchKind(p, best.entry) !== null
-          )]) : -1;
+          const pdfPaperIdx = paperInfos
+            ? paperInfos.indexOf(
+                papersForStrong[
+                  papersForStrong.findIndex(
+                    (p) => getStrongMatchKind(p, best.entry) !== null,
+                  )
+                ],
+              )
+            : -1;
 
           results.push({
             pdfLabel,
@@ -891,7 +1257,6 @@ export class LabelMatcher {
           if (pdfPaperIdx >= 0) {
             matchedPaperIndices.add(pdfPaperIdx);
           }
-
         }
       }
 
@@ -912,7 +1277,12 @@ export class LabelMatcher {
 
         // Version mismatch: PDF has more refs than INSPIRE - try global identifier search
         // Don't treat "no labels in INSPIRE" as version mismatch - fall through to index fallback
-        if (!noLabelsInInspire && !isNaN(numLabel) && numLabel > maxInspireLabel && paperInfos?.length) {
+        if (
+          !noLabelsInInspire &&
+          !isNaN(numLabel) &&
+          numLabel > maxInspireLabel &&
+          paperInfos?.length
+        ) {
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] [VERSION-MISMATCH-SEARCH] Label [${normalizedLabel}] exceeds max ${maxInspireLabel}, trying global arXiv/DOI search`,
           );
@@ -934,7 +1304,11 @@ export class LabelMatcher {
               const entryDoiNorm = normalizeDoi(entry.doi);
 
               // arXiv match
-              if (pdfArxivNorm && entryArxivNorm && pdfArxivNorm === entryArxivNorm) {
+              if (
+                pdfArxivNorm &&
+                entryArxivNorm &&
+                pdfArxivNorm === entryArxivNorm
+              ) {
                 results.push({
                   pdfLabel,
                   entryIndex: i,
@@ -999,7 +1373,8 @@ export class LabelMatcher {
         const exists = results.some((r) => r.entryIndex === idx);
         if (!exists) {
           const inspireLabel = this.entries[idx]?.label ?? null;
-          const labelMatchesPdf = inspireLabel && inspireLabel.trim() === normalizedLabel;
+          const labelMatchesPdf =
+            inspireLabel && inspireLabel.trim() === normalizedLabel;
           if (labelMatchesPdf) {
             pdfMapHasAlignedLabel = true;
           }
@@ -1008,14 +1383,17 @@ export class LabelMatcher {
             entryIndex: idx,
             entryId: this.entries[idx].id,
             confidence: labelMatchesPdf
-              ? (this.pdfMapping?.confidence === "high" ? "high" : hasStrong ? "medium" : "low")
+              ? this.pdfMapping?.confidence === "high"
+                ? "high"
+                : hasStrong
+                  ? "medium"
+                  : "low"
               : "low",
             matchMethod: labelMatchesPdf ? "exact" : "inferred",
           });
           added.push(idx);
         }
       }
-
     }
 
     // NOTE: Reconciliation moved to end of match() function, before return statements.
@@ -1023,9 +1401,7 @@ export class LabelMatcher {
 
     // When PDF mapping is misaligned and INSPIRE labels are duplicated, allow continuing to later strategies
     const allowFallbackAfterPdfMap =
-      results.length > 0 &&
-      this.hasDuplicateLabels &&
-      !pdfMapHasAlignedLabel;
+      results.length > 0 && this.hasDuplicateLabels && !pdfMapHasAlignedLabel;
 
     // Do not return early; we will sort and slice at the end
 
@@ -1043,7 +1419,8 @@ export class LabelMatcher {
             pdfLabel,
             entryIndex: idx,
             entryId: this.entries[idx].id,
-            confidence: this.pdfMapping?.confidence === "high" ? "high" : "medium",
+            confidence:
+              this.pdfMapping?.confidence === "high" ? "high" : "medium",
             matchMethod: "exact",
           });
         }
@@ -1053,21 +1430,48 @@ export class LabelMatcher {
       }
 
       // Global fallback (prioritize arXiv); when PDF parsing over-parses, prefer this path
-      const shouldForceGlobalFallback = this.pdfOverParsed && this.pdfOverParsedRatio > 1.05;
+      const shouldForceGlobalFallback =
+        this.pdfOverParsed && this.pdfOverParsedRatio > 1.05;
       if (paperInfos?.length) {
-        let bestAny: { idx: number; score: number; paper: PDFPaperInfo; yearOk: boolean; yearDelta: number | null; arxivOk: boolean } | null = null;
-        let bestYearOk: { idx: number; score: number; paper: PDFPaperInfo; yearOk: boolean; yearDelta: number | null; arxivOk: boolean } | null = null;
-        let bestArxiv: { idx: number; score: number; paper: PDFPaperInfo } | null = null;
+        let bestAny: {
+          idx: number;
+          score: number;
+          paper: PDFPaperInfo;
+          yearOk: boolean;
+          yearDelta: number | null;
+          arxivOk: boolean;
+        } | null = null;
+        let bestYearOk: {
+          idx: number;
+          score: number;
+          paper: PDFPaperInfo;
+          yearOk: boolean;
+          yearDelta: number | null;
+          arxivOk: boolean;
+        } | null = null;
+        let bestArxiv: {
+          idx: number;
+          score: number;
+          paper: PDFPaperInfo;
+        } | null = null;
         for (const paper of paperInfos) {
           const pdfArxivNorm = normalizeArxivId(paper.arxivId);
           for (let i = 0; i < this.entries.length; i++) {
             const score = this.calculateMatchScore(paper, this.entries[i]);
             const entryYear = this.entries[i].year;
             const yearDelta =
-              paper.year && entryYear ? Math.abs(parseInt(paper.year, 10) - parseInt(entryYear, 10)) : null;
-            const yearOk = yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE; // Accept up to ±3 years (arXiv vs published)
-            const entryArxivNorm = normalizeArxivId(this.entries[i].arxivDetails);
-            const arxivOk = !!pdfArxivNorm && !!entryArxivNorm && pdfArxivNorm === entryArxivNorm;
+              paper.year && entryYear
+                ? Math.abs(parseInt(paper.year, 10) - parseInt(entryYear, 10))
+                : null;
+            const yearOk =
+              yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE; // Accept up to ±3 years (arXiv vs published)
+            const entryArxivNorm = normalizeArxivId(
+              this.entries[i].arxivDetails,
+            );
+            const arxivOk =
+              !!pdfArxivNorm &&
+              !!entryArxivNorm &&
+              pdfArxivNorm === entryArxivNorm;
             if (!bestAny || score > bestAny.score) {
               bestAny = { idx: i, score, paper, yearOk, yearDelta, arxivOk };
             }
@@ -1090,7 +1494,10 @@ export class LabelMatcher {
           chosenIdx = bestArxiv.idx;
           chosenScore = bestArxiv.score;
           chosenArxivOk = true;
-        } else if (bestYearOk && (!bestAny || bestYearOk.score >= bestAny.score - 1)) {
+        } else if (
+          bestYearOk &&
+          (!bestAny || bestYearOk.score >= bestAny.score - 1)
+        ) {
           chosenIdx = bestYearOk.idx;
           chosenScore = bestYearOk.score;
           chosenYearOk = true;
@@ -1135,14 +1542,29 @@ export class LabelMatcher {
       // If strict inputs existed (pdf map or paper infos), stop here and return whatever we have.
       // If neither mapping nor paper info exists, allow normal label/index fallback below.
       const hadStrictInputs =
-        (pdfMatches && pdfMatches.length > 0) || (paperInfos && paperInfos.length > 0);
+        (pdfMatches && pdfMatches.length > 0) ||
+        (paperInfos && paperInfos.length > 0);
       // Do not return here; allow downstream strategies and final sorting
     }
 
     // Strategy 0a: If over-parsed, try global best (arXiv/DOI/author/year) before trusting sequence mapping
     if (preferPdfMapping && overParsedActive && paperInfos?.length) {
-      let bestAny: { idx: number; score: number; yearOk: boolean; yearDelta: number | null; arxivOk: boolean; doiOk: boolean } | null = null;
-      let bestYearOk: { idx: number; score: number; yearOk: boolean; yearDelta: number | null; arxivOk: boolean; doiOk: boolean } | null = null;
+      let bestAny: {
+        idx: number;
+        score: number;
+        yearOk: boolean;
+        yearDelta: number | null;
+        arxivOk: boolean;
+        doiOk: boolean;
+      } | null = null;
+      let bestYearOk: {
+        idx: number;
+        score: number;
+        yearOk: boolean;
+        yearDelta: number | null;
+        arxivOk: boolean;
+        doiOk: boolean;
+      } | null = null;
       let bestArxiv: { idx: number; score: number } | null = null;
       let bestDoi: { idx: number; score: number } | null = null;
       for (const pdfPaper of paperInfos) {
@@ -1152,12 +1574,19 @@ export class LabelMatcher {
           const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
           const entryYear = this.entries[i].year;
           const yearDelta =
-            pdfPaper.year && entryYear ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10)) : null;
-          const yearOk = yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
+            pdfPaper.year && entryYear
+              ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10))
+              : null;
+          const yearOk =
+            yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
           const entryArxivNorm = normalizeArxivId(this.entries[i].arxivDetails);
-          const arxivOk = !!pdfArxivNorm && !!entryArxivNorm && pdfArxivNorm === entryArxivNorm;
+          const arxivOk =
+            !!pdfArxivNorm &&
+            !!entryArxivNorm &&
+            pdfArxivNorm === entryArxivNorm;
           const entryDoiNorm = normalizeDoi(this.entries[i].doi);
-          const doiOk = !!pdfDoiNorm && !!entryDoiNorm && pdfDoiNorm === entryDoiNorm;
+          const doiOk =
+            !!pdfDoiNorm && !!entryDoiNorm && pdfDoiNorm === entryDoiNorm;
           if (!bestAny || score > bestAny.score) {
             bestAny = { idx: i, score, yearOk, yearDelta, arxivOk, doiOk };
           }
@@ -1187,7 +1616,10 @@ export class LabelMatcher {
         chosenIdx = bestDoi.idx;
         chosenScore = bestDoi.score;
         chosenDoiOk = true;
-      } else if (bestYearOk && (!bestAny || bestYearOk.score >= bestAny.score - 1)) {
+      } else if (
+        bestYearOk &&
+        (!bestAny || bestYearOk.score >= bestAny.score - 1)
+      ) {
         chosenIdx = bestYearOk.idx;
         chosenScore = bestYearOk.score;
         chosenYearOk = true;
@@ -1215,8 +1647,14 @@ export class LabelMatcher {
             pdfLabel,
             entryIndex: chosenIdx,
             entryId: entry.id,
-            confidence: chosenArxivOk || chosenDoiOk ? "high" : chosenYearOk ? "high" : "medium",
-            matchMethod: chosenArxivOk || chosenDoiOk ? "exact" : "strict-fallback",
+            confidence:
+              chosenArxivOk || chosenDoiOk
+                ? "high"
+                : chosenYearOk
+                  ? "high"
+                  : "medium",
+            matchMethod:
+              chosenArxivOk || chosenDoiOk ? "exact" : "strict-fallback",
           });
           // do not return; allow final sorting
         }
@@ -1239,7 +1677,7 @@ export class LabelMatcher {
 
       Zotero.debug(
         `[${config.addonName}] [PDF-ANNOTATE] Multi-paper handling for [${normalizedLabel}]: ${paperInfos.length} papers, ` +
-        `searching ${this.entries.length} entries (expected range: ${expectedMinIdx}-${expectedMaxIdx})`,
+          `searching ${this.entries.length} entries (expected range: ${expectedMinIdx}-${expectedMaxIdx})`,
       );
 
       const used = new Set<number>();
@@ -1263,7 +1701,10 @@ export class LabelMatcher {
         let bestIdx = bestLocalIdx;
         let bestScore = bestLocalScore;
 
-        if (bestLocalScore < SCORE.VALIDATION_ACCEPT || bestLocalScore <= SCORE.MARGINAL_THRESHOLD) {
+        if (
+          bestLocalScore < SCORE.VALIDATION_ACCEPT ||
+          bestLocalScore <= SCORE.MARGINAL_THRESHOLD
+        ) {
           // Local match is weak, try global search
           let bestGlobalIdx = -1;
           let bestGlobalScore = 0;
@@ -1279,7 +1720,10 @@ export class LabelMatcher {
 
           // Only accept global match if it's significantly better AND has strong identifier
           // (score > 8 means likely has journal/DOI/arXiv match)
-          if (bestGlobalScore > bestLocalScore && bestGlobalScore > SCORE.MARGINAL_THRESHOLD) {
+          if (
+            bestGlobalScore > bestLocalScore &&
+            bestGlobalScore > SCORE.MARGINAL_THRESHOLD
+          ) {
             bestIdx = bestGlobalIdx;
             bestScore = bestGlobalScore;
             Zotero.debug(
@@ -1300,13 +1744,18 @@ export class LabelMatcher {
           used.add(bestIdx);
           const entry = this.entries[bestIdx];
           const confidence =
-            bestScore >= SCORE.NO_YEAR_ACCEPT ? "high" : bestScore >= SCORE.YEAR_MATCH_ACCEPT ? "medium" : "low";
+            bestScore >= SCORE.NO_YEAR_ACCEPT
+              ? "high"
+              : bestScore >= SCORE.YEAR_MATCH_ACCEPT
+                ? "medium"
+                : "low";
           results.push({
             pdfLabel,
             entryIndex: bestIdx,
             entryId: entry.id,
             confidence: confidence as MatchConfidence,
-            matchMethod: bestScore >= SCORE.JOURNAL_EXACT ? "exact" : "strict-fallback",
+            matchMethod:
+              bestScore >= SCORE.JOURNAL_EXACT ? "exact" : "strict-fallback",
             matchedIdentifier: undefined,
             score: bestScore,
           });
@@ -1328,8 +1777,8 @@ export class LabelMatcher {
               this.pdfMapping?.confidence === "high"
                 ? "high"
                 : overParsedActive
-                ? "low"
-                : "medium",
+                  ? "low"
+                  : "medium",
             matchMethod: overParsedActive ? "inferred" : "exact", // downgrade confidence when over-parsed
           });
         }
@@ -1345,13 +1794,21 @@ export class LabelMatcher {
     if (preferPdfMapping && paperInfos?.length) {
       // Calculate expected position range based on label number
       const labelNumForPos = parseInt(normalizedLabel, 10);
-      const expectedMinIdx = isNaN(labelNumForPos) ? 0 : Math.max(0, labelNumForPos - 2);
+      const expectedMinIdx = isNaN(labelNumForPos)
+        ? 0
+        : Math.max(0, labelNumForPos - 2);
       const expectedMaxIdx = isNaN(labelNumForPos)
         ? this.entries.length - 1
         : Math.min(this.entries.length - 1, labelNumForPos * 2 + 8);
 
       // Track both local and global best matches
-      type BestMatch = { idx: number; score: number; yearOk: boolean; yearDelta: number | null; arxivOk: boolean };
+      type BestMatch = {
+        idx: number;
+        score: number;
+        yearOk: boolean;
+        yearDelta: number | null;
+        arxivOk: boolean;
+      };
       let bestLocalAny: BestMatch | null = null;
       let bestLocalYearOk: BestMatch | null = null;
       let bestLocalArxiv: { idx: number; score: number } | null = null;
@@ -1365,23 +1822,41 @@ export class LabelMatcher {
           const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
           const entryYear = this.entries[i].year;
           const yearDelta =
-            pdfPaper.year && entryYear ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10)) : null;
-          const yearOk = yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
+            pdfPaper.year && entryYear
+              ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10))
+              : null;
+          const yearOk =
+            yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
           const entryArxivNorm = normalizeArxivId(this.entries[i].arxivDetails);
-          const arxivOk = !!pdfArxivNorm && !!entryArxivNorm && pdfArxivNorm === entryArxivNorm;
-          const matchData: BestMatch = { idx: i, score, yearOk, yearDelta, arxivOk };
+          const arxivOk =
+            !!pdfArxivNorm &&
+            !!entryArxivNorm &&
+            pdfArxivNorm === entryArxivNorm;
+          const matchData: BestMatch = {
+            idx: i,
+            score,
+            yearOk,
+            yearDelta,
+            arxivOk,
+          };
 
           // Determine if this entry is in the expected local range
           const isLocal = i >= expectedMinIdx && i <= expectedMaxIdx;
 
           if (isLocal) {
-            if (!bestLocalAny || score > bestLocalAny.score) bestLocalAny = matchData;
-            if (yearOk && (!bestLocalYearOk || score > bestLocalYearOk.score)) bestLocalYearOk = matchData;
-            if (arxivOk && (!bestLocalArxiv || score > bestLocalArxiv.score)) bestLocalArxiv = { idx: i, score };
+            if (!bestLocalAny || score > bestLocalAny.score)
+              bestLocalAny = matchData;
+            if (yearOk && (!bestLocalYearOk || score > bestLocalYearOk.score))
+              bestLocalYearOk = matchData;
+            if (arxivOk && (!bestLocalArxiv || score > bestLocalArxiv.score))
+              bestLocalArxiv = { idx: i, score };
           } else {
-            if (!bestGlobalAny || score > bestGlobalAny.score) bestGlobalAny = matchData;
-            if (yearOk && (!bestGlobalYearOk || score > bestGlobalYearOk.score)) bestGlobalYearOk = matchData;
-            if (arxivOk && (!bestGlobalArxiv || score > bestGlobalArxiv.score)) bestGlobalArxiv = { idx: i, score };
+            if (!bestGlobalAny || score > bestGlobalAny.score)
+              bestGlobalAny = matchData;
+            if (yearOk && (!bestGlobalYearOk || score > bestGlobalYearOk.score))
+              bestGlobalYearOk = matchData;
+            if (arxivOk && (!bestGlobalArxiv || score > bestGlobalArxiv.score))
+              bestGlobalArxiv = { idx: i, score };
           }
         }
       }
@@ -1405,7 +1880,10 @@ export class LabelMatcher {
         chosenArxivOk = true;
       }
       // Priority 2: Year-matched with good score (local first)
-      else if (bestLocalYearOk && bestLocalYearOk.score >= SCORE.YEAR_MATCH_ACCEPT) {
+      else if (
+        bestLocalYearOk &&
+        bestLocalYearOk.score >= SCORE.YEAR_MATCH_ACCEPT
+      ) {
         chosenIdx = bestLocalYearOk.idx;
         chosenScore = bestLocalYearOk.score;
         chosenYearOk = true;
@@ -1413,7 +1891,10 @@ export class LabelMatcher {
         chosenArxivOk = bestLocalYearOk.arxivOk;
       }
       // Priority 3: Global year-matched only if score is high (not marginal)
-      else if (bestGlobalYearOk && bestGlobalYearOk.score > SCORE.MARGINAL_THRESHOLD) {
+      else if (
+        bestGlobalYearOk &&
+        bestGlobalYearOk.score > SCORE.MARGINAL_THRESHOLD
+      ) {
         chosenIdx = bestGlobalYearOk.idx;
         chosenScore = bestGlobalYearOk.score;
         chosenYearOk = true;
@@ -1432,7 +1913,10 @@ export class LabelMatcher {
         chosenArxivOk = bestLocalAny.arxivOk;
       }
       // Priority 5: Global best only if score is high (reject marginal distant matches)
-      else if (bestGlobalAny && bestGlobalAny.score > SCORE.MARGINAL_THRESHOLD) {
+      else if (
+        bestGlobalAny &&
+        bestGlobalAny.score > SCORE.MARGINAL_THRESHOLD
+      ) {
         chosenIdx = bestGlobalAny.idx;
         chosenScore = bestGlobalAny.score;
         chosenYearOk = bestGlobalAny.yearOk;
@@ -1464,10 +1948,17 @@ export class LabelMatcher {
             pdfLabel,
             entryIndex: chosenIdx,
             entryId: entry.id,
-            confidence: chosenArxivOk ? "high" : chosenYearOk ? "high" : "medium",
+            confidence: chosenArxivOk
+              ? "high"
+              : chosenYearOk
+                ? "high"
+                : "medium",
             matchMethod: "strict-fallback",
             matchedIdentifier: chosenArxivOk
-              ? { type: "arxiv", value: normalizeArxivId(paperInfos[0].arxivId) ?? "arxiv" }
+              ? {
+                  type: "arxiv",
+                  value: normalizeArxivId(paperInfos[0].arxivId) ?? "arxiv",
+                }
               : undefined,
           });
         }
@@ -1507,7 +1998,6 @@ export class LabelMatcher {
         );
       }
       // Continue to later strategies; do not return early
-
     }
 
     // Strategy 1: Exact match with INSPIRE label (may return multiple entries)
@@ -1523,7 +2013,6 @@ export class LabelMatcher {
         });
       }
       // Do NOT return; continue to allow combined results sorting
-
     }
 
     // If labelMatches exist and no aligned result yet, force-add a highest-priority label match
@@ -1555,7 +2044,8 @@ export class LabelMatcher {
     // This is a version mismatch case where PDF and INSPIRE have different reference lists
     // EXCEPTION: If maxInspireLabel is 0 (no labels in INSPIRE data), try scoring-based match first
     // Note: noLabelsInInspire and maxInspireLabel are calculated at function start
-    const isVersionMismatch = !noLabelsInInspire && !isNaN(numLabel) && numLabel > maxInspireLabel;
+    const isVersionMismatch =
+      !noLabelsInInspire && !isNaN(numLabel) && numLabel > maxInspireLabel;
 
     // FTR-NO-LABELS-FIX: When INSPIRE has no labels, use scoring-based matching with paperInfos
     // instead of blind index fallback (which assumes PDF order matches INSPIRE order)
@@ -1564,8 +2054,22 @@ export class LabelMatcher {
         `[${config.addonName}] [PDF-ANNOTATE] No INSPIRE labels, trying scoring-based match for [${normalizedLabel}] with ${paperInfos.length} paperInfo(s)`,
       );
 
-      let bestAny: { idx: number; score: number; yearOk: boolean; yearDelta: number | null; arxivOk: boolean; doiOk: boolean } | null = null;
-      let bestYearOk: { idx: number; score: number; yearOk: boolean; yearDelta: number | null; arxivOk: boolean; doiOk: boolean } | null = null;
+      let bestAny: {
+        idx: number;
+        score: number;
+        yearOk: boolean;
+        yearDelta: number | null;
+        arxivOk: boolean;
+        doiOk: boolean;
+      } | null = null;
+      let bestYearOk: {
+        idx: number;
+        score: number;
+        yearOk: boolean;
+        yearDelta: number | null;
+        arxivOk: boolean;
+        doiOk: boolean;
+      } | null = null;
       let bestArxiv: { idx: number; score: number } | null = null;
       let bestDoi: { idx: number; score: number } | null = null;
 
@@ -1577,12 +2081,19 @@ export class LabelMatcher {
           const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
           const entryYear = this.entries[i].year;
           const yearDelta =
-            pdfPaper.year && entryYear ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10)) : null;
-          const yearOk = yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
+            pdfPaper.year && entryYear
+              ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10))
+              : null;
+          const yearOk =
+            yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
           const entryArxivNorm = normalizeArxivId(this.entries[i].arxivDetails);
-          const arxivOk = !!pdfArxivNorm && !!entryArxivNorm && pdfArxivNorm === entryArxivNorm;
+          const arxivOk =
+            !!pdfArxivNorm &&
+            !!entryArxivNorm &&
+            pdfArxivNorm === entryArxivNorm;
           const entryDoiNorm = normalizeDoi(this.entries[i].doi);
-          const doiOk = !!pdfDoiNorm && !!entryDoiNorm && pdfDoiNorm === entryDoiNorm;
+          const doiOk =
+            !!pdfDoiNorm && !!entryDoiNorm && pdfDoiNorm === entryDoiNorm;
 
           if (!bestAny || score > bestAny.score) {
             bestAny = { idx: i, score, yearOk, yearDelta, arxivOk, doiOk };
@@ -1615,7 +2126,10 @@ export class LabelMatcher {
         chosenIdx = bestDoi.idx;
         chosenScore = bestDoi.score;
         chosenDoiOk = true;
-      } else if (bestYearOk && (!bestAny || bestYearOk.score >= bestAny.score - 1)) {
+      } else if (
+        bestYearOk &&
+        (!bestAny || bestYearOk.score >= bestAny.score - 1)
+      ) {
         chosenIdx = bestYearOk.idx;
         chosenScore = bestYearOk.score;
         chosenYearOk = true;
@@ -1645,7 +2159,12 @@ export class LabelMatcher {
             pdfLabel,
             entryIndex: chosenIdx,
             entryId: entry.id,
-            confidence: chosenArxivOk || chosenDoiOk ? "high" : chosenYearOk ? "medium" : "low",
+            confidence:
+              chosenArxivOk || chosenDoiOk
+                ? "high"
+                : chosenYearOk
+                  ? "medium"
+                  : "low",
             matchMethod: chosenArxivOk || chosenDoiOk ? "exact" : "inferred",
           });
           Zotero.debug(
@@ -1741,22 +2260,27 @@ export class LabelMatcher {
       const sorted = results
         .map((r) => {
           const entryLabel = this.entries[r.entryIndex]?.label ?? null;
-          const matchesPdf = entryLabel && entryLabel.trim() === normalizedLabel;
+          const matchesPdf =
+            entryLabel && entryLabel.trim() === normalizedLabel;
           const idPri =
             r.matchedIdentifier?.type === "arxiv"
               ? 3
               : r.matchedIdentifier?.type === "doi"
-              ? 2
-              : r.matchedIdentifier
-              ? 1
-              : 0;
+                ? 2
+                : r.matchedIdentifier
+                  ? 1
+                  : 0;
           // Compute publication match strength for scoring tie-breaker
-          const pubPri = computePublicationPriority(paperInfos?.[0], this.entries[r.entryIndex]);
+          const pubPri = computePublicationPriority(
+            paperInfos?.[0],
+            this.entries[r.entryIndex],
+          );
           return {
             ...r,
             __matchesPdf: !!matchesPdf,
             __methodPri: methodPriority[r.matchMethod] ?? 0,
-            __confPri: r.confidence === "high" ? 2 : r.confidence === "medium" ? 1 : 0,
+            __confPri:
+              r.confidence === "high" ? 2 : r.confidence === "medium" ? 1 : 0,
             __idPri: idPri,
             __pubPri: pubPri,
           };
@@ -1766,7 +2290,8 @@ export class LabelMatcher {
           if (a.__pubPri !== b.__pubPri) return b.__pubPri - a.__pubPri; // Prefer volume/page matches
           if (a.__matchesPdf !== b.__matchesPdf) return a.__matchesPdf ? -1 : 1;
           if (a.__confPri !== b.__confPri) return b.__confPri - a.__confPri;
-          if (a.__methodPri !== b.__methodPri) return b.__methodPri - a.__methodPri;
+          if (a.__methodPri !== b.__methodPri)
+            return b.__methodPri - a.__methodPri;
           return a.entryIndex - b.entryIndex;
         })
         .map(({ __matchesPdf, __methodPri, __confPri, ...r }) => r);
@@ -1783,7 +2308,8 @@ export class LabelMatcher {
         seen.add(r.entryIndex);
         return true;
       });
-      const hasStrongIdentifierLead = dedupedSorted[0]?.matchedIdentifier !== undefined;
+      const hasStrongIdentifierLead =
+        dedupedSorted[0]?.matchedIdentifier !== undefined;
       let finalList: MatchResult[];
       if (expectedCount > 0) {
         if (hasStrongIdentifierLead) {
@@ -1793,7 +2319,10 @@ export class LabelMatcher {
           if (expectedCount === 1) {
             finalList = dedupedSorted.slice(0, 1);
           } else {
-            const count = Math.max(1, Math.min(expectedCount, dedupedSorted.length));
+            const count = Math.max(
+              1,
+              Math.min(expectedCount, dedupedSorted.length),
+            );
             finalList = dedupedSorted.slice(0, count);
           }
         } else if (alignedSorted.length > 0) {
@@ -1830,14 +2359,20 @@ export class LabelMatcher {
       // 4. Unassigned PDF papers are "missing in INSPIRE"
       // ═══════════════════════════════════════════════════════════════════════════
       if (paperInfos && paperInfos.length > 0 && finalList.length > 0) {
-        const returnedEntries = finalList.map(r => this.entries[r.entryIndex]);
+        const returnedEntries = finalList.map(
+          (r) => this.entries[r.entryIndex],
+        );
 
         // Build all pairwise scores
-        const scorePairs: Array<{ pIdx: number; eIdx: number; score: number }> = [];
+        const scorePairs: Array<{ pIdx: number; eIdx: number; score: number }> =
+          [];
         for (let pIdx = 0; pIdx < paperInfos.length; pIdx++) {
           const pdfPaper = paperInfos[pIdx];
           for (let eIdx = 0; eIdx < returnedEntries.length; eIdx++) {
-            const score = this.calculateMatchScore(pdfPaper, returnedEntries[eIdx]);
+            const score = this.calculateMatchScore(
+              pdfPaper,
+              returnedEntries[eIdx],
+            );
             if (score >= SCORE.VALIDATION_ACCEPT) {
               scorePairs.push({ pIdx, eIdx, score });
             }
@@ -1850,7 +2385,11 @@ export class LabelMatcher {
         // Greedy one-to-one assignment
         const matchedPaperIndices = new Set<number>();
         const usedEntryIndices = new Set<number>();
-        const assignments: Array<{ pIdx: number; eIdx: number; score: number }> = [];
+        const assignments: Array<{
+          pIdx: number;
+          eIdx: number;
+          score: number;
+        }> = [];
 
         // FTR-MISSING-FIX: Higher threshold for reconciliation when PDF has journal info
         // A score of 5-6 (just author+year) is NOT enough to confirm a match
@@ -1867,7 +2406,11 @@ export class LabelMatcher {
 
           // FTR-MISSING-FIX: For marginal scores, verify journal/volume if PDF has this info
           // This prevents false matches where author+year match but journal is different
-          if (score < RECONCILIATION_THRESHOLD_WITH_JOURNAL && pdfPaper.journalAbbrev && pdfPaper.volume) {
+          if (
+            score < RECONCILIATION_THRESHOLD_WITH_JOURNAL &&
+            pdfPaper.journalAbbrev &&
+            pdfPaper.volume
+          ) {
             // PDF has specific journal info - verify it matches the entry
             const entryPub = entry.publicationInfo;
             if (entryPub) {
@@ -1876,7 +2419,7 @@ export class LabelMatcher {
               if (entryVol && String(entryVol) !== String(pdfPaper.volume)) {
                 Zotero.debug(
                   `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Rejecting marginal match: ` +
-                  `PDF[${pIdx}] "${pdfPaper.firstAuthorLastName}" vol=${pdfPaper.volume} != Entry[${eIdx}] vol=${entryVol} (score=${score})`,
+                    `PDF[${pIdx}] "${pdfPaper.firstAuthorLastName}" vol=${pdfPaper.volume} != Entry[${eIdx}] vol=${entryVol} (score=${score})`,
                 );
                 continue; // Skip this pair - volume mismatch
               }
@@ -1885,7 +2428,7 @@ export class LabelMatcher {
               if (score < SCORE.NO_YEAR_ACCEPT) {
                 Zotero.debug(
                   `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Rejecting marginal match: ` +
-                  `PDF[${pIdx}] has journal info but Entry[${eIdx}] has none (score=${score})`,
+                    `PDF[${pIdx}] has journal info but Entry[${eIdx}] has none (score=${score})`,
                 );
                 continue;
               }
@@ -1916,9 +2459,13 @@ export class LabelMatcher {
 
         // Filter: only keep entries that were verified matched
         const verifiedEntryIndices = new Set(
-          assignments.map(a => finalList[a.eIdx]?.entryIndex).filter(x => x !== undefined)
+          assignments
+            .map((a) => finalList[a.eIdx]?.entryIndex)
+            .filter((x) => x !== undefined),
         );
-        const filteredFinalList = finalList.filter(r => verifiedEntryIndices.has(r.entryIndex));
+        const filteredFinalList = finalList.filter((r) =>
+          verifiedEntryIndices.has(r.entryIndex),
+        );
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Filtered: ${finalList.length} -> ${filteredFinalList.length} verified entries`,
         );
@@ -1934,23 +2481,25 @@ export class LabelMatcher {
         finalList = sortedFinalList;
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Re-sorted finalList by PDF paper order: ` +
-          `${finalList.map((r, i) => `[${i}]=${r.entryIndex}`).join(", ")}`,
+            `${finalList.map((r, i) => `[${i}]=${r.entryIndex}`).join(", ")}`,
         );
 
-        const unmatchedPapers = paperInfos.filter((_, idx) => !matchedPaperIndices.has(idx));
+        const unmatchedPapers = paperInfos.filter(
+          (_, idx) => !matchedPaperIndices.has(idx),
+        );
         if (unmatchedPapers.length > 0) {
           this.pdfMissingByLabel.set(normalizedLabel, unmatchedPapers);
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Label [${normalizedLabel}]: ` +
-            `${finalList.length} returned, ${unmatchedPapers.length} truly unmatched: ` +
-            `${unmatchedPapers.map(p => `${p.firstAuthorLastName || "?"} ${p.year || "?"} ${p.journalAbbrev || ""} ${p.volume || ""}`).join(", ")}`,
+              `${finalList.length} returned, ${unmatchedPapers.length} truly unmatched: ` +
+              `${unmatchedPapers.map((p) => `${p.firstAuthorLastName || "?"} ${p.year || "?"} ${p.journalAbbrev || ""} ${p.volume || ""}`).join(", ")}`,
           );
         } else {
           // All PDF papers matched returned entries - clear any stale missing record
           this.pdfMissingByLabel.delete(normalizedLabel);
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Label [${normalizedLabel}]: ` +
-            `all ${paperInfos.length} PDF paper(s) matched to ${finalList.length} returned entries (one-to-one)`,
+              `all ${paperInfos.length} PDF paper(s) matched to ${finalList.length} returned entries (one-to-one)`,
           );
         }
       }
@@ -1958,7 +2507,7 @@ export class LabelMatcher {
       return finalList;
     }
 
-    return results;  // Empty array = no match
+    return results; // Empty array = no match
   }
 
   /**
@@ -1998,13 +2547,15 @@ export class LabelMatcher {
         ...r,
         __order: idx,
         __methodPri: methodPriority[r.matchMethod] ?? 0,
-        __confPri: r.confidence === "high" ? 2 : r.confidence === "medium" ? 1 : 0,
+        __confPri:
+          r.confidence === "high" ? 2 : r.confidence === "medium" ? 1 : 0,
       }))
       .sort((a, b) => {
         // Primary: preserve insertion order (which is PDF paper order from match())
         if (a.__order !== b.__order) return a.__order - b.__order;
         // Secondary: method priority
-        if (a.__methodPri !== b.__methodPri) return b.__methodPri - a.__methodPri;
+        if (a.__methodPri !== b.__methodPri)
+          return b.__methodPri - a.__methodPri;
         // Tertiary: confidence
         return b.__confPri - a.__confPri;
       })
@@ -2055,7 +2606,10 @@ export class LabelMatcher {
       }
     });
 
-    const recommendation = this.getRecommendation(alignedCount, labelAvailableCount);
+    const recommendation = this.getRecommendation(
+      alignedCount,
+      labelAvailableCount,
+    );
 
     this.alignmentReport = {
       totalEntries: this.entries.length,
@@ -2066,9 +2620,10 @@ export class LabelMatcher {
     };
 
     // FTR-PDF-ANNOTATE-MULTI-LABEL: Log detailed diagnosis for debugging
-    const labelRate = this.entries.length > 0
-      ? ((labelAvailableCount / this.entries.length) * 100).toFixed(1)
-      : "0";
+    const labelRate =
+      this.entries.length > 0
+        ? ((labelAvailableCount / this.entries.length) * 100).toFixed(1)
+        : "0";
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] Label diagnosis: ${labelAvailableCount}/${this.entries.length} (${labelRate}%) labels available, recommendation=${recommendation}`,
     );
@@ -2111,7 +2666,10 @@ export class LabelMatcher {
 
     if (alignRate > MATCH_CONFIG.ALIGN_RATE_HIGH) {
       return "USE_INSPIRE_LABEL";
-    } else if (alignRate > MATCH_CONFIG.ALIGN_RATE_MEDIUM || labelRate > MATCH_CONFIG.ALIGN_RATE_MEDIUM) {
+    } else if (
+      alignRate > MATCH_CONFIG.ALIGN_RATE_MEDIUM ||
+      labelRate > MATCH_CONFIG.ALIGN_RATE_MEDIUM
+    ) {
       return "USE_INDEX_WITH_FALLBACK";
     } else {
       return "USE_INDEX_ONLY";
@@ -2238,16 +2796,24 @@ export class LabelMatcher {
       // ═══════════════════════════════════════════════════════════════════════════
       if (pdfPaper.journalAbbrev && pdfPaper.volume && entry.publicationInfo) {
         const pub = entry.publicationInfo;
-        const journalMatches = journalsSimilar(pdfPaper.journalAbbrev, pub.journal_title);
+        const journalMatches = journalsSimilar(
+          pdfPaper.journalAbbrev,
+          pub.journal_title,
+        );
         const entryVol = pub.journal_volume || pub.volume;
-        const volumeMatches = entryVol && String(entryVol) === String(pdfPaper.volume);
+        const volumeMatches =
+          entryVol && String(entryVol) === String(pdfPaper.volume);
 
         if (journalMatches && volumeMatches) {
           score += 4; // Journal + volume match
 
           // Check page/article ID for extra confidence
           const entryPage = pub.page_start || pub.artid;
-          if (pdfPaper.pageStart && entryPage && String(entryPage) === pdfPaper.pageStart) {
+          if (
+            pdfPaper.pageStart &&
+            entryPage &&
+            String(entryPage) === pdfPaper.pageStart
+          ) {
             score += 3; // Page also matches - very high confidence
             matchMethod = "journal-vol-page";
           } else {
@@ -2259,8 +2825,14 @@ export class LabelMatcher {
           if (targetAuthors.length > 0) {
             const targetAuthor = targetAuthors[0];
             if (entry.authors?.length) {
-              const firstAuthor = extractLastName(entry.authors[0]).toLowerCase();
-              if (firstAuthor === targetAuthor || firstAuthor.includes(targetAuthor) || targetAuthor.includes(firstAuthor)) {
+              const firstAuthor = extractLastName(
+                entry.authors[0],
+              ).toLowerCase();
+              if (
+                firstAuthor === targetAuthor ||
+                firstAuthor.includes(targetAuthor) ||
+                targetAuthor.includes(firstAuthor)
+              ) {
                 authorVerified = true;
                 score += 2;
               }
@@ -2292,7 +2864,12 @@ export class LabelMatcher {
       // Some papers cite abbreviated journal differently
       // Only try if no match found yet (bestMatch is null)
       // ═══════════════════════════════════════════════════════════════════════════
-      if (bestMatch === null && pdfPaper.volume && pdfPaper.pageStart && entry.publicationInfo) {
+      if (
+        bestMatch === null &&
+        pdfPaper.volume &&
+        pdfPaper.pageStart &&
+        entry.publicationInfo
+      ) {
         const pub = entry.publicationInfo;
         const entryVol = pub.journal_volume || pub.volume;
         const entryPage = pub.page_start || pub.artid;
@@ -2310,7 +2887,10 @@ export class LabelMatcher {
           let verified = false;
           if (targetAuthors.length > 0 && entry.authors?.length) {
             const firstAuthor = extractLastName(entry.authors[0]).toLowerCase();
-            if (firstAuthor === targetAuthors[0] || firstAuthor.includes(targetAuthors[0])) {
+            if (
+              firstAuthor === targetAuthors[0] ||
+              firstAuthor.includes(targetAuthors[0])
+            ) {
               verified = true;
               tempScore += 2;
             }
@@ -2375,8 +2955,19 @@ export class LabelMatcher {
     const results: MatchResult[] = [];
     const seenIndices = new Set<number>();
 
+    // FTR-FIX: Preprocess labels to handle parenthesized years like "Guo et al. (2015)"
+    // Convert "(YYYY)" to "YYYY" for proper matching
+    const preprocessedLabels = authorLabels.map((label) =>
+      label.replace(/\((\d{4}[a-z]?)\)/g, "$1"),
+    );
+
     // FTR-REFACTOR: Use shared parseAuthorLabels function to extract author/year info
-    const { authors: targetAuthors, authorInitials: targetAuthorInitials, year: targetYear, isEtAl } = parseAuthorLabels(authorLabels);
+    const {
+      authors: targetAuthors,
+      authorInitials: targetAuthorInitials,
+      year: targetYear,
+      isEtAl,
+    } = parseAuthorLabels(preprocessedLabels);
 
     if (targetAuthors.length === 0 && !targetYear) {
       Zotero.debug(
@@ -2415,7 +3006,9 @@ export class LabelMatcher {
       const keyVariants = new Set<string>([baseKey]);
       keyVariants.add(baseKey.replace("ß", "ss"));
       // Also try without diacritics for fallback (e.g., "lü" -> "lu")
-      const keyNoDiacritics = baseKey.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const keyNoDiacritics = baseKey
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
       keyVariants.add(keyNoDiacritics);
 
       // FTR-COMPOUND-SURNAME: For compound surnames like "Hiller Blin", PDF parser may only
@@ -2425,7 +3018,9 @@ export class LabelMatcher {
       if (firstWord !== targetAuthors[0]) {
         const firstWordKey = `${firstWord} ${targetYear}`.toLowerCase();
         keyVariants.add(firstWordKey);
-        keyVariants.add(firstWordKey.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+        keyVariants.add(
+          firstWordKey.normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
+        );
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: compound surname detected, adding first-word key "${firstWordKey}"`,
         );
@@ -2468,9 +3063,17 @@ export class LabelMatcher {
           }
 
           // Collect all precise matches from all candidates
-          const allPreciseMatches: Array<{ match: MatchResult; entry: InspireReferenceEntry; pdfInfo: PDFPaperInfo }> = [];
+          const allPreciseMatches: Array<{
+            match: MatchResult;
+            entry: InspireReferenceEntry;
+            pdfInfo: PDFPaperInfo;
+          }> = [];
           for (const pdfInfo of pdfPaperInfos) {
-            const preciseMatch = this.findPreciseMatch(pdfInfo, targetAuthors, targetYearBase);
+            const preciseMatch = this.findPreciseMatch(
+              pdfInfo,
+              targetAuthors,
+              targetYearBase,
+            );
             if (preciseMatch) {
               const entry = this.entries[preciseMatch.entryIndex];
               allPreciseMatches.push({ match: preciseMatch, entry, pdfInfo });
@@ -2479,7 +3082,11 @@ export class LabelMatcher {
 
           if (allPreciseMatches.length > 0) {
             // Filter by initials on INSPIRE authorText
-            let bestMatch: { match: MatchResult; entry: InspireReferenceEntry; initialScore: number } | null = null;
+            let bestMatch: {
+              match: MatchResult;
+              entry: InspireReferenceEntry;
+              initialScore: number;
+            } | null = null;
 
             for (const { match, entry } of allPreciseMatches) {
               let initialScore = 0;
@@ -2534,9 +3141,16 @@ export class LabelMatcher {
         // ═══════════════════════════════════════════════════════════════════════════
 
         // Calculate scores for all candidates to detect ties
-        const candidatesWithScores = scorePdfPaperInfos(pdfPaperInfos, targetAuthors, isEtAl, targetAuthorInitials);
+        const candidatesWithScores = scorePdfPaperInfos(
+          pdfPaperInfos,
+          targetAuthors,
+          isEtAl,
+          targetAuthorInitials,
+        );
         const topScore = candidatesWithScores[0]?.score ?? -Infinity;
-        const tiedCandidates = candidatesWithScores.filter(c => c.score === topScore);
+        const tiedCandidates = candidatesWithScores.filter(
+          (c) => c.score === topScore,
+        );
 
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: found ${pdfPaperInfos.length} PDF paper info(s) for "${chosenKey}", top score=${topScore}, tied=${tiedCandidates.length}`,
@@ -2544,7 +3158,9 @@ export class LabelMatcher {
 
         if (tiedCandidates.length > 1) {
           // Multiple candidates with same score - collect all precise matches for user selection
-          const tiedJournals = tiedCandidates.map(c => `${c.pdfInfo.journalAbbrev} ${c.pdfInfo.volume}`).join(", ");
+          const tiedJournals = tiedCandidates
+            .map((c) => `${c.pdfInfo.journalAbbrev} ${c.pdfInfo.volume}`)
+            .join(", ");
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: ⚠️ AMBIGUOUS - ${tiedCandidates.length} candidates tied with score=${topScore}: [${tiedJournals}]. Returning with ambiguous candidates for user selection.`,
           );
@@ -2554,11 +3170,18 @@ export class LabelMatcher {
           let firstMatch: MatchResult | null = null;
 
           for (const { pdfInfo } of tiedCandidates) {
-            const preciseMatch = this.findPreciseMatch(pdfInfo, targetAuthors, targetYearBase);
+            const preciseMatch = this.findPreciseMatch(
+              pdfInfo,
+              targetAuthors,
+              targetYearBase,
+            );
             if (preciseMatch) {
               const entry = this.entries[preciseMatch.entryIndex];
               const authorCount = entry.authors?.length || 0;
-              const secondAuthor = authorCount >= 2 ? extractLastName(entry.authors![1]) : undefined;
+              const secondAuthor =
+                authorCount >= 2
+                  ? extractLastName(entry.authors![1])
+                  : undefined;
 
               // Build display text: "Journal Vol, Page (N authors)"
               const pub = entry.publicationInfo;
@@ -2625,7 +3248,11 @@ export class LabelMatcher {
         );
 
         // Use precise matching with journal/volume/page
-        const preciseMatch = this.findPreciseMatch(pdfPaperInfo, targetAuthors, targetYearBase);
+        const preciseMatch = this.findPreciseMatch(
+          pdfPaperInfo,
+          targetAuthors,
+          targetYearBase,
+        );
         if (preciseMatch) {
           results.push(preciseMatch);
           Zotero.debug(
@@ -2640,15 +3267,26 @@ export class LabelMatcher {
         }
       } else {
         // Try without suffix (e.g., "cho 2011" when looking for "cho 2011a")
-        const lookupKeyBase = `${targetAuthors[0]} ${targetYearBase}`.toLowerCase();
+        const lookupKeyBase =
+          `${targetAuthors[0]} ${targetYearBase}`.toLowerCase();
         if (lookupKeyBase !== chosenKey) {
-          const pdfPaperInfosBase = this.authorYearMapping.authorYearMap.get(lookupKeyBase);
+          const pdfPaperInfosBase =
+            this.authorYearMapping.authorYearMap.get(lookupKeyBase);
           if (pdfPaperInfosBase && pdfPaperInfosBase.length > 0) {
-            const pdfPaperInfoBase = selectBestPdfPaperInfo(pdfPaperInfosBase, targetAuthors, isEtAl, targetAuthorInitials);
+            const pdfPaperInfoBase = selectBestPdfPaperInfo(
+              pdfPaperInfosBase,
+              targetAuthors,
+              isEtAl,
+              targetAuthorInitials,
+            );
             Zotero.debug(
               `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: found PDF paper info for base "${lookupKeyBase}"`,
             );
-            const preciseMatch = this.findPreciseMatch(pdfPaperInfoBase, targetAuthors, targetYearBase);
+            const preciseMatch = this.findPreciseMatch(
+              pdfPaperInfoBase,
+              targetAuthors,
+              targetYearBase,
+            );
             if (preciseMatch) {
               results.push(preciseMatch);
               return results;
@@ -2664,7 +3302,7 @@ export class LabelMatcher {
 
     // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Log candidate entries for debugging
     // This helps diagnose why matches fail (e.g., missing author data in INSPIRE)
-    const candidatesWithYear = this.entries.filter(e => {
+    const candidatesWithYear = this.entries.filter((e) => {
       if (!e.year || !targetYearBase) return false;
       const entryYearBase = normalizeYear(e.year);
       return entryYearBase === targetYearBase;
@@ -2673,7 +3311,11 @@ export class LabelMatcher {
       `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: ${candidatesWithYear.length} entries with year=${targetYearBase} (from ${targetYear}) out of ${this.entries.length} total`,
     );
     for (const cand of candidatesWithYear.slice(0, 5)) {
-      const candAuthors = cand.authors?.slice(0, 2).map(a => extractLastName(a)).join(", ") || "(no authors)";
+      const candAuthors =
+        cand.authors
+          ?.slice(0, 2)
+          .map((a) => extractLastName(a))
+          .join(", ") || "(no authors)";
       const candPubInfo = cand.publicationInfo
         ? `vol=${cand.publicationInfo.journal_volume || "?"}, page=${cand.publicationInfo.page_start || "?"}`
         : "(no pubInfo)";
@@ -2688,16 +3330,29 @@ export class LabelMatcher {
     // use journal/volume/page from the mapping to distinguish between entries
     // ═══════════════════════════════════════════════════════════════════════════
     const hasYearSuffix = targetYear && RE_YEAR_WITH_SUFFIX.test(targetYear);
-    let pdfPaperInfoForFuzzy: { journalAbbrev?: string; volume?: string; pageStart?: string } | null = null;
+    let pdfPaperInfoForFuzzy: {
+      journalAbbrev?: string;
+      volume?: string;
+      pageStart?: string;
+    } | null = null;
 
     if (hasYearSuffix && this.authorYearMapping && targetAuthors.length > 0) {
       // Try to get PDF paper info for disambiguation during fuzzy matching
       const baseKeyFuzzy = `${targetAuthors[0]} ${targetYear}`.toLowerCase();
-      const fuzzyKeyVariants = new Set<string>([baseKeyFuzzy, baseKeyFuzzy.replace("ß", "ss")]);
+      const fuzzyKeyVariants = new Set<string>([
+        baseKeyFuzzy,
+        baseKeyFuzzy.replace("ß", "ss"),
+      ]);
       for (const k of fuzzyKeyVariants) {
-        const pdfPaperInfosForFuzzy = this.authorYearMapping.authorYearMap.get(k);
+        const pdfPaperInfosForFuzzy =
+          this.authorYearMapping.authorYearMap.get(k);
         if (pdfPaperInfosForFuzzy && pdfPaperInfosForFuzzy.length > 0) {
-          pdfPaperInfoForFuzzy = selectBestPdfPaperInfo(pdfPaperInfosForFuzzy, targetAuthors, isEtAl, targetAuthorInitials);
+          pdfPaperInfoForFuzzy = selectBestPdfPaperInfo(
+            pdfPaperInfosForFuzzy,
+            targetAuthors,
+            isEtAl,
+            targetAuthorInitials,
+          );
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: using PDF paper info for fuzzy disambiguation (key=${k}): vol=${pdfPaperInfoForFuzzy.volume}, page=${pdfPaperInfoForFuzzy.pageStart}`,
           );
@@ -2707,7 +3362,12 @@ export class LabelMatcher {
     }
 
     // Score each entry
-    const scoredMatches: Array<{ idx: number; score: number; entry: InspireReferenceEntry; yearMatched: boolean }> = [];
+    const scoredMatches: Array<{
+      idx: number;
+      score: number;
+      entry: InspireReferenceEntry;
+      yearMatched: boolean;
+    }> = [];
 
     for (let idx = 0; idx < this.entries.length; idx++) {
       const entry = this.entries[idx];
@@ -2720,24 +3380,37 @@ export class LabelMatcher {
         if (entryYear === targetYearBase) {
           score += 3;
           yearMatched = true;
-        } else if (entryYear && Math.abs(parseInt(entryYear, 10) - parseInt(targetYearBase, 10)) === 1) {
+        } else if (
+          entryYear &&
+          Math.abs(parseInt(entryYear, 10) - parseInt(targetYearBase, 10)) === 1
+        ) {
           score += 1; // Off by one year (possible preprint vs published)
         }
       }
 
       // Check author matches - score based on how many target authors match
-      if (targetAuthors.length > 0 && entry.authors && entry.authors.length > 0) {
+      if (
+        targetAuthors.length > 0 &&
+        entry.authors &&
+        entry.authors.length > 0
+      ) {
         let authorMatchCount = 0;
-        const entryAuthorsLower = entry.authors.map(a => extractLastName(a).toLowerCase());
+        const entryAuthorsLower = entry.authors.map((a) =>
+          extractLastName(a).toLowerCase(),
+        );
 
         for (const targetAuthor of targetAuthors) {
           // Check for exact match with any entry author
-          if (entryAuthorsLower.some(ea => ea === targetAuthor)) {
+          if (entryAuthorsLower.some((ea) => ea === targetAuthor)) {
             authorMatchCount++;
             continue;
           }
           // Check for partial match
-          if (entryAuthorsLower.some(ea => ea.includes(targetAuthor) || targetAuthor.includes(ea))) {
+          if (
+            entryAuthorsLower.some(
+              (ea) => ea.includes(targetAuthor) || targetAuthor.includes(ea),
+            )
+          ) {
             authorMatchCount += 0.5;
           }
         }
@@ -2745,7 +3418,8 @@ export class LabelMatcher {
         if (authorMatchCount > 0) {
           // Scale score: more matching authors = higher score
           // First author match is most important
-          const firstAuthorMatched = entryAuthorsLower[0] === targetAuthors[0] ||
+          const firstAuthorMatched =
+            entryAuthorsLower[0] === targetAuthors[0] ||
             entryAuthorsLower[0]?.includes(targetAuthors[0]) ||
             targetAuthors[0]?.includes(entryAuthorsLower[0]);
 
@@ -2885,8 +3559,9 @@ export class LabelMatcher {
 
     // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Filter results more strictly
     // If we have year-matched results, only return those (filter out year-mismatched)
-    const yearMatchedResults = scoredMatches.filter(m => m.yearMatched);
-    const resultsToUse = yearMatchedResults.length > 0 ? yearMatchedResults : scoredMatches;
+    const yearMatchedResults = scoredMatches.filter((m) => m.yearMatched);
+    const resultsToUse =
+      yearMatchedResults.length > 0 ? yearMatchedResults : scoredMatches;
 
     // Build results from top matches
     // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Only return multiple if scores are close AND no year suffix
@@ -2907,7 +3582,8 @@ export class LabelMatcher {
       if (match.score < topScore - 2) break;
       seenIndices.add(match.idx);
 
-      const confidence: MatchConfidence = match.score >= 7 ? "high" : match.score >= 5 ? "medium" : "low";
+      const confidence: MatchConfidence =
+        match.score >= 7 ? "high" : match.score >= 5 ? "medium" : "low";
 
       results.push({
         pdfLabel: `${targetAuthors[0] || "?"} ${targetYear || "?"}`,
@@ -2920,7 +3596,7 @@ export class LabelMatcher {
 
       Zotero.debug(
         `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: found match idx=${match.idx}, score=${match.score}, yearMatched=${match.yearMatched}, ` +
-        `entry="${match.entry.authors?.[0] || "?"} (${match.entry.year || "?"})"`,
+          `entry="${match.entry.authors?.[0] || "?"} (${match.entry.year || "?"})"`,
       );
 
       // Only return top matches (limit to avoid noise)
@@ -2930,4 +3606,3 @@ export class LabelMatcher {
     return results;
   }
 }
-

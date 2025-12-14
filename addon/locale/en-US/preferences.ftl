@@ -40,6 +40,12 @@ pref-chart-enable-desc = Show interactive statistics chart (by year/citations) a
 pref-chart-default-collapsed =
     .label = Collapsed by default
 
+pref-keyboard-shortcuts-title = Keyboard Shortcuts
+pref-keyboard-shortcuts-desc = Navigate and interact with entries using keyboard
+pref-keyboard-shortcuts-nav = ↑/↓ or j/k: Navigate entries · Home/End: Jump to first/last · ←/→: Back/Forward
+pref-keyboard-shortcuts-action = Enter: Open PDF or select item · Space/l: Toggle link · Ctrl+C: Copy BibTeX
+pref-keyboard-shortcuts-tab = Tab/Shift+Tab: Switch tabs · Escape: Clear focus
+
 pref-search-history-clear =
     .label = Clear Search History
 pref-search-history-cleared = History cleared

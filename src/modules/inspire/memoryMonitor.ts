@@ -90,7 +90,9 @@ export class MemoryMonitor {
    * @param cache - The cache instance to unregister
    */
   unregisterCache(cache: LRUCache<any, any>): void {
-    this.registeredCaches = this.registeredCaches.filter((r) => r.cache !== cache);
+    this.registeredCaches = this.registeredCaches.filter(
+      (r) => r.cache !== cache,
+    );
   }
 
   /**

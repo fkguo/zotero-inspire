@@ -8,7 +8,12 @@ import type { MatchConfidence, MatchMethod } from "./constants";
 /**
  * Citation type detected from PDF text
  */
-export type CitationType = "numeric" | "author-year" | "arxiv" | "mixed" | "unknown";
+export type CitationType =
+  | "numeric"
+  | "author-year"
+  | "arxiv"
+  | "mixed"
+  | "unknown";
 
 /**
  * Parsed citation from PDF text
@@ -136,7 +141,10 @@ export interface AlignmentReport {
   /** Number of entries with any label (for availability rate calculation) */
   labelAvailableCount?: number;
   issues: AlignmentIssue[];
-  recommendation: "USE_INSPIRE_LABEL" | "USE_INDEX_WITH_FALLBACK" | "USE_INDEX_ONLY";
+  recommendation:
+    | "USE_INSPIRE_LABEL"
+    | "USE_INDEX_WITH_FALLBACK"
+    | "USE_INDEX_ONLY";
 }
 
 /**
@@ -156,6 +164,25 @@ export interface CitationLookupEvent {
   parentItemID: number;
   /** Parsed citation from selection */
   citation: ParsedCitation;
+  /** Reader tab ID */
+  readerTabID?: string;
+}
+
+/**
+ * Citation preview event data (FTR-HOVER-PREVIEW)
+ * Emitted when hovering over lookup buttons in PDF reader
+ */
+export interface CitationPreviewEvent {
+  /** Parent item ID (the paper being read) */
+  parentItemID: number;
+  /** Citation label for display (e.g., "65" for [65], "Guo et al. (2015)") */
+  label: string;
+  /** All labels from parsed citation for proper matching (required for consistent behavior) */
+  labels: string[];
+  /** Citation type */
+  citationType: "numeric" | "author-year" | "arxiv";
+  /** Button position for preview card placement */
+  buttonRect: { top: number; left: number; bottom: number; right: number };
   /** Reader tab ID */
   readerTabID?: string;
 }
@@ -182,6 +209,7 @@ export interface ReaderState {
 // ─────────────────────────────────────────────────────────────────────────────
 // Zotero Structured Page Data Types
 // FTR-PDF-STRUCTURED-DATA: Types for Zotero's internal PDF page data
+// FTR-OVERLAY-REFS: Extended with ZoteroOverlayReference for numeric citation mapping
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -218,19 +246,68 @@ export interface ZoteroChar {
 }
 
 /**
+ * FTR-OVERLAY-REFS: Reference entry from Zotero's citation overlay.
+ * For numeric citations [1], [2], etc., Zotero builds a direct mapping
+ * from citation markers to their corresponding reference text.
+ *
+ * Source: Zotero pdfWorker/worker.js getCitationAndReferenceOverlays()
+ */
+export interface ZoteroOverlayReference {
+  /** Reference number (for numeric citations like [1]) */
+  index?: number;
+  /** Full text of the reference entry */
+  text: string;
+  /** Character-level data of the reference text */
+  chars: ZoteroChar[];
+  /** Position of the reference in the bibliography section */
+  position: {
+    pageIndex: number;
+    rects: [number, number, number, number][];
+    /** If reference spans to next page */
+    nextPageRects?: [number, number, number, number][];
+  };
+}
+
+/**
  * Overlay element detected by Zotero in PDF
  * These include citations, links, footnotes, etc.
+ *
+ * FTR-OVERLAY-REFS: Extended with proper typing for references array.
+ * For citation type overlays, `references` contains the matched bibliography entries.
+ *
+ * IMPORTANT: Zotero's overlay.references is reliable for NUMERIC citations only.
+ * For Author-Year citations, Zotero's matchByNameAndYear() returns ALL matches
+ * without disambiguation - the plugin's matchAuthorYear() is more accurate.
  */
 export interface ZoteroOverlay {
   /** Type of overlay element */
-  type: "reference" | "citation" | "internal-link" | "external-link" | "footnote";
+  type:
+    | "reference"
+    | "citation"
+    | "internal-link"
+    | "external-link"
+    | "footnote";
   /** Position information */
   position: {
     pageIndex: number;
     rects: [number, number, number, number][];
   };
-  /** Referenced items (for citation/reference types) */
-  references?: unknown[];
+  /**
+   * FTR-OVERLAY-REFS: Referenced bibliography entries.
+   * For citation overlays, contains the matched reference(s).
+   * For numeric citations: typically 1 reference per citation marker.
+   * For author-year: may contain multiple unranked matches (not recommended to use).
+   */
+  references?: ZoteroOverlayReference[];
+  /**
+   * FTR-OVERLAY-REFS: Character data of the citation marker itself.
+   * E.g., for "[1]", this contains chars for '[', '1', ']'.
+   */
+  word?: ZoteroChar[];
+  /** Character offset in the document */
+  offset?: number;
+  /** Sort index for ordering overlays */
+  sortIndex?: string;
 }
 
 /**
@@ -283,4 +360,3 @@ export interface StructuredRefEntry {
   /** Starting page number */
   page: string | null;
 }
-

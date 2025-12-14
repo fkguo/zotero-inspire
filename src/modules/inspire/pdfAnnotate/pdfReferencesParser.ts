@@ -117,7 +117,9 @@ export class PDFReferencesParser {
     // 1. Split into page-like blocks to mimic Zotero pdf-worker flow
     const pages = this.splitIntoPages(pdfText);
     if (!pages.length) {
-      Zotero.debug(`[${config.addonName}] [PDF-PARSE] No pages found after split`);
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] No pages found after split`,
+      );
       return null;
     }
 
@@ -164,22 +166,36 @@ export class PDFReferencesParser {
     // Filter out obviously invalid labels (0, >MAX_LABEL_NUMBER, or years)
     const filtered = labelPositions.filter((p) => {
       const num = parseInt(p.label, 10);
-      return Number.isFinite(num) && num >= 1 && num <= MATCH_CONFIG.MAX_LABEL_NUMBER && !(num >= MATCH_CONFIG.YEAR_RANGE_MIN && num <= MATCH_CONFIG.YEAR_RANGE_MAX);
+      return (
+        Number.isFinite(num) &&
+        num >= 1 &&
+        num <= MATCH_CONFIG.MAX_LABEL_NUMBER &&
+        !(
+          num >= MATCH_CONFIG.YEAR_RANGE_MIN &&
+          num <= MATCH_CONFIG.YEAR_RANGE_MAX
+        )
+      );
     });
     if (filtered.length !== labelPositions.length) {
       labelPositions = filtered;
     }
 
     // If labels start far from 1, try an extended scan (look back up to 6 pages earlier) to capture earlier labels
-    const minLabelNum = Math.min(...labelPositions.map((l) => parseInt(l.label, 10)));
+    const minLabelNum = Math.min(
+      ...labelPositions.map((l) => parseInt(l.label, 10)),
+    );
     if (Number.isFinite(minLabelNum) && minLabelNum > 5 && pages.length > 0) {
       const backPages = Math.max(0, refStartPageIndex - 6);
       const extendedPages = pages.slice(backPages);
       const extendedText = extendedPages.map((p) => p.text).join("\n");
       const extendedLabels = this.extractLabelPositionsRelaxed(extendedText);
       if (extendedLabels.length > labelPositions.length) {
-        const extMin = Math.min(...extendedLabels.map((l) => parseInt(l.label, 10)));
-        const extMax = Math.max(...extendedLabels.map((l) => parseInt(l.label, 10)));
+        const extMin = Math.min(
+          ...extendedLabels.map((l) => parseInt(l.label, 10)),
+        );
+        const extMax = Math.max(
+          ...extendedLabels.map((l) => parseInt(l.label, 10)),
+        );
         labelPositions = extendedLabels;
         refText = extendedText;
       } else {
@@ -194,8 +210,12 @@ export class PDFReferencesParser {
       // Fallback: full relaxed scan over entire text if still far from 1
       const fullRelaxed = this.extractLabelPositionsRelaxed(pdfText);
       if (fullRelaxed.length > labelPositions.length) {
-        const fullMin = Math.min(...fullRelaxed.map((l) => parseInt(l.label, 10)));
-        const fullMax = Math.max(...fullRelaxed.map((l) => parseInt(l.label, 10)));
+        const fullMin = Math.min(
+          ...fullRelaxed.map((l) => parseInt(l.label, 10)),
+        );
+        const fullMax = Math.max(
+          ...fullRelaxed.map((l) => parseInt(l.label, 10)),
+        );
         labelPositions = fullRelaxed;
         refText = pdfText;
       } else {
@@ -211,7 +231,15 @@ export class PDFReferencesParser {
     // Final sanitization: drop invalid labels (num <1, >MAX_LABEL_NUMBER, or year-like)
     const finalFiltered = labelPositions.filter((p) => {
       const num = parseInt(p.label, 10);
-      return Number.isFinite(num) && num >= 1 && num <= MATCH_CONFIG.MAX_LABEL_NUMBER && !(num >= MATCH_CONFIG.YEAR_RANGE_MIN && num <= MATCH_CONFIG.YEAR_RANGE_MAX);
+      return (
+        Number.isFinite(num) &&
+        num >= 1 &&
+        num <= MATCH_CONFIG.MAX_LABEL_NUMBER &&
+        !(
+          num >= MATCH_CONFIG.YEAR_RANGE_MIN &&
+          num <= MATCH_CONFIG.YEAR_RANGE_MAX
+        )
+      );
     });
     labelPositions = finalFiltered;
 
@@ -402,7 +430,10 @@ export class PDFReferencesParser {
       // Pattern: keyword at start of line or after section number
       // e.g., "References", "8. References", "VIII. REFERENCES"
       const patterns = [
-        new RegExp(`(?:^|\\n)\\s*(?:\\d+\\.?|[IVXLC]+\\.?)?\\s*${keyword}\\s*(?:\\n|$)`, "im"),
+        new RegExp(
+          `(?:^|\\n)\\s*(?:\\d+\\.?|[IVXLC]+\\.?)?\\s*${keyword}\\s*(?:\\n|$)`,
+          "im",
+        ),
         new RegExp(`(?:^|\\n)\\s*${keyword}\\s*(?:\\n|$)`, "im"),
       ];
 
@@ -418,17 +449,19 @@ export class PDFReferencesParser {
     }
 
     // Strategy 2: Look for ACKNOWLEDGMENTS section (references often follow it)
-    const ackMatch = text.match(/(?:^|\n)\s*(?:\d+\\.?|[IVXLC]+\\.?)?\s*ACKNOWLEDGM?ENTS?\s*(?:\n|$)/i);
+    const ackMatch = text.match(
+      /(?:^|\n)\s*(?:\d+\\.?|[IVXLC]+\\.?)?\s*ACKNOWLEDGM?ENTS?\s*(?:\n|$)/i,
+    );
     if (ackMatch && ackMatch.index !== undefined) {
       const afterAck = text.slice(ackMatch.index);
       // Try both bracketed [1] and bare "1 " patterns
       // Zotero fulltext cache often removes brackets
       const ref1Patterns = [
-        /(?:^|\n)[-─—_]{3,}[\s\n]*\[1\]\s/,         // Separator + [1]
-        /(?:^|\n)\s*\[1\]\s+[A-Z]/,                  // [1] Author
-        /(?:^|\n)\s*1\s+[A-Z][a-z]+\s+(Collaboration|et\s+al)/i,  // 1 ATLAS Collaboration or 1 Name et al
-        /(?:^|\n)\s*1\s+[A-Z]\.\s*[A-Z]/,           // 1 A. Name
-        /(?:^|\n)\s*1\s+[A-Z][a-z]+,\s*[A-Z]\./,    // 1 Name, A.
+        /(?:^|\n)[-─—_]{3,}[\s\n]*\[1\]\s/, // Separator + [1]
+        /(?:^|\n)\s*\[1\]\s+[A-Z]/, // [1] Author
+        /(?:^|\n)\s*1\s+[A-Z][a-z]+\s+(Collaboration|et\s+al)/i, // 1 ATLAS Collaboration or 1 Name et al
+        /(?:^|\n)\s*1\s+[A-Z]\.\s*[A-Z]/, // 1 A. Name
+        /(?:^|\n)\s*1\s+[A-Z][a-z]+,\s*[A-Z]\./, // 1 Name, A.
       ];
       for (const pattern of ref1Patterns) {
         const ref1Match = afterAck.match(pattern);
@@ -445,7 +478,8 @@ export class PDFReferencesParser {
     // Strategy 3: Look for pattern of numbered references (bare numbers without brackets)
     // This handles Zotero fulltext cache format: "1 BaBar Collaboration, B. Aubert et al."
     // Look for sequential numbers 1, 2, 3 at line starts followed by author patterns
-    const bareNumPattern = /(?:^|\n)\s*1\s+[A-Z][a-z]*(?:\s+Collaboration|,|\s+et\s+al|\.\s*[A-Z])/i;
+    const bareNumPattern =
+      /(?:^|\n)\s*1\s+[A-Z][a-z]*(?:\s+Collaboration|,|\s+et\s+al|\.\s*[A-Z])/i;
     const bareNumMatch = text.match(bareNumPattern);
     if (bareNumMatch && bareNumMatch.index !== undefined) {
       // Verify this is likely a reference list by checking for "2" nearby
@@ -580,50 +614,50 @@ export class PDFReferencesParser {
       Zotero.debug(
         `[${config.addonName}] [PDF-PARSE] Few bracketed labels (${positions.length}), trying bare number format`,
       );
-      
+
       // Reset for bare number search
       positions.length = 0;
       seenLabels.clear();
-      
+
       // In Zotero fulltext cache, references may be continuous without newlines
       // Pattern 1: Start of text or newline + number + space + Capital
       // Pattern 2: Period/space + number + space + Capital (e.g., "2003 . 2 J. Bartelt")
       // Pattern 3: Form feed + number (e.g., "\f1 BaBar")
       const barePatterns = [
-        /(?:^|\n|\f)\s*(\d+)\s+([A-Z])/g,           // Start/newline/formfeed
-        /\.\s+(\d+)\s+([A-Z])/g,                     // Period + number (continuous refs)
+        /(?:^|\n|\f)\s*(\d+)\s+([A-Z])/g, // Start/newline/formfeed
+        /\.\s+(\d+)\s+([A-Z])/g, // Period + number (continuous refs)
       ];
-      
+
       for (const bareRegex of barePatterns) {
         bareRegex.lastIndex = 0;
         while ((match = bareRegex.exec(text)) !== null) {
           const label = match[1];
           const num = parseInt(label, 10);
-          
+
           // Skip if number is too large (likely a year or page number)
           if (num > 500) continue;
-          
+
           // Skip years (1900-2099)
           if (num >= 1900 && num <= 2099) continue;
-          
+
           // Skip if we've seen this label
           if (seenLabels.has(label)) continue;
-          
+
           // For sequential validation, allow some gaps but not too many
           const expectedNum = positions.length + 1;
           if (positions.length > 0) {
             // Allow refs to be slightly out of order or have small gaps
             if (num < expectedNum - 1 || num > expectedNum + 5) continue;
           }
-          
+
           seenLabels.add(label);
           positions.push({ label, index: match.index });
         }
-        
+
         // If we found enough with this pattern, stop trying other patterns
         if (positions.length >= 5) break;
       }
-      
+
       // Fallback 3: inline numeric pattern without newlines (e.g., "78. H. Zhang ... 79. B. Wu ...")
       if (positions.length < 5) {
         const inlineRegex = /(?:^|[\s,])(\d{1,3})\.\s+(?=[A-Z])/g;
@@ -641,9 +675,12 @@ export class PDFReferencesParser {
 
       // Re-sort by label number (in case they were found out of order)
       positions.sort((a, b) => parseInt(a.label, 10) - parseInt(b.label, 10));
-      
+
       Zotero.debug(
-        `[${config.addonName}] [PDF-PARSE] Found ${positions.length} bare number labels: [${positions.slice(0, 5).map(p => p.label).join(", ")}${positions.length > 5 ? "..." : ""}]`,
+        `[${config.addonName}] [PDF-PARSE] Found ${positions.length} bare number labels: [${positions
+          .slice(0, 5)
+          .map((p) => p.label)
+          .join(", ")}${positions.length > 5 ? "..." : ""}]`,
       );
     }
 
@@ -692,7 +729,8 @@ export class PDFReferencesParser {
     while ((match = rangeRegex.exec(text)) !== null) {
       const startNum = parseInt(match[1], 10);
       const endNum = parseInt(match[2], 10);
-      if (Number.isNaN(startNum) || Number.isNaN(endNum) || endNum < startNum) continue;
+      if (Number.isNaN(startNum) || Number.isNaN(endNum) || endNum < startNum)
+        continue;
       for (let n = startNum; n <= endNum; n++) {
         const label = String(n);
         if (n > 500 || (n >= 1900 && n <= 2099)) continue;
@@ -716,7 +754,7 @@ export class PDFReferencesParser {
     // Bare numbers (relaxed) for Zotero fulltext without brackets: start of line or inline
     const barePatterns = [
       /(?:^|[\n\r\f])\s*(\d{1,3})[.)]?\s+(?=[A-Z0-9])/g, // line start + number + optional . or ) + space
-      /(?:^|[\s,])(\d{1,3})\.\s+(?=[A-Z0-9])/g,          // inline "xx. Author"
+      /(?:^|[\s,])(\d{1,3})\.\s+(?=[A-Z0-9])/g, // inline "xx. Author"
     ];
     for (const bareRegex of barePatterns) {
       bareRegex.lastIndex = 0;
@@ -772,16 +810,19 @@ export class PDFReferencesParser {
    * Parse papers from a reference text block.
    * Returns count and extracted info for each paper.
    */
-  private parsePapersInText(text: string): { count: number; papers: PDFPaperInfo[] } {
+  private parsePapersInText(text: string): {
+    count: number;
+    papers: PDFPaperInfo[];
+  } {
     // Remove the label itself - handles various formats:
     // - "[20] Author..." (bracketed)
     // - "20 Author..." (bare number with space)
     // - "20. Author..." (bare number with period)
     // - Also handles leading newlines/whitespace from textBetween
     const content = text
-      .replace(/^[\s\n\f]*/, "")           // Remove leading whitespace/newlines
-      .replace(/^\[\d+\]\s*/, "")          // Remove [n] format
-      .replace(/^\d+\.?\s*/, "");          // Remove bare number (with optional period/space)
+      .replace(/^[\s\n\f]*/, "") // Remove leading whitespace/newlines
+      .replace(/^\[\d+\]\s*/, "") // Remove [n] format
+      .replace(/^\d+\.?\s*/, ""); // Remove bare number (with optional period/space)
 
     // Split by semicolon or strong delimiters (semicolon or " ; " or " ;\n")
     const semicolonParts = content.split(/;\s*/);
@@ -792,7 +833,8 @@ export class PDFReferencesParser {
       const trimmed = part.trim();
       const hasYear = /\b(19|20)\d{2}\b/.test(trimmed);
       const hasDoi = /doi/i.test(trimmed) || /10\.\d{4,9}\//.test(trimmed);
-      const hasArxiv = /arxiv/i.test(trimmed) || /\bhep-[a-z]+\/\d{7}\b/i.test(trimmed);
+      const hasArxiv =
+        /arxiv/i.test(trimmed) || /\bhep-[a-z]+\/\d{7}\b/i.test(trimmed);
       const looksRef = this.looksLikeReference(trimmed);
       if (looksRef || hasYear || hasDoi || hasArxiv) {
         const info = this.extractPaperInfo(trimmed, true);
@@ -823,16 +865,16 @@ export class PDFReferencesParser {
       if (yearToken && i > 0) {
         const prev = yearSplitParts[i - 1] || "";
         const combined = `${prev} ${yearToken}`.trim();
-      if (this.looksLikeReference(combined)) {
-        const info = this.extractPaperInfo(combined, true);
-        if (!info.firstAuthorLastName && lastAuthorName) {
-          info.firstAuthorLastName = lastAuthorName;
+        if (this.looksLikeReference(combined)) {
+          const info = this.extractPaperInfo(combined, true);
+          if (!info.firstAuthorLastName && lastAuthorName) {
+            info.firstAuthorLastName = lastAuthorName;
+          }
+          if (info.firstAuthorLastName) {
+            lastAuthorName = info.firstAuthorLastName;
+          }
+          yearBasedPapers.push(info);
         }
-        if (info.firstAuthorLastName) {
-          lastAuthorName = info.firstAuthorLastName;
-        }
-        yearBasedPapers.push(info);
-      }
       }
     }
     if (yearBasedPapers.length >= 2) {
@@ -923,14 +965,18 @@ export class PDFReferencesParser {
 
     // First, check for CJK names (Chinese, Japanese, Korean)
     // CJK names are typically 2-4 characters with surname first
-    const cjkAuthorMatch = text.match(/^([\u4e00-\u9fff\u3400-\u4dbf]{1})([\u4e00-\u9fff\u3400-\u4dbf]{1,3})/);
+    const cjkAuthorMatch = text.match(
+      /^([\u4e00-\u9fff\u3400-\u4dbf]{1})([\u4e00-\u9fff\u3400-\u4dbf]{1,3})/,
+    );
     if (cjkAuthorMatch) {
       info.firstAuthorLastName = cjkAuthorMatch[1]; // First character is surname
     }
 
     // Japanese names with hiragana/katakana
     if (!info.firstAuthorLastName) {
-      const japaneseMatch = text.match(/^([\u4e00-\u9fff]{1,3})([\u3040-\u309f\u30a0-\u30ff]|[\u4e00-\u9fff])+/);
+      const japaneseMatch = text.match(
+        /^([\u4e00-\u9fff]{1,3})([\u3040-\u309f\u30a0-\u30ff]|[\u4e00-\u9fff])+/,
+      );
       if (japaneseMatch) {
         info.firstAuthorLastName = japaneseMatch[1];
       }
@@ -938,7 +984,9 @@ export class PDFReferencesParser {
 
     // Korean names (Hangul)
     if (!info.firstAuthorLastName) {
-      const koreanMatch = text.match(/^([\uac00-\ud7af]{1,2})([\uac00-\ud7af]{1,3})/);
+      const koreanMatch = text.match(
+        /^([\uac00-\ud7af]{1,2})([\uac00-\ud7af]{1,3})/,
+      );
       if (koreanMatch) {
         info.firstAuthorLastName = koreanMatch[1];
       }
@@ -1002,7 +1050,16 @@ export class PDFReferencesParser {
       if (match) {
         // Exclude common non-name words
         const word = match[1];
-        const excludeWords = ["Phys", "Rev", "Lett", "Nucl", "Part", "Theor", "Prog", "Report"];
+        const excludeWords = [
+          "Phys",
+          "Rev",
+          "Lett",
+          "Nucl",
+          "Part",
+          "Theor",
+          "Prog",
+          "Report",
+        ];
         if (!excludeWords.includes(word)) {
           info.firstAuthorLastName = word;
         }
@@ -1019,9 +1076,9 @@ export class PDFReferencesParser {
     // Extract page number
     // Patterns: "123 (1963)", ", 123", "page 123", "p. 123"
     const pagePatterns = [
-      /\b(\d{1,5})\s*\(\d{4}\)/,           // 165 (1963)
-      /,\s*(\d{1,5})\s*\(/,                 // , 165 (
-      /[Pp](?:age|\.?)\s*(\d{1,5})/,        // page 165 or p. 165
+      /\b(\d{1,5})\s*\(\d{4}\)/, // 165 (1963)
+      /,\s*(\d{1,5})\s*\(/, // , 165 (
+      /[Pp](?:age|\.?)\s*(\d{1,5})/, // page 165 or p. 165
       /\b(\d{1,5})[-–]\d{1,5}\s*\(\d{4}\)/, // 165-170 (1963)
     ];
 
@@ -1035,7 +1092,9 @@ export class PDFReferencesParser {
 
     // If not set above, attempt a minimal secondary extraction (legacy)
     if (!info.arxivId) {
-      const arxivMatch = text.match(/arxiv[:\s]?([0-9]{4}\.[0-9]{4,5}|[a-z-]+\/\d{7})(?:v\d+)?/i);
+      const arxivMatch = text.match(
+        /arxiv[:\s]?([0-9]{4}\.[0-9]{4,5}|[a-z-]+\/\d{7})(?:v\d+)?/i,
+      );
       if (arxivMatch) {
         info.arxivId = arxivMatch[1].toLowerCase();
       }
@@ -1047,7 +1106,9 @@ export class PDFReferencesParser {
       }
     }
     if (!info.journalAbbrev || !info.volume || !info.pageStart) {
-      const jvpMatch = textNoParen.match(/([A-Z][-A-Za-z.]{1,}(?:\s+[A-Z][-A-Za-z.]{1,})*)\s+(\d{1,4})[, ]+\s*([A-Za-z]?\d{1,6})/);
+      const jvpMatch = textNoParen.match(
+        /([A-Z][-A-Za-z.]{1,}(?:\s+[A-Z][-A-Za-z.]{1,})*)\s+(\d{1,4})[, ]+\s*([A-Za-z]?\d{1,6})/,
+      );
       if (jvpMatch) {
         info.journalAbbrev = info.journalAbbrev ?? jvpMatch[1].trim();
         info.volume = info.volume ?? jvpMatch[2];
@@ -1072,8 +1133,12 @@ export class PDFReferencesParser {
     const hasYear = /\b(19|20)\d{2}\b/.test(text);
     if (!hasYear) return false;
 
-    const hasJournalToken = /\b(Phys|Nucl|Ann|Physica|Rev\.?|Lett|J\.)/i.test(text);
-    const hasVolumePage = /\b[A-Z]?[A-Za-z.]{2,}\s*\d{1,4}[, ]+\d{1,5}\b/.test(text);
+    const hasJournalToken = /\b(Phys|Nucl|Ann|Physica|Rev\.?|Lett|J\.)/i.test(
+      text,
+    );
+    const hasVolumePage = /\b[A-Z]?[A-Za-z.]{2,}\s*\d{1,4}[, ]+\d{1,5}\b/.test(
+      text,
+    );
 
     // Should have author-like pattern
     // A. Name, Name A., Name et al., collaboration names
@@ -1097,7 +1162,9 @@ export class PDFReferencesParser {
     counts: Map<string, number>,
   ): "high" | "medium" | "low" {
     // Check if labels are sequential (1, 2, 3, ...)
-    const labels = positions.map((p) => parseInt(p.label, 10)).filter((n) => !isNaN(n));
+    const labels = positions
+      .map((p) => parseInt(p.label, 10))
+      .filter((n) => !isNaN(n));
     let sequential = true;
     for (let i = 1; i < labels.length; i++) {
       if (labels[i] !== labels[i - 1] + 1) {
@@ -1321,7 +1388,7 @@ export class PDFReferencesParser {
     }
 
     // Check for numeric label patterns: [1], 1., 1), (1)
-    if (/^[\[(]?\d{1,3}[\].)]\s*/.test(snippet)) {
+    if (/^[[(]?\d{1,3}[\].)]\s*/.test(snippet)) {
       return true;
     }
 
@@ -1348,7 +1415,7 @@ export class PDFReferencesParser {
 
     // Extract label
     let label: string | null = null;
-    const labelMatch = text.match(/^[\[(]?(\d{1,3})[\].)]\s*/);
+    const labelMatch = text.match(/^[[(]?(\d{1,3})[\].)]\s*/);
     if (labelMatch) {
       label = labelMatch[1];
     }
@@ -1362,7 +1429,10 @@ export class PDFReferencesParser {
     return {
       label,
       text,
-      charRange: { start: entryData.start, end: entryData.start + entryData.chars.length },
+      charRange: {
+        start: entryData.start,
+        end: entryData.start + entryData.chars.length,
+      },
       firstAuthor: info.firstAuthorLastName || null,
       year: info.year || null,
       arxivId: info.arxivId || null,
@@ -1430,7 +1500,9 @@ export class PDFReferencesParser {
    * @param pdfText - Full text extracted from PDF
    * @returns AuthorYearReferenceMapping or null if parsing fails
    */
-  parseAuthorYearReferencesSection(pdfText: string): AuthorYearReferenceMapping | null {
+  parseAuthorYearReferencesSection(
+    pdfText: string,
+  ): AuthorYearReferenceMapping | null {
     Zotero.debug(
       `[${config.addonName}] [PDF-PARSE-AY] Starting author-year reference parsing (${pdfText.length} chars)`,
     );
@@ -1441,7 +1513,9 @@ export class PDFReferencesParser {
     // which would incorrectly cut off content in alphabetically-ordered author-year refs.
     const refText = this.buildAuthorYearRefSection(pdfText);
     if (!refText.trim() || refText.length < 500) {
-      Zotero.debug(`[${config.addonName}] [PDF-PARSE-AY] Reference section too short or not found`);
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE-AY] Reference section too short or not found`,
+      );
       return null;
     }
 
@@ -1459,36 +1533,15 @@ export class PDFReferencesParser {
     const authorYearMap = new Map<string, PDFPaperInfo[]>();
     let withJournal = 0;
 
-    // DEBUG: Log all parsed references to find missing ones
-    const allKeys = references.map(r => `${r.firstAuthorLastName || "?"} ${r.year || "?"}`).slice(0, 20);
-    Zotero.debug(
-      `[${config.addonName}] [PDF-PARSE-AY] First 20 parsed refs: [${allKeys.join(", ")}]`,
-    );
-
-    // Check specifically for Braaten entries
-    const braatenRefs = references.filter(r =>
-      r.firstAuthorLastName?.toLowerCase() === "braaten"
-    );
-    if (braatenRefs.length > 0) {
-      Zotero.debug(
-        `[${config.addonName}] [PDF-PARSE-AY] Found ${braatenRefs.length} Braaten refs: ${braatenRefs.map(r => `${r.year}(j=${r.journalAbbrev},v=${r.volume},p=${r.pageStart})`).join(", ")}`,
-      );
-    }
-
     for (const ref of references) {
       if (!ref.firstAuthorLastName || !ref.year) continue;
 
       // Build key: "AuthorLastName YearSuffix" (e.g., "Cho 2011a")
       const key = `${ref.firstAuthorLastName} ${ref.year}`.toLowerCase();
       // Also create a key without diacritics for bidirectional fallback (e.g., "lü 2016" -> "lu 2016")
-      const keyNoDiacritics = key.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-      // DEBUG: Log Li 2013 entries to find M.-T. Li arXiv paper
-      if (ref.firstAuthorLastName?.toLowerCase() === "li" && ref.year === "2013") {
-        Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE-AY] Li 2013 ref: arxiv=${ref.arxivId || "none"}, journal=${ref.journalAbbrev || "none"}, vol=${ref.volume || "none"}, page=${ref.pageStart || "none"}, raw=${ref.rawText?.substring(0, 80) || "none"}`,
-        );
-      }
+      const keyNoDiacritics = key
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
 
       // Only add if we have additional info (journal, DOI, arXiv)
       if (ref.journalAbbrev || ref.doi || ref.arxivId) {
@@ -1506,13 +1559,6 @@ export class PDFReferencesParser {
         }
 
         if (ref.journalAbbrev) withJournal++;
-      } else {
-        // DEBUG: Log refs that are skipped due to missing info
-        if (ref.firstAuthorLastName.toLowerCase() === "braaten") {
-          Zotero.debug(
-            `[${config.addonName}] [PDF-PARSE-AY] Braaten ref skipped (no journal/doi/arxiv): year=${ref.year}`,
-          );
-        }
       }
     }
 
@@ -1534,29 +1580,6 @@ export class PDFReferencesParser {
     Zotero.debug(
       `[${config.addonName}] [PDF-PARSE-AY] Parsed ${authorYearMap.size} author-year keys (${withJournal} with journal), confidence=${confidence}`,
     );
-
-    // Log a few samples for debugging, including multi-paper keys
-    const samples = Array.from(authorYearMap.entries()).slice(0, 5);
-    for (const [key, infos] of samples) {
-      if (infos.length > 1) {
-        Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE-AY] Sample: "${key}" -> ${infos.length} papers: ${infos.map(i => `${i.journalAbbrev || "?"} ${i.volume || "?"}`).join("; ")}`,
-        );
-      } else {
-        const info = infos[0];
-        Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE-AY] Sample: "${key}" -> ${info.journalAbbrev || "?"} ${info.volume || "?"}, ${info.pageStart || "?"}`,
-        );
-      }
-    }
-
-    // Log keys with multiple papers (important for disambiguation)
-    const multiPaperKeys = Array.from(authorYearMap.entries()).filter(([_, infos]) => infos.length > 1);
-    if (multiPaperKeys.length > 0) {
-      Zotero.debug(
-        `[${config.addonName}] [PDF-PARSE-AY] Found ${multiPaperKeys.length} keys with multiple papers: ${multiPaperKeys.map(([k, v]) => `${k}(${v.length})`).join(", ")}`,
-      );
-    }
 
     return {
       parsedAt: Date.now(),
@@ -1623,7 +1646,7 @@ export class PDFReferencesParser {
     // Use extended character class to support German ß, umlauts, accents, etc.
     const yearPattern = new RegExp(
       `,\\s*((?:19|20)\\d{2}[a-z]?)\\s*,\\s*(.+?)\\.(?=\\s*\\n|\\s*$|\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+,|\\s*\\n[^\\n]*\\n\\s*[${AUTHOR_LETTER_UPPER}]|\\s+")`,
-      "g"
+      "g",
     );
     let match: RegExpExecArray | null;
 
@@ -1631,12 +1654,12 @@ export class PDFReferencesParser {
       const yearWithSuffix = match[1];
       const journalPart = match[2].trim();
 
-      // DEBUG: Track Braaten-related entries
-      const isBraatenYear = yearWithSuffix === "2005a" || yearWithSuffix === "2005b";
-
       // Find the author part: go backwards from the match to find "LastName, I."
       // The author is at the start of the reference line
-      const beforeYear = refText.slice(Math.max(0, match.index - 300), match.index);
+      const beforeYear = refText.slice(
+        Math.max(0, match.index - 300),
+        match.index,
+      );
 
       // Find the start of this reference entry.
       // RMP format: "Braaten, E., and M. Kusunoki, 2005a, Phys. Rev. D 71, 074005."
@@ -1655,7 +1678,7 @@ export class PDFReferencesParser {
       const findRefBoundaryByDigitPattern = (text: string): number => {
         const prevRefEndPattern = new RegExp(
           `\\d+\\.\\s+([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+),\\s*[${AUTHOR_LETTER_UPPER}][\\.\\-]`,
-          "g"
+          "g",
         );
         const allPrevRefEnds = [...text.matchAll(prevRefEndPattern)];
         if (allPrevRefEnds.length > 0) {
@@ -1674,13 +1697,13 @@ export class PDFReferencesParser {
         if (!trimmed) return true; // Empty line is not a reference start
         // Common page header patterns in physics papers
         const pageHeaderPatterns = [
-          /^[A-Z][a-z]+\s+et\s+al\.:/i,                    // "Guo et al.:" running header
-          /^Rev\.\s*Mod\.\s*Phys\./i,                      // Journal header
-          /^Phys\.\s*Rev\./i,                              // Journal header
-          /^\d{6}-\d+\s*$/,                                // Page number like "015004-52"
-          /^Vol\.\s*\d+/i,                                 // Volume header
-          /^No\.\s*\d+/i,                                  // Issue header
-          /^[A-Z][A-Z\s]+$/,                               // All caps header
+          /^[A-Z][a-z]+\s+et\s+al\.:/i, // "Guo et al.:" running header
+          /^Rev\.\s*Mod\.\s*Phys\./i, // Journal header
+          /^Phys\.\s*Rev\./i, // Journal header
+          /^\d{6}-\d+\s*$/, // Page number like "015004-52"
+          /^Vol\.\s*\d+/i, // Volume header
+          /^No\.\s*\d+/i, // Issue header
+          /^[A-Z][A-Z\s]+$/, // All caps header
           /^January|February|March|April|May|June|July|August|September|October|November|December/i, // Month in header
         ];
         for (const pattern of pageHeaderPatterns) {
@@ -1709,7 +1732,7 @@ export class PDFReferencesParser {
       // Use extended character class to support German ß, umlauts, etc.
       const refEntryText = beforeYear.slice(refEntryStart);
       const firstAuthorPattern = new RegExp(
-        `^\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+),\\s*[${AUTHOR_LETTER_UPPER}]\\.`
+        `^\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+),\\s*[${AUTHOR_LETTER_UPPER}]\\.`,
       );
       const firstAuthorMatch = refEntryText.match(firstAuthorPattern);
 
@@ -1719,19 +1742,12 @@ export class PDFReferencesParser {
       } else {
         // Fallback: try to find any capitalized name at line start
         const lineStartPattern = new RegExp(
-          `^\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+),`
+          `^\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+),`,
         );
         const lineStartAuthor = refEntryText.match(lineStartPattern);
         if (lineStartAuthor) {
           firstAuthorLastName = lineStartAuthor[1];
         }
-      }
-
-      // DEBUG: Log when we're looking at a year that might be Braaten
-      if (isBraatenYear) {
-        Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE-AY] DEBUG year=${yearWithSuffix}: refEntryText="${refEntryText.slice(0, 60)}...", firstAuthor=${firstAuthorLastName || "NONE"}`,
-        );
       }
 
       if (!firstAuthorLastName) {
@@ -1756,12 +1772,12 @@ export class PDFReferencesParser {
       // FIX: Added compound surname support (?:-[UPPER][lower]+)? to match "Hidalgo-Duque"
       const authorPattern1 = new RegExp(
         `([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+(?:-[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+)?),\\s*[${AUTHOR_LETTER_UPPER}][\\.\\-]`,
-        "g"
+        "g",
       );
       let authorMatch;
       while ((authorMatch = authorPattern1.exec(refEntryText)) !== null) {
         const name = authorMatch[1];
-        if (!authorMatches.some(m => m.name === name)) {
+        if (!authorMatches.some((m) => m.name === name)) {
           authorMatches.push({ name, index: authorMatch.index });
         }
       }
@@ -1772,11 +1788,11 @@ export class PDFReferencesParser {
       // FIX: Added compound surname support (?:-[UPPER][lower]+)? to match "Hidalgo-Duque"
       const authorPattern2 = new RegExp(
         `and\\s+[${AUTHOR_LETTER_UPPER}][\\.\\-](?:\\s*-?[${AUTHOR_LETTER_UPPER}][\\.\\-])*\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+(?:-[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+)?)`,
-        "gi"
+        "gi",
       );
       while ((authorMatch = authorPattern2.exec(refEntryText)) !== null) {
         const name = authorMatch[1];
-        if (!authorMatches.some(m => m.name === name)) {
+        if (!authorMatches.some((m) => m.name === name)) {
           authorMatches.push({ name, index: authorMatch.index });
         }
       }
@@ -1788,27 +1804,30 @@ export class PDFReferencesParser {
       // FIX: Added compound surname support (?:-[UPPER][lower]+)? to match "Hidalgo-Duque"
       const authorPattern3 = new RegExp(
         `,\\s+[${AUTHOR_LETTER_UPPER}][\\.\\-](?:\\s*-?[${AUTHOR_LETTER_UPPER}][\\.\\-])*\\s*([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+(?:-[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER_LOWER}]+)?)(?=,|\\s+and\\b)`,
-        "gi"
+        "gi",
       );
       while ((authorMatch = authorPattern3.exec(refEntryText)) !== null) {
         const name = authorMatch[1];
         // Skip if this is a partial match of a compound surname already in the list
         // e.g., skip "Duque" if "Hidalgo-Duque" is already present
         // e.g., skip "Soler" if "Fernandez-Soler" is already present
-        const isPartOfExisting = authorMatches.some(existing => {
+        const isPartOfExisting = authorMatches.some((existing) => {
           const existingLower = existing.name.toLowerCase();
           const nameLower = name.toLowerCase();
           // Check if existing name contains this name as part of a compound (with hyphen)
-          return existingLower.includes(`-${nameLower}`) || existingLower.includes(`${nameLower}-`);
+          return (
+            existingLower.includes(`-${nameLower}`) ||
+            existingLower.includes(`${nameLower}-`)
+          );
         });
-        if (!isPartOfExisting && !authorMatches.some(m => m.name === name)) {
+        if (!isPartOfExisting && !authorMatches.some((m) => m.name === name)) {
           authorMatches.push({ name, index: authorMatch.index });
         }
       }
 
       // Sort by position in text to preserve original author order
       authorMatches.sort((a, b) => a.index - b.index);
-      const allAuthorLastNames = authorMatches.map(m => m.name);
+      const allAuthorLastNames = authorMatches.map((m) => m.name);
 
       // Build the full reference text for extractPaperInfo
       const fullRefText = refEntryText + match[0].slice(1); // Include ", year, journal."
@@ -1819,7 +1838,10 @@ export class PDFReferencesParser {
       // Override with our more reliable extracted values
       info.firstAuthorLastName = firstAuthorLastName;
       info.year = yearWithSuffix;
-      info.allAuthorLastNames = allAuthorLastNames.length > 0 ? allAuthorLastNames : [firstAuthorLastName];
+      info.allAuthorLastNames =
+        allAuthorLastNames.length > 0
+          ? allAuthorLastNames
+          : [firstAuthorLastName];
 
       // Parse journal info directly from journalPart: "Phys. Rev. Lett. 106, 212001"
       // Pattern: Journal Name Volume, Page
@@ -1893,46 +1915,6 @@ export interface AuthorYearReferenceMapping {
   confidence: "high" | "medium" | "low";
 }
 
-/**
- * Build index mapping from PDF reference mapping.
- * Returns a map: label -> { startIdx, count }
- *
- * @param mapping - Parsed PDF reference mapping
- * @param totalEntries - Total number of INSPIRE entries
- */
-export function buildLabelToIndicesMap(
-  mapping: PDFReferenceMapping,
-  totalEntries: number,
-): Map<string, { startIdx: number; count: number }> {
-  const result = new Map<string, { startIdx: number; count: number }>();
-
-  // Sort labels numerically
-  const sortedLabels = Array.from(mapping.labelCounts.keys())
-    .map((l) => parseInt(l, 10))
-    .filter((n) => !isNaN(n))
-    .sort((a, b) => a - b);
-
-  let currentIdx = 0;
-
-  for (const labelNum of sortedLabels) {
-    const label = String(labelNum);
-    const count = mapping.labelCounts.get(label) || 1;
-
-    // Ensure we don't exceed total entries
-    const actualCount = Math.min(count, totalEntries - currentIdx);
-    if (actualCount <= 0) break;
-
-    result.set(label, {
-      startIdx: currentIdx,
-      count: actualCount,
-    });
-
-    currentIdx += actualCount;
-  }
-
-  return result;
-}
-
 // Singleton instance
 let parserInstance: PDFReferencesParser | null = null;
 
@@ -1942,4 +1924,3 @@ export function getPDFReferencesParser(): PDFReferencesParser {
   }
   return parserInstance;
 }
-

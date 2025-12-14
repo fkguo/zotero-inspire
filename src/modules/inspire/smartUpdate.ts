@@ -10,7 +10,11 @@ import type { jsobject } from "./types";
 /**
  * Field categories for smart update
  */
-export type FieldCategory = "bibliographic" | "identifiers" | "citations" | "extra";
+export type FieldCategory =
+  | "bibliographic"
+  | "identifiers"
+  | "citations"
+  | "extra";
 
 /**
  * Individual field change detected during comparison
@@ -50,7 +54,7 @@ export interface FieldProtectionConfig {
   protectVolume: boolean;
   protectPages: boolean;
   protectDOI: boolean;
-  protectedNames: string[];  // List of author names to always preserve
+  protectedNames: string[]; // List of author names to always preserve
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,15 +62,15 @@ export interface FieldProtectionConfig {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const DEFAULT_FIELD_PROTECTION: FieldProtectionConfig = {
-  protectTitle: true,      // Don't overwrite if user edited title
-  protectAuthors: true,    // Don't overwrite if user edited authors
-  protectAbstract: false,  // Usually safe to update
-  protectDate: false,      // Usually safe to update
-  protectJournal: false,   // Usually want INSPIRE's journal info
+  protectTitle: true, // Don't overwrite if user edited title
+  protectAuthors: true, // Don't overwrite if user edited authors
+  protectAbstract: false, // Usually safe to update
+  protectDate: false, // Usually safe to update
+  protectJournal: false, // Usually want INSPIRE's journal info
   protectVolume: false,
   protectPages: false,
-  protectDOI: false,       // Usually want to add DOI
-  protectedNames: [],      // No protected names by default
+  protectDOI: false, // Usually want to add DOI
+  protectedNames: [], // No protected names by default
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,24 +86,33 @@ function parseProtectedNames(namesString: string): string[] {
   }
   return namesString
     .split(/[,;]/)
-    .map(name => name.trim().toLowerCase())
-    .filter(name => name.length > 0);
+    .map((name) => name.trim().toLowerCase())
+    .filter((name) => name.length > 0);
 }
 
 /**
  * Get current field protection configuration from preferences
  */
 export function getFieldProtectionConfig(): FieldProtectionConfig {
-  const protectedNamesStr = getPref("smart_update_protected_names") as string ?? "";
+  const protectedNamesStr =
+    (getPref("smart_update_protected_names") as string) ?? "";
   return {
-    protectTitle: getPref("smart_update_protect_title") as boolean ?? DEFAULT_FIELD_PROTECTION.protectTitle,
-    protectAuthors: getPref("smart_update_protect_authors") as boolean ?? DEFAULT_FIELD_PROTECTION.protectAuthors,
-    protectAbstract: getPref("smart_update_protect_abstract") as boolean ?? DEFAULT_FIELD_PROTECTION.protectAbstract,
-    protectDate: getPref("smart_update_protect_date") as boolean ?? DEFAULT_FIELD_PROTECTION.protectDate,
-    protectJournal: getPref("smart_update_protect_journal") as boolean ?? DEFAULT_FIELD_PROTECTION.protectJournal,
-    protectVolume: getPref("smart_update_protect_volume") as boolean ?? DEFAULT_FIELD_PROTECTION.protectVolume,
-    protectPages: getPref("smart_update_protect_pages") as boolean ?? DEFAULT_FIELD_PROTECTION.protectPages,
-    protectDOI: getPref("smart_update_protect_doi") as boolean ?? DEFAULT_FIELD_PROTECTION.protectDOI,
+    protectTitle:
+      (getPref("smart_update_protect_title") as boolean) ??
+      DEFAULT_FIELD_PROTECTION.protectTitle,
+    protectAuthors:
+      (getPref("smart_update_protect_authors") as boolean) ??
+      DEFAULT_FIELD_PROTECTION.protectAuthors,
+    protectAbstract:
+      (getPref("smart_update_protect_abstract") as boolean) ??
+      DEFAULT_FIELD_PROTECTION.protectAbstract,
+    protectDate: DEFAULT_FIELD_PROTECTION.protectDate,
+    protectJournal:
+      (getPref("smart_update_protect_journal") as boolean) ??
+      DEFAULT_FIELD_PROTECTION.protectJournal,
+    protectVolume: DEFAULT_FIELD_PROTECTION.protectVolume,
+    protectPages: DEFAULT_FIELD_PROTECTION.protectPages,
+    protectDOI: DEFAULT_FIELD_PROTECTION.protectDOI,
     protectedNames: parseProtectedNames(protectedNamesStr),
   };
 }
@@ -107,7 +120,10 @@ export function getFieldProtectionConfig(): FieldProtectionConfig {
 /**
  * Check if a field is protected based on current configuration
  */
-export function isFieldProtected(field: string, config: FieldProtectionConfig): boolean {
+export function isFieldProtected(
+  field: string,
+  config: FieldProtectionConfig,
+): boolean {
   switch (field) {
     case "title":
       return config.protectTitle;
@@ -144,43 +160,97 @@ export function isFieldProtected(field: string, config: FieldProtectionConfig): 
  */
 const DIACRITIC_EQUIVALENTS: Record<string, string> = {
   // German umlauts (expanded form)
-  "ä": "ae", "ö": "oe", "ü": "ue",
-  "Ä": "Ae", "Ö": "Oe", "Ü": "Ue",
-  "ß": "ss",
+  ä: "ae",
+  ö: "oe",
+  ü: "ue",
+  Ä: "Ae",
+  Ö: "Oe",
+  Ü: "Ue",
+  ß: "ss",
   // French/Spanish accents
-  "é": "e", "è": "e", "ê": "e", "ë": "e",
-  "É": "E", "È": "E", "Ê": "E", "Ë": "E",
-  "á": "a", "à": "a", "â": "a", "ã": "a",
-  "Á": "A", "À": "A", "Â": "A", "Ã": "A",
-  "í": "i", "ì": "i", "î": "i", "ï": "i",
-  "Í": "I", "Ì": "I", "Î": "I", "Ï": "I",
-  "ó": "o", "ò": "o", "ô": "o", "õ": "o",
-  "Ó": "O", "Ò": "O", "Ô": "O", "Õ": "O",
-  "ú": "u", "ù": "u", "û": "u",
-  "Ú": "U", "Ù": "U", "Û": "U",
-  "ñ": "n", "Ñ": "N",
-  "ç": "c", "Ç": "C",
+  é: "e",
+  è: "e",
+  ê: "e",
+  ë: "e",
+  É: "E",
+  È: "E",
+  Ê: "E",
+  Ë: "E",
+  á: "a",
+  à: "a",
+  â: "a",
+  ã: "a",
+  Á: "A",
+  À: "A",
+  Â: "A",
+  Ã: "A",
+  í: "i",
+  ì: "i",
+  î: "i",
+  ï: "i",
+  Í: "I",
+  Ì: "I",
+  Î: "I",
+  Ï: "I",
+  ó: "o",
+  ò: "o",
+  ô: "o",
+  õ: "o",
+  Ó: "O",
+  Ò: "O",
+  Ô: "O",
+  Õ: "O",
+  ú: "u",
+  ù: "u",
+  û: "u",
+  Ú: "U",
+  Ù: "U",
+  Û: "U",
+  ñ: "n",
+  Ñ: "N",
+  ç: "c",
+  Ç: "C",
   // Nordic characters
-  "å": "a", "Å": "A",
-  "æ": "ae", "Æ": "Ae",
-  "ø": "o", "Ø": "O",
+  å: "a",
+  Å: "A",
+  æ: "ae",
+  Æ: "Ae",
+  ø: "o",
+  Ø: "O",
   // Polish/Czech/etc
-  "ł": "l", "Ł": "L",
-  "ś": "s", "Ś": "S",
-  "ź": "z", "Ź": "Z", "ż": "z", "Ż": "Z",
-  "ć": "c", "Ć": "C",
-  "ń": "n", "Ń": "N",
-  "ř": "r", "Ř": "R",
-  "š": "s", "Š": "S",
-  "ž": "z", "Ž": "Z",
-  "č": "c", "Č": "C",
-  "ě": "e", "Ě": "E",
-  "ů": "u", "Ů": "U",
-  "ý": "y", "Ý": "Y",
+  ł: "l",
+  Ł: "L",
+  ś: "s",
+  Ś: "S",
+  ź: "z",
+  Ź: "Z",
+  ż: "z",
+  Ż: "Z",
+  ć: "c",
+  Ć: "C",
+  ń: "n",
+  Ń: "N",
+  ř: "r",
+  Ř: "R",
+  š: "s",
+  Š: "S",
+  ž: "z",
+  Ž: "Z",
+  č: "c",
+  Č: "C",
+  ě: "e",
+  Ě: "E",
+  ů: "u",
+  Ů: "U",
+  ý: "y",
+  Ý: "Y",
   // Turkish
-  "ğ": "g", "Ğ": "G",
-  "ı": "i", "İ": "I",
-  "ş": "s", "Ş": "S",
+  ğ: "g",
+  Ğ: "G",
+  ı: "i",
+  İ: "I",
+  ş: "s",
+  Ş: "S",
 };
 
 /**
@@ -189,43 +259,97 @@ const DIACRITIC_EQUIVALENTS: Record<string, string> = {
  */
 const DIACRITIC_STRIP: Record<string, string> = {
   // German umlauts (simple strip)
-  "ä": "a", "ö": "o", "ü": "u",
-  "Ä": "A", "Ö": "O", "Ü": "U",
-  "ß": "s",  // Sometimes stripped to single s
+  ä: "a",
+  ö: "o",
+  ü: "u",
+  Ä: "A",
+  Ö: "O",
+  Ü: "U",
+  ß: "s", // Sometimes stripped to single s
   // All accented vowels
-  "é": "e", "è": "e", "ê": "e", "ë": "e",
-  "É": "E", "È": "E", "Ê": "E", "Ë": "E",
-  "á": "a", "à": "a", "â": "a", "ã": "a",
-  "Á": "A", "À": "A", "Â": "A", "Ã": "A",
-  "í": "i", "ì": "i", "î": "i", "ï": "i",
-  "Í": "I", "Ì": "I", "Î": "I", "Ï": "I",
-  "ó": "o", "ò": "o", "ô": "o", "õ": "o",
-  "Ó": "O", "Ò": "O", "Ô": "O", "Õ": "O",
-  "ú": "u", "ù": "u", "û": "u",
-  "Ú": "U", "Ù": "U", "Û": "U",
-  "ñ": "n", "Ñ": "N",
-  "ç": "c", "Ç": "C",
+  é: "e",
+  è: "e",
+  ê: "e",
+  ë: "e",
+  É: "E",
+  È: "E",
+  Ê: "E",
+  Ë: "E",
+  á: "a",
+  à: "a",
+  â: "a",
+  ã: "a",
+  Á: "A",
+  À: "A",
+  Â: "A",
+  Ã: "A",
+  í: "i",
+  ì: "i",
+  î: "i",
+  ï: "i",
+  Í: "I",
+  Ì: "I",
+  Î: "I",
+  Ï: "I",
+  ó: "o",
+  ò: "o",
+  ô: "o",
+  õ: "o",
+  Ó: "O",
+  Ò: "O",
+  Ô: "O",
+  Õ: "O",
+  ú: "u",
+  ù: "u",
+  û: "u",
+  Ú: "U",
+  Ù: "U",
+  Û: "U",
+  ñ: "n",
+  Ñ: "N",
+  ç: "c",
+  Ç: "C",
   // Nordic
-  "å": "a", "Å": "A",
-  "æ": "a", "Æ": "A",  // Simple strip (vs ae expansion)
-  "ø": "o", "Ø": "O",
+  å: "a",
+  Å: "A",
+  æ: "a",
+  Æ: "A", // Simple strip (vs ae expansion)
+  ø: "o",
+  Ø: "O",
   // Polish/Czech/etc
-  "ł": "l", "Ł": "L",
-  "ś": "s", "Ś": "S",
-  "ź": "z", "Ź": "Z", "ż": "z", "Ż": "Z",
-  "ć": "c", "Ć": "C",
-  "ń": "n", "Ń": "N",
-  "ř": "r", "Ř": "R",
-  "š": "s", "Š": "S",
-  "ž": "z", "Ž": "Z",
-  "č": "c", "Č": "C",
-  "ě": "e", "Ě": "E",
-  "ů": "u", "Ů": "U",
-  "ý": "y", "Ý": "Y",
+  ł: "l",
+  Ł: "L",
+  ś: "s",
+  Ś: "S",
+  ź: "z",
+  Ź: "Z",
+  ż: "z",
+  Ż: "Z",
+  ć: "c",
+  Ć: "C",
+  ń: "n",
+  Ń: "N",
+  ř: "r",
+  Ř: "R",
+  š: "s",
+  Š: "S",
+  ž: "z",
+  Ž: "Z",
+  č: "c",
+  Č: "C",
+  ě: "e",
+  Ě: "E",
+  ů: "u",
+  Ů: "U",
+  ý: "y",
+  Ý: "Y",
   // Turkish
-  "ğ": "g", "Ğ": "G",
-  "ı": "i", "İ": "I",
-  "ş": "s", "Ş": "S",
+  ğ: "g",
+  Ğ: "G",
+  ı: "i",
+  İ: "I",
+  ş: "s",
+  Ş: "S",
 };
 
 /**
@@ -233,7 +357,9 @@ const DIACRITIC_STRIP: Record<string, string> = {
  */
 function normalizeDiacritics(str: string): string {
   let result = str;
-  for (const [diacritic, replacement] of Object.entries(DIACRITIC_EQUIVALENTS)) {
+  for (const [diacritic, replacement] of Object.entries(
+    DIACRITIC_EQUIVALENTS,
+  )) {
     result = result.split(diacritic).join(replacement);
   }
   return result;
@@ -290,7 +416,10 @@ function hasDiacritics(str: string): boolean {
 /**
  * Check if a creator name matches any protected name
  */
-function isNameProtected(creator: _ZoteroTypes.Item.Creator, protectedNames: string[]): boolean {
+function isNameProtected(
+  creator: _ZoteroTypes.Item.Creator,
+  protectedNames: string[],
+): boolean {
   if (protectedNames.length === 0) return false;
 
   const lastName = (creator.lastName || "").toLowerCase();
@@ -299,12 +428,18 @@ function isNameProtected(creator: _ZoteroTypes.Item.Creator, protectedNames: str
   const reverseName = `${lastName} ${firstName}`.trim();
 
   for (const protectedName of protectedNames) {
-    // Match against lastName, fullName, or reversed fullName
-    if (lastName === protectedName ||
-        fullName === protectedName ||
-        reverseName === protectedName ||
-        lastName.includes(protectedName) ||
-        protectedName.includes(lastName)) {
+    // Match against lastName, firstName, fullName, or reversed fullName
+    // Also check partial matches (e.g., "Ulf-G." should match firstName "Ulf-G.")
+    if (
+      lastName === protectedName ||
+      firstName === protectedName ||
+      fullName === protectedName ||
+      reverseName === protectedName ||
+      lastName.includes(protectedName) ||
+      firstName.includes(protectedName) ||
+      protectedName.includes(lastName) ||
+      protectedName.includes(firstName)
+    ) {
       return true;
     }
   }
@@ -319,7 +454,11 @@ export function findProtectedCreatorNames(
   localCreators: _ZoteroTypes.Item.Creator[],
   protectedNames: string[],
 ): string[] {
-  if (!localCreators || localCreators.length === 0 || protectedNames.length === 0) {
+  if (
+    !localCreators ||
+    localCreators.length === 0 ||
+    protectedNames.length === 0
+  ) {
     return [];
   }
 
@@ -384,11 +523,16 @@ export function mergeCreatorsWithProtectedNames(
       }
       // Check 2: Does local have diacritics that INSPIRE lacks?
       // Only preserve if local has diacritics AND names are diacritic-equivalent
-      else if (hasDiacritics(localLastName) && isDiacriticEquivalent(localLastName, inspireLastName)) {
+      else if (
+        hasDiacritics(localLastName) &&
+        isDiacriticEquivalent(localLastName, inspireLastName)
+      ) {
         shouldPreserveLocal = true;
         reason = "diacritic preservation";
-      }
-      else if (hasDiacritics(localFirstName) && isDiacriticEquivalent(localFirstName, inspireFirstName)) {
+      } else if (
+        hasDiacritics(localFirstName) &&
+        isDiacriticEquivalent(localFirstName, inspireFirstName)
+      ) {
         shouldPreserveLocal = true;
         reason = "diacritic preservation (first name)";
       }
@@ -397,7 +541,9 @@ export function mergeCreatorsWithProtectedNames(
     if (shouldPreserveLocal && localCreator) {
       merged.push(localCreator);
       hasPreservations = true;
-      Zotero.debug(`[zotero-inspire] Preserving local author name (${reason}): ${localCreator.lastName}, ${localCreator.firstName}`);
+      Zotero.debug(
+        `[zotero-inspire] Preserving local author name (${reason}): ${localCreator.lastName}, ${localCreator.firstName}`,
+      );
     } else {
       merged.push(inspireCreator);
     }
@@ -417,11 +563,11 @@ function normalizeForComparison(value: string | null | undefined): string {
   if (!value) return "";
   return value
     .toString()
-    .normalize("NFC")  // Unicode normalization to avoid false positives
+    .normalize("NFC") // Unicode normalization to avoid false positives
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, " ")  // Collapse multiple spaces
-    .replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, " ");  // Replace special spaces
+    .replace(/\s+/g, " ") // Collapse multiple spaces
+    .replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, " "); // Replace special spaces
 }
 
 /**
@@ -433,7 +579,10 @@ function valuesAreEqual(local: any, inspire: any): boolean {
   // One empty
   if (!local || !inspire) return false;
   // Normalize and compare strings
-  return normalizeForComparison(String(local)) === normalizeForComparison(String(inspire));
+  return (
+    normalizeForComparison(String(local)) ===
+    normalizeForComparison(String(inspire))
+  );
 }
 
 /**
@@ -455,9 +604,9 @@ function isEmptyValue(value: any): boolean {
 function normalizeNameForComparison(name: string): string {
   return name
     .trim()
-    .replace(/\s+/g, " ")           // Collapse multiple spaces
-    .replace(/\s*\.\s*/g, ".")       // Remove spaces around dots: "J. R." → "J.R."
-    .replace(/\s*-\s*/g, "-");       // Remove spaces around hyphens
+    .replace(/\s+/g, " ") // Collapse multiple spaces
+    .replace(/\s*\.\s*/g, ".") // Remove spaces around dots: "J. R." → "J.R."
+    .replace(/\s*-\s*/g, "-"); // Remove spaces around hyphens
 }
 
 /**
@@ -490,10 +639,16 @@ function creatorsAreEqual(
 
   // Check if local list ends with a terminator like "others" or "et al."
   // These indicate the user intentionally truncated the author list
-  const terminators = ["others", "et al.", "et al", "and others", "collaboration"];
-  const localEffective = local.filter(c => {
+  const terminators = [
+    "others",
+    "et al.",
+    "et al",
+    "and others",
+    "collaboration",
+  ];
+  const localEffective = local.filter((c) => {
     const name = ((c as any).name || c.lastName || "").toLowerCase().trim();
-    return !terminators.some(t => name === t || name.includes(t));
+    return !terminators.some((t) => name === t || name.includes(t));
   });
 
   // If local only has terminators (no real authors), consider it empty
@@ -510,17 +665,25 @@ function creatorsAreEqual(
     // Normalize names to handle whitespace differences like "J. R." vs "J.R."
     const localFirst = normalizeNameForComparison(l.firstName || "");
     const inspireFirst = normalizeNameForComparison(r.firstName || "");
-    const localLast = normalizeNameForComparison((l as any).name || l.lastName || "");
-    const inspireLast = normalizeNameForComparison((r as any).name || r.lastName || "");
+    const localLast = normalizeNameForComparison(
+      (l as any).name || l.lastName || "",
+    );
+    const inspireLast = normalizeNameForComparison(
+      (r as any).name || r.lastName || "",
+    );
 
     // Check firstName: either exact match (case-insensitive) or diacritic equivalent
-    if (localFirst.toLowerCase() !== inspireFirst.toLowerCase() &&
-        !isDiacriticEquivalent(localFirst, inspireFirst)) {
+    if (
+      localFirst.toLowerCase() !== inspireFirst.toLowerCase() &&
+      !isDiacriticEquivalent(localFirst, inspireFirst)
+    ) {
       return false;
     }
     // Check lastName: either exact match (case-insensitive) or diacritic equivalent
-    if (localLast.toLowerCase() !== inspireLast.toLowerCase() &&
-        !isDiacriticEquivalent(localLast, inspireLast)) {
+    if (
+      localLast.toLowerCase() !== inspireLast.toLowerCase() &&
+      !isDiacriticEquivalent(localLast, inspireLast)
+    ) {
       return false;
     }
   }
@@ -534,11 +697,13 @@ function creatorsAreEqual(
 /**
  * Format creators array for display in preview dialog
  */
-function formatCreatorsForDisplay(creators: _ZoteroTypes.Item.Creator[]): string {
+function formatCreatorsForDisplay(
+  creators: _ZoteroTypes.Item.Creator[],
+): string {
   if (!creators || creators.length === 0) {
     return "";
   }
-  const names = creators.slice(0, 3).map(c => {
+  const names = creators.slice(0, 3).map((c) => {
     if (c.firstName && c.lastName) {
       return `${c.lastName}, ${c.firstName}`;
     }
@@ -586,8 +751,14 @@ function compareField(
 /**
  * Extract citation counts from Extra field
  */
-function extractCitationsFromExtra(extra: string): { total: number | null; withoutSelf: number | null } {
-  const result = { total: null as number | null, withoutSelf: null as number | null };
+function extractCitationsFromExtra(extra: string): {
+  total: number | null;
+  withoutSelf: number | null;
+} {
+  const result = {
+    total: null as number | null,
+    withoutSelf: null as number | null,
+  };
 
   const totalMatch = extra.match(/^(\d+)\s+citations\s+\(INSPIRE/m);
   if (totalMatch) {
@@ -613,7 +784,10 @@ function extractArxivFromExtra(extra: string): string | null {
 /**
  * Build arXiv info string (matches setInspireMeta logic)
  */
-function buildArxivInfoString(arxiv: { value: string; categories?: string[] }): string {
+function buildArxivInfoString(arxiv: {
+  value: string;
+  categories?: string[];
+}): string {
   const arxivId = arxiv.value;
   if (/^\d/.test(arxivId) && arxiv.categories?.[0]) {
     return `arXiv:${arxivId} [${arxiv.categories[0]}]`;
@@ -629,38 +803,92 @@ export function compareItemWithInspire(
   metaInspire: jsobject,
 ): SmartUpdateDiff {
   const changes: FieldChange[] = [];
-  const extra = item.getField("extra") as string || "";
+  const extra = (item.getField("extra") as string) || "";
 
   // Determine effective journalAbbreviation value from INSPIRE
   // If no journal info but has arXiv, use arXiv as fallback (matches setInspireMeta logic)
   let effectiveJournalAbbr = metaInspire.journalAbbreviation;
-  if (!effectiveJournalAbbr && metaInspire.arxiv?.value && item.itemType === "journalArticle") {
+  if (
+    !effectiveJournalAbbr &&
+    metaInspire.arxiv?.value &&
+    item.itemType === "journalArticle"
+  ) {
     effectiveJournalAbbr = buildArxivInfoString(metaInspire.arxiv);
   }
 
   // Bibliographic fields
-  const bibliographicFields: Array<{ field: string; localGetter: () => any; inspireValue: any }> = [
-    { field: "title", localGetter: () => item.getField("title"), inspireValue: metaInspire.title },
-    { field: "date", localGetter: () => item.getField("date"), inspireValue: metaInspire.date },
-    { field: "journalAbbreviation", localGetter: () => item.getField("journalAbbreviation"), inspireValue: effectiveJournalAbbr },
-    { field: "volume", localGetter: () => item.getField("volume"), inspireValue: metaInspire.volume },
-    { field: "pages", localGetter: () => item.getField("pages"), inspireValue: metaInspire.pages },
-    { field: "issue", localGetter: () => item.getField("issue"), inspireValue: metaInspire.issue },
-    { field: "abstractNote", localGetter: () => item.getField("abstractNote"), inspireValue: metaInspire.abstractNote },
+  const bibliographicFields: Array<{
+    field: string;
+    localGetter: () => any;
+    inspireValue: any;
+  }> = [
+    {
+      field: "title",
+      localGetter: () => item.getField("title"),
+      inspireValue: metaInspire.title,
+    },
+    {
+      field: "date",
+      localGetter: () => item.getField("date"),
+      inspireValue: metaInspire.date,
+    },
+    {
+      field: "journalAbbreviation",
+      localGetter: () => item.getField("journalAbbreviation"),
+      inspireValue: effectiveJournalAbbr,
+    },
+    {
+      field: "volume",
+      localGetter: () => item.getField("volume"),
+      inspireValue: metaInspire.volume,
+    },
+    {
+      field: "pages",
+      localGetter: () => item.getField("pages"),
+      inspireValue: metaInspire.pages,
+    },
+    {
+      field: "issue",
+      localGetter: () => item.getField("issue"),
+      inspireValue: metaInspire.issue,
+    },
+    {
+      field: "abstractNote",
+      localGetter: () => item.getField("abstractNote"),
+      inspireValue: metaInspire.abstractNote,
+    },
   ];
 
   for (const { field, localGetter, inspireValue } of bibliographicFields) {
-    const change = compareField(field, "bibliographic", localGetter(), inspireValue);
+    const change = compareField(
+      field,
+      "bibliographic",
+      localGetter(),
+      inspireValue,
+    );
     if (change) changes.push(change);
   }
 
   // Identifier fields
-  const identifierFields: Array<{ field: string; localGetter: () => any; inspireKey: string }> = [
-    { field: "DOI", localGetter: () => item.getField("DOI"), inspireKey: "DOI" },
+  const identifierFields: Array<{
+    field: string;
+    localGetter: () => any;
+    inspireKey: string;
+  }> = [
+    {
+      field: "DOI",
+      localGetter: () => item.getField("DOI"),
+      inspireKey: "DOI",
+    },
   ];
 
   for (const { field, localGetter, inspireKey } of identifierFields) {
-    const change = compareField(field, "identifiers", localGetter(), metaInspire[inspireKey]);
+    const change = compareField(
+      field,
+      "identifiers",
+      localGetter(),
+      metaInspire[inspireKey],
+    );
     if (change) changes.push(change);
   }
 
@@ -693,7 +921,10 @@ export function compareItemWithInspire(
     }
   }
   if (metaInspire.citation_count_wo_self_citations !== undefined) {
-    if (localCitations.withoutSelf !== metaInspire.citation_count_wo_self_citations) {
+    if (
+      localCitations.withoutSelf !==
+      metaInspire.citation_count_wo_self_citations
+    ) {
       changes.push({
         field: "citationsWithoutSelf",
         category: "citations",
@@ -723,7 +954,10 @@ export function compareItemWithInspire(
     const localCreators = item.getCreators();
     if (!creatorsAreEqual(localCreators, metaInspire.creators)) {
       // Debug: log the actual difference
-      const compareCount = Math.min(localCreators.length, metaInspire.creators.length);
+      const compareCount = Math.min(
+        localCreators.length,
+        metaInspire.creators.length,
+      );
       for (let i = 0; i < compareCount; i++) {
         const l = localCreators[i];
         const r = metaInspire.creators[i];
@@ -731,11 +965,17 @@ export function compareItemWithInspire(
         const inspireFirst = (r.firstName || "").trim();
         const localLast = (l.lastName || "").trim();
         const inspireLast = (r.lastName || "").trim();
-        if (localFirst.toLowerCase() !== inspireFirst.toLowerCase() ||
-            localLast.toLowerCase() !== inspireLast.toLowerCase()) {
+        if (
+          localFirst.toLowerCase() !== inspireFirst.toLowerCase() ||
+          localLast.toLowerCase() !== inspireLast.toLowerCase()
+        ) {
           Zotero.debug(`[zotero-inspire] Creator diff at index ${i}:`);
-          Zotero.debug(`  Local: "${localLast}", "${localFirst}" (${JSON.stringify(l)})`);
-          Zotero.debug(`  INSPIRE: "${inspireLast}", "${inspireFirst}" (${JSON.stringify(r)})`);
+          Zotero.debug(
+            `  Local: "${localLast}", "${localFirst}" (${JSON.stringify(l)})`,
+          );
+          Zotero.debug(
+            `  INSPIRE: "${inspireLast}", "${inspireFirst}" (${JSON.stringify(r)})`,
+          );
         }
       }
       changes.push({
@@ -764,14 +1004,17 @@ export function compareItemWithInspire(
   }
 
   // Group changes by category
-  const bibliographicChanges = changes.filter(c => c.category === "bibliographic");
-  const identifierChanges = changes.filter(c => c.category === "identifiers");
-  const citationChanges = changes.filter(c => c.category === "citations");
-  const extraChanges = changes.filter(c => c.category === "extra");
+  const bibliographicChanges = changes.filter(
+    (c) => c.category === "bibliographic",
+  );
+  const identifierChanges = changes.filter((c) => c.category === "identifiers");
+  const citationChanges = changes.filter((c) => c.category === "citations");
+  const extraChanges = changes.filter((c) => c.category === "extra");
 
   return {
     itemId: item.id,
-    itemTitle: item.getField("title") as string || getString("smart-update-untitled"),
+    itemTitle:
+      (item.getField("title") as string) || getString("smart-update-untitled"),
     hasChanges: changes.length > 0,
     changes,
     bibliographicChanges,
@@ -793,12 +1036,14 @@ export function filterProtectedChanges(
   diff: SmartUpdateDiff,
   config: FieldProtectionConfig,
 ): FieldChange[] {
-  return diff.changes.filter(change => {
+  return diff.changes.filter((change) => {
     // Check field protection
     if (isFieldProtected(change.field, config)) {
       // Only skip if local value is non-empty (user has data)
       if (!isEmptyValue(change.localValue)) {
-        Zotero.debug(`[zotero-inspire] Skipping protected field: ${change.field} (local value exists)`);
+        Zotero.debug(
+          `[zotero-inspire] Skipping protected field: ${change.field} (local value exists)`,
+        );
         return false;
       }
     }
@@ -833,7 +1078,10 @@ export function getFieldDisplayName(field: string): string {
 /**
  * Format a value for display (truncate long strings)
  */
-export function formatValueForDisplay(value: any, maxLength: number = 50): string {
+export function formatValueForDisplay(
+  value: any,
+  maxLength: number = 50,
+): string {
   if (value === null || value === undefined) {
     return getString("smart-update-value-empty");
   }
@@ -852,21 +1100,21 @@ export function formatValueForDisplay(value: any, maxLength: number = 50): strin
  * Check if smart update mode is enabled
  */
 export function isSmartUpdateEnabled(): boolean {
-  return getPref("smart_update_enable") as boolean ?? false;
+  return (getPref("smart_update_enable") as boolean) ?? false;
 }
 
 /**
  * Check if preview dialog should be shown
  */
 export function shouldShowPreview(): boolean {
-  return getPref("smart_update_show_preview") as boolean ?? true;
+  return (getPref("smart_update_show_preview") as boolean) ?? true;
 }
 
 /**
  * Check if auto-check on item select is enabled
  */
 export function isAutoCheckEnabled(): boolean {
-  return getPref("smart_update_auto_check") as boolean ?? false;
+  return (getPref("smart_update_auto_check") as boolean) ?? false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -878,7 +1126,7 @@ export function isAutoCheckEnabled(): boolean {
  */
 export interface PreviewDialogResult {
   confirmed: boolean;
-  selectedFields: string[];  // Field names user chose to update
+  selectedFields: string[]; // Field names user chose to update
 }
 
 /**
@@ -891,27 +1139,38 @@ export async function showSmartUpdatePreviewDialog(
   allowedChanges: FieldChange[],
 ): Promise<PreviewDialogResult> {
   return new Promise((resolve) => {
-    Zotero.debug(`[zotero-inspire] showSmartUpdatePreviewDialog: starting with ${allowedChanges.length} changes`);
+    Zotero.debug(
+      `[zotero-inspire] showSmartUpdatePreviewDialog: starting with ${allowedChanges.length} changes`,
+    );
 
     const win = Zotero.getMainWindow();
     if (!win) {
-      Zotero.debug(`[zotero-inspire] showSmartUpdatePreviewDialog: ERROR - no main window, auto-confirming`);
-      resolve({ confirmed: true, selectedFields: allowedChanges.map(c => c.field) });
+      Zotero.debug(
+        `[zotero-inspire] showSmartUpdatePreviewDialog: ERROR - no main window, auto-confirming`,
+      );
+      resolve({
+        confirmed: true,
+        selectedFields: allowedChanges.map((c) => c.field),
+      });
       return;
     }
 
     const doc = win.document;
-    Zotero.debug(`[zotero-inspire] showSmartUpdatePreviewDialog: got document, creating overlay`);
+    Zotero.debug(
+      `[zotero-inspire] showSmartUpdatePreviewDialog: got document, creating overlay`,
+    );
 
     // Remove any existing overlay first (in case of stale state)
     const existingOverlay = doc.getElementById("zinspire-smart-update-overlay");
     if (existingOverlay) {
-      Zotero.debug(`[zotero-inspire] showSmartUpdatePreviewDialog: removing existing overlay`);
+      Zotero.debug(
+        `[zotero-inspire] showSmartUpdatePreviewDialog: removing existing overlay`,
+      );
       existingOverlay.remove();
     }
 
     // Track selected fields (all selected by default)
-    const selectedFields = new Set<string>(allowedChanges.map(c => c.field));
+    const selectedFields = new Set<string>(allowedChanges.map((c) => c.field));
 
     // Create overlay
     const overlay = doc.createElement("div");
@@ -1112,7 +1371,11 @@ function createChangeRowHTML(
   valuesBox.style.fontSize = "12px";
 
   // Current value (if exists)
-  if (change.localValue !== null && change.localValue !== undefined && String(change.localValue).trim() !== "") {
+  if (
+    change.localValue !== null &&
+    change.localValue !== undefined &&
+    String(change.localValue).trim() !== ""
+  ) {
     const currentRow = doc.createElement("div");
     currentRow.style.marginBottom = "2px";
     currentRow.style.display = "flex";

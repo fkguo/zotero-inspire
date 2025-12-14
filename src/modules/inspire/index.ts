@@ -69,9 +69,21 @@ export {
 } from "./authorUtils";
 
 // Re-export classes and utilities
-export { LRUCache, ZInsUtils, ReaderTabHelper, clearAllHistoryPrefs, type CacheStats } from "./utils";
+export {
+  LRUCache,
+  ZInsUtils,
+  ReaderTabHelper,
+  clearAllHistoryPrefs,
+  type CacheStats,
+} from "./utils";
 export { ZInsMenu } from "./menu";
-export { ZInspire, setInspireMeta, setInspireMetaSelective, setCrossRefCitations, saveItemWithPendingInspireNote } from "./itemUpdater";
+export {
+  ZInspire,
+  setInspireMeta,
+  setInspireMetaSelective,
+  setCrossRefCitations,
+  saveItemWithPendingInspireNote,
+} from "./itemUpdater";
 export { MemoryMonitor } from "./memoryMonitor";
 
 // Re-export CrossRef service
@@ -115,7 +127,11 @@ export {
 export { localCache } from "./localCache";
 
 // Re-export reference services
-export { fetchReferencesEntries, buildReferenceEntry, enrichReferencesEntries } from "./referencesService";
+export {
+  fetchReferencesEntries,
+  buildReferenceEntry,
+  enrichReferencesEntries,
+} from "./referencesService";
 
 // Re-export smart update service (FTR-SMART-UPDATE)
 export {
@@ -148,6 +164,7 @@ export {
   type AlignmentReport,
   type ScanResult,
   type CitationLookupEvent,
+  type CitationPreviewEvent,
   type PageScanCompleteEvent,
   type ReaderState,
   // Classes

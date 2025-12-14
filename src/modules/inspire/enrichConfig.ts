@@ -9,7 +9,12 @@ export const ENRICH_PARALLEL_RANGE = { min: 1, max: 5 };
 export const ENRICH_BATCH_DEFAULT = 100;
 export const ENRICH_PARALLEL_DEFAULT = 4;
 
-function clamp(value: number, min: number, max: number, fallback: number): number {
+function clamp(
+  value: number,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
   const safeValue = Number.isFinite(value) ? value : fallback;
   return Math.min(Math.max(safeValue, min), max);
 }
@@ -41,4 +46,3 @@ export function getEnrichmentSettings() {
     defaultParallel: ENRICH_PARALLEL_DEFAULT,
   };
 }
-

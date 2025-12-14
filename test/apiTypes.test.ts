@@ -68,12 +68,16 @@ describe("isInspireLiteratureSearchResponse", () => {
   });
 
   it("returns false for missing total", () => {
-    expect(isInspireLiteratureSearchResponse({ hits: { hits: [] } })).toBe(false);
+    expect(isInspireLiteratureSearchResponse({ hits: { hits: [] } })).toBe(
+      false,
+    );
   });
 
   it("returns false for non-array hits", () => {
     expect(
-      isInspireLiteratureSearchResponse({ hits: { total: 1, hits: "not array" } })
+      isInspireLiteratureSearchResponse({
+        hits: { total: 1, hits: "not array" },
+      }),
     ).toBe(false);
   });
 });
@@ -100,7 +104,7 @@ describe("isInspireLiteratureHit", () => {
     expect(
       isInspireLiteratureHit({
         metadata: { control_number: 123, titles: [] },
-      })
+      }),
     ).toBe(false);
   });
 
@@ -110,7 +114,7 @@ describe("isInspireLiteratureHit", () => {
 
   it("returns false for missing control_number", () => {
     expect(
-      isInspireLiteratureHit({ id: "123", metadata: { titles: [] } })
+      isInspireLiteratureHit({ id: "123", metadata: { titles: [] } }),
     ).toBe(false);
   });
 });
@@ -133,9 +137,9 @@ describe("isCrossRefWorksResponse", () => {
   });
 
   it("returns false for missing status", () => {
-    expect(
-      isCrossRefWorksResponse({ message: { DOI: "10.1234/test" } })
-    ).toBe(false);
+    expect(isCrossRefWorksResponse({ message: { DOI: "10.1234/test" } })).toBe(
+      false,
+    );
   });
 
   it("returns false for missing message", () => {
@@ -143,9 +147,7 @@ describe("isCrossRefWorksResponse", () => {
   });
 
   it("returns false for missing DOI in message", () => {
-    expect(
-      isCrossRefWorksResponse({ status: "ok", message: {} })
-    ).toBe(false);
+    expect(isCrossRefWorksResponse({ status: "ok", message: {} })).toBe(false);
   });
 });
 
@@ -169,18 +171,22 @@ describe("extractRecidFromRef", () => {
   });
 
   it("returns undefined for null $ref", () => {
-    expect(extractRecidFromRef({ $ref: null as unknown as string })).toBeUndefined();
+    expect(
+      extractRecidFromRef({ $ref: null as unknown as string }),
+    ).toBeUndefined();
   });
 
   it("returns undefined for invalid URL format", () => {
     expect(
-      extractRecidFromRef({ $ref: "https://example.com/other/123" })
+      extractRecidFromRef({ $ref: "https://example.com/other/123" }),
     ).toBeUndefined();
   });
 
   it("returns undefined for non-numeric id", () => {
     expect(
-      extractRecidFromRef({ $ref: "https://inspirehep.net/api/literature/abc" })
+      extractRecidFromRef({
+        $ref: "https://inspirehep.net/api/literature/abc",
+      }),
     ).toBeUndefined();
   });
 });

@@ -21,7 +21,8 @@ export function extractAuthorNamesFromReference(
   if (Array.isArray(reference?.authors) && reference.authors.length) {
     const totalAuthors = reference.authors.length;
     // For large collaborations, only extract first author
-    const effectiveLimit = totalAuthors > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
+    const effectiveLimit =
+      totalAuthors > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
     const result: string[] = [];
     const maxToProcess = Math.min(totalAuthors, effectiveLimit);
     for (let i = 0; i < maxToProcess; i++) {
@@ -69,11 +70,13 @@ export function extractAuthorNamesLimited(
   }
   const totalAuthors = authors.length;
   // For large collaborations, only extract first author
-  const effectiveLimit = totalAuthors > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
+  const effectiveLimit =
+    totalAuthors > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
   const result: string[] = [];
   const maxToProcess = Math.min(totalAuthors, effectiveLimit);
   for (let i = 0; i < maxToProcess; i++) {
-    const name = authors[i]?.full_name || authors[i]?.full_name_unicode_normalized;
+    const name =
+      authors[i]?.full_name || authors[i]?.full_name_unicode_normalized;
     if (name) {
       result.push(name);
     }
@@ -132,7 +135,8 @@ export function extractAuthorSearchInfos(
     return undefined;
   }
   // For large collaborations, only extract first author's search info
-  const effectiveLimit = authors.length > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
+  const effectiveLimit =
+    authors.length > LARGE_COLLABORATION_THRESHOLD ? 1 : limit;
   const result: AuthorSearchInfo[] = [];
   const maxToProcess = Math.min(authors.length, effectiveLimit);
   for (let i = 0; i < maxToProcess; i++) {
@@ -172,4 +176,3 @@ export function extractAuthorSearchInfos(
 
 // Re-export AUTHOR_IDS_EXTRACT_LIMIT for convenience
 export { AUTHOR_IDS_EXTRACT_LIMIT };
-

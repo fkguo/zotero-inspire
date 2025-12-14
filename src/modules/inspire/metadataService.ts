@@ -20,7 +20,8 @@ import { crossrefFetch } from "./crossrefService";
 // ─────────────────────────────────────────────────────────────────────────────
 const ARXIV_REGEX = /arxiv/i;
 const ARXIV_ID_REGEX = /(arXiv:|_eprint:)(.+)/;
-const ARXIV_URL_REGEX = /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
+const ARXIV_URL_REGEX =
+  /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
 const RECID_FROM_URL_REGEX = /[^/]*$/;
 const DOI_IN_EXTRA_REGEX = /DOI:(.+)/i;
 const DOI_ORG_IN_EXTRA_REGEX = /doi\.org\/(.+)/i;
@@ -42,7 +43,9 @@ interface ExtractedIdentifier {
  * @param item - Zotero item to extract identifier from
  * @returns Extracted identifier info, or null if not found
  */
-function extractIdentifierFromItem(item: Zotero.Item): ExtractedIdentifier | null {
+function extractIdentifierFromItem(
+  item: Zotero.Item,
+): ExtractedIdentifier | null {
   const doi0 = item.getField("DOI") as string;
   const url = item.getField("url") as string;
   const extra = item.getField("extra") as string;
@@ -115,7 +118,10 @@ function extractIdentifierFromItem(item: Zotero.Item): ExtractedIdentifier | nul
 // INSPIRE Metadata Fetching
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function getInspireMeta(item: Zotero.Item, operation: string): Promise<jsobject | -1> {
+export async function getInspireMeta(
+  item: Zotero.Item,
+  operation: string,
+): Promise<jsobject | -1> {
   const identifier = extractIdentifierFromItem(item);
   if (!identifier) {
     return -1;
@@ -144,7 +150,9 @@ export async function getInspireMeta(item: Zotero.Item, operation: string): Prom
     const edoi = encodeURIComponent(doi);
     urlInspire = `${INSPIRE_API_BASE}/${idtype}/${edoi}${fieldsParam ? "?" + fieldsParam.slice(1) : ""}`;
   } else if (searchOrNot === 1) {
-    const citekey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0].split(": ")[1];
+    const citekey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0].split(
+      ": ",
+    )[1];
     urlInspire = `${INSPIRE_API_BASE}/literature?q=texkey%20${encodeURIComponent(citekey)}${fieldsParam}`;
   }
 
@@ -185,7 +193,9 @@ export async function getInspireMeta(item: Zotero.Item, operation: string): Prom
     const metaInspire = buildMetaFromMetadata(meta, operation);
     if (operation !== "citations") {
       const assignEnd = performance.now();
-      Zotero.debug(`Assigning meta took ${assignEnd - assignStart} milliseconds.`);
+      Zotero.debug(
+        `Assigning meta took ${assignEnd - assignStart} milliseconds.`,
+      );
     }
     return metaInspire;
   } catch (err) {
@@ -193,11 +203,17 @@ export async function getInspireMeta(item: Zotero.Item, operation: string): Prom
   }
 }
 
-export async function fetchRecidFromInspire(item: Zotero.Item): Promise<string | null> {
+export async function fetchRecidFromInspire(
+  item: Zotero.Item,
+): Promise<string | null> {
   // Validate item.id before using as cache key
   if (typeof item.id !== "number" || !Number.isFinite(item.id)) {
-    Zotero.debug(`[${config.addonName}] Invalid item.id: ${item.id}, skipping cache`);
-    const meta = (await getInspireMeta(item, "literatureLookup")) as jsobject | -1;
+    Zotero.debug(
+      `[${config.addonName}] Invalid item.id: ${item.id}, skipping cache`,
+    );
+    const meta = (await getInspireMeta(item, "literatureLookup")) as
+      | jsobject
+      | -1;
     if (meta === -1 || typeof meta !== "object") return null;
     // FIX: INSPIRE API returns recid as number, convert to string
     return meta.recid != null ? String(meta.recid) : null;
@@ -206,11 +222,15 @@ export async function fetchRecidFromInspire(item: Zotero.Item): Promise<string |
   // Check cache first to avoid redundant API calls
   const cached = recidLookupCache.get(item.id);
   if (cached !== undefined) {
-    Zotero.debug(`[${config.addonName}] Using cached recid for item ${item.id}: ${cached}`);
+    Zotero.debug(
+      `[${config.addonName}] Using cached recid for item ${item.id}: ${cached}`,
+    );
     return cached;
   }
 
-  const meta = (await getInspireMeta(item, "literatureLookup")) as jsobject | -1;
+  const meta = (await getInspireMeta(item, "literatureLookup")) as
+    | jsobject
+    | -1;
   if (meta === -1 || typeof meta !== "object") {
     return null;
   }
@@ -260,18 +280,14 @@ export async function fetchInspireMetaByRecid(
 
 /**
  * Fetch only the abstract for a given recid from INSPIRE API.
+ * FTR-PERF-ABSTRACT: Uses lightweight endpoint (only abstracts field) instead
+ * of full metadata fetch to improve performance for hover preview and tooltips.
  */
 export async function fetchInspireAbstract(
   recid: string,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const meta = await fetchInspireMetaByRecid(recid, signal, "full").catch(() => -1);
-  if (meta !== -1 && meta) {
-    const abstract = (meta as jsobject).abstractNote;
-    if (typeof abstract === "string" && abstract.trim()) {
-      return abstract.trim();
-    }
-  }
+  // Use lightweight fetch that only requests abstracts field
   return await fetchAbstractDirect(recid, signal);
 }
 
@@ -341,7 +357,9 @@ export async function getCrossrefCount(item: Zotero.Item): Promise<number> {
     const xform = "transform/application/" + style;
     const url = `${CROSSREF_API_URL}/${edoi}/${xform}`;
     const fetchResponse = await crossrefFetch(url);
-    response = fetchResponse ? await fetchResponse.json().catch(() => null) : null;
+    response = fetchResponse
+      ? await fetchResponse.json().catch(() => null)
+      : null;
   }
 
   // Fallback to DOI.org with Accept header
@@ -353,7 +371,9 @@ export async function getCrossrefCount(item: Zotero.Item): Promise<number> {
         Accept: "application/" + style,
       },
     });
-    response = fetchResponse ? await fetchResponse.json().catch(() => null) : null;
+    response = fetchResponse
+      ? await fetchResponse.json().catch(() => null)
+      : null;
   }
 
   if (response === null) {
@@ -385,7 +405,8 @@ export function buildMetaFromMetadata(meta: any, operation: string): jsobject {
   const metaInspire: jsobject = {};
   metaInspire.recid = meta["control_number"];
   metaInspire.citation_count = meta["citation_count"];
-  metaInspire.citation_count_wo_self_citations = meta["citation_count_without_self_citations"];
+  metaInspire.citation_count_wo_self_citations =
+    meta["citation_count_without_self_citations"];
 
   if (operation !== "citations") {
     if (meta["dois"]) {
@@ -428,7 +449,8 @@ export function buildMetaFromMetadata(meta: any, operation: string): jsobject {
                 pagesErr = pagesErr + "-" + next.page_end;
               }
             }
-            errNotes[i - 1] = `Erratum: ${jAbbrev} ${next.journal_volume}, ${pagesErr} (${next.year})`;
+            errNotes[i - 1] =
+              `Erratum: ${jAbbrev} ${next.journal_volume}, ${pagesErr} (${next.year})`;
           } else if (next.journal_title && (next.page_start || next.artid)) {
             let pagesNext = "";
             if (next.page_start) {
@@ -439,7 +461,8 @@ export function buildMetaFromMetadata(meta: any, operation: string): jsobject {
             } else if (next.artid) {
               pagesNext = next.artid;
             }
-            errNotes[i - 1] = `${next.journal_title}  ${next.journal_volume} (${next.year}) ${pagesNext}`;
+            errNotes[i - 1] =
+              `${next.journal_title}  ${next.journal_volume} (${next.year}) ${pagesNext}`;
           }
           if (next.pubinfo_freetext) {
             errNotes[i - 1] = next.pubinfo_freetext;
@@ -533,4 +556,3 @@ export function buildMetaFromMetadata(meta: any, operation: string): jsobject {
 
   return metaInspire;
 }
-
