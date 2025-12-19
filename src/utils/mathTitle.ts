@@ -293,6 +293,20 @@ export function cleanMathTitle(title?: string | null): string {
     "",
   );
 
+  // Remove spacing commands with their arguments: \hspace{...}, \vspace{...}, \kern{...}, \mkern{...}
+  // These are used for fine-tuning spacing in LaTeX but should be completely removed in plain text
+  // e.g., "J \hspace{-1.66656pt}/\hspace{-1.111pt}\psi" → "J/ψ"
+  text = text.replace(/\\[hv]space\s*\{[^}]*\}/g, "");
+  text = text.replace(/\\m?kern\s*-?[\d.]+\s*(pt|em|ex|mu|mm|cm|in)?/g, "");
+  text = text.replace(/\\m?kern\s*\{[^}]*\}/g, "");
+  // Also handle \, \; \: \! (thin/medium/thick/negative space)
+  text = text.replace(/\\[,;:!]/g, "");
+  // Handle \quad, \qquad, \enspace, \thinspace, \negthinspace
+  text = text.replace(
+    /\\(quad|qquad|enspace|thinspace|negthinspace|negthickspace|negmedspace)(?![a-zA-Z])/g,
+    " ",
+  );
+
   const superscriptMap: Record<string, string> = {
     0: "⁰",
     1: "¹",
@@ -432,35 +446,53 @@ export function cleanMathTitle(title?: string | null): string {
     "\\gamma": "γ",
     "\\delta": "δ",
     "\\epsilon": "ε",
+    "\\varepsilon": "ε",
     "\\zeta": "ζ",
     "\\eta": "η",
     "\\theta": "θ",
+    "\\vartheta": "ϑ",
     "\\iota": "ι",
     "\\kappa": "κ",
+    "\\varkappa": "ϰ",
     "\\lambda": "λ",
     "\\mu": "μ",
     "\\nu": "ν",
     "\\xi": "ξ",
     "\\pi": "π",
+    "\\varpi": "ϖ",
     "\\rho": "ρ",
+    "\\varrho": "ϱ",
     "\\sigma": "σ",
+    "\\varsigma": "ς",
     "\\tau": "τ",
     "\\upsilon": "υ",
     "\\phi": "φ",
+    "\\varphi": "φ",
     "\\chi": "χ",
     "\\psi": "ψ",
     "\\omega": "ω",
     "\\Gamma": "Γ",
+    "\\varGamma": "Γ",
     "\\Delta": "Δ",
+    "\\varDelta": "Δ",
     "\\Theta": "Θ",
+    "\\varTheta": "Θ",
     "\\Lambda": "Λ",
+    "\\varLambda": "Λ",
     "\\Xi": "Ξ",
+    "\\varXi": "Ξ",
     "\\Pi": "Π",
+    "\\varPi": "Π",
     "\\Sigma": "Σ",
+    "\\varSigma": "Σ",
     "\\Upsilon": "Υ",
+    "\\varUpsilon": "Υ",
     "\\Phi": "Φ",
+    "\\varPhi": "Φ",
     "\\Psi": "Ψ",
+    "\\varPsi": "Ψ",
     "\\Omega": "Ω",
+    "\\varOmega": "Ω",
   };
   for (const [tex, char] of Object.entries(greekMap)) {
     const re = new RegExp(tex.replace("\\", "\\\\") + "(?![a-zA-Z])", "g");
@@ -493,6 +525,10 @@ export function cleanMathTitle(title?: string | null): string {
     .replace(/\\ell/g, "ℓ")
     .replace(/\\hbar/g, "ℏ")
     .replace(/\\dagger/g, "†")
+    .replace(/\\ast/g, "*")
+    .replace(/\\star/g, "★")
+    .replace(/\\bullet/g, "•")
+    .replace(/\\circ/g, "∘")
     .replace(/\\bar\{([^}]+)\}/g, "$1\u0304")
     .replace(/-{2,}>/g, "→") // ---> or --> to →
     .replace(/->/g, "→");

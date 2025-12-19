@@ -140,6 +140,38 @@
     name="__prefsPrefix__.smart_update_protected_names"
     type="string"
   />
+  <!-- Preprint Watch Settings (FTR-PREPRINT-WATCH) -->
+  <preference
+    id="pref-preprint_watch_enabled"
+    name="__prefsPrefix__.preprint_watch_enabled"
+    type="bool"
+  />
+  <preference
+    id="pref-preprint_watch_auto_check"
+    name="__prefsPrefix__.preprint_watch_auto_check"
+    type="string"
+  />
+  <preference
+    id="pref-preprint_watch_notify"
+    name="__prefsPrefix__.preprint_watch_notify"
+    type="bool"
+  />
+  <!-- Collaboration Tag Settings (FTR-COLLAB-TAGS) -->
+  <preference
+    id="pref-collab_tag_enable"
+    name="__prefsPrefix__.collab_tag_enable"
+    type="bool"
+  />
+  <preference
+    id="pref-collab_tag_auto"
+    name="__prefsPrefix__.collab_tag_auto"
+    type="bool"
+  />
+  <preference
+    id="pref-collab_tag_template"
+    name="__prefsPrefix__.collab_tag_template"
+    type="string"
+  />
 </preferences>
 <groupbox
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
@@ -619,6 +651,93 @@
           placeholder="e.g., O'Brien, McDowell"
         />
       </hbox>
+    </vbox>
+  </vbox>
+
+  <!-- Preprint Watch Settings (FTR-PREPRINT-WATCH) -->
+  <vbox class="zinspire-pref-section">
+    <html:h3
+      class="zinspire-pref-title"
+      data-l10n-id="pref-preprint-watch"
+    ></html:h3>
+    <vbox class="zinspire-pref-row">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-preprint_watch_enabled"
+        preference="extensions.zotero.inspiremeta.preprint_watch_enabled"
+        data-l10n-id="pref-preprint-watch-enable"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-preprint-watch-enable-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px; margin-left: 20px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-preprint_watch_on_startup"
+        data-l10n-id="pref-preprint-watch-startup"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-preprint-watch-startup-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px; margin-left: 20px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-preprint_watch_notify"
+        preference="extensions.zotero.inspiremeta.preprint_watch_notify"
+        data-l10n-id="pref-preprint-watch-notify"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-preprint-watch-notify-desc"
+      ></html:p>
+    </vbox>
+  </vbox>
+
+  <!-- Collaboration Tags Settings (FTR-COLLAB-TAGS) -->
+  <vbox class="zinspire-pref-section">
+    <html:h3
+      class="zinspire-pref-title"
+      data-l10n-id="pref-collab-tags"
+    ></html:h3>
+    <vbox class="zinspire-pref-row">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-collab_tag_enable"
+        preference="extensions.zotero.inspiremeta.collab_tag_enable"
+        data-l10n-id="pref-collab-tag-enable"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-collab-tag-enable-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px; margin-left: 20px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-collab_tag_auto"
+        preference="extensions.zotero.inspiremeta.collab_tag_auto"
+        data-l10n-id="pref-collab-tag-auto"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-collab-tag-auto-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px; margin-left: 20px">
+      <hbox align="center">
+        <label data-l10n-id="pref-collab-tag-template-label" />
+        <html:input
+          type="text"
+          id="zotero-prefpane-__addonRef__-collab_tag_template"
+          preference="extensions.zotero.inspiremeta.collab_tag_template"
+          class="zinspire-pref-input"
+          style="width: 200px; margin-left: 8px"
+          placeholder="{name}"
+        />
+      </hbox>
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-collab-tag-template-desc"
+      ></html:p>
     </vbox>
   </vbox>
 

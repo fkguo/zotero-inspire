@@ -201,7 +201,9 @@ export class RowPoolManager {
     // Use innerHTML for static elements (Zotero XHTML removes input/button via innerHTML)
     row.innerHTML = `
       <div class="zinspire-ref-entry__text">
-        <span class="zinspire-ref-entry__dot is-clickable"></span>
+        <div class="zinspire-ref-entry__controls">
+          <span class="zinspire-ref-entry__dot is-clickable"></span>
+        </div>
         <div class="zinspire-ref-entry__content">
           <div class="zinspire-ref-entry__title">
             <span class="zinspire-ref-entry__label"></span>
@@ -215,6 +217,9 @@ export class RowPoolManager {
 
     const textContainer = row.querySelector(
       ".zinspire-ref-entry__text",
+    ) as HTMLElement;
+    const controls = row.querySelector(
+      ".zinspire-ref-entry__controls",
     ) as HTMLElement;
     const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
     const content = row.querySelector(
@@ -260,6 +265,13 @@ export class RowPoolManager {
       this.options.applyBibTeXButtonStyle(bibtexButton);
     }
 
+    const texkeyButton = doc.createElement("button");
+    texkeyButton.type = "button";
+    texkeyButton.classList.add("zinspire-ref-entry__texkey");
+    if (this.options.applyBibTeXButtonStyle) {
+      this.options.applyBibTeXButtonStyle(texkeyButton);
+    }
+
     const statsButton = doc.createElement("button");
     statsButton.type = "button";
     statsButton.classList.add(
@@ -268,12 +280,13 @@ export class RowPoolManager {
     );
 
     // Insert elements at correct positions
-    if (textContainer && marker && content) {
+    if (controls && marker && content) {
       // Insert checkbox before marker (leftmost position)
-      textContainer.insertBefore(checkbox, marker);
-      // Insert link and bibtex buttons before content
-      textContainer.insertBefore(bibtexButton, content);
-      textContainer.insertBefore(linkButton, bibtexButton);
+      controls.insertBefore(checkbox, marker);
+      // Insert link, texkey, and bibtex buttons after marker
+      controls.appendChild(linkButton);
+      controls.appendChild(texkeyButton);
+      controls.appendChild(bibtexButton);
       content.appendChild(statsButton);
     }
 

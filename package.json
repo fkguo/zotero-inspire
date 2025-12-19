@@ -1,7 +1,7 @@
 {
   "name": "zotero-inspire",
-  "version": "2.1.1",
-  "description": "Zotere INSPIRE References",
+  "version": "2.2.0",
+  "description": "Bridge between Zotero and INSPIRE for high energy physics and related fields",
   "config": {
     "addonName": "zotero-inspire",
     "addonID": "zoteroinspire@itp.ac.cn",

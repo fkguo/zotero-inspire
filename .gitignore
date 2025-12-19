@@ -15,3 +15,5 @@ node_modules/
 .env
 .scaffold/
 
+AGENTS.md
+readme_obsolete.md

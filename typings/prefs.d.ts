@@ -37,6 +37,13 @@ declare namespace _ZoteroTypes {
       "smart_update_protect_abstract": boolean;
       "smart_update_protect_journal": boolean;
       "smart_update_protected_names": string;
+      "preprint_watch_enabled": boolean;
+      "preprint_watch_auto_check": string;
+      "preprint_watch_last_check": number;
+      "preprint_watch_notify": boolean;
+      "collab_tag_enable": boolean;
+      "collab_tag_auto": boolean;
+      "collab_tag_template": string;
     };
   }
 }

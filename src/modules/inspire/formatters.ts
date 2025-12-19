@@ -39,6 +39,7 @@ export function getCachedStrings(): Record<string, string> {
       citationUnknown: getString("references-panel-citation-count-unknown"),
       unknownAuthor: getString("references-panel-unknown-author"),
       copyBibtex: getString("references-panel-copy-bibtex"),
+      copyTexkey: getString("references-panel-copy-texkey"),
       noTitle: getString("references-panel-no-title"),
       // Abstract tooltip strings
       noAbstract: getString("references-panel-no-abstract"),
@@ -128,7 +129,16 @@ export function buildInitials(given: string): string {
   return wordInitials.join(" ");
 }
 
-export function formatAuthorName(rawName?: string): string {
+/**
+ * Format author name for display.
+ * By default, keeps the full name for better search accuracy.
+ * If keepFullName is false, converts first name to initials (legacy behavior).
+ *
+ * Examples:
+ *   "Guo, Feng-Kun" → "Feng-Kun Guo" (keepFullName=true, default)
+ *   "Guo, Feng-Kun" → "F.-K. Guo" (keepFullName=false)
+ */
+export function formatAuthorName(rawName?: string, keepFullName = true): string {
   if (!rawName) {
     return "";
   }
@@ -171,6 +181,13 @@ export function formatAuthorName(rawName?: string): string {
   if (!given) {
     return family || trimmed;
   }
+
+  // FTR-FULL-NAME: Keep full first name for better search accuracy
+  if (keepFullName) {
+    return `${given} ${family}`.trim();
+  }
+
+  // Legacy behavior: convert to initials
   const initials = buildInitials(given);
   if (!initials) {
     return `${given} ${family}`.trim();
@@ -345,9 +362,11 @@ export function formatPublicationInfo(
     return "";
   }
   const parts: string[] = [];
-  const journal = options?.omitJournal
+  // Get raw journal title and normalize format (add spaces after dots: "Phys.Rev.D" → "Phys. Rev. D")
+  const rawJournal = options?.omitJournal
     ? ""
     : info.journal_title || info.journal_title_abbrev || "";
+  const journal = rawJournal ? rawJournal.replace(/\.\s|\./g, ". ") : "";
   const volume = info.journal_volume || info.volume || "";
   const artid = info.artid || info.article_number || info.eprintid;
   const pageStart =
@@ -502,11 +521,12 @@ export function extractJournalName(
   entry: InspireReferenceEntry,
 ): string | undefined {
   const info = entry.publicationInfo;
+  // Normalize journal title format (add spaces after dots: "Phys.Rev.D" → "Phys. Rev. D")
   if (info?.journal_title) {
-    return info.journal_title;
+    return info.journal_title.replace(/\.\s|\./g, ". ");
   }
   if (info?.journal_title_abbrev) {
-    return info.journal_title_abbrev;
+    return info.journal_title_abbrev.replace(/\.\s|\./g, ". ");
   }
   if (entry.summary) {
     const match = entry.summary.match(/^([^0-9(]+?)(?:\s+\d+|\(|$)/);

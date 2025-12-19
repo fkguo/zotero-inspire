@@ -224,12 +224,20 @@ class InspireLocalCache {
   /**
    * Validate cache data and return result if valid.
    * Performs structural checks including random sampling for data integrity.
+   * @param ignoreTTL - If true, skip TTL check (for offline fallback)
    * @returns Cache result or null if invalid/expired
    */
   private validateCache<T>(
     cached: LocalCacheFile<T>,
     filePath: string,
-  ): { data: T; fromCache: true; ageHours: number; total?: number } | null {
+    ignoreTTL = false,
+  ): {
+    data: T;
+    fromCache: true;
+    ageHours: number;
+    total?: number;
+    expired?: boolean;
+  } | null {
     // Version check
     if (cached.v !== CACHE_VERSION) {
       Zotero.debug(`[${config.addonName}] Cache version mismatch: ${filePath}`);
@@ -257,6 +265,19 @@ class InspireLocalCache {
     if (cached.ttl > 0) {
       const ttlMs = cached.ttl * 60 * 60 * 1000;
       if (ageMs > ttlMs) {
+        if (ignoreTTL) {
+          // Return expired cache data with expired flag for offline fallback
+          Zotero.debug(
+            `[${config.addonName}] Cache expired (${ageHours}h) but returning for offline fallback: ${filePath}`,
+          );
+          return {
+            data: cached.d,
+            fromCache: true,
+            ageHours,
+            total: cached.n,
+            expired: true,
+          };
+        }
         Zotero.debug(
           `[${config.addonName}] Cache expired (${ageHours}h): ${filePath}`,
         );
@@ -403,6 +424,11 @@ class InspireLocalCache {
    *
    * Tries compressed file first (.json.gz), then falls back to uncompressed (.json).
    *
+   * @param type - Cache type (refs, cited, author)
+   * @param key - Cache key (usually recid or author BAI)
+   * @param sort - Optional sort parameter
+   * @param options - Optional settings
+   * @param options.ignoreTTL - If true, return expired cache data (for offline fallback)
    * @returns Object with:
    *   - data: The cached data
    *   - fromCache: Always true (for type discrimination)
@@ -410,16 +436,19 @@ class InspireLocalCache {
    *   - total: Total count from API (if available). Used for smart caching:
    *     - If total <= data.length, data is complete and can be sorted client-side
    *     - If total > data.length or undefined, data may be truncated
+   *   - expired: True if cache TTL has expired (only when ignoreTTL=true)
    */
   async get<T = InspireReferenceEntry[]>(
     type: LocalCacheType,
     key: string,
     sort?: string,
+    options?: { ignoreTTL?: boolean },
   ): Promise<{
     data: T;
     fromCache: true;
     ageHours: number;
     total?: number;
+    expired?: boolean;
   } | null> {
     const getStart = performance.now();
     const getLog = (msg: string) => {
@@ -464,12 +493,16 @@ class InspireLocalCache {
         }
 
         getLog("validating cache...");
-        const result = this.validateCache(cached, path);
-        getLog(`validateCache done (${result ? "valid" : "invalid"})`);
+        const ignoreTTL = options?.ignoreTTL ?? false;
+        const result = this.validateCache(cached, path, ignoreTTL);
+        getLog(
+          `validateCache done (${result ? (result.expired ? "valid-expired" : "valid") : "invalid"})`,
+        );
         if (result) {
           const format = isCompressed ? " (gzip)" : "";
+          const expiredTag = result.expired ? " [expired]" : "";
           Zotero.debug(
-            `[${config.addonName}] Cache hit${format}: ${type}/${key}${cached.n !== undefined ? ` (total: ${cached.n})` : ""}`,
+            `[${config.addonName}] Cache hit${format}${expiredTag}: ${type}/${key}${cached.n !== undefined ? ` (total: ${cached.n})` : ""}`,
           );
           getLog("returning result");
           return result;
@@ -509,7 +542,10 @@ class InspireLocalCache {
     await this.init();
 
     // Determine TTL based on type
-    const ttl = type === "refs" ? DEFAULT_TTL_REFS : this.getTTLHours();
+    const ttl =
+      type === "refs" || type === "preprintCandidates"
+        ? DEFAULT_TTL_REFS // keep indefinitely for refs and candidate list
+        : this.getTTLHours();
 
     const cacheData: LocalCacheFile<T> = {
       v: CACHE_VERSION,

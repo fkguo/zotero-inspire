@@ -5,7 +5,7 @@
 // Re-export constants
 export * from "./constants";
 
-// Re-export types
+// Re-export types (including FTR-PREPRINT-WATCH types)
 export * from "./types";
 
 // Re-export text utilities
@@ -75,6 +75,11 @@ export {
   ReaderTabHelper,
   clearAllHistoryPrefs,
   type CacheStats,
+  // AbortController utilities (FTR-ABORT-CONTROLLER-FIX)
+  getAbortControllerClass,
+  createAbortController,
+  createMockSignal,
+  createAbortControllerWithSignal,
 } from "./utils";
 export { ZInsMenu } from "./menu";
 export {
@@ -107,9 +112,17 @@ export {
   fetchInspireMetaByRecid,
   fetchInspireAbstract,
   fetchBibTeX,
+  fetchInspireTexkey,
   getCrossrefCount,
   buildMetaFromMetadata,
 } from "./metadataService";
+
+// Re-export author profile service
+export {
+  fetchAuthorProfile,
+  parseAuthorProfile,
+  clearAuthorProfileCache,
+} from "./authorProfileService";
 
 // Re-export rate limiter
 export {
@@ -153,6 +166,54 @@ export {
   showSmartUpdatePreviewDialog,
 } from "./smartUpdate";
 
+// Re-export preprint watch service (FTR-PREPRINT-WATCH)
+export {
+  // Constants
+  ARXIV_DOI_PREFIX,
+  // Detection functions
+  isArxivDoi,
+  isUnpublishedPreprint,
+  extractArxivIdFromItem,
+  // Scanning functions
+  findUnpublishedPreprints,
+  // Check functions
+  batchCheckPublicationStatus,
+  buildCheckSummary,
+  // Update functions
+  updatePreprintWithPublicationInfo,
+  batchUpdatePreprints,
+  trackPreprintCandidates,
+  removePreprintFromCache,
+  // Background check support
+  shouldRunBackgroundCheck,
+  updateLastCheckTime,
+  clearPreprintCache,
+  // Cache cleanup
+  cleanupLegacyPreprintFiles,
+  // Types
+  type PreprintWatchCache,
+  type PreprintWatchEntry,
+} from "./preprintWatchService";
+
+// Re-export collaboration tag service (FTR-COLLAB-TAGS)
+export {
+  // Constants
+  DEFAULT_TAG_TEMPLATE,
+  COLLAB_SUFFIX_PATTERN,
+  // Config functions
+  isCollabTagEnabled,
+  isCollabTagAutoEnabled,
+  getCollabTagTemplate,
+  // Tag formatting
+  extractCollabName,
+  formatCollabTag,
+  // Item operations
+  addCollabTagsToItem,
+  batchAddCollabTags,
+  type CollabTagResult,
+  type CollabTagProgressCallback,
+} from "./collabTagService";
+
 // Re-export PDF annotate module (FTR-PDF-ANNOTATE)
 export {
   // Types
@@ -188,6 +249,8 @@ export {
   applyStyles,
   toStyleString,
   isDarkMode,
+  getChartNoDataStyle,
+  getChartNoDataItalicStyle,
 } from "./styles";
 
 // Re-export filter utilities

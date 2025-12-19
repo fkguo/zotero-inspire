@@ -50,6 +50,7 @@ references-panel-status-loading-cited = Loading citing records...
 references-panel-status-loading-entry = Loading citing records for the selected reference...
 references-panel-status-loading-author = Loading papers by the author...
 references-panel-status-error = Failed to load data from INSPIRE
+references-panel-status-stale-cache = Using offline cache ({ $hours }h old) - data may be outdated
 references-panel-empty-list = No references available
 references-panel-empty-cited = No citing records found
 references-panel-entry-empty = Select a reference to view citing records
@@ -147,9 +148,30 @@ references-panel-preview-loading = Loading details...
 references-panel-preview-abstract-truncated = [truncated]
 references-panel-author-papers-label = Papers by { $author }
 references-panel-author-click-hint = Click to view papers by { $author }
+references-panel-author-profile-loading = Loading author profile...
+references-panel-author-profile-unavailable = Author profile not available
+references-panel-author-stats-loading = Loading statistics...
+references-panel-author-stats = { $papers } papers · { $citations } citations · h-index: { $h }
+references-panel-author-stats-no-self = { $papers } papers · { $citations } citations (no self) · h-index: { $h }
+references-panel-author-stats-partial = Based on { $count } loaded papers
+references-panel-author-advisors = Advisors
+references-panel-author-emails = Emails
+references-panel-author-orcid-tooltip = Open ORCID profile
+references-panel-author-inspire-tooltip = View on INSPIRE
+references-panel-author-homepage-tooltip = Open homepage
+references-panel-author-profile-collapse = Collapse
+references-panel-author-profile-expand = Expand
+references-panel-author-preview-view-papers = View all papers
+references-panel-author-copied = Copied
+references-panel-author-orcid-label = ORCID
+references-panel-author-bai-label = BAI
+references-panel-author-recid-label = INSPIRE ID
 references-panel-copy-bibtex = Copy BibTeX
+references-panel-copy-texkey = Copy TeX key
 references-panel-bibtex-copied = BibTeX copied to clipboard
 references-panel-bibtex-failed = Failed to fetch BibTeX
+references-panel-texkey-copied = TeX key copied to clipboard
+references-panel-texkey-failed = Failed to copy TeX key
 references-panel-copy-link = Copy link
 references-panel-open-link = Open in browser
 references-panel-link-copied = Link copied to clipboard
@@ -179,6 +201,10 @@ references-panel-no-recid-entries = No INSPIRE records to export
 # Export menu localization strings
 references-panel-export-copy-header = 📋 Copy to Clipboard
 references-panel-export-file-header = 💾 Export to File
+references-panel-export-copy-texkey = Copy citation keys
+references-panel-export-texkey-copying = Copying citation keys...
+references-panel-export-texkey-copied = Copied { $count } citation key(s)
+references-panel-export-texkey-failed = Failed to copy citation keys
 references-panel-export-copied = { $count } { $format } entries copied
 references-panel-export-saved = { $count } { $format } entries saved
 references-panel-export-clipboard-failed = Failed to copy to clipboard (content too large?)
@@ -191,6 +217,9 @@ references-panel-export-citation-header = 📝 Citation Style
 references-panel-export-citation-copied = { $count } formatted references copied
 references-panel-export-citation-no-local = No local Zotero items to format (only local library items can use citation styles)
 references-panel-export-citation-select-style = Select Citation Style...
+references-panel-export-citation-import-needed = { $count } reference(s) need to be imported to your Zotero library first. Select a collection to import them.
+references-panel-export-citation-importing = Importing { $done } / { $total } for citation export...
+references-panel-export-citation-import-failed = Failed to import some references. Only { $success } of { $total } can be formatted.
 
 # Chart localization strings
 references-panel-chart-collapse = Collapse chart
@@ -234,6 +263,7 @@ references-panel-filter-count-search =
 references-panel-cache-source-api = From INSPIRE
 references-panel-cache-source-memory = From memory cache
 references-panel-cache-source-local = From local cache ({ $age }h ago)
+references-panel-cache-source-local-expired = From expired cache ({ $age }h ago) - offline mode
 
 # Context menu copy actions
 menuitem-copy-bibtex = Copy BibTeX
@@ -351,3 +381,56 @@ pdf-annotate-ambiguous-message = This citation matches multiple papers. Please s
 pdf-annotate-ambiguous-cancel = Cancel
 # FTR-AMBIGUOUS-AUTHOR-YEAR: Preview message for ambiguous author-year match
 pdf-annotate-ambiguous-preview-hint = Author-year match only; click to select
+
+# Preprint Watch feature (FTR-PREPRINT-WATCH)
+preprint-check-menu = Check Preprint Status
+preprint-check-collection-menu = Check Preprints in Collection
+preprint-check-all-menu = Check All Preprints in Library
+preprint-check-progress = Checking preprints... ({ $current }/{ $total })
+preprint-check-scanning = Scanning library for preprints...
+preprint-check-cancelled = Check cancelled
+preprint-found-published =
+  { $count ->
+    [one] 1 preprint has been published!
+   *[other] { $count } preprints have been published!
+  }
+preprint-all-current = All preprints are still unpublished.
+preprint-no-preprints = No unpublished preprints found.
+preprint-update-success =
+  { $count ->
+    [one] Successfully updated 1 item.
+   *[other] Successfully updated { $count } items.
+  }
+preprint-update-selected = Update Selected
+preprint-select-all = Select All
+preprint-cancel = Cancel
+preprint-doi-updated = DOI updated: { $oldDoi } → { $newDoi }
+preprint-results-published = Published
+preprint-results-unpublished = Unpublished
+preprint-results-errors = Errors
+
+# Collaboration Tags feature (FTR-COLLAB-TAGS)
+collab-tag-menu-add = Add Collaboration Tags
+collab-tag-menu-reapply = Reapply Collaboration Tags
+collab-tag-progress = Adding collaboration tags...
+collab-tag-result =
+  { $added ->
+    [0] { $updated ->
+      [0] No changes
+      [one] Updated 1 tag
+     *[other] Updated { $updated } tags
+    }
+    [one] Added 1 tag{ $updated ->
+      [0] {""}
+     *[other] , updated { $updated }
+    }
+   *[other] Added { $added } tags{ $updated ->
+      [0] {""}
+     *[other] , updated { $updated }
+    }
+  }{ $skipped ->
+    [0] {""}
+   *[other] , skipped { $skipped }
+  }
+collab-tag-no-selection = Select at least one item to add collaboration tags
+collab-tag-disabled = Enable collaboration tags in Preferences → INSPIRE to use this feature

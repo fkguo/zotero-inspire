@@ -124,4 +124,25 @@ pref-smart-update-protected-names-desc = 此列表中的作者姓名在更新时
 pref-smart-update-protected-names-input =
     .placeholder = 例如：Meißner, Müller, O'Brien
 
+pref-preprint-watch = 预印本监控
+pref-preprint-watch-enable =
+    .label = 启用预印本发表状态监控
+pref-preprint-watch-enable-desc = 检测库中未正式发表的 arXiv 预印本，并检查它们是否已正式发表。
+pref-preprint-watch-startup =
+    .label = Zotero 启动时自动检查
+pref-preprint-watch-startup-desc = 每天首次启动时检查一次。如果 24 小时内已检查过，则跳过。
+pref-preprint-watch-notify =
+    .label = 发现已发表时显示通知
+pref-preprint-watch-notify-desc = 当发现预印本已正式发表时显示通知。
+
+pref-collab-tags = 合作组标签
+pref-collab-tag-enable =
+    .label = 启用合作组标签
+pref-collab-tag-enable-desc = 根据 INSPIRE 合作组信息自动添加标签（如 ATLAS、CMS、LHCb）。
+pref-collab-tag-auto =
+    .label = 更新/导入时添加标签
+pref-collab-tag-auto-desc = 从 INSPIRE 更新条目或导入时自动添加合作组标签。
+pref-collab-tag-template-label = 标签格式：
+pref-collab-tag-template-desc = 使用 {"{name}"} 作为合作组名称占位符。示例：{"{name}"}、#collab/{"{name}"}、collab:{"{name}"}
+
 pref-help = { $name } 版本 { $version } { $time }

@@ -7,7 +7,7 @@ import {
   buildPublicationSummary,
   splitPublicationInfo,
 } from "./formatters";
-import { extractAuthorNamesFromReference } from "./authorUtils";
+import { extractAuthorNamesFromReference, extractAuthorSearchInfos } from "./authorUtils";
 import {
   buildReferenceUrl,
   buildFallbackUrl,
@@ -24,6 +24,35 @@ import {
 } from "./constants";
 import type { InspireReferenceEntry } from "./types";
 import { inspireFetch } from "./rateLimiter";
+import { LRUCache } from "./utils";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PERF-FIX-9: Memory cache for enrichment metadata (recid → metadata)
+// Prevents redundant API calls when viewing the same references multiple times
+// ─────────────────────────────────────────────────────────────────────────────
+const enrichmentMetadataCache = new LRUCache<string, any>(500);
+
+/**
+ * PERF-FIX-9: Check if cached metadata is complete enough to skip fetching.
+ * Returns true if metadata has title, authors, and citation count.
+ */
+function isMetadataComplete(metadata: any): boolean {
+  if (!metadata) return false;
+  // Must have title
+  const hasTitle =
+    Array.isArray(metadata.titles) &&
+    metadata.titles.some(
+      (t: any) => typeof t?.title === "string" && t.title.trim(),
+    );
+  // Must have authors or collaborations
+  const hasAuthors =
+    (Array.isArray(metadata.authors) && metadata.authors.length > 0) ||
+    (Array.isArray(metadata.collaborations) &&
+      metadata.collaborations.length > 0);
+  // Must have citation count
+  const hasCitationCount = typeof metadata.citation_count === "number";
+  return hasTitle && hasAuthors && hasCitationCount;
+}
 
 interface FetchReferencesOptions {
   signal?: AbortSignal;
@@ -104,13 +133,20 @@ export function buildReferenceEntry(
     Array.isArray(reference?.dois) && reference.dois.length
       ? reference.dois[0]
       : undefined;
+  const texkey =
+    Array.isArray(reference?.texkeys) && reference.texkeys.length
+      ? reference.texkeys[0]
+      : undefined;
+
+  const cleanedTitle = cleanMathTitle(reference?.title?.title);
+
   const entry: InspireReferenceEntry = {
     id: `${index}-${recid ?? reference?.label ?? Date.now()}`,
     label: reference?.label,
     recid: recid ?? undefined,
     inspireUrl: buildReferenceUrl(reference, recid),
     fallbackUrl: buildFallbackUrl(reference, arxivDetails),
-    title: cleanMathTitle(reference?.title?.title) || strings.noTitle,
+    title: cleanedTitle || strings.noTitle,
     summary,
     year: resolvedYear ?? strings.yearUnknown,
     authors,
@@ -130,6 +166,7 @@ export function buildReferenceEntry(
     publicationInfoErrata: errata,
     arxivDetails,
     doi,
+    texkey,
   };
   entry.displayText = buildDisplayText(entry);
   return entry;
@@ -163,17 +200,47 @@ export async function enrichReferencesEntries(
   const { signal, onBatchComplete } = options;
   const strings = getCachedStrings();
 
-  // Filter entries that have recid but are missing essential metadata
-  const needsDetails = entries.filter(
-    (entry) =>
-      entry.recid &&
-      (typeof entry.citationCount !== "number" ||
-        !entry.title ||
-        entry.title === strings.noTitle ||
-        !entry.authors.length ||
-        (entry.authors.length === 1 &&
-          entry.authors[0] === strings.unknownAuthor)),
-  );
+  // PERF-FIX-9: Check memory cache before adding to fetch list
+  // This prevents redundant API calls for already-cached metadata
+  const needsDetails: InspireReferenceEntry[] = [];
+  // FIX-ENRICH-CACHE: Track entries that were enriched from cache
+  // These need onBatchComplete notification for UI update
+  const cacheAppliedRecids: string[] = [];
+
+  for (const entry of entries) {
+    if (!entry.recid) continue;
+
+    // Check if entry already has all required data
+    // FTR-AUTHOR-PROFILE-FIX: Also require authorSearchInfos for author profile lookup
+    const hasAllData =
+      typeof entry.citationCount === "number" &&
+      entry.title &&
+      entry.title !== strings.noTitle &&
+      entry.authors.length > 0 &&
+      !(entry.authors.length === 1 && entry.authors[0] === strings.unknownAuthor) &&
+      Array.isArray(entry.authorSearchInfos) && entry.authorSearchInfos.length > 0;
+
+    if (hasAllData) continue;
+
+    // PERF-FIX-9: Check memory cache for this recid
+    const cachedMetadata = enrichmentMetadataCache.get(entry.recid);
+    if (cachedMetadata && isMetadataComplete(cachedMetadata)) {
+      // Apply cached data directly without network request
+      applyMetadataToEntry(entry, cachedMetadata, strings);
+      // FIX-ENRICH-CACHE: Track for UI callback notification
+      cacheAppliedRecids.push(entry.recid);
+      continue;
+    }
+
+    // Need to fetch from network
+    needsDetails.push(entry);
+  }
+
+  // FIX-ENRICH-CACHE: Notify UI for entries enriched from cache
+  // This ensures UI updates even when no network requests are made
+  if (cacheAppliedRecids.length && onBatchComplete) {
+    onBatchComplete(cacheAppliedRecids);
+  }
 
   if (!needsDetails.length || signal?.aborted) {
     return;
@@ -271,6 +338,11 @@ async function fetchAndApplyBatchMetadata(
 
       if (!recid) continue;
 
+      // PERF-FIX-9: Cache metadata for future lookups
+      if (isMetadataComplete(metadata)) {
+        enrichmentMetadataCache.set(recid, metadata);
+      }
+
       const matchingEntries = recidToEntry.get(recid);
       if (!matchingEntries) continue;
 
@@ -311,15 +383,26 @@ function applyMetadataToEntry(
   }
 
   // Title update
-  if (
-    (!entry.title || entry.title === strings.noTitle) &&
-    Array.isArray(metadata.titles)
-  ) {
+  // FIX: Also update title if current title appears truncated (ends with space or is very short)
+  // INSPIRE's references API truncates titles at LaTeX $ characters
+  const currentTitleTruncated = entry.title &&
+    entry.title !== strings.noTitle &&
+    (entry.title.endsWith(" ") || entry.title.length < 20);
+  const shouldUpdateTitle = !entry.title ||
+    entry.title === strings.noTitle ||
+    currentTitleTruncated;
+
+  if (shouldUpdateTitle && Array.isArray(metadata.titles)) {
     const titleObj = metadata.titles.find(
       (item: any) => typeof item?.title === "string" && item.title.trim(),
     );
     if (titleObj?.title) {
-      entry.title = cleanMathTitle(titleObj.title);
+      const newTitle = cleanMathTitle(titleObj.title);
+      // Only update if new title is longer (more complete)
+      if (!entry.title || entry.title === strings.noTitle ||
+          newTitle.length > entry.title.length) {
+        entry.title = newTitle;
+      }
     }
   }
 
@@ -350,6 +433,47 @@ function applyMetadataToEntry(
     entry.authorText = formatAuthors(entry.authors, entry.totalAuthors);
   }
 
+  // Extract authorSearchInfos for author profile lookup (FTR-AUTHOR-PROFILE)
+  // This allows References tab authors to have recid/BAI for precise profile queries
+  // FTR-AUTHOR-PROFILE-FIX-2: ALWAYS rebuild entry.authors from metadata.authors to ensure
+  // index alignment with authorSearchInfos. This is critical because:
+  // - Reference data may have different author ordering/naming than literature metadata
+  // - extractAuthorNamesFromReference skips authors without names (no placeholders)
+  // - extractAuthorSearchInfos pushes placeholders to maintain alignment
+  // By rebuilding both from the same source (metadata.authors), we guarantee alignment.
+  if (
+    !entry.authorSearchInfos &&
+    Array.isArray(metadata.authors) &&
+    metadata.authors.length > 0
+  ) {
+    const searchInfos = extractAuthorSearchInfos(
+      metadata.authors,
+      AUTHOR_IDS_EXTRACT_LIMIT,
+    );
+    if (searchInfos?.length) {
+      entry.authorSearchInfos = searchInfos;
+      // FTR-AUTHOR-PROFILE-FIX-2: Rebuild entry.authors from same source to ensure alignment
+      // Extract author names from the same metadata.authors array used for searchInfos
+      const alignedAuthors: string[] = [];
+      const limit = Math.min(metadata.authors.length, AUTHOR_IDS_EXTRACT_LIMIT);
+      for (let i = 0; i < limit; i++) {
+        const author = metadata.authors[i];
+        const name = author?.full_name || author?.full_name_unicode_normalized || "";
+        alignedAuthors.push(name); // Push even if empty to maintain alignment
+      }
+      // Only update if we got meaningful names (not all empty)
+      const hasRealNames = alignedAuthors.some((n) => n.trim());
+      if (hasRealNames) {
+        entry.authors = alignedAuthors;
+        entry.totalAuthors =
+          typeof metadata.author_count === "number"
+            ? metadata.author_count
+            : metadata.authors.length;
+        entry.authorText = formatAuthors(entry.authors, entry.totalAuthors);
+      }
+    }
+  }
+
   // Year update
   if (
     (!entry.year || entry.year === strings.yearUnknown) &&
@@ -370,6 +494,11 @@ function applyMetadataToEntry(
   if (!entry.doi && Array.isArray(metadata.dois) && metadata.dois.length) {
     const doiObj = metadata.dois[0];
     entry.doi = typeof doiObj === "string" ? doiObj : doiObj?.value;
+  }
+
+  // Extract texkey from metadata if not already present
+  if (!entry.texkey && Array.isArray(metadata.texkeys) && metadata.texkeys.length) {
+    entry.texkey = metadata.texkeys[0];
   }
 
   // Publication summary update

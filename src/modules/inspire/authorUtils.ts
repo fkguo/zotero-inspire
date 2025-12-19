@@ -122,8 +122,13 @@ export function isValidBAI(bai: string): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Extract author search info (fullName + BAI/recid) from INSPIRE authors array.
- * BAI (INSPIRE Author ID) like "Feng.Kun.Guo.1" is the most reliable for precise search.
+ * Extract author search info (fullName + BAI + recid) from INSPIRE authors array.
+ *
+ * Query priority for author profile lookup:
+ * 1. recid: Direct `/api/authors/{recid}` lookup - 100% accurate, fastest
+ * 2. BAI (INSPIRE Author ID) like "Feng.Kun.Guo.1" - highly reliable search
+ * 3. fullName: Fallback when recid and BAI are not available
+ *
  * For large collaborations (>50 authors), only extract first author's info.
  * See: https://github.com/inspirehep/rest-api-doc
  */
@@ -142,7 +147,13 @@ export function extractAuthorSearchInfos(
   for (let i = 0; i < maxToProcess; i++) {
     const author = authors[i];
     const fullName = author?.full_name || author?.full_name_unicode_normalized;
+
+    // FTR-AUTHOR-PROFILE-FIX: Always push an entry to maintain index alignment
+    // with entry.authors array. Even if fullName is missing, push a placeholder
+    // so that authorSearchInfos[i] corresponds to authors[i].
     if (!fullName) {
+      // Push placeholder with empty fullName to maintain index alignment
+      result.push({ fullName: "" });
       continue;
     }
 
@@ -158,12 +169,13 @@ export function extractAuthorSearchInfos(
       }
     }
 
-    // Extract recid for display purposes (not used for search anymore)
+    // Extract recid for direct /api/authors/{recid} lookup (highest priority)
     let recid: string | undefined;
     if (author.recid) {
       recid = String(author.recid);
     } else if (author.record?.$ref) {
-      const match = author.record.$ref.match(/\/authors\/(\d+)$/);
+      // Allow trailing query/fragment when extracting recid (some APIs append params)
+      const match = author.record.$ref.match(/\/authors\/(\d+)/);
       if (match) {
         recid = match[1];
       }

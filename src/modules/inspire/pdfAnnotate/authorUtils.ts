@@ -297,6 +297,7 @@ export function parseAuthorLabels(labels: string[]): {
   isEtAl: boolean;
 } {
   const authors: string[] = [];
+  const authorSet = new Set<string>();
   const authorInitials = new Map<string, string>();
   let year: string | null = null;
   let isEtAl = false;
@@ -307,8 +308,9 @@ export function parseAuthorLabels(labels: string[]): {
     if (initialAuthorMatch) {
       const initials = initialAuthorMatch[1].replace(/\s+/g, "");
       const author = initialAuthorMatch[2].toLowerCase();
-      if (!authors.includes(author)) {
+      if (!authorSet.has(author)) {
         authors.push(author);
+        authorSet.add(author);
       }
       authorInitials.set(author, initials);
       continue;
@@ -318,8 +320,9 @@ export function parseAuthorLabels(labels: string[]): {
     const combinedMatch = label.match(RE_AUTHOR_YEAR_COMBINED);
     if (combinedMatch) {
       const author = combinedMatch[1].toLowerCase();
-      if (!authors.includes(author)) {
+      if (!authorSet.has(author)) {
         authors.push(author);
+        authorSet.add(author);
       }
       year = combinedMatch[2];
       isEtAl = /et\s+al\.?/i.test(label);
@@ -331,8 +334,14 @@ export function parseAuthorLabels(labels: string[]): {
     if (twoAuthorsMatch) {
       const author1 = twoAuthorsMatch[1].toLowerCase();
       const author2 = twoAuthorsMatch[2].toLowerCase();
-      if (!authors.includes(author1)) authors.push(author1);
-      if (!authors.includes(author2)) authors.push(author2);
+      if (!authorSet.has(author1)) {
+        authors.push(author1);
+        authorSet.add(author1);
+      }
+      if (!authorSet.has(author2)) {
+        authors.push(author2);
+        authorSet.add(author2);
+      }
       year = twoAuthorsMatch[3];
       continue;
     }
@@ -346,8 +355,9 @@ export function parseAuthorLabels(labels: string[]): {
     // Check for standalone author name
     if (RE_AUTHOR_STANDALONE.test(label)) {
       const author = label.toLowerCase();
-      if (!authors.includes(author)) {
+      if (!authorSet.has(author)) {
         authors.push(author);
+        authorSet.add(author);
       }
       continue;
     }
@@ -357,8 +367,9 @@ export function parseAuthorLabels(labels: string[]): {
       const parts = label.split(/,\s*/);
       for (const part of parts) {
         const author = part.trim().toLowerCase();
-        if (author && !authors.includes(author)) {
+        if (author && !authorSet.has(author)) {
           authors.push(author);
+          authorSet.add(author);
         }
       }
     }

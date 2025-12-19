@@ -254,6 +254,8 @@ export function postProcessLabels(
   labels: string[],
   maxKnownLabel?: number,
 ): string[] {
+  // PERF-FIX-13: Use Set for O(1) duplicate checking instead of O(n) includes()
+  const seen = new Set<string>();
   const result: string[] = [];
 
   for (const label of labels) {
@@ -265,7 +267,8 @@ export function postProcessLabels(
     if (expanded) {
       // Add expanded labels (avoiding duplicates)
       for (const exp of expanded) {
-        if (!result.includes(exp)) {
+        if (!seen.has(exp)) {
+          seen.add(exp);
           result.push(exp);
         }
       }
@@ -273,7 +276,8 @@ export function postProcessLabels(
     }
 
     // Keep original label
-    if (!result.includes(label)) {
+    if (!seen.has(label)) {
+      seen.add(label);
       result.push(label);
     }
   }
@@ -332,6 +336,8 @@ function parseMixedCitation(content: string): string[] {
  * @returns Array of citation labels found
  */
 function detectSuperscriptStyleCitations(text: string): string[] {
+  // PERF-FIX-13: Use Set for O(1) duplicate checking
+  const seen = new Set<string>();
   const labels: string[] = [];
 
   // Pattern: letter followed immediately by citation number(s)
@@ -350,7 +356,8 @@ function detectSuperscriptStyleCitations(text: string): string[] {
       // Skip years and out-of-range numbers
       // Use stricter range (1-500) for superscript style to avoid false positives
       if (num >= 1 && num <= 500 && !(num >= 1900 && num <= 2099)) {
-        if (!labels.includes(label)) {
+        if (!seen.has(label)) {
+          seen.add(label);
           labels.push(label);
         }
       }

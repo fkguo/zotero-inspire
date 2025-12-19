@@ -3,16 +3,48 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Author search information for precise INSPIRE author search.
- * Priority: BAI > fullName > recid
- * BAI (INSPIRE Author ID) like "Feng.Kun.Guo.1" is the most reliable.
- * Note: INSPIRE currently doesn't support querying authors by recid,
- * so recid is kept as lowest priority for potential future support.
+ * Author search information for precise INSPIRE author profile lookup.
+ * Priority: recid > BAI > fullName
+ *
+ * - recid: Direct lookup via `/api/authors/{recid}` - 100% accurate, fastest
+ * - BAI (INSPIRE Author ID) like "Feng.Kun.Guo.1" - highly reliable (search query)
+ * - fullName: Fallback when recid and BAI are not available
+ *
+ * Note: author recid can be extracted from paper's `authors[].record.$ref` field.
+ * See `authorUtils.ts:extractAuthorSearchInfos()` for extraction logic.
  */
 export interface AuthorSearchInfo {
   fullName: string;
-  bai?: string; // INSPIRE BAI (e.g., "Feng.Kun.Guo.1") - most precise
-  recid?: string; // INSPIRE author recid (lowest priority, not currently supported by INSPIRE API)
+  bai?: string; // INSPIRE BAI (e.g., "Feng.Kun.Guo.1") - highly reliable search
+  recid?: string; // INSPIRE author recid - direct /api/authors/{recid} lookup (highest priority)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Author Profile Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface InspireAuthorProfile {
+  recid: string;
+  name: string;
+  currentPosition?: {
+    institution: string;
+    rank?: string;
+  };
+  orcid?: string;
+  inspireId?: string;
+  bai?: string;
+  arxivCategories?: string[];
+  homepageUrl?: string;
+  emails?: string[];
+  status?: string;
+  advisors?: Array<{ name: string; degreeType?: string }>;
+}
+
+export interface AuthorStats {
+  paperCount: number;
+  totalCitations: number;
+  hIndex: number;
+  citationsWithoutSelf?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,6 +81,7 @@ export interface InspireReferenceEntry {
   abstract?: string;
   abstractLoading?: boolean;
   doi?: string; // DOI for journal link and duplicate detection
+  texkey?: string; // INSPIRE texkey for quick copy
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -190,7 +223,15 @@ export type ItemWithPendingInspireNote = Zotero.Item & {
 /**
  * Cache type identifier for file naming
  */
-export type LocalCacheType = "refs" | "cited" | "author";
+export type LocalCacheType =
+  | "refs"
+  | "cited"
+  | "author"
+  | "preprint"
+  | "preprintCandidates"
+  | "crossref"
+  | "author_profile" // FTR-AUTHOR-PROFILE: Author profile cache (permanent)
+  | "author_papers"; // FTR-AUTHOR-PROFILE: Author papers list cache (permanent)
 
 /**
  * Local cache file structure for persistent storage.
@@ -219,4 +260,79 @@ export interface CachedData<T> {
   data: T;
   source: CacheSource;
   ageHours?: number; // Age in hours (for local cache)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Preprint Watch Types (FTR-PREPRINT-WATCH)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Publication information from INSPIRE for a newly published paper.
+ */
+export interface PublicationInfo {
+  journalTitle: string;
+  volume?: string;
+  pageStart?: string; // page_start or artid
+  year?: number; // Publication year (for date field)
+  doi?: string; // Non-arXiv DOI (journal DOI)
+  recid?: string; // INSPIRE record ID
+  preprintDate?: string; // Original arXiv submission date (preserved for reference)
+}
+
+/**
+ * Result of checking a single preprint's publication status.
+ */
+export interface PreprintCheckResult {
+  itemID: number;
+  arxivId: string;
+  title?: string; // Item title (for display)
+  status: "published" | "unpublished" | "error" | "not_in_inspire";
+  publicationInfo?: PublicationInfo;
+  error?: string;
+}
+
+/**
+ * Summary of batch preprint check operation.
+ */
+export interface PreprintCheckSummary {
+  total: number;
+  published: number; // Found new publications
+  unpublished: number; // Still preprints
+  errors: number; // Check failures
+  notInInspire: number; // Not found in INSPIRE
+  results: PreprintCheckResult[];
+}
+
+/**
+ * Options for preprint update operation.
+ */
+export interface PreprintUpdateOptions {
+  updateDoi?: boolean; // Replace arXiv DOI with journal DOI
+  updateJournal?: boolean; // Update journalAbbreviation
+  updateVolume?: boolean;
+  updatePages?: boolean;
+  updateDate?: boolean; // Update date to publication year
+  preserveArxivInExtra?: boolean; // Keep arXiv info in Extra field
+}
+
+/**
+ * Single entry in the unified preprint watch cache.
+ */
+export interface PreprintWatchEntry {
+  arxivId: string; // Stable identifier (e.g., "2301.12345")
+  itemId?: number; // Zotero item ID for fast lookup (may become stale)
+  lastChecked: number; // Timestamp of last INSPIRE check
+  status: "unpublished" | "published" | "error";
+  publicationInfo?: PublicationInfo; // Only set when status === "published"
+}
+
+/**
+ * Unified preprint watch cache structure (single file).
+ * Replaces per-arxivId cache files for simpler management.
+ */
+export interface PreprintWatchCache {
+  version: number; // Cache format version
+  lastFullScan: number; // Timestamp of last full library scan
+  lastCheck: number; // Timestamp of last batch check
+  entries: PreprintWatchEntry[];
 }

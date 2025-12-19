@@ -161,6 +161,7 @@ export const isInspireSortOption = (
 // Author Processing Constants
 // ─────────────────────────────────────────────────────────────────────────────
 export const AUTHOR_IDS_EXTRACT_LIMIT = 10; // Support up to 10 displayed authors
+export const AUTHOR_PROFILE_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // Non-person author patterns (collaborations, organizations)
 export const NON_PERSON_AUTHOR_PATTERN =
@@ -261,16 +262,17 @@ export const API_FIELDS_CITATIONS =
 /**
  * Fields for reference list display (panel entries).
  * Includes basic metadata for display and filtering.
+ * Includes authors.record for direct recid lookup (faster author profile fetch).
  */
 export const API_FIELDS_LIST_DISPLAY =
-  "control_number,titles.title,authors.full_name,authors.ids,author_count,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
+  "control_number,titles.title,authors.full_name,authors.ids,authors.record,author_count,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
 
 /**
  * Fields for reference enrichment (batch metadata fetch).
- * Same as list display but without author IDs (not needed for enrichment).
+ * Includes author IDs (ids, record) for author profile lookup in References tab.
  */
 export const API_FIELDS_ENRICHMENT =
-  "control_number,citation_count,citation_count_without_self_citations,titles.title,authors.full_name,author_count,publication_info,earliest_date,arxiv_eprints,dois";
+  "control_number,citation_count,citation_count_without_self_citations,titles.title,authors.full_name,authors.ids,authors.record,author_count,publication_info,earliest_date,arxiv_eprints,dois,texkeys";
 
 /**
  * Fields for abstract tooltip fetch.
@@ -297,6 +299,21 @@ export const API_FIELDS_AUTO_CHECK =
  */
 export const API_FIELDS_LOOKUP =
   "control_number,titles.title,dois,arxiv_eprints,texkeys";
+
+/**
+ * Fields for preprint publication status check (FTR-PREPRINT-WATCH).
+ * Minimal fields to detect if an arXiv preprint has been published.
+ */
+export const API_FIELDS_PREPRINT_CHECK =
+  "control_number,publication_info,dois,preprint_date";
+
+/**
+ * Fields for author profile fetch (Authors API).
+ * Minimal fields for author info display.
+ * Note: For Authors API direct lookup, fields must be prefixed with "metadata."
+ */
+export const API_FIELDS_AUTHOR_PROFILE =
+  "metadata.control_number,metadata.name,metadata.positions,metadata.ids,metadata.arxiv_categories,metadata.urls,metadata.status,metadata.advisors,metadata.email_addresses";
 
 /**
  * Build query string with fields parameter.

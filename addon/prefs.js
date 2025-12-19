@@ -31,3 +31,12 @@ pref("__prefsPrefix__.smart_update_protect_authors", true); // Protect user-edit
 pref("__prefsPrefix__.smart_update_protect_abstract", false); // Protect user-edited abstract
 pref("__prefsPrefix__.smart_update_protect_journal", false); // Protect user-edited journal
 pref("__prefsPrefix__.smart_update_protected_names", ""); // Comma-separated list of protected author names (e.g., "Meißner, Müller")
+// Preprint watch settings (FTR-PREPRINT-WATCH)
+pref("__prefsPrefix__.preprint_watch_enabled", true); // Enable preprint publication monitoring
+pref("__prefsPrefix__.preprint_watch_auto_check", "never"); // Auto-check timing: "startup" | "daily" | "never"
+pref("__prefsPrefix__.preprint_watch_last_check", 0); // Last check timestamp
+pref("__prefsPrefix__.preprint_watch_notify", true); // Show notification when publications found
+// Collaboration tag settings (FTR-COLLAB-TAGS)
+pref("__prefsPrefix__.collab_tag_enable", false); // Enable collaboration tagging
+pref("__prefsPrefix__.collab_tag_auto", false); // Auto-add tags when updating/importing
+pref("__prefsPrefix__.collab_tag_template", "{name}"); // Tag format template ({name} = collaboration name)

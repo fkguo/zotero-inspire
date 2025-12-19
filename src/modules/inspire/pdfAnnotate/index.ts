@@ -26,10 +26,7 @@ export { CitationParser, getCitationParser } from "./citationParser";
 export { LabelMatcher } from "./labelMatcher";
 
 // Re-export reader integration
-export {
-  ReaderIntegration,
-  getReaderIntegration,
-} from "./readerIntegration";
+export { ReaderIntegration, getReaderIntegration } from "./readerIntegration";
 export type { OverlayReferenceMapping } from "./readerIntegration";
 
 // Re-export PDF references parser (FTR-PDF-ANNOTATE-MULTI-LABEL)
@@ -41,10 +38,12 @@ export {
 
 // Re-export shared utilities (FTR-REFACTOR: Centralized scoring and author utilities)
 export {
+  DEBUG_MODE,
   SCORE,
   YEAR_DELTA,
   PARSE_CONFIG,
   MATCH_CONFIG,
+  AUTHOR_SCORE,
 } from "./constants";
 export type { MatchConfidence, MatchMethod } from "./constants";
 

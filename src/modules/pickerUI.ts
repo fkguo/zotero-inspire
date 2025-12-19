@@ -5,6 +5,60 @@ import type { AmbiguousCandidate } from "./inspire/pdfAnnotate/types";
 // Style helper functions for reference panel UI elements
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FTR-CONSISTENT-UI: Unified button color constants for consistent styling
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Button colors for active state (dark mode) - use brighter color for better contrast */
+const BUTTON_ACTIVE_BG_DARK = "#6b7280";
+/** Button colors for active state (light mode) */
+const BUTTON_ACTIVE_BG_LIGHT = "#475569";
+/** Button colors for inactive state (dark mode) */
+const BUTTON_INACTIVE_BG_DARK = "#2d2d30";
+/** Button colors for inactive state (light mode) */
+const BUTTON_INACTIVE_BG_LIGHT = "#e2e8f0";
+/** Button text color for active state */
+const BUTTON_ACTIVE_COLOR = "#ffffff";
+/** Button text color for inactive state (dark mode) */
+const BUTTON_INACTIVE_COLOR_DARK = "#9ca3af";
+/** Button text color for inactive state (light mode) */
+const BUTTON_INACTIVE_COLOR_LIGHT = "#475569";
+
+/**
+ * Apply unified pill button style for filter/toggle buttons.
+ * This ensures consistent appearance across all filter buttons:
+ * - Published Only button
+ * - Author Filter button
+ * - Excl. Self-Cit. button
+ * - Year/Journal filter buttons
+ *
+ * @param el - Button element to style
+ * @param isActive - Whether the button is in active/selected state
+ * @param isDark - Whether dark mode is enabled
+ */
+export function applyPillButtonStyle(
+  el: HTMLElement,
+  isActive: boolean,
+  isDark: boolean,
+): void {
+  // Base styles
+  el.style.padding = "3px 10px";
+  el.style.fontSize = "12px";
+  el.style.borderRadius = "12px";
+  el.style.border = "none";
+  el.style.cursor = "pointer";
+  el.style.transition = "background-color 0.15s ease, color 0.15s ease";
+  el.style.whiteSpace = "nowrap";
+
+  if (isActive) {
+    el.style.background = isDark ? BUTTON_ACTIVE_BG_DARK : BUTTON_ACTIVE_BG_LIGHT;
+    el.style.color = BUTTON_ACTIVE_COLOR;
+  } else {
+    el.style.background = isDark ? BUTTON_INACTIVE_BG_DARK : BUTTON_INACTIVE_BG_LIGHT;
+    el.style.color = isDark ? BUTTON_INACTIVE_COLOR_DARK : BUTTON_INACTIVE_COLOR_LIGHT;
+  }
+}
+
 /**
  * Apply inline styles to the reference entry text container (horizontal layout)
  */
@@ -12,7 +66,21 @@ export function applyRefEntryTextContainerStyle(el: HTMLElement): void {
   el.style.display = "flex";
   el.style.flexDirection = "row";
   el.style.alignItems = "flex-start";
-  el.style.gap = "4px";
+  el.style.gap = "6px";
+
+  const controls = el.querySelector(
+    ".zinspire-ref-entry__controls",
+  ) as HTMLElement | null;
+  if (controls) {
+    controls.style.display = "flex";
+    controls.style.flexWrap = "wrap";
+    controls.style.alignItems = "center";
+    controls.style.alignContent = "flex-start";
+    controls.style.justifyContent = "flex-end";
+    controls.style.gap = "4px";
+    controls.style.width = "56px";
+    controls.style.flexShrink = "0";
+  }
 }
 
 /**
@@ -65,23 +133,39 @@ export function applyRefEntryContentStyle(el: HTMLElement): void {
 }
 
 /**
- * Apply inline styles to clickable author name links
+ * Apply inline styles to clickable author name links.
+ * Uses brighter blue in dark mode for better visibility.
+ * @param el - The link element to style
+ * @param isDark - Optional dark mode flag. If not provided, uses CSS variable.
  */
-export function applyAuthorLinkStyle(el: HTMLElement): void {
+export function applyAuthorLinkStyle(el: HTMLElement, isDark?: boolean): void {
   el.style.cursor = "pointer";
   el.style.textDecoration = "none";
-  el.style.color = "#0066cc";
-  // Add hover effect via CSS class in the main stylesheet
+  // Use brighter blue in dark mode for better contrast
+  if (isDark !== undefined) {
+    el.style.color = isDark ? "#60a5fa" : "#0066cc";
+  } else {
+    // Fallback: use CSS variable that adapts to theme
+    el.style.color = "var(--accent-color, #0066cc)";
+  }
 }
 
 /**
- * Apply inline styles to clickable meta links (DOI/arXiv links in publication info)
- * Blue color to indicate clickable links, no underline for cleaner look
+ * Apply inline styles to clickable meta links (DOI/arXiv links in publication info).
+ * Uses brighter blue in dark mode for better visibility.
+ * @param el - The link element to style
+ * @param isDark - Optional dark mode flag. If not provided, uses CSS variable.
  */
-export function applyMetaLinkStyle(el: HTMLAnchorElement): void {
+export function applyMetaLinkStyle(el: HTMLAnchorElement, isDark?: boolean): void {
   el.style.cursor = "pointer";
   el.style.textDecoration = "none";
-  el.style.color = "#0066cc";
+  // Use brighter blue in dark mode for better contrast
+  if (isDark !== undefined) {
+    el.style.color = isDark ? "#60a5fa" : "#0066cc";
+  } else {
+    // Fallback: use CSS variable that adapts to theme
+    el.style.color = "var(--accent-color, #0066cc)";
+  }
 }
 
 /**
@@ -131,6 +215,85 @@ export function applyBibTeXButtonStyle(el: HTMLElement): void {
   el.style.color = "#666";
   el.style.opacity = "0.7";
   el.style.transition = "opacity 0.15s ease";
+}
+
+/**
+ * Apply inline styles to the author profile card (Author Papers header).
+ * FTR-CONSISTENT-UI: Use same background as chart container for consistency
+ */
+export function applyAuthorProfileCardStyle(el: HTMLElement): void {
+  el.style.background = "var(--material-sidepane, #f8fafc)";
+  el.style.border = "1px solid var(--fill-quaternary, #e2e8f0)";
+  el.style.borderRadius = "6px";
+  el.style.padding = "10px 12px";
+  el.style.marginBottom = "8px";
+}
+
+/**
+ * Apply inline styles to the author hover preview card.
+ */
+export function applyAuthorPreviewCardStyle(el: HTMLElement): void {
+  el.style.position = "fixed";
+  el.style.zIndex = "99999";
+  el.style.minWidth = "220px";
+  el.style.maxWidth = "320px";
+  el.style.background = "var(--material-background, #fff)";
+  el.style.border = "1px solid var(--fill-quaternary, #e2e8f0)";
+  el.style.borderRadius = "6px";
+  el.style.padding = "8px 10px";
+  el.style.boxShadow = "0 6px 20px rgba(0, 0, 0, 0.12)";
+  el.style.fontSize = "12px";
+  el.style.color = "var(--fill-primary, #334155)";
+  // Enable text selection and copy (Ctrl/Cmd+C) - consistent with PDF preview card
+  el.style.userSelect = "text";
+  el.style.cursor = "auto";
+}
+
+/**
+ * Attach right-click to copy functionality to a link element.
+ * Updates tooltip to show value and enables copying on right-click.
+ *
+ * @param el - Link element to enhance
+ * @param value - Value to copy (e.g., ORCID ID, BAI)
+ * @param copiedText - Localized "Copied" text for feedback
+ */
+export function attachCopyableValue(
+  el: HTMLElement,
+  value: string,
+  copiedText: string,
+): void {
+  // Update tooltip to show actual value with copy hint
+  el.title = `${value} — Right-click to copy`;
+
+  // Right-click to copy
+  el.addEventListener("contextmenu", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      // Use Zotero's clipboard API for better compatibility
+      const clipboardService = (Components.classes as any)[
+        "@mozilla.org/widget/clipboardhelper;1"
+      ]?.getService(Components.interfaces.nsIClipboardHelper);
+      if (clipboardService) {
+        clipboardService.copyString(value);
+      } else {
+        // Fallback to navigator.clipboard
+        await navigator.clipboard.writeText(value);
+      }
+      // Show feedback via tooltip change
+      const originalTitle = el.title;
+      const originalText = el.textContent;
+      el.textContent = `✓ ${copiedText}`;
+      el.style.color = "#1a8f4d";
+      setTimeout(() => {
+        el.textContent = originalText;
+        el.style.color = "";
+        el.title = originalTitle;
+      }, 1500);
+    } catch (err) {
+      Zotero.debug(`[zoteroinspire] Copy failed: ${err}`);
+    }
+  });
 }
 
 /**
@@ -189,6 +352,9 @@ export function applyPreviewCardStyle(el: HTMLElement): void {
   el.style.pointerEvents = "auto";
   el.style.display = "none";
   el.style.scrollbarWidth = "thin";
+  // Enable text selection and copy (Ctrl/Cmd+C)
+  el.style.userSelect = "text";
+  el.style.cursor = "auto";
 }
 
 /**
@@ -465,25 +631,42 @@ export function showTargetPickerUI(
     };
 
     // Position relative to anchor
+    // Ensure minimum distance from top of viewport so header is always visible
     const rect = anchor.getBoundingClientRect();
-    const top = rect.bottom + 5;
-    let left = Math.max(10, rect.left - 20);
-
+    const viewportHeight = doc.documentElement.clientHeight;
     const viewportWidth = doc.documentElement.clientWidth;
-    const panelWidth = 400; // Defined in style below
+    const panelWidth = 400;
+    const panelMinHeight = 300; // Approximate minimum height for usability
+    const minTop = 10; // Minimum distance from viewport top
 
+    let left = Math.max(10, rect.left - 20);
     if (left + panelWidth > viewportWidth) {
       left = Math.max(10, viewportWidth - panelWidth - 40);
     }
 
-    panel.style.top = `${top}px`;
-    panel.style.left = `${left}px`;
+    // Calculate preferred position (below anchor)
+    let calculatedTop = rect.bottom + 5;
 
-    const viewportHeight = doc.documentElement.clientHeight;
-    if (top + 300 > viewportHeight) {
+    // Check if popup fits below the anchor
+    const fitsBelow = calculatedTop + panelMinHeight <= viewportHeight;
+    // Check if popup would fit above the anchor
+    const fitsAbove = rect.top - panelMinHeight - 5 >= minTop;
+
+    if (fitsBelow) {
+      // Position below anchor, but ensure minimum top
+      panel.style.top = `${Math.max(minTop, calculatedTop)}px`;
+      panel.style.left = `${left}px`;
+    } else if (fitsAbove) {
+      // Position above anchor using bottom positioning
       const bottom = viewportHeight - rect.top + 5;
       panel.style.top = "auto";
       panel.style.bottom = `${bottom}px`;
+      panel.style.left = `${left}px`;
+    } else {
+      // Not enough space above or below - center vertically and ensure header visible
+      const centeredTop = Math.max(minTop, (viewportHeight - panelMinHeight) / 2);
+      panel.style.top = `${centeredTop}px`;
+      panel.style.left = `${left}px`;
     }
 
     body.appendChild(overlay);
@@ -728,6 +911,9 @@ export function showTargetPickerUI(
       visibleTagSuggestions = matches;
       activeTagSuggestionIndex = 0;
       tagsSuggestionPanel.textContent = "";
+      // PERF-FIX-11: Batch append with DocumentFragment to avoid repeated reflow
+      const frag = doc.createDocumentFragment();
+      // PERF-FIX-5: Use data attributes for event delegation instead of per-button listeners
       matches.forEach((name, index) => {
         const button = doc.createElement("button");
         button.type = "button";
@@ -735,22 +921,24 @@ export function showTargetPickerUI(
           "zinspire-collection-picker__tags-autocomplete-item",
         );
         button.textContent = name;
-        button.style.display = "block";
-        button.style.width = "100%";
-        button.style.textAlign = "left";
-        button.style.padding = "4px 8px";
-        button.style.fontSize = "12px";
-        button.style.border = "none";
-        button.style.background = "transparent";
-        button.style.cursor = "pointer";
-        button.addEventListener("mousedown", (event) => event.preventDefault());
-        button.addEventListener("mouseenter", () => {
-          activeTagSuggestionIndex = index;
-          refreshTagSuggestionHighlight();
-        });
-        button.addEventListener("click", () => applyTagSuggestion(name));
-        tagsSuggestionPanel.appendChild(button);
+        // PERF-FIX-5: Data attributes for delegated event handlers
+        button.dataset.index = String(index);
+        button.dataset.tagName = name;
+        // PERF-FIX-12: Use cssText for batch style assignment
+        button.style.cssText = `
+          display: block;
+          width: 100%;
+          text-align: left;
+          padding: 4px 8px;
+          font-size: 12px;
+          border: none;
+          background: transparent;
+          cursor: pointer;
+        `;
+        // PERF-FIX-5: Removed per-button event listeners - now using delegation
+        frag.appendChild(button);
       });
+      tagsSuggestionPanel.appendChild(frag);
       tagsSuggestionPanel.style.display = "block";
       refreshTagSuggestionHighlight();
     };
@@ -842,6 +1030,31 @@ export function showTargetPickerUI(
       event.preventDefault(),
     );
 
+    // PERF-FIX-5: Event delegation for tag suggestion buttons
+    // Single listener handles all button clicks instead of per-button listeners
+    tagsSuggestionPanel.addEventListener("click", (event) => {
+      const btn = (event.target as HTMLElement).closest(
+        "button",
+      ) as HTMLButtonElement | null;
+      if (btn?.dataset.tagName) {
+        applyTagSuggestion(btn.dataset.tagName);
+      }
+    });
+
+    // PERF-FIX-5: Delegated mouseover for highlight updates
+    tagsSuggestionPanel.addEventListener("mouseover", (event) => {
+      const btn = (event.target as HTMLElement).closest(
+        "button",
+      ) as HTMLButtonElement | null;
+      if (btn?.dataset.index !== undefined) {
+        const idx = parseInt(btn.dataset.index, 10);
+        if (!isNaN(idx) && idx !== activeTagSuggestionIndex) {
+          activeTagSuggestionIndex = idx;
+          refreshTagSuggestionHighlight();
+        }
+      }
+    });
+
     // Fetch all tags from Zotero libraries
     const libraries = Zotero.Libraries.getAll();
     for (const lib of libraries) {
@@ -924,6 +1137,8 @@ export function showTargetPickerUI(
 
     const rowMap = new Map<string, SaveTargetRow>();
     const buttonMap = new Map<string, HTMLButtonElement>();
+    // PERF-FIX-11: Use DocumentFragment for batch DOM insertions
+    const fragment = doc.createDocumentFragment();
     for (const row of targets) {
       rowMap.set(row.id, row);
       const button = doc.createElement("button");
@@ -931,23 +1146,26 @@ export function showTargetPickerUI(
       button.dataset.id = row.id;
       button.dataset.type = row.type;
       button.classList.add("zinspire-collection-picker__row");
+      // PERF-FIX-12: Use cssText for batch style assignment (compact chip styles)
+      button.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        max-width: 100%;
+        padding: 4px 8px;
+        border: 1px solid var(--material-border, #ccc);
+        border-radius: 12px;
+        background: var(--material-background, #fff);
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 12px;
+      `;
+      // Set custom property after cssText (cssText clears all inline styles)
       button.style.setProperty(
         "--zinspire-collection-level",
         row.level.toString(),
       );
-      // Compact chip styles
-      button.style.display = "inline-flex";
-      button.style.alignItems = "center";
-      button.style.maxWidth = "100%";
-      button.style.padding = "4px 8px";
-      button.style.border = "1px solid var(--material-border, #ccc)";
-      button.style.borderRadius = "12px"; // Chip shape
-      button.style.background = "var(--material-background, #fff)";
-      button.style.cursor = "pointer";
-      button.style.whiteSpace = "nowrap";
-      button.style.overflow = "hidden";
-      button.style.textOverflow = "ellipsis";
-      button.style.fontSize = "12px";
 
       button.addEventListener("mouseover", () => {
         if (!button.classList.contains("is-focused")) {
@@ -966,9 +1184,11 @@ export function showTargetPickerUI(
       if (row.recent) {
         button.dataset.recent = "1";
       }
-      list.appendChild(button);
+      fragment.appendChild(button);
       buttonMap.set(row.id, button);
     }
+    // PERF-FIX-11: Append all buttons at once
+    list.appendChild(fragment);
 
     if (!targets.length) {
       const empty = doc.createElement("div");
@@ -1443,68 +1663,87 @@ export function showAmbiguousCitationPicker(
     };
 
     // Create buttons for each candidate
+    // PERF-FIX-11: Use DocumentFragment for batch DOM insertions
+    const candidateFragment = doc.createDocumentFragment();
     candidates.forEach((candidate, index) => {
       const button = doc.createElement("button");
       button.type = "button";
       button.classList.add("zinspire-ambiguous-picker__candidate");
-      button.style.display = "flex";
-      button.style.flexDirection = "row";
-      button.style.alignItems = "center";
-      button.style.width = "100%";
-      button.style.padding = "10px 12px";
-      button.style.border = "1px solid var(--material-border, #ccc)";
-      button.style.borderRadius = "6px";
-      button.style.backgroundColor = "var(--material-background, #fff)";
-      button.style.cursor = "pointer";
-      button.style.textAlign = "left";
-      button.style.transition =
-        "background-color 0.15s ease, border-color 0.15s ease";
-      button.style.gap = "12px";
+      // PERF-FIX-12: Use cssText for batch style assignment
+      button.style.cssText = `
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--material-border, #ccc);
+        border-radius: 6px;
+        background-color: var(--material-background, #fff);
+        cursor: pointer;
+        text-align: left;
+        transition: background-color 0.15s ease, border-color 0.15s ease;
+        gap: 12px;
+      `;
 
       // Radio-style indicator
       const radioIndicator = doc.createElement("div");
-      radioIndicator.style.width = "18px";
-      radioIndicator.style.height = "18px";
-      radioIndicator.style.borderRadius = "50%";
-      radioIndicator.style.border = "2px solid var(--material-border, #ccc)";
-      radioIndicator.style.flexShrink = "0";
-      radioIndicator.style.display = "flex";
-      radioIndicator.style.alignItems = "center";
-      radioIndicator.style.justifyContent = "center";
-      radioIndicator.style.transition = "border-color 0.15s ease";
+      // PERF-FIX-12: Use cssText for batch style assignment
+      radioIndicator.style.cssText = `
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 2px solid var(--material-border, #ccc);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: border-color 0.15s ease;
+      `;
       button.appendChild(radioIndicator);
 
       // Inner dot (shown when selected)
       const innerDot = doc.createElement("div");
-      innerDot.style.width = "8px";
-      innerDot.style.height = "8px";
-      innerDot.style.borderRadius = "50%";
-      innerDot.style.backgroundColor = "#0066cc";
-      innerDot.style.opacity = "0";
-      innerDot.style.transition = "opacity 0.15s ease";
+      // PERF-FIX-12: Use cssText for batch style assignment
+      innerDot.style.cssText = `
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #0066cc;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      `;
       radioIndicator.appendChild(innerDot);
 
       // Content container
       const content = doc.createElement("div");
-      content.style.flex = "1";
-      content.style.minWidth = "0";
-      content.style.display = "flex";
-      content.style.flexDirection = "column";
-      content.style.gap = "2px";
+      // PERF-FIX-12: Use cssText for batch style assignment
+      content.style.cssText = `
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      `;
 
       // Main line: Journal + Volume + Page
       const mainLine = doc.createElement("div");
-      mainLine.style.display = "flex";
-      mainLine.style.alignItems = "baseline";
-      mainLine.style.gap = "6px";
-      mainLine.style.flexWrap = "wrap";
+      // PERF-FIX-12: Use cssText for batch style assignment
+      mainLine.style.cssText = `
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        flex-wrap: wrap;
+      `;
 
       // Journal name (bold)
       if (candidate.journal) {
         const journalSpan = doc.createElement("span");
-        journalSpan.style.fontWeight = "600";
-        journalSpan.style.fontSize = "14px";
-        journalSpan.style.color = "var(--fill-primary, #333)";
+        // PERF-FIX-12: Use cssText for batch style assignment
+        journalSpan.style.cssText = `
+          font-weight: 600;
+          font-size: 14px;
+          color: var(--fill-primary, #333);
+        `;
         journalSpan.textContent = candidate.journal;
         mainLine.appendChild(journalSpan);
       }
@@ -1515,8 +1754,11 @@ export function showAmbiguousCitationPicker(
       if (candidate.page) volPageParts.push(candidate.page);
       if (volPageParts.length > 0) {
         const volPageSpan = doc.createElement("span");
-        volPageSpan.style.fontSize = "14px";
-        volPageSpan.style.color = "var(--fill-primary, #333)";
+        // PERF-FIX-12: Use cssText for batch style assignment
+        volPageSpan.style.cssText = `
+          font-size: 14px;
+          color: var(--fill-primary, #333);
+        `;
         volPageSpan.textContent = volPageParts.join(", ");
         mainLine.appendChild(volPageSpan);
       }
@@ -1524,8 +1766,11 @@ export function showAmbiguousCitationPicker(
       // If no journal info, use displayText as fallback
       if (!candidate.journal && !candidate.volume) {
         const fallbackSpan = doc.createElement("span");
-        fallbackSpan.style.fontSize = "14px";
-        fallbackSpan.style.color = "var(--fill-primary, #333)";
+        // PERF-FIX-12: Use cssText for batch style assignment
+        fallbackSpan.style.cssText = `
+          font-size: 14px;
+          color: var(--fill-primary, #333);
+        `;
         fallbackSpan.textContent = candidate.displayText;
         mainLine.appendChild(fallbackSpan);
       }
@@ -1535,12 +1780,15 @@ export function showAmbiguousCitationPicker(
       // Title line (truncated)
       if (candidate.title) {
         const titleLine = doc.createElement("div");
-        titleLine.style.fontSize = "13px";
-        titleLine.style.color = "var(--fill-primary, #333)";
-        titleLine.style.overflow = "hidden";
-        titleLine.style.textOverflow = "ellipsis";
-        titleLine.style.whiteSpace = "nowrap";
-        titleLine.style.maxWidth = "100%";
+        // PERF-FIX-12: Use cssText for batch style assignment
+        titleLine.style.cssText = `
+          font-size: 13px;
+          color: var(--fill-primary, #333);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 100%;
+        `;
         // Truncate title if too long
         const maxTitleLength = 60;
         const truncatedTitle =
@@ -1569,9 +1817,11 @@ export function showAmbiguousCitationPicker(
         finish({ candidate, candidateIndex: index });
       });
 
-      list.appendChild(button);
+      candidateFragment.appendChild(button);
       buttons.push(button);
     });
+    // PERF-FIX-11: Append all candidate buttons at once
+    list.appendChild(candidateFragment);
 
     // Actions bar
     const actions = doc.createElement("div");

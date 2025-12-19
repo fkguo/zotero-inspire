@@ -156,7 +156,13 @@ export class InspireRateLimiter {
       return response;
     } catch (err) {
       // Re-throw abort errors immediately
-      if (err instanceof DOMException && err.name === "AbortError") {
+      // FTR-ABORT-CONTROLLER-FIX: Check error name instead of instanceof DOMException
+      // (DOMException may not be available in Zotero's sandboxed environment)
+      if (
+        err &&
+        typeof err === "object" &&
+        (err as any).name === "AbortError"
+      ) {
         throw err;
       }
       throw err;

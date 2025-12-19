@@ -121,7 +121,12 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["SciBull", "SB"],
   },
   {
-    names: ["Journal of High Energy Physics", "J. High Energy Phys.", "JHEP", "J High Energy Phys"],
+    names: [
+      "Journal of High Energy Physics",
+      "J. High Energy Phys.",
+      "JHEP",
+      "J High Energy Phys",
+    ],
     abbreviations: ["JHEP"],
   },
   {
@@ -141,27 +146,57 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["PLA"],
   },
   {
-    names: ["European Physical Journal C", "Eur. Phys. J. C", "Eur Phys J C", "EurPhysJC"],
+    names: [
+      "European Physical Journal C",
+      "Eur. Phys. J. C",
+      "Eur Phys J C",
+      "EurPhysJC",
+    ],
     abbreviations: ["EPJC"],
   },
   {
-    names: ["European Physical Journal A", "Eur. Phys. J. A", "Eur Phys J A", "EurPhysJA"],
+    names: [
+      "European Physical Journal A",
+      "Eur. Phys. J. A",
+      "Eur Phys J A",
+      "EurPhysJA",
+    ],
     abbreviations: ["EPJA"],
   },
   {
-    names: ["European Physical Journal B", "Eur. Phys. J. B", "Eur Phys J B", "EurPhysJB"],
+    names: [
+      "European Physical Journal B",
+      "Eur. Phys. J. B",
+      "Eur Phys J B",
+      "EurPhysJB",
+    ],
     abbreviations: ["EPJB"],
   },
   {
-    names: ["Classical and Quantum Gravity", "Class. Quantum Grav.", "Class Quantum Grav", "ClassQuantumGrav"],
+    names: [
+      "Classical and Quantum Gravity",
+      "Class. Quantum Grav.",
+      "Class Quantum Grav",
+      "ClassQuantumGrav",
+    ],
     abbreviations: ["CQG"],
   },
   {
-    names: ["Reviews of Modern Physics", "Rev. Mod. Phys.", "Rev Mod Phys", "RevModPhys"],
+    names: [
+      "Reviews of Modern Physics",
+      "Rev. Mod. Phys.",
+      "Rev Mod Phys",
+      "RevModPhys",
+    ],
     abbreviations: ["RMP"],
   },
   {
-    names: ["Progress of Theoretical Physics", "Prog. Theor. Phys.", "Prog Theor Phys", "ProgTheorPhys"],
+    names: [
+      "Progress of Theoretical Physics",
+      "Prog. Theor. Phys.",
+      "Prog Theor Phys",
+      "ProgTheorPhys",
+    ],
     abbreviations: ["PTP"],
   },
   {
@@ -196,7 +231,12 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["IJMPE"],
   },
   {
-    names: ["Modern Physics Letters A", "Mod. Phys. Lett. A", "Mod Phys Lett A", "ModPhysLettA"],
+    names: [
+      "Modern Physics Letters A",
+      "Mod. Phys. Lett. A",
+      "Mod Phys Lett A",
+      "ModPhysLettA",
+    ],
     abbreviations: ["MPLA"],
   },
   {
@@ -204,7 +244,12 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["CPC"],
   },
   {
-    names: ["Chinese Physics Letters", "Chin. Phys. Lett.", "Chin Phys Lett", "ChinPhysLett"],
+    names: [
+      "Chinese Physics Letters",
+      "Chin. Phys. Lett.",
+      "Chin Phys Lett",
+      "ChinPhysLett",
+    ],
     abbreviations: ["CPL"],
   },
   {
@@ -216,11 +261,21 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["CPA"],
   },
   {
-    names: ["Chinese Journal of Physics", "Chin. J. Phys.", "Chin J Phys", "ChinJPhys"],
+    names: [
+      "Chinese Journal of Physics",
+      "Chin. J. Phys.",
+      "Chin J Phys",
+      "ChinJPhys",
+    ],
     abbreviations: ["CJP"],
   },
   {
-    names: ["Communications in Theoretical Physics", "Commun. Theor. Phys.", "Commun Theor Phys", "CommunTheorPhys"],
+    names: [
+      "Communications in Theoretical Physics",
+      "Commun. Theor. Phys.",
+      "Commun Theor Phys",
+      "CommunTheorPhys",
+    ],
     abbreviations: ["CTP"],
   },
   {
@@ -283,7 +338,14 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     abbreviations: ["ARNPS"],
   },
   {
-    names: ["Annals of Physics", "Ann. Phys.", "Ann Phys", "Ann. Phys. (N.Y.)", "Annals Phys.", "Annals Phys"],
+    names: [
+      "Annals of Physics",
+      "Ann. Phys.",
+      "Ann Phys",
+      "Ann. Phys. (N.Y.)",
+      "Annals Phys.",
+      "Annals Phys",
+    ],
     abbreviations: ["AnnPhys"],
   },
   {
