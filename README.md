@@ -3,7 +3,7 @@
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net) into your reference management workflow. Browse references, citations, and author papers directly in Zotero without leaving your library.
+A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a community maintained database for **high energy physics and related fields**, into your reference management workflow. Browse references, citations, and author papers directly in Zotero without leaving your library.
 
 > 📖 **[中文功能说明](docs/FEATURES_CN.md)** | **[Technical Reference](docs/FEATURES_REFERENCE.md)**
 
@@ -14,7 +14,7 @@ A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net) into your 
 ### From Release
 
 1. Download the latest `.xpi` file from [Releases](https://github.com/fkguo/zotero-inspire/releases/)
-2. In Zotero: `Tools` → `Add-ons` → click gear icon → `Install Add-on From File...`
+2. In Zotero: `Tools` → `Plugins` → click gear icon → `Install Plugin From File...`
 3. Select the downloaded `.xpi` file
 
 ### From Source
@@ -34,11 +34,11 @@ Then install `build/*.xpi` as above.
 
 ### Update Metadata from INSPIRE
 
-**Right-click any item** → `INSPIRE` → `Update Metadata`:
+**Right-click any item** → `INSPIRE`:
 
-- **With abstracts** — Full metadata including abstract
-- **Without abstracts** — Skip abstract field
-- **Citation counts only** — Just update citation numbers
+- **`With abstracts`** — Full metadata including abstract
+- **`Without abstracts`** — Skip abstract field
+- **`Citation counts only`** — Just update citation numbers
 
 The plugin automatically fetches metadata when you add new items (configurable in Preferences).
 
@@ -46,28 +46,23 @@ The plugin automatically fetches metadata when you add new items (configurable i
 
 **Right-click any item** → `INSPIRE` for quick copy options:
 
-- **Copy BibTeX** — Fetch and copy BibTeX from INSPIRE
-- **Copy citation key** — Copy the INSPIRE texkey
-- **Copy INSPIRE link** — Copy the INSPIRE literature URL
-- **Copy INSPIRE link (Markdown)** — Copy as markdown link
-- **Copy Zotero link** — Copy Zotero select link
-
-### Other Item Actions
-
-- **Add Collaboration Tags** — Tag large collaboration papers (ATLAS, CMS, etc.)
-- **Check Preprint Status** — Check if arXiv preprints have been published
+- **`Copy BibTeX`** — Fetch and copy BibTeX from INSPIRE
+- **`Copy citation key`** — Copy the INSPIRE texkey
+- **`Copy INSPIRE link`** — Copy the INSPIRE literature URL
+- **`Copy INSPIRE link (markdown)`** — Copy the INSPIRE literature URL in format of `[texkey](link)`
+- **`Copy Zotero link`** — Copy Zotero select link
 
 ### Browse References Panel
 
 Select an item with an INSPIRE record, then find the **INSPIRE** section in the right panel:
 
-| Tab                     | What it shows                      |
-| ----------------------- | ---------------------------------- |
-| **References**    | Papers cited by this item          |
-| **Cited by**      | Papers that cite this item         |
-| **Entry Cited**   | Papers citing a specific reference |
-| **Author Papers** | All papers by a clicked author     |
-| **🔍 Search**     | INSPIRE search results             |
+| Tab                     | What it shows                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **References**    | Papers cited by this item                                                                                  |
+| **Cited by**      | Papers that cite this item                                                                                 |
+| **Entry Cited**   | Papers citing a specific reference, appears only after clicking the `Cited by ...` button below an entry |
+| **Author Papers** | All papers by a clicked author, appears only after clicking an author name                                 |
+| **🔍 Search**     | INSPIRE search results                                                                                     |
 
 ### Search INSPIRE
 
@@ -80,7 +75,7 @@ inspire: arXiv:2305.12345   → Search by arXiv ID
 inspire: j Phys.Rev.D       → Search by journal
 ```
 
-**From the panel**: Click the 🔍 Search tab and enter your query directly (no prefix needed). Search history is saved and accessible via dropdown.
+**From the panel (more convenient)**: Click the 🔍 Search tab and enter your query directly (no prefix needed). Search history is saved and accessible via dropdown (use right or tab to accept inline hint from history records).
 
 ---
 
@@ -94,8 +89,6 @@ inspire: j Phys.Rev.D       → Search by journal
 | ⊕ (red)   | Item can be imported        |
 | 🔗 (green) | Linked as related item      |
 | 🔗 (gray)  | Not linked                  |
-| 📋         | Copy BibTeX                 |
-| T          | Copy citation key           |
 
 ### Interactions
 
@@ -118,7 +111,7 @@ inspire: j Phys.Rev.D       → Search by journal
 - **Text filter**: Type keywords to filter entries; supports multi-word, phrase search (`"exact phrase"`), journal abbreviations (`"PRL"`, `"PRD"`, `"JHEP"`, etc.), and international characters (ä→ae)
 - **Quick filters**: Click the Filters button for presets (high citations, recent papers, published only, etc.)
 - **Sort options**: INSPIRE order, newest first, or most cited first
-- **Chart filters**: Click bars in the statistics chart to filter by year or citation range; Ctrl/Cmd+click for multi-select, Shift+click for range
+- **Chart filters**: Click bars in the statistics chart to filter by year or citation range; Ctrl/Cmd+click for multi-select
 
 ### Navigation
 
@@ -127,10 +120,9 @@ inspire: j Phys.Rev.D       → Search by journal
 
 ### Batch Operations
 
-- **Checkbox selection**: Use checkboxes on the left side of entries; supports single click, Shift+Click for range selection, Ctrl/Cmd+Click for multi-select
-- **Batch toolbar**: Shows "Select All", "Clear", and "Import" buttons when entries are selected
-- **Duplicate detection**: Automatically detects duplicates before importing
-- **Batch import**: Select target library/collections/tags once for all items; shows progress and supports ESC to cancel
+1. Use checkboxes to select multiple entries
+2. Click **Import** to batch import selected items
+3. The plugin detects duplicates automatically before importing
 
 ### Export Options
 
@@ -151,7 +143,7 @@ When reading a PDF in Zotero:
 2. **Hover** over the **INSPIRE Refs. [n]** button to preview the reference (title, authors, abstract)
 3. **Click** to jump to and highlight the corresponding reference in the panel
 
-**Supported formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, superscripts
+**Supported formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, `[arXiv:2301.12345]`, superscripts
 
 ---
 
@@ -183,16 +175,7 @@ Enable **Preprint Watch** in Preferences to automatically check if your arXiv pr
 
 ### Smart Update Mode
 
-Enable **Smart Update** in Preferences to preserve your manual edits when updating metadata. You can protect specific fields (title, authors, abstract, journal). Author names with diacritics (ä, ö, ü, etc.) are automatically preserved.
-
-### Generate Publication Lists for Reports
-
-Perfect for annual or grant reports:
-1. Search with `ft <grant_number>` to find papers acknowledging a specific grant
-2. Click **Published** filter to show only formally published papers
-3. Select entries to export (or export all visible)
-4. Click the export button → **Select Citation Style...** → choose your format (e.g., APS)
-5. Save as RTF file and paste directly into Word
+Enable **Smart Update** in Preferences to preserve your manual edits when updating metadata. You can protect specific fields (title, authors, abstract, journal) and author names with diacritics.
 
 ### Better BibTeX Integration
 
