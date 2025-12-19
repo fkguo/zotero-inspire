@@ -123,6 +123,81 @@ function debugLog(message: string): void {
   }
 }
 
+type ExtractedIdentifier =
+  | { type: "arxiv"; value: string }
+  | { type: "doi"; value: string };
+
+/**
+ * Fallback identifier extraction using Zotero.Utilities.extractIdentifiers.
+ * Only invoked when citation parsing fails; safe-guarded to avoid errors in tests
+ * (where Zotero may be undefined).
+ */
+function extractIdentifiersFallback(text: string): ExtractedIdentifier | null {
+  try {
+    const zoteroAny = Zotero as any;
+    const utilities = zoteroAny?.Utilities;
+    const extractIdentifiers = utilities?.extractIdentifiers;
+    if (typeof extractIdentifiers !== "function") {
+      return null;
+    }
+
+    const results = extractIdentifiers(text);
+    if (!Array.isArray(results) || results.length === 0) {
+      return null;
+    }
+
+    const candidates: Array<{ id: ExtractedIdentifier; idx: number }> = [];
+    const cleanDoi: ((doi: string) => string) | undefined =
+      typeof utilities?.cleanDOI === "function" ? utilities.cleanDOI : undefined;
+    const lower = text.toLowerCase();
+
+    for (const r of results) {
+      if (!r || typeof r !== "object") continue;
+
+      const doiRaw =
+        (r.DOI as string | undefined) ??
+        (r.doi as string | undefined) ??
+        undefined;
+      if (typeof doiRaw === "string" && doiRaw.trim()) {
+        const cleaned = cleanDoi ? cleanDoi(doiRaw) : doiRaw.trim();
+        if (cleaned) {
+          const idx = lower.indexOf(cleaned.toLowerCase());
+          candidates.push({ id: { type: "doi", value: cleaned }, idx });
+        }
+      }
+
+      const arxivRaw =
+        (r.arXiv as string | undefined) ??
+        (r.arxiv as string | undefined) ??
+        undefined;
+      if (typeof arxivRaw === "string" && arxivRaw.trim()) {
+        const cleaned = arxivRaw.replace(/^arxiv:\s*/i, "").trim();
+        if (cleaned) {
+          const idx = lower.indexOf(cleaned.toLowerCase());
+          candidates.push({ id: { type: "arxiv", value: cleaned }, idx });
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    // Prefer earliest occurrence; tie-breaker prefers arXiv in INSPIRE workflows.
+    candidates.sort((a, b) => {
+      const aIdx = a.idx >= 0 ? a.idx : Number.POSITIVE_INFINITY;
+      const bIdx = b.idx >= 0 ? b.idx : Number.POSITIVE_INFINITY;
+      if (aIdx !== bIdx) return aIdx - bIdx;
+      if (a.id.type !== b.id.type) return a.id.type === "arxiv" ? -1 : 1;
+      return 0;
+    });
+
+    return candidates[0].id;
+  } catch (_err) {
+    return null;
+  }
+}
+
 /**
  * Event listener callback type
  */
@@ -470,10 +545,24 @@ export class ReaderIntegration {
     }
 
     if (allLabels.length === 0) {
-      debugLog(
-        `[${config.addonName}] [PDF-ANNOTATE] No citation pattern detected in selection`,
-      );
-      return;
+      // Fallback: try Zotero.Utilities.extractIdentifiers() for DOI/arXiv when no citation pattern is detected
+      const extracted = extractIdentifiersFallback(selectedText);
+      if (extracted) {
+        allLabels = [extracted.value];
+        citationType = extracted.type === "arxiv" ? "arxiv" : "unknown";
+        originalRaw =
+          extracted.type === "arxiv"
+            ? `arXiv:${extracted.value}`
+            : `DOI:${extracted.value}`;
+        debugLog(
+          `[${config.addonName}] [PDF-ANNOTATE] extractIdentifiers fallback matched ${extracted.type}: ${extracted.value}`,
+        );
+      } else {
+        debugLog(
+          `[${config.addonName}] [PDF-ANNOTATE] No citation pattern detected in selection`,
+        );
+        return;
+      }
     }
 
     // Build a combined citation object for UI
@@ -674,7 +763,13 @@ export class ReaderIntegration {
       button.style.background = "var(--fill-quinary, #f0f0f0)";
       // FTR-HOVER-PREVIEW: Schedule preview card
       // FTR-FIX: Pass citation.labels so panel can use its existing matching logic
-      this.schedulePreviewShow(button, reader, citation.raw, "author-year", citation.labels);
+      this.schedulePreviewShow(
+        button,
+        reader,
+        citation.raw,
+        "author-year",
+        citation.labels,
+      );
     });
 
     button.addEventListener("mouseleave", () => {
@@ -759,7 +854,13 @@ export class ReaderIntegration {
         button.style.borderColor = "var(--accent-color, #4a90d9)";
         // FTR-HOVER-PREVIEW: Schedule preview card
         // FTR-FIX: Pass subCitation.labels so panel can use its existing matching logic
-        this.schedulePreviewShow(button, reader, subCitation.displayText, "author-year", subCitation.labels);
+        this.schedulePreviewShow(
+          button,
+          reader,
+          subCitation.displayText,
+          "author-year",
+          subCitation.labels,
+        );
       });
 
       button.addEventListener("mouseleave", () => {
@@ -1340,64 +1441,73 @@ export class ReaderIntegration {
     recid: string,
     attachmentItemID?: number,
   ): Promise<void> {
-    // Check if local cache is enabled
-    if (!localCache.isEnabled()) {
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] Cache disabled, skipping preload for ${recid}`,
-      );
-      return;
-    }
-
-    // Check if already in cache
-    const cached = await localCache.get<InspireReferenceEntry[]>("refs", recid);
-    if (cached) {
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] References for ${recid} already cached (age: ${cached.ageHours.toFixed(1)}h)`,
-      );
-      // FTR-PDF-MATCHING: Set maxKnownLabel from cached data
-      if (attachmentItemID && cached.data && cached.data.length > 0) {
-        this.setMaxKnownLabel(attachmentItemID, cached.data.length);
+    try {
+      // Check if local cache is enabled
+      if (!localCache.isEnabled()) {
+        Zotero.debug(
+          `[${config.addonName}] [PRELOAD] Cache disabled, skipping preload for ${recid}`,
+        );
+        return;
       }
-      return;
-    }
 
-    Zotero.debug(
-      `[${config.addonName}] [PRELOAD] Starting background fetch for ${recid}`,
-    );
-
-    // Fetch from INSPIRE
-    const entries = await fetchReferencesEntries(recid);
-    if (!entries || entries.length === 0) {
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] No references found for ${recid}`,
+      // Check if already in cache
+      const cached = await localCache.get<InspireReferenceEntry[]>(
+        "refs",
+        recid,
       );
-      return;
-    }
+      if (cached) {
+        Zotero.debug(
+          `[${config.addonName}] [PRELOAD] References for ${recid} already cached (age: ${cached.ageHours.toFixed(1)}h)`,
+        );
+        // FTR-PDF-MATCHING: Set maxKnownLabel from cached data
+        if (attachmentItemID && cached.data && cached.data.length > 0) {
+          this.setMaxKnownLabel(attachmentItemID, cached.data.length);
+        }
+        return;
+      }
 
-    // Enrich with complete metadata (title, authors, etc.)
-    await enrichReferencesEntries(entries);
-
-    // Store to local cache
-    await localCache.set("refs", recid, entries, undefined, entries.length);
-
-    // FTR-PDF-MATCHING: Set maxKnownLabel based on entry count for precise concatenated range detection
-    // This provides an early estimate before PDF is parsed
-    if (attachmentItemID && entries.length > 0) {
-      this.setMaxKnownLabel(attachmentItemID, entries.length);
       Zotero.debug(
-        `[${config.addonName}] [PRELOAD] Set maxKnownLabel=${entries.length} for attachment ${attachmentItemID}`,
+        `[${config.addonName}] [PRELOAD] Starting background fetch for ${recid}`,
       );
-    }
 
-    Zotero.debug(
-      `[${config.addonName}] [PRELOAD] Cached ${entries.length} references for ${recid}`,
-    );
+      // Fetch from INSPIRE
+      const entries = await fetchReferencesEntries(recid);
+      if (!entries || entries.length === 0) {
+        Zotero.debug(
+          `[${config.addonName}] [PRELOAD] No references found for ${recid}`,
+        );
+        return;
+      }
 
-    // FTR-PDF-PARSE-PRELOAD: Also preload PDF parsing in background
-    // This reduces first-click latency by having PDF mapping ready
-    // FTR-PRELOAD-AWAIT: Track the promise so callers can await it
-    if (attachmentItemID && getPref("pdf_parse_refs_list") === true) {
-      this.startPdfParsing(attachmentItemID);
+      // Enrich with complete metadata (title, authors, etc.)
+      await enrichReferencesEntries(entries);
+
+      // Store to local cache
+      await localCache.set("refs", recid, entries, undefined, entries.length);
+
+      // FTR-PDF-MATCHING: Set maxKnownLabel based on entry count for precise concatenated range detection
+      // This provides an early estimate before PDF is parsed
+      if (attachmentItemID && entries.length > 0) {
+        this.setMaxKnownLabel(attachmentItemID, entries.length);
+        Zotero.debug(
+          `[${config.addonName}] [PRELOAD] Set maxKnownLabel=${entries.length} for attachment ${attachmentItemID}`,
+        );
+      }
+
+      Zotero.debug(
+        `[${config.addonName}] [PRELOAD] Cached ${entries.length} references for ${recid}`,
+      );
+
+      // FTR-PDF-PARSE-PRELOAD: Also preload PDF parsing in background
+      // This reduces first-click latency by having PDF mapping ready
+      // FTR-PRELOAD-AWAIT: Track the promise so callers can await it
+      if (attachmentItemID && getPref("pdf_parse_refs_list") === true) {
+        this.startPdfParsing(attachmentItemID);
+      }
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [PRELOAD] Error preloading references for ${recid}: ${err}`,
+      );
     }
   }
 
@@ -1696,7 +1806,10 @@ export class ReaderIntegration {
                   totalReferences++;
                 }
               }
-            } else if (overlay.references.length >= 1 && numericMatches.length === 1) {
+            } else if (
+              overlay.references.length >= 1 &&
+              numericMatches.length === 1
+            ) {
               // Single label with multiple references - add ALL of them
               // This handles cases like [1] containing 3 papers separated by semicolons
               for (const ref of overlay.references) {

@@ -20,11 +20,16 @@ import {
   applyTabButtonStyle,
   applyAbstractTooltipStyle,
   applyBibTeXButtonStyle,
+  applyAuthorProfileCardStyle,
+  applyAuthorPreviewCardStyle,
+  attachCopyableValue,
   // FTR-HOVER-PREVIEW: Preview card styles
   applyPreviewCardStyle,
   applyPreviewCardTitleStyle,
   applyPreviewCardSectionStyle,
   applyPreviewCardIdentifiersStyle,
+  // FTR-CONSISTENT-UI: Unified button styling
+  applyPillButtonStyle,
   applyPreviewCardAbstractStyle,
 } from "./pickerUI";
 
@@ -96,6 +101,8 @@ import {
   type InspireSortOption,
   type InspireViewMode,
   type AuthorSearchInfo,
+  type InspireAuthorProfile,
+  type AuthorStats,
   type InspireReferenceEntry,
   type InspireArxivDetails,
   type ScrollSnapshot,
@@ -118,6 +125,8 @@ import {
   ZInsMenu,
   ReaderTabHelper,
   clearAllHistoryPrefs,
+  // AbortController utilities (FTR-ABORT-CONTROLLER-FIX)
+  createAbortController,
   // Rate limiter
   inspireFetch,
   getRateLimiterStatus,
@@ -167,6 +176,8 @@ import {
   fetchInspireMetaByRecid,
   fetchInspireAbstract,
   fetchBibTeX,
+  fetchInspireTexkey,
+  fetchAuthorProfile,
   buildMetaFromMetadata,
   getCrossrefCount,
   // Item updater
@@ -191,6 +202,9 @@ import {
   // Style utilities
   CHART_STYLES,
   toStyleString,
+  isDarkMode,
+  getChartNoDataStyle,
+  getChartNoDataItalicStyle,
   // Smart Update (FTR-SMART-UPDATE)
   isSmartUpdateEnabled,
   isAutoCheckEnabled,
@@ -1247,6 +1261,23 @@ class InspireReferencePanelController {
   private tooltipRAF?: number; // For requestAnimationFrame throttling
   private readonly tooltipShowDelay = TOOLTIP_SHOW_DELAY_MS;
   private readonly tooltipHideDelay = TOOLTIP_HIDE_DELAY_MS;
+  // Author profile card state (Author Papers)
+  private authorProfile?: InspireAuthorProfile | null;
+  private authorStats?: AuthorStats;
+  private authorProfileCard?: HTMLDivElement;
+  private authorProfileCollapsed = false;
+  private authorProfileCollapsedByKey = new Map<string, boolean>();
+  private authorProfileAbort?: AbortController;
+  private authorProfileKey?: string;
+  // Author hover preview state (FTR-AUTHOR-PROFILE-PREVIEW)
+  private authorPreviewCard?: HTMLDivElement;
+  private authorPreviewShowTimeout?: ReturnType<typeof setTimeout>;
+  private authorPreviewHideTimeout?: ReturnType<typeof setTimeout>;
+  private authorPreviewAbort?: AbortController;
+  private authorPreviewCurrentKey?: string;
+  private authorPreviewAnchor?: HTMLElement;
+  private readonly authorPreviewShowDelay = 300;
+  private readonly authorPreviewHideDelay = 120;
   // FTR-HOVER-PREVIEW: Preview card state
   private previewCard?: HTMLDivElement;
   private previewShowTimeout?: ReturnType<typeof setTimeout>;
@@ -1261,7 +1292,12 @@ class InspireReferencePanelController {
   private previewEntries: InspireReferenceEntry[] = [];
   private previewCurrentIndex = 0;
   private previewLabel?: string;
-  private previewButtonRect?: { top: number; left: number; bottom: number; right: number };
+  private previewButtonRect?: {
+    top: number;
+    left: number;
+    bottom: number;
+    right: number;
+  };
   // FTR-AMBIGUOUS-AUTHOR-YEAR: Track citation type for ambiguous message
   private previewCitationType?: "numeric" | "author-year" | "arxiv";
   // Frontend pagination state (for cited-by and author papers)
@@ -1307,6 +1343,7 @@ class InspireReferencePanelController {
   // Cache source indicator
   private cacheSource: CacheSource = "api";
   private cacheSourceAge?: number; // Age in hours (for local cache)
+  private cacheSourceExpired?: boolean; // True if using expired/stale cache (offline fallback)
   private cacheSourceEl?: HTMLSpanElement;
 
   // Search mode state
@@ -1328,6 +1365,12 @@ class InspireReferencePanelController {
   private quickFiltersPopupVisible = false;
   private quickFiltersWrapper?: HTMLDivElement;
   private quickFilterCheckboxes = new Map<QuickFilterType, HTMLInputElement>();
+  // PERF-FIX-6: Track outside click handler and timeout for cleanup
+  private quickFiltersOutsideClickHandler?: (e: MouseEvent) => void;
+  private quickFiltersTimeoutId?: ReturnType<typeof setTimeout>;
+
+  // PERF-FIX-2: Track AbortController for cancellable exports
+  private exportAbort?: AbortController;
 
   // Author count filter for chart
   private authorFilterEnabled = false; // Filter for papers with <= 10 authors
@@ -1352,6 +1395,9 @@ class InspireReferencePanelController {
   private boundHandleListContextMenu?: (e: MouseEvent) => void; // FTR-COPY-LINK
   // Timer for handling click/double-click conflict on marker
   private markerClickTimer?: ReturnType<typeof setTimeout>;
+  // PERF-FIX-7: Throttle mousemove updates (~60fps)
+  private lastMouseMoveTime = 0;
+  private readonly mouseMoveThrottleMs = 16; // ~60fps
 
   // Batch import state (FTR-BATCH-IMPORT)
   private selectedEntryIDs = new Set<string>();
@@ -1384,10 +1430,20 @@ class InspireReferencePanelController {
   private autoCheckLastCheckTime = new Map<number, number>();
   /** Throttle interval: don't re-check same item within this time (ms) */
   private readonly autoCheckThrottleMs = 5000; // 5 seconds
+  /** FTR-DARK-MODE-AUTO: Theme change listener for chart re-render */
+  private themeChangeListener?: () => void;
+  private themeMediaQuery?: MediaQueryList;
 
   constructor(body: HTMLDivElement) {
     this.body = body;
     this.body.classList.add("zinspire-ref-panel");
+    // FTR-PANEL-WIDTH-FIX: Ensure panel respects container width at all sizes
+    // Use width: 100% with overflow handling to prevent content from exceeding sidebar width
+    this.body.style.width = "100%";
+    this.body.style.maxWidth = "100%";
+    this.body.style.minWidth = "0"; // Allow shrinking below intrinsic minimum
+    this.body.style.overflow = "hidden";
+    this.body.style.boxSizing = "border-box";
     this.enableTextSelection();
 
     // Initialize chart collapsed state from preferences
@@ -1408,6 +1464,8 @@ class InspireReferencePanelController {
       this.body,
     ) as HTMLDivElement;
     // Main toolbar container styles
+    // FTR-PANEL-WIDTH-FIX: Add min-width handling for narrow sidebars
+    // FIX-POPUP-CLIP: Use overflow:visible so quick filters popup isn't clipped
     toolbar.style.cssText = `
       display: flex;
       flex-direction: column;
@@ -1415,6 +1473,11 @@ class InspireReferencePanelController {
       padding: 8px 10px;
       border-bottom: 1px solid var(--fill-quinary, #e2e8f0);
       background: var(--material-sidepane, #f8fafc);
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      overflow: visible;
     `;
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1447,19 +1510,25 @@ class InspireReferencePanelController {
     // Row 2: Tab buttons (pill button style)
     // ═══════════════════════════════════════════════════════════════════════
     const row2 = body.ownerDocument.createElement("div");
+    // FTR-PANEL-WIDTH-FIX: Allow tab row to wrap on narrow sidebars
     row2.style.cssText = `
       display: flex;
       align-items: center;
       gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
     `;
     toolbar.appendChild(row2);
 
     const tabs = body.ownerDocument.createElement("div");
     tabs.className = "zinspire-ref-panel__tabs";
+    // FTR-PANEL-WIDTH-FIX: Allow tabs to wrap on narrow sidebars
     tabs.style.cssText = `
       display: inline-flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 6px;
+      min-width: 0;
     `;
     row2.appendChild(tabs);
 
@@ -1471,52 +1540,22 @@ class InspireReferencePanelController {
     };
     this.updateTabSelection();
 
-    // Sort dropdown (on same row as tabs, pushed to the right)
-    this.sortSelect = ztoolkit.UI.appendElement(
-      {
-        tag: "select",
-        classList: ["zinspire-ref-panel__sort"],
-        attributes: {
-          "aria-label": getString("references-panel-sort-label"),
-        },
-        listeners: [
-          {
-            type: "change",
-            listener: (event: Event) => {
-              const target = event.target as HTMLSelectElement;
-              this.handleSortChange(target.value);
-            },
-          },
-        ],
-      },
-      row2,
-    ) as HTMLSelectElement;
-    this.sortSelect.style.cssText = `
-      margin-left: auto;
-      padding: 4px 24px 4px 10px;
-      font-size: 12px;
-      border: 1px solid var(--fill-quinary, #cbd5e1);
-      border-radius: 4px;
-      background: var(--material-background, #fff) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M3 4.5L6 8l3-3.5H3z'/%3E%3C/svg%3E") no-repeat right 6px center;
-      color: var(--fill-primary, #334155);
-      cursor: pointer;
-      appearance: none;
-      -webkit-appearance: none;
-      -moz-appearance: none;
-    `;
-
     // ═══════════════════════════════════════════════════════════════════════
     // Row 3: Filter (left) + Navigation (right)
     // ═══════════════════════════════════════════════════════════════════════
     const row3 = body.ownerDocument.createElement("div");
+    // FTR-PANEL-WIDTH-FIX: Allow filter row to wrap on narrow sidebars
     row3.style.cssText = `
       display: flex;
       align-items: center;
       gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
     `;
     toolbar.appendChild(row3);
 
     // Filter group (LEFT side)
+    // FTR-PANEL-WIDTH-FIX: Allow filter group to wrap on narrow sidebars
     const filterGroup = ztoolkit.UI.appendElement(
       {
         tag: "div",
@@ -1526,7 +1565,8 @@ class InspireReferencePanelController {
           flexDirection: "row",
           alignItems: "center",
           gap: "6px",
-          flexWrap: "nowrap",
+          flexWrap: "wrap",
+          minWidth: "0",
         },
       },
       row3,
@@ -1697,19 +1737,64 @@ class InspireReferencePanelController {
       this.updateRateLimiterStatus(status);
     });
 
-    // Cache source indicator (shows whether data is from API, memory, or local cache)
+    // ═══════════════════════════════════════════════════════════════════════
+    // Row 4: Sort dropdown (left) + Cache source indicator (right)
+    // ═══════════════════════════════════════════════════════════════════════
+    const row4 = body.ownerDocument.createElement("div");
+    row4.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    `;
+    toolbar.appendChild(row4);
+
+    // Sort dropdown (left side of row4)
+    this.sortSelect = ztoolkit.UI.appendElement(
+      {
+        tag: "select",
+        classList: ["zinspire-ref-panel__sort"],
+        attributes: {
+          "aria-label": getString("references-panel-sort-label"),
+        },
+        listeners: [
+          {
+            type: "change",
+            listener: (event: Event) => {
+              const target = event.target as HTMLSelectElement;
+              this.handleSortChange(target.value);
+            },
+          },
+        ],
+      },
+      row4,
+    ) as HTMLSelectElement;
+    this.sortSelect.style.cssText = `
+      margin: 0;
+      padding: 4px 24px 4px 8px;
+      font-size: 12px;
+      border: 0px solid var(--fill-quinary, #d1d5db);
+      border-radius: 3px;
+      background: var(--material-background, #fff) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M3 4.5L6 8l3-3.5H3z'/%3E%3C/svg%3E") no-repeat right 6px center;
+      color: var(--fill-primary, #334155);
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+    `;
+
+    // Cache source indicator (right side of row4, pushed to the right)
     this.cacheSourceEl = ztoolkit.UI.appendElement(
       {
         tag: "span",
         classList: ["zinspire-ref-panel__cache-source"],
       },
-      toolbar,
+      row4,
     ) as HTMLSpanElement;
     this.cacheSourceEl.hidden = true;
     this.cacheSourceEl.style.cssText = `
       font-size: 10px;
       color: var(--fill-secondary, #64748b);
-      margin-left: 6px;
+      margin-left: auto;
       padding: 2px 6px;
       background: var(--material-mix-quinary, #f1f5f9);
       border-radius: 4px;
@@ -1719,9 +1804,6 @@ class InspireReferencePanelController {
     // Create search input container (hidden by default, shown in search mode)
     this.createSearchInputContainer(toolbar);
 
-    // FTR-BATCH-IMPORT: Create batch toolbar (hidden by default, shown when items selected)
-    this.createBatchToolbar();
-
     // Load search & filter history from preferences
     this.loadSearchHistory();
     this.loadFilterHistory();
@@ -1730,6 +1812,8 @@ class InspireReferencePanelController {
     const chartContainer = this.createChartContainer();
     this.body.appendChild(chartContainer);
     this.observeChartResize(chartContainer);
+    // FTR-DARK-MODE-AUTO: Listen for theme changes to re-render chart SVG
+    this.setupThemeChangeListener();
 
     this.listEl = ztoolkit.UI.appendElement(
       {
@@ -1740,7 +1824,18 @@ class InspireReferencePanelController {
     ) as HTMLDivElement;
     // FTR-KEYBOARD-NAV-FULL: Make list focusable for keyboard navigation
     this.listEl.tabIndex = -1;
+    // FTR-PANEL-WIDTH-FIX: Ensure list respects container width
     this.listEl.style.outline = "none";
+    this.listEl.style.width = "100%";
+    this.listEl.style.maxWidth = "100%";
+    this.listEl.style.minWidth = "0";
+    this.listEl.style.boxSizing = "border-box";
+    this.listEl.style.overflowX = "hidden";
+    this.listEl.style.overflowY = "auto";
+
+    // FTR-BATCH-IMPORT: Create batch toolbar (hidden by default, shown when items selected)
+    // Must be created AFTER listEl exists, so insertBefore(toolbar, listEl) works correctly
+    this.createBatchToolbar();
 
     // Setup event delegation on listEl (PERF-14: reduces listeners from 10000+ to 4)
     this.setupEventDelegation();
@@ -2585,7 +2680,9 @@ class InspireReferencePanelController {
 
             // Apply overlay mapping for multi-entry support (numeric citations)
             if (event.citationType === "numeric" && event.readerTabID) {
-              const cachedOverlay = reader.getOverlayMapping(event.parentItemID);
+              const cachedOverlay = reader.getOverlayMapping(
+                event.parentItemID,
+              );
               if (cachedOverlay?.isReliable) {
                 labelMatcher.setOverlayMapping(cachedOverlay);
                 Zotero.debug(
@@ -2649,7 +2746,11 @@ class InspireReferencePanelController {
       if (matches.length > 0) {
         const firstMatch = matches[0];
 
-        if (firstMatch.isAmbiguous && firstMatch.ambiguousCandidates && firstMatch.ambiguousCandidates.length > 1) {
+        if (
+          firstMatch.isAmbiguous &&
+          firstMatch.ambiguousCandidates &&
+          firstMatch.ambiguousCandidates.length > 1
+        ) {
           // Ambiguous match with candidates - show all candidates for pagination
           Zotero.debug(
             `[${config.addonName}] [HOVER-PREVIEW] Ambiguous author-year match with ${firstMatch.ambiguousCandidates.length} candidates`,
@@ -2728,7 +2829,12 @@ class InspireReferencePanelController {
     // Show preview card at button position with all matched entries
     // FTR-HOVER-PREVIEW-MULTI: Pass all entries for pagination
     // FTR-AMBIGUOUS-AUTHOR-YEAR: Pass citation type to show appropriate message
-    this.showPreviewCardAtRect(matchedEntries, event.buttonRect, event.label, event.citationType);
+    this.showPreviewCardAtRect(
+      matchedEntries,
+      event.buttonRect,
+      event.label,
+      event.citationType,
+    );
   }
 
   /**
@@ -3051,7 +3157,9 @@ class InspireReferencePanelController {
           if (item) {
             const cacheFile = Zotero.Fulltext.getItemCacheFile(item);
             if (cacheFile?.exists?.()) {
-              const content = await Zotero.File.getContentsAsync(cacheFile.path);
+              const content = await Zotero.File.getContentsAsync(
+                cacheFile.path,
+              );
               const text = typeof content === "string" ? content : null;
               if (text && text.length > 100) {
                 Zotero.debug(
@@ -3183,9 +3291,7 @@ class InspireReferencePanelController {
     );
 
     // Detect dark mode for appropriate colors
-    const isDarkMode = Zotero.getMainWindow?.()?.matchMedia?.(
-      "(prefers-color-scheme: dark)",
-    )?.matches;
+    const dark = isDarkMode();
 
     // Clear any existing highlights (using inline style marker)
     const prevHighlights = this.listEl?.querySelectorAll(
@@ -3207,7 +3313,7 @@ class InspireReferencePanelController {
 
     // FTR-MISSING-FIX: Use inline styles because CSS files may not load reliably in Zotero
     // Define highlight styles (matching zoteroPane.css .zinspire-entry-highlight)
-    const highlightStyles = isDarkMode
+    const highlightStyles = dark
       ? {
           backgroundColor: "rgba(0, 96, 223, 0.25)",
           boxShadow: "0 0 0 2px #0052cc",
@@ -3349,10 +3455,8 @@ class InspireReferencePanelController {
   private applyFocusedEntryStyle(row: HTMLElement, isFocused: boolean): void {
     if (isFocused) {
       row.classList.add("zinspire-entry-focused");
-      const isDarkMode = Zotero.getMainWindow?.()?.matchMedia?.(
-        "(prefers-color-scheme: dark)",
-      )?.matches;
-      if (isDarkMode) {
+      const dark = isDarkMode();
+      if (dark) {
         row.style.backgroundColor = "rgba(0, 96, 223, 0.2)";
         row.style.boxShadow = "inset 3px 0 0 #3584e4";
       } else {
@@ -3567,7 +3671,7 @@ class InspireReferencePanelController {
   }
 
   /**
-   * Handle Ctrl/Cmd+C to copy BibTeX of focused entry.
+   * Handle Ctrl/Cmd+Shift+C to copy BibTeX of focused entry.
    * FTR-KEYBOARD-NAV-FULL: Copies BibTeX to clipboard.
    */
   private async handleKeyboardCopy(): Promise<void> {
@@ -3581,7 +3685,7 @@ class InspireReferencePanelController {
         if (success) {
           this.showToast(getString("references-panel-toast-bibtex-success"));
           Zotero.debug(
-            `[${config.addonName}] [KEYBOARD-NAV] Copied BibTeX via Ctrl+C`,
+            `[${config.addonName}] [KEYBOARD-NAV] Copied BibTeX via Ctrl+Shift+C`,
           );
         }
       }
@@ -3987,6 +4091,11 @@ class InspireReferencePanelController {
     if (!options?.suppressRender) {
       this.renderChart();
       this.renderReferenceList();
+      // FTR-AUTHOR-CARD-FILTERS: Update author stats when quick filter changes
+      if (this.viewMode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+        this.updateAuthorStats(this.getEntriesForAuthorStats());
+        this.updateAuthorProfileCard();
+      }
     }
   }
 
@@ -4017,26 +4126,24 @@ class InspireReferencePanelController {
     if (!this.publishedOnlyButton) {
       return;
     }
-    if (this.publishedOnlyFilterEnabled) {
-      this.publishedOnlyButton.style.background = "#475569";
-      this.publishedOnlyButton.style.color = "white";
-    } else {
-      this.publishedOnlyButton.style.background = "#e2e8f0";
-      this.publishedOnlyButton.style.color = "#475569";
-    }
+    // FTR-CONSISTENT-UI: Use unified pill button style
+    applyPillButtonStyle(
+      this.publishedOnlyButton,
+      this.publishedOnlyFilterEnabled,
+      isDarkMode(),
+    );
   }
 
   private updateAuthorFilterButtonStyle(): void {
     if (!this.authorFilterButton) {
       return;
     }
-    if (this.authorFilterEnabled) {
-      this.authorFilterButton.style.background = "#475569";
-      this.authorFilterButton.style.color = "white";
-    } else {
-      this.authorFilterButton.style.background = "#e2e8f0";
-      this.authorFilterButton.style.color = "#475569";
-    }
+    // FTR-CONSISTENT-UI: Use unified pill button style
+    applyPillButtonStyle(
+      this.authorFilterButton,
+      this.authorFilterEnabled,
+      isDarkMode(),
+    );
     this.updateChartClearButton();
   }
 
@@ -4135,7 +4242,7 @@ class InspireReferencePanelController {
     button.setAttribute("aria-haspopup", "true");
     button.setAttribute("aria-expanded", "false");
     const filtersLabel = getString("references-panel-quick-filters");
-    const filtersEmoji = "⭐⏳";
+    const filtersEmoji = "⏳";
     button.textContent = filtersEmoji;
     button.setAttribute("aria-label", filtersLabel);
     button.setAttribute("title", filtersLabel);
@@ -4170,8 +4277,9 @@ class InspireReferencePanelController {
     const popup = doc.createElement("div");
     popup.className = "zinspire-quick-filter-popup";
     popup.hidden = true;
-    // Absolute positioned dropdown overlay - single column, semi-transparent
+    // Absolute positioned dropdown overlay - single column
     // Use left: 0 to align with button's left edge (prevents cutoff on narrow panels)
+    // FIX-DARK-MODE: Use solid background for better visibility
     popup.style.cssText = `
       display: none;
       flex-direction: column;
@@ -4179,12 +4287,10 @@ class InspireReferencePanelController {
       top: 100%;
       left: 0;
       z-index: 1000;
-      background: rgba(255, 255, 255, 0.92);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+      background: var(--material-background, #fff);
       border: 1px solid var(--fill-quinary, #d1d5db);
       border-radius: 6px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
       padding: 6px 4px;
       margin-top: 4px;
       gap: 2px;
@@ -4208,7 +4314,7 @@ class InspireReferencePanelController {
     for (const config of QUICK_FILTER_CONFIGS) {
       const item = doc.createElement("label");
       item.className = "zinspire-quick-filter-item";
-      // Compact row style with hover effect
+      // Compact row style with hover effect - use CSS variables for dark mode
       item.style.cssText = `
         display: flex;
         align-items: center;
@@ -4218,6 +4324,7 @@ class InspireReferencePanelController {
         border-radius: 4px;
         cursor: pointer;
         font-size: 12px;
+        color: var(--fill-primary, #1e293b);
         transition: background-color 0.1s ease;
       `;
       const labelText = getString(config.labelKey);
@@ -4227,9 +4334,9 @@ class InspireReferencePanelController {
         item.title = labelText;
       }
 
-      // Hover effect
+      // Hover effect - use CSS variable for dark mode support
       item.addEventListener("mouseenter", () => {
-        item.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+        item.style.backgroundColor = "var(--fill-quinary, rgba(0, 0, 0, 0.05))";
       });
       item.addEventListener("mouseleave", () => {
         item.style.backgroundColor = "";
@@ -4285,31 +4392,42 @@ class InspireReferencePanelController {
     this.updateQuickFiltersButtonExpandedState();
     this.updateQuickFilterCheckboxStates();
 
-    // Add outside click handler to close popup
-    const handleOutsideClick = (event: MouseEvent) => {
+    // PERF-FIX-6: Clean up any existing handler before creating new one
+    this.cleanupQuickFiltersHandler();
+
+    // PERF-FIX-6: Create tracked outside click handler
+    this.quickFiltersOutsideClickHandler = (event: MouseEvent) => {
+      // Early exit if controller is destroyed
+      if (!this.body?.ownerDocument) {
+        this.cleanupQuickFiltersHandler();
+        return;
+      }
+
       const target = event.target as Node;
       const isInsidePopup = this.quickFiltersPopup?.contains(target);
       const isInsideButton = this.quickFiltersButton?.contains(target);
       if (!isInsidePopup && !isInsideButton) {
         this.closeQuickFiltersPopup();
-        this.body.ownerDocument?.removeEventListener(
+      }
+    };
+
+    // PERF-FIX-6: Track timeout ID for cleanup
+    this.quickFiltersTimeoutId = setTimeout(() => {
+      this.quickFiltersTimeoutId = undefined;
+      if (this.quickFiltersOutsideClickHandler) {
+        this.body.ownerDocument?.addEventListener(
           "click",
-          handleOutsideClick,
+          this.quickFiltersOutsideClickHandler,
           true,
         );
       }
-    };
-    // Use setTimeout to avoid immediately closing from the same click
-    setTimeout(() => {
-      this.body.ownerDocument?.addEventListener(
-        "click",
-        handleOutsideClick,
-        true,
-      );
     }, 0);
   }
 
   private closeQuickFiltersPopup(): void {
+    // PERF-FIX-6: Clean up handler when closing
+    this.cleanupQuickFiltersHandler();
+
     if (!this.quickFiltersPopup) {
       this.quickFiltersPopupVisible = false;
       this.updateQuickFiltersButtonExpandedState();
@@ -4319,6 +4437,37 @@ class InspireReferencePanelController {
     this.quickFiltersPopup.style.display = "none";
     this.quickFiltersPopupVisible = false;
     this.updateQuickFiltersButtonExpandedState();
+  }
+
+  /**
+   * PERF-FIX-6: Clean up quick filters outside click handler and timeout.
+   * Called when closing popup or destroying controller.
+   */
+  private cleanupQuickFiltersHandler(): void {
+    if (this.quickFiltersTimeoutId) {
+      clearTimeout(this.quickFiltersTimeoutId);
+      this.quickFiltersTimeoutId = undefined;
+    }
+    if (this.quickFiltersOutsideClickHandler) {
+      this.body.ownerDocument?.removeEventListener(
+        "click",
+        this.quickFiltersOutsideClickHandler,
+        true,
+      );
+      this.quickFiltersOutsideClickHandler = undefined;
+    }
+  }
+
+  /**
+   * PERF-FIX-2: Cancel any ongoing export operation.
+   * Called when the controller is destroyed or user navigates away.
+   */
+  private cancelExport(): void {
+    if (this.exportAbort) {
+      this.exportAbort.abort();
+      this.exportAbort = undefined;
+      Zotero.debug(`[${config.addonName}] Export operation cancelled`);
+    }
   }
 
   private updateQuickFiltersButtonExpandedState(): void {
@@ -4547,6 +4696,19 @@ class InspireReferencePanelController {
         return;
       }
 
+      // Texkey button click (copy texkey)
+      if (target.closest(".zinspire-ref-entry__texkey")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const texkeyButton = target.closest(
+          ".zinspire-ref-entry__texkey",
+        ) as HTMLButtonElement;
+        if (!texkeyButton.disabled) {
+          this.handleTexkeyCopy(entry, texkeyButton).catch(() => void 0);
+        }
+        return;
+      }
+
       // Author link click (show author papers)
       if (target.closest(".zinspire-ref-entry__author-link")) {
         event.preventDefault();
@@ -4554,6 +4716,7 @@ class InspireReferencePanelController {
         const authorLink = target.closest(
           ".zinspire-ref-entry__author-link",
         ) as HTMLElement;
+        this.hideAuthorPreviewCard();
         const authorIndex = parseInt(
           authorLink.dataset.authorIndex ?? "-1",
           10,
@@ -4577,7 +4740,7 @@ class InspireReferencePanelController {
       const isInteractiveElement = target.closest(
         "button, a, input, .zinspire-ref-entry__dot, .zinspire-ref-entry__link, " +
           ".zinspire-ref-entry__author-link, .zinspire-ref-entry__stats-button, " +
-          ".zinspire-ref-entry__bibtex, .zinspire-ref-entry__checkbox",
+          ".zinspire-ref-entry__bibtex, .zinspire-ref-entry__texkey, .zinspire-ref-entry__checkbox",
       );
       if (!isInteractiveElement) {
         // Sync focusedEntryIndex with current filtered list
@@ -4604,12 +4767,35 @@ class InspireReferencePanelController {
         return;
       }
 
+      const authorLink = target.closest(
+        ".zinspire-ref-entry__author-link",
+      ) as HTMLElement | null;
+      if (authorLink && entry) {
+        const authorIndex = parseInt(
+          authorLink.dataset.authorIndex ?? "-1",
+          10,
+        );
+        if (authorIndex >= 0) {
+          this.scheduleAuthorPreview(entry, authorIndex, authorLink);
+        }
+        return;
+      }
+
       // BibTeX button hover
       const bibtexButton = target.closest(
         ".zinspire-ref-entry__bibtex",
       ) as HTMLButtonElement | null;
       if (bibtexButton && !bibtexButton.disabled) {
         bibtexButton.style.opacity = "1";
+        return;
+      }
+
+      // Texkey button hover
+      const texkeyButton = target.closest(
+        ".zinspire-ref-entry__texkey",
+      ) as HTMLButtonElement | null;
+      if (texkeyButton && !texkeyButton.disabled) {
+        texkeyButton.style.opacity = "1";
         return;
       }
     };
@@ -4625,6 +4811,24 @@ class InspireReferencePanelController {
         return;
       }
 
+      const authorLink = target.closest(
+        ".zinspire-ref-entry__author-link",
+      ) as HTMLElement | null;
+      if (authorLink) {
+        const related = event.relatedTarget as Node | null;
+        if (
+          related &&
+          this.authorPreviewCard &&
+          (related === this.authorPreviewCard ||
+            this.authorPreviewCard.contains(related))
+        ) {
+          this.cancelAuthorPreviewHide();
+          return;
+        }
+        this.scheduleAuthorPreviewHide();
+        return;
+      }
+
       // BibTeX button mouseout
       const bibtexButton = target.closest(
         ".zinspire-ref-entry__bibtex",
@@ -4633,10 +4837,25 @@ class InspireReferencePanelController {
         bibtexButton.style.opacity = "0.7";
         return;
       }
+
+      // Texkey button mouseout
+      const texkeyButton = target.closest(
+        ".zinspire-ref-entry__texkey",
+      ) as HTMLButtonElement | null;
+      if (texkeyButton && !texkeyButton.disabled) {
+        texkeyButton.style.opacity = "0.7";
+        return;
+      }
     };
 
-    // Mousemove handler for tooltip position
+    // Mousemove handler for tooltip position (PERF-FIX-7: throttled ~60fps)
     this.boundHandleListMouseMove = (event: MouseEvent) => {
+      const now = Date.now();
+      if (now - this.lastMouseMoveTime < this.mouseMoveThrottleMs) {
+        return; // Skip if within throttle window
+      }
+      this.lastMouseMoveTime = now;
+
       const target = event.target as HTMLElement;
       const titleLink = target.closest(".zinspire-ref-entry__title-link");
       if (titleLink) {
@@ -4875,12 +5094,14 @@ class InspireReferencePanelController {
           break;
 
         // ═══════════════════════════════════════════════════════════════════════
-        // Ctrl/Cmd+C: Copy BibTeX of focused entry
+        // Ctrl/Cmd+Shift+C: Copy BibTeX of focused entry
+        // (Using Shift to avoid conflict with text copy shortcut)
         // ═══════════════════════════════════════════════════════════════════════
         case "c":
         case "C":
           if (
             (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
             this.focusedEntryID &&
             !isFormInput
           ) {
@@ -5060,6 +5281,80 @@ class InspireReferencePanelController {
     }
   }
 
+  /**
+   * FTR-DARK-MODE-AUTO: Set up theme change listener to re-render chart SVG.
+   * The chart container and buttons use CSS variables for auto-adaptation,
+   * but SVG bar colors need to be recalculated when theme changes.
+   */
+  private setupThemeChangeListener() {
+    try {
+      const mainWindow = Zotero.getMainWindow?.();
+      if (!mainWindow?.matchMedia) return;
+
+      const mediaQuery = mainWindow.matchMedia("(prefers-color-scheme: dark)");
+      if (!mediaQuery) return;
+
+      this.themeMediaQuery = mediaQuery;
+      this.themeChangeListener = () => {
+        // Re-render chart to update SVG bar colors
+        if (!this.chartCollapsed && this.allEntries.length) {
+          this.renderChartImmediate();
+        }
+        // FTR-CONSISTENT-UI: Update button styles on theme change
+        this.updatePublishedOnlyButtonStyle();
+        this.updateAuthorFilterButtonStyle();
+        // Update chart toggle buttons
+        if (this.chartContainer) {
+          const dark = isDarkMode();
+          const buttons = this.chartContainer.querySelectorAll(
+            ".zinspire-chart-toggle-btn",
+          );
+          buttons.forEach((btn) => {
+            const btnEl = btn as HTMLButtonElement;
+            const isActive = btnEl.classList.contains("active");
+            applyPillButtonStyle(btnEl, isActive, dark);
+          });
+          // Update self-cite button
+          const selfCiteBtn = this.chartContainer.querySelector(
+            ".zinspire-chart-selfcite-filter-btn",
+          ) as HTMLButtonElement | null;
+          if (selfCiteBtn) {
+            applyPillButtonStyle(selfCiteBtn, this.excludeSelfCitations, dark);
+          }
+        }
+      };
+
+      // Use addListener for compatibility with older browsers
+      if (mediaQuery.addEventListener) {
+        mediaQuery.addEventListener("change", this.themeChangeListener);
+      } else if ((mediaQuery as any).addListener) {
+        // Deprecated but still works in some environments
+        (mediaQuery as any).addListener(this.themeChangeListener);
+      }
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] Failed to setup theme listener: ${err}`);
+    }
+  }
+
+  /**
+   * FTR-DARK-MODE-AUTO: Remove theme change listener.
+   */
+  private removeThemeChangeListener() {
+    if (this.themeMediaQuery && this.themeChangeListener) {
+      try {
+        if (this.themeMediaQuery.removeEventListener) {
+          this.themeMediaQuery.removeEventListener("change", this.themeChangeListener);
+        } else if (this.themeMediaQuery.removeListener) {
+          this.themeMediaQuery.removeListener(this.themeChangeListener);
+        }
+      } catch {
+        // Ignore errors during cleanup
+      }
+    }
+    this.themeMediaQuery = undefined;
+    this.themeChangeListener = undefined;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Chart Methods - Statistics visualization for references/cited-by/author papers
   // ─────────────────────────────────────────────────────────────────────────────
@@ -5068,20 +5363,24 @@ class InspireReferencePanelController {
     const doc = this.body.ownerDocument;
     const container = doc.createElement("div");
     container.className = "zinspire-chart-container";
-    // Soft muted blue color scheme - subtle and professional
-    // Apply inline styles for reliable rendering (CSS files may not load properly in Zotero)
-    // Start collapsed by default (chartCollapsed = true)
+    // FTR-DARK-MODE-AUTO: Use CSS variables for automatic theme adaptation (like author card)
+    // FIX-ZINDEX: Use position:relative and z-index:1 so quick filters popup (z-index:1000) stays on top
     container.style.cssText = `
       display: flex;
       flex-direction: column;
-      border: 1px solid #cbd5e1;
+      border: 1px solid var(--fill-quaternary, #cbd5e1);
       border-radius: 8px;
       padding: 6px 10px;
-      background: #f8fafc;
+      background: var(--material-sidepane, #f8fafc);
       flex-shrink: 0;
       height: auto;
       min-height: auto;
       max-height: auto;
+      max-width: 100%;
+      overflow: hidden;
+      box-sizing: border-box;
+      position: relative;
+      z-index: 1;
     `;
 
     // Header with view buttons
@@ -5090,12 +5389,13 @@ class InspireReferencePanelController {
     header.style.cssText = `
       display: flex;
       flex-direction: row;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
       align-items: center;
       gap: 6px;
       font-size: 12px;
       margin-bottom: 4px;
       flex-shrink: 0;
+      max-width: 100%;
     `;
 
     // Sub-header for filters (second row)
@@ -5118,6 +5418,7 @@ class InspireReferencePanelController {
     this.chartSubHeader = subHeader;
 
     // Collapse button - initial state based on chartCollapsed preference
+    // FTR-DARK-MODE-AUTO: Use CSS variables for automatic theme adaptation
     const collapseBtn = doc.createElement("button");
     collapseBtn.className = "zinspire-chart-collapse-btn";
     collapseBtn.type = "button";
@@ -5128,11 +5429,11 @@ class InspireReferencePanelController {
         : "references-panel-chart-collapse",
     );
     collapseBtn.style.cssText = `
-      border: 1px solid #cbd5e1;
-      background: #f1f5f9;
+      border: 1px solid var(--fill-quaternary, #cbd5e1);
+      background: var(--material-background, #f1f5f9);
       font-size: 10px;
       cursor: pointer;
-      color: #64748b;
+      color: var(--fill-secondary, #64748b);
       padding: 2px 8px;
       border-radius: 4px;
       flex-shrink: 0;
@@ -5141,23 +5442,17 @@ class InspireReferencePanelController {
       this.toggleChartCollapse();
     };
 
-    // View toggle buttons - soft blue theme
+    // View toggle buttons - use CSS classes to manage active/inactive state styles
+    // FTR-CONSISTENT-UI: Use unified pill button style for consistent appearance
     const yearBtn = doc.createElement("button");
     yearBtn.className = "zinspire-chart-toggle-btn active";
     yearBtn.type = "button";
     yearBtn.textContent = getString("references-panel-chart-by-year");
     yearBtn.dataset.mode = "year";
-    yearBtn.style.cssText = `
-      border: none;
-      border-radius: 5px;
-      padding: 3px 10px;
-      background: #475569;
-      font-size: 11px;
-      cursor: pointer;
-      color: white;
-      flex-shrink: 0;
-      font-weight: 500;
-    `;
+    yearBtn.style.flexShrink = "0";
+    yearBtn.style.fontWeight = "500";
+    yearBtn.style.fontSize = "11px";
+    applyPillButtonStyle(yearBtn, true, isDarkMode());
     yearBtn.onclick = () => this.toggleChartView("year");
 
     const citationBtn = doc.createElement("button");
@@ -5165,17 +5460,10 @@ class InspireReferencePanelController {
     citationBtn.type = "button";
     citationBtn.textContent = getString("references-panel-chart-by-citation");
     citationBtn.dataset.mode = "citation";
-    citationBtn.style.cssText = `
-      border: none;
-      border-radius: 5px;
-      padding: 3px 10px;
-      background: #e2e8f0;
-      font-size: 11px;
-      cursor: pointer;
-      color: #475569;
-      flex-shrink: 0;
-      font-weight: 500;
-    `;
+    citationBtn.style.flexShrink = "0";
+    citationBtn.style.fontWeight = "500";
+    citationBtn.style.fontSize = "11px";
+    applyPillButtonStyle(citationBtn, false, isDarkMode());
     citationBtn.onclick = () => this.toggleChartView("citation");
 
     // Clear filter button (right after citations button)
@@ -5202,6 +5490,7 @@ class InspireReferencePanelController {
     };
 
     // Author filter button (filter papers with <= 10 authors, i.e., non-large-collaboration)
+    // FTR-CONSISTENT-UI: Use unified pill button style
     const authorFilterBtn = doc.createElement("button");
     authorFilterBtn.className = "zinspire-chart-author-filter-btn";
     authorFilterBtn.type = "button";
@@ -5211,27 +5500,25 @@ class InspireReferencePanelController {
     authorFilterBtn.title = getString(
       "references-panel-chart-author-filter-tooltip",
     );
-    authorFilterBtn.style.cssText = `
-      border: none;
-      border-radius: 5px;
-      padding: 3px 10px;
-      background: #e2e8f0;
-      font-size: 11px;
-      cursor: pointer;
-      color: #475569;
-      flex-shrink: 0;
-      font-weight: 500;
-    `;
+    authorFilterBtn.style.flexShrink = "0";
+    authorFilterBtn.style.fontWeight = "500";
+    authorFilterBtn.style.fontSize = "11px";
     this.authorFilterButton = authorFilterBtn as HTMLButtonElement;
     authorFilterBtn.onclick = () => {
       this.authorFilterEnabled = !this.authorFilterEnabled;
       this.updateAuthorFilterButtonStyle();
       this.renderChart();
       this.renderReferenceList();
+      // FTR-AUTHOR-CARD-FILTERS: Update author stats when filter changes
+      if (this.viewMode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+        this.updateAuthorStats(this.getEntriesForAuthorStats());
+        this.updateAuthorProfileCard();
+      }
     };
     this.updateAuthorFilterButtonStyle();
 
     // Self-citation exclusion toggle
+    // FTR-CONSISTENT-UI: Use unified pill button style
     const selfCiteBtn = doc.createElement("button");
     selfCiteBtn.className = "zinspire-chart-selfcite-filter-btn";
     selfCiteBtn.type = "button";
@@ -5241,25 +5528,11 @@ class InspireReferencePanelController {
     selfCiteBtn.title = getString(
       "references-panel-chart-selfcite-filter-tooltip",
     );
-    selfCiteBtn.style.cssText = `
-      border: none;
-      border-radius: 5px;
-      padding: 3px 10px;
-      background: #e2e8f0;
-      font-size: 11px;
-      cursor: pointer;
-      color: #475569;
-      flex-shrink: 0;
-      font-weight: 500;
-    `;
+    selfCiteBtn.style.flexShrink = "0";
+    selfCiteBtn.style.fontWeight = "500";
+    selfCiteBtn.style.fontSize = "11px";
     const updateSelfCiteStyle = () => {
-      if (this.excludeSelfCitations) {
-        selfCiteBtn.style.background = "#475569";
-        selfCiteBtn.style.color = "white";
-      } else {
-        selfCiteBtn.style.background = "#e2e8f0";
-        selfCiteBtn.style.color = "#475569";
-      }
+      applyPillButtonStyle(selfCiteBtn, this.excludeSelfCitations, isDarkMode());
     };
     selfCiteBtn.onclick = () => {
       this.excludeSelfCitations = !this.excludeSelfCitations;
@@ -5278,10 +5551,16 @@ class InspireReferencePanelController {
       }
       this.renderChart();
       this.renderReferenceList();
+      if (this.viewMode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+        // FTR-AUTHOR-CARD-FILTERS: Use filtered entries for author stats
+        this.updateAuthorStats(this.getEntriesForAuthorStats());
+        this.updateAuthorProfileCard();
+      }
     };
     updateSelfCiteStyle();
 
     // Published only filter button (filter papers with journal information)
+    // FTR-CONSISTENT-UI: Use unified pill button style
     const publishedOnlyBtn = doc.createElement("button");
     publishedOnlyBtn.className = "zinspire-chart-published-filter-btn";
     publishedOnlyBtn.type = "button";
@@ -5291,17 +5570,9 @@ class InspireReferencePanelController {
     publishedOnlyBtn.title = getString(
       "references-panel-chart-published-only-tooltip",
     );
-    publishedOnlyBtn.style.cssText = `
-      border: none;
-      border-radius: 5px;
-      padding: 3px 10px;
-      background: #e2e8f0;
-      font-size: 11px;
-      cursor: pointer;
-      color: #475569;
-      flex-shrink: 0;
-      font-weight: 500;
-    `;
+    publishedOnlyBtn.style.flexShrink = "0";
+    publishedOnlyBtn.style.fontWeight = "500";
+    publishedOnlyBtn.style.fontSize = "11px";
     publishedOnlyBtn.onclick = () => {
       this.toggleQuickFilter("publishedOnly");
     };
@@ -5313,11 +5584,12 @@ class InspireReferencePanelController {
     spacer.style.cssText = `flex: 1;`;
 
     // Stats display (two lines: header + subheader alignment)
+    // FTR-DARK-MODE-AUTO: Use CSS variables for automatic theme adaptation
     const statsTopLine = doc.createElement("span");
     statsTopLine.className = "zinspire-chart-stats zinspire-chart-stats-top";
     statsTopLine.style.cssText = `
       font-size: 11px;
-      color: #64748b;
+      color: var(--fill-secondary, #64748b);
       font-weight: 500;
       text-align: left;
       line-height: 1.3;
@@ -5327,7 +5599,7 @@ class InspireReferencePanelController {
       "zinspire-chart-stats zinspire-chart-stats-bottom";
     statsBottomLine.style.cssText = `
       font-size: 11px;
-      color: #64748b;
+      color: var(--fill-secondary, #64748b);
       font-weight: 500;
       text-align: left;
       line-height: 1.3;
@@ -5363,6 +5635,8 @@ class InspireReferencePanelController {
       overflow: hidden;
       height: 130px;
       display: ${this.chartCollapsed ? "none" : "block"};
+      max-width: 100%;
+      box-sizing: border-box;
     `;
     this.chartSvgWrapper = svgWrapper;
 
@@ -5386,8 +5660,9 @@ class InspireReferencePanelController {
     this.chartSelectedBins.clear(); // Clear selection when switching views
     this.cachedChartStats = undefined; // Invalidate cache
 
-    // Update button states with inline styles (soft blue/slate theme)
+    // Update button states with inline styles (dark mode aware)
     if (this.chartContainer) {
+      const dark = isDarkMode();
       const buttons = this.chartContainer.querySelectorAll(
         ".zinspire-chart-toggle-btn",
       );
@@ -5395,13 +5670,8 @@ class InspireReferencePanelController {
         const btnEl = btn as HTMLButtonElement;
         const isActive = btnEl.dataset.mode === mode;
         btnEl.classList.toggle("active", isActive);
-        if (isActive) {
-          btnEl.style.background = "#475569"; // slate-600
-          btnEl.style.color = "white";
-        } else {
-          btnEl.style.background = "#e2e8f0"; // slate-200
-          btnEl.style.color = "#475569"; // slate-600
-        }
+        // FTR-CONSISTENT-UI: Use unified pill button style
+        applyPillButtonStyle(btnEl, isActive, dark);
       });
     }
 
@@ -5684,7 +5954,7 @@ class InspireReferencePanelController {
     this.chartSvgWrapper.textContent = "";
     const loadingMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
     loadingMsg.className = "zinspire-chart-no-data";
-    loadingMsg.style.cssText = toStyleString(CHART_STYLES.noDataItalic);
+    loadingMsg.style.cssText = toStyleString(getChartNoDataItalicStyle());
     loadingMsg.textContent = "Loading...";
     this.chartSvgWrapper.appendChild(loadingMsg);
   }
@@ -5769,7 +6039,7 @@ class InspireReferencePanelController {
     if (!entries.length) {
       const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
       noDataMsg.className = "zinspire-chart-no-data";
-      noDataMsg.style.cssText = toStyleString(CHART_STYLES.noData);
+      noDataMsg.style.cssText = toStyleString(getChartNoDataStyle());
       noDataMsg.textContent = getString("references-panel-chart-no-data");
       this.chartSvgWrapper.appendChild(noDataMsg);
       return;
@@ -5870,9 +6140,13 @@ class InspireReferencePanelController {
     // Create bars
     const fragment = doc.createDocumentFragment();
 
-    // Colors for bars (soft muted blue - professional, easy on eyes)
-    const selectedColor = "#3b82f6"; // blue-500 for selected
-    const unselectedColor = "#93c5fd"; // blue-300 for unselected
+    // Colors for bars - dark mode aware
+    const dark = isDarkMode();
+    const selectedColor = dark ? "#60a5fa" : "#3b82f6"; // blue-400/500 for selected
+    const unselectedColor = dark ? "#3b82f6" : "#93c5fd"; // blue-500/300 for unselected
+    const labelColor = dark ? "#a0a0a5" : "#4a4a4f"; // axis label color
+    const countSelectedColor = "#ffffff"; // white on selected bar
+    const countUnselectedColor = dark ? "#c7d2fe" : "#1e3a5f"; // count label on unselected
 
     // Label positioning for rotated labels
     const labelBaseline = padding.top + chartHeight + (rotateLabels ? 14 : 16);
@@ -5926,7 +6200,7 @@ class InspireReferencePanelController {
         text.setAttribute("text-anchor", "middle");
       }
       text.setAttribute("font-size", "11");
-      text.setAttribute("fill", "#4a4a4f");
+      text.setAttribute("fill", labelColor);
       text.textContent = bin.label;
 
       // Count label on top of bar (only if bar is tall enough)
@@ -5936,7 +6210,7 @@ class InspireReferencePanelController {
         countText.setAttribute("y", String(y + 14));
         countText.setAttribute("text-anchor", "middle");
         countText.setAttribute("font-size", "10");
-        countText.setAttribute("fill", isSelected ? "#ffffff" : "#1e3a5f");
+        countText.setAttribute("fill", isSelected ? countSelectedColor : countUnselectedColor);
         countText.textContent = String(bin.count);
         g.appendChild(countText);
       }
@@ -6275,6 +6549,8 @@ class InspireReferencePanelController {
   destroy() {
     this.unregisterNotifier();
     this.cancelActiveRequest();
+    // PERF-FIX-2: Cancel any ongoing export operations
+    this.cancelExport();
     this.allEntries = [];
     this.referencesCache.clear();
     this.citedByCache.clear();
@@ -6308,6 +6584,8 @@ class InspireReferencePanelController {
       this.chartResizeObserver.disconnect();
       this.chartResizeObserver = undefined;
     }
+    // FTR-DARK-MODE-AUTO: Remove theme change listener
+    this.removeThemeChangeListener();
     // Clear chart state
     this.chartSelectedBins.clear();
     this.cachedChartStats = undefined;
@@ -6323,6 +6601,13 @@ class InspireReferencePanelController {
     if (this.previewCard) {
       this.previewCard.remove();
       this.previewCard = undefined;
+    }
+    // FTR-AUTHOR-PROFILE: Cleanup author profile and hover preview
+    this.clearAuthorProfileState();
+    this.hideAuthorPreviewCard();
+    if (this.authorPreviewCard) {
+      this.authorPreviewCard.remove();
+      this.authorPreviewCard = undefined;
     }
     // Note: No outside click handler cleanup needed - popup only closes via button toggle
     // FTR-PDF-ANNOTATE: Cleanup shared citation lookup handler when last instance gone
@@ -6440,14 +6725,26 @@ class InspireReferencePanelController {
         this.cacheSourceEl.hidden = false;
         break;
       case "local":
-        this.cacheSourceEl.textContent = getString(
-          "references-panel-cache-source-local",
-          {
-            args: { age: this.cacheSourceAge ?? 0 },
-          },
-        );
-        this.cacheSourceEl.style.background =
-          "var(--material-mix-quinary, #dcfce7)";
+        if (this.cacheSourceExpired) {
+          // Show expired cache indicator with warning color
+          this.cacheSourceEl.textContent = getString(
+            "references-panel-cache-source-local-expired",
+            {
+              args: { age: this.cacheSourceAge ?? 0 },
+            },
+          );
+          this.cacheSourceEl.style.background =
+            "var(--material-mix-quinary, #fef3c7)"; // Amber/warning color
+        } else {
+          this.cacheSourceEl.textContent = getString(
+            "references-panel-cache-source-local",
+            {
+              args: { age: this.cacheSourceAge ?? 0 },
+            },
+          );
+          this.cacheSourceEl.style.background =
+            "var(--material-mix-quinary, #dcfce7)";
+        }
         this.cacheSourceEl.hidden = false;
         break;
       default:
@@ -6631,6 +6928,7 @@ class InspireReferencePanelController {
   /**
    * Copy all visible references as BibTeX to the clipboard.
    * Uses batch queries to efficiently fetch BibTeX from INSPIRE.
+   * PERF-FIX-2: Now cancellable via AbortController.
    */
   async copyAllBibTeX() {
     const strings = getCachedStrings();
@@ -6649,6 +6947,12 @@ class InspireReferencePanelController {
       return;
     }
 
+    // PERF-FIX-2: Create AbortController for this export operation
+    this.cancelExport(); // Cancel any previous export
+    // FTR-ABORT-CONTROLLER-FIX: Use utility function to safely create AbortController
+    // Don't create mock signal - only pass real signal to fetch()
+    this.exportAbort = createAbortController();
+
     const BATCH_SIZE = METADATA_BATCH_SIZE; // Same as existing code for metadata batch fetch
     const allBibTeX: string[] = [];
     let successCount = 0;
@@ -6665,13 +6969,28 @@ class InspireReferencePanelController {
 
     try {
       for (let i = 0; i < entriesWithRecid.length; i += BATCH_SIZE) {
+        // PERF-FIX-2: Check abort before each batch (use optional chaining)
+        if (this.exportAbort?.signal?.aborted) {
+          Zotero.debug(`[${config.addonName}] BibTeX export aborted`);
+          progressWin.changeLine({
+            icon: icon,
+            text: "Export cancelled",
+            type: "default",
+          });
+          break;
+        }
+
         const batch = entriesWithRecid.slice(i, i + BATCH_SIZE);
         const recids = batch.map((e) => e.recid!);
         const query = recids.map((r) => `recid:${r}`).join(" OR ");
         const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${recids.length}&format=bibtex`;
 
         try {
-          const response = await inspireFetch(url);
+          // PERF-FIX-2: Only pass signal to fetch if it's a real AbortSignal
+          const fetchOptions = this.exportAbort?.signal
+            ? { signal: this.exportAbort.signal }
+            : {};
+          const response = await inspireFetch(url, fetchOptions);
           if (response.ok) {
             const bibtex = await response.text();
             if (bibtex?.trim()) {
@@ -6680,13 +6999,19 @@ class InspireReferencePanelController {
             }
           }
         } catch (e) {
+          // PERF-FIX-2: Handle abort error gracefully
+          if ((e as Error).name === "AbortError") {
+            Zotero.debug(`[${config.addonName}] BibTeX batch aborted`);
+            break;
+          }
           Zotero.debug(
             `[${config.addonName}] Failed to fetch BibTeX batch: ${e}`,
           );
         }
       }
 
-      if (allBibTeX.length) {
+      // PERF-FIX-2: Only show success if not aborted (use optional chaining)
+      if (!this.exportAbort?.signal?.aborted && allBibTeX.length) {
         const success = await copyToClipboard(allBibTeX.join("\n\n"));
         if (success) {
           progressWin.changeLine({
@@ -6697,7 +7022,7 @@ class InspireReferencePanelController {
             type: "success",
           });
         }
-      } else {
+      } else if (!this.exportAbort?.signal?.aborted) {
         progressWin.changeLine({
           icon: icon,
           text: strings.bibtexAllFailed,
@@ -6705,12 +7030,17 @@ class InspireReferencePanelController {
         });
       }
     } catch (e) {
-      Zotero.debug(`[${config.addonName}] Copy all BibTeX error: ${e}`);
-      progressWin.changeLine({
-        icon: icon,
-        text: strings.bibtexAllFailed,
-        type: "fail",
-      });
+      if ((e as Error).name !== "AbortError") {
+        Zotero.debug(`[${config.addonName}] Copy all BibTeX error: ${e}`);
+        progressWin.changeLine({
+          icon: icon,
+          text: strings.bibtexAllFailed,
+          type: "fail",
+        });
+      }
+    } finally {
+      // PERF-FIX-2: Clear abort controller after export completes
+      this.exportAbort = undefined;
     }
 
     setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
@@ -6722,18 +7052,14 @@ class InspireReferencePanelController {
    * Uses HTML dropdown positioned relative to the panel container.
    */
   showExportMenu(event: Event) {
-    Zotero.debug(`[${config.addonName}] showExportMenu called`);
-
     // Determine which entries to export
     const hasSelection = this.selectedEntryIDs.size > 0;
     const targetEntries = hasSelection
       ? this.allEntries.filter((e) => this.selectedEntryIDs.has(e.id))
       : this.allEntries;
+    const selectedEntries = hasSelection ? targetEntries : [];
 
     const entriesWithRecid = targetEntries.filter((e) => e.recid);
-    Zotero.debug(
-      `[${config.addonName}] showExportMenu: ${entriesWithRecid.length} entries with recid`,
-    );
 
     if (!entriesWithRecid.length) {
       const strings = getCachedStrings();
@@ -6864,6 +7190,14 @@ class InspireReferencePanelController {
       );
     }
 
+    popup.appendChild(
+      createMenuItem(
+        `  ${getString("references-panel-export-copy-texkey")}`,
+        !hasSelection,
+        () => this.copyCitationKeys(selectedEntries),
+      ),
+    );
+
     // Separator
     popup.appendChild((doc as any).createXULElement("menuseparator"));
 
@@ -6886,8 +7220,9 @@ class InspireReferencePanelController {
       );
     }
 
-    // Citation section if local items exist
-    if (entriesWithLocalItem.length > 0) {
+    // Citation section - always show, will handle import if needed
+    // FTR-CITATION-EXPORT: Show for all entries with recid (not just those with localItemID)
+    if (entriesWithRecid.length > 0) {
       popup.appendChild((doc as any).createXULElement("menuseparator"));
       const citationLabel = getString(
         "references-panel-export-citation-header",
@@ -6895,7 +7230,7 @@ class InspireReferencePanelController {
       popup.appendChild(
         createMenuItem(
           hasSelection
-            ? `${citationLabel} (${entriesWithLocalItem.length})`
+            ? `${citationLabel} (${entriesWithRecid.length})`
             : citationLabel,
           true,
         ),
@@ -6905,7 +7240,7 @@ class InspireReferencePanelController {
         createMenuItem(
           `  ${getString("references-panel-export-citation-select-style")}`,
           false,
-          () => this.openBibliographyDialog(entriesWithLocalItem),
+          () => this.handleCitationStyleExport(targetEntries),
         ),
       );
     }
@@ -6919,6 +7254,7 @@ class InspireReferencePanelController {
   /**
    * Export entries in specified format to clipboard or file.
    * Supports: bibtex, latex-us, latex-eu
+   * PERF-FIX-2: Now cancellable via AbortController.
    */
   private async exportEntries(
     format: string,
@@ -6933,6 +7269,12 @@ class InspireReferencePanelController {
 
     const entriesWithRecid = targetEntries.filter((e) => e.recid);
     const strings = getCachedStrings();
+
+    // PERF-FIX-2: Create AbortController for this export operation
+    this.cancelExport(); // Cancel any previous export
+    // FTR-ABORT-CONTROLLER-FIX: Use utility function to safely create AbortController
+    // Don't create mock signal - only pass real signal to fetch()
+    this.exportAbort = createAbortController();
 
     const BATCH_SIZE = METADATA_BATCH_SIZE;
     const allContent: string[] = [];
@@ -6951,13 +7293,29 @@ class InspireReferencePanelController {
 
     try {
       for (let i = 0; i < entriesWithRecid.length; i += BATCH_SIZE) {
+        // PERF-FIX-2: Check abort before each batch (use optional chaining)
+        if (this.exportAbort?.signal?.aborted) {
+          Zotero.debug(`[${config.addonName}] ${format} export aborted`);
+          progressWin.changeLine({
+            icon: icon,
+            text: "Export cancelled",
+            type: "default",
+          });
+          setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+          return;
+        }
+
         const batch = entriesWithRecid.slice(i, i + BATCH_SIZE);
         const recids = batch.map((e) => e.recid!);
         const query = recids.map((r) => `recid:${r}`).join(" OR ");
         const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${recids.length}&format=${format}`;
 
         try {
-          const response = await inspireFetch(url);
+          // PERF-FIX-2: Only pass signal to fetch if it's a real AbortSignal
+          const fetchOptions = this.exportAbort?.signal
+            ? { signal: this.exportAbort.signal }
+            : {};
+          const response = await inspireFetch(url, fetchOptions);
           if (response.ok) {
             const content = await response.text();
             if (content?.trim()) {
@@ -6975,6 +7333,17 @@ class InspireReferencePanelController {
             failedBatches++;
           }
         } catch (e) {
+          // PERF-FIX-2: Handle abort error gracefully
+          if ((e as Error).name === "AbortError") {
+            Zotero.debug(`[${config.addonName}] ${format} batch aborted`);
+            progressWin.changeLine({
+              icon: icon,
+              text: "Export cancelled",
+              type: "default",
+            });
+            setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+            return;
+          }
           Zotero.debug(
             `[${config.addonName}] Failed to fetch ${format} batch: ${e}`,
           );
@@ -7055,11 +7424,175 @@ class InspireReferencePanelController {
         }
       }
     } catch (e) {
+      // PERF-FIX-2: Handle abort error at top level
+      if ((e as Error).name === "AbortError") {
+        progressWin.changeLine({
+          icon: icon,
+          text: "Export cancelled",
+          type: "default",
+        });
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+        return;
+      }
       Zotero.debug(`[${config.addonName}] Export error: ${e}`);
       progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
+    } finally {
+      // PERF-FIX-2: Clear abort controller after export completes
+      this.exportAbort = undefined;
     }
 
     setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+  }
+
+  /**
+   * Copy citation keys (INSPIRE texkeys) for selected entries.
+   * Keys are joined by ", " for quick paste into LaTeX.
+   */
+  private async copyCitationKeys(entries: InspireReferenceEntry[]) {
+    if (!entries.length) return;
+
+    const entriesWithRecidOrKey = entries.filter((e) => e.recid || e.texkey);
+    if (!entriesWithRecidOrKey.length) {
+      const strings = getCachedStrings();
+      const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+      const noRecidWin = new ztoolkit.ProgressWindow(config.addonName);
+      noRecidWin.win.changeHeadline(config.addonName, icon);
+      noRecidWin.createLine({
+        icon: icon,
+        text: strings.noRecidEntries,
+        type: "default",
+      });
+      noRecidWin.show();
+      return;
+    }
+
+    this.cancelExport();
+    // FTR-ABORT-CONTROLLER-FIX: Use utility function to safely create AbortController
+    this.exportAbort = createAbortController();
+
+    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+    const progressWin = new ztoolkit.ProgressWindow(config.addonName);
+    progressWin.win.changeHeadline(config.addonName, icon);
+    progressWin.createLine({
+      icon: icon,
+      text: getString("references-panel-export-texkey-copying"),
+      type: "default",
+    });
+    progressWin.show();
+
+    try {
+      // OPTIMIZATION: First, try to get citation keys from Zotero library
+      // This avoids unnecessary INSPIRE API calls
+      const texkeyByRecid = new Map<string, string>();
+
+      for (const entry of entriesWithRecidOrKey) {
+        if (entry.texkey?.trim()) continue;
+        if (entry.localItemID) {
+          try {
+            const item = Zotero.Items.get(entry.localItemID);
+            if (item) {
+              const citationKey = (
+                item.getField("citationKey") as string | undefined
+              )?.trim();
+              if (citationKey && entry.recid) {
+                texkeyByRecid.set(entry.recid, citationKey);
+                entry.texkey = citationKey;
+              }
+            }
+          } catch {
+            // Ignore errors when getting Zotero item
+          }
+        }
+      }
+
+      // Fetch remaining texkeys from INSPIRE
+      const missingEntries = entriesWithRecidOrKey.filter(
+        (entry) => entry.recid && !entry.texkey,
+      );
+      const missingRecids = missingEntries.map((entry) => entry.recid!);
+      const fieldsParam = buildFieldsParam("control_number,texkeys");
+
+      for (let i = 0; i < missingRecids.length; i += METADATA_BATCH_SIZE) {
+        if (this.exportAbort?.signal?.aborted) {
+          progressWin.changeLine({
+            icon: icon,
+            text: getString("references-panel-export-cancelled"),
+            type: "default",
+          });
+          return;
+        }
+
+        const batch = missingRecids.slice(i, i + METADATA_BATCH_SIZE);
+        const query = batch.map((recid) => `recid:${recid}`).join(" OR ");
+        const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batch.length}${fieldsParam}`;
+
+        try {
+          const fetchOptions = this.exportAbort?.signal
+            ? { signal: this.exportAbort.signal }
+            : {};
+          const response = await inspireFetch(url, fetchOptions);
+          if (!response.ok) continue;
+
+          const payload: any = await response.json();
+          const hits = payload?.hits?.hits ?? [];
+          for (const hit of hits) {
+            const recid = String(hit?.metadata?.control_number || hit?.id || "");
+            const texkeys = hit?.metadata?.texkeys;
+            if (!recid || !Array.isArray(texkeys) || !texkeys.length) continue;
+            const texkey = texkeys[0];
+            if (typeof texkey === "string" && texkey.trim()) {
+              texkeyByRecid.set(recid, texkey);
+            }
+          }
+        } catch (e) {
+          if ((e as Error).name === "AbortError") return;
+          Zotero.debug(`[${config.addonName}] Failed to fetch texkeys: ${e}`);
+        }
+      }
+
+      // Collect all texkeys
+      const texkeys: string[] = [];
+      for (const entry of entriesWithRecidOrKey) {
+        let texkey = entry.texkey?.trim() || "";
+        if (!texkey && entry.recid) {
+          const fetched = texkeyByRecid.get(entry.recid);
+          if (fetched) {
+            texkey = fetched;
+            entry.texkey = fetched;
+          }
+        }
+        if (texkey) texkeys.push(texkey);
+      }
+
+      if (!texkeys.length) {
+        progressWin.changeLine({
+          icon: icon,
+          text: getString("references-panel-export-texkey-failed"),
+          type: "fail",
+        });
+        return;
+      }
+
+      const success = await copyToClipboard(texkeys.join(", "));
+      if (success) {
+        progressWin.changeLine({
+          icon: icon,
+          text: getString("references-panel-export-texkey-copied", {
+            args: { count: texkeys.length },
+          }),
+          type: "success",
+        });
+      } else {
+        progressWin.changeLine({
+          icon: icon,
+          text: getString("references-panel-export-texkey-failed"),
+          type: "fail",
+        });
+      }
+    } finally {
+      this.exportAbort = undefined;
+      setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+    }
   }
 
   /**
@@ -7317,6 +7850,157 @@ class InspireReferencePanelController {
     }
   }
 
+  /**
+   * FTR-CITATION-EXPORT: Handle citation style export with automatic import
+   * If entries are not in Zotero library, prompt user to select a collection,
+   * import them first, then proceed with bibliography dialog.
+   */
+  private async handleCitationStyleExport(
+    entries: InspireReferenceEntry[],
+  ): Promise<void> {
+    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+
+    // Separate entries with and without localItemID
+    const entriesWithLocalItem = entries.filter(
+      (e) => typeof e.localItemID === "number" && e.localItemID > 0,
+    );
+    const entriesNeedingImport = entries.filter(
+      (e) =>
+        e.recid &&
+        (typeof e.localItemID !== "number" || e.localItemID <= 0),
+    );
+
+    // If all entries have localItemID, proceed directly to bibliography dialog
+    if (entriesNeedingImport.length === 0) {
+      await this.openBibliographyDialog(entriesWithLocalItem);
+      return;
+    }
+
+    // Show progress window explaining what needs to happen
+    const progressWin = new ztoolkit.ProgressWindow(config.addonName, {
+      closeOnClick: false,
+    });
+    progressWin.win.changeHeadline(config.addonName, icon);
+    progressWin.createLine({
+      icon: icon,
+      text: getString("references-panel-export-citation-import-needed", {
+        args: { count: entriesNeedingImport.length },
+      }),
+      type: "default",
+    });
+    progressWin.show();
+
+    // Get anchor for collection picker (use body element)
+    const anchor = this.body;
+
+    // Show collection picker for user to select where to import
+    const selection = await this.promptForSaveTarget(anchor);
+
+    // Close the progress window after picker closes
+    progressWin.close();
+
+    if (!selection) {
+      // User cancelled
+      return;
+    }
+
+    // Import entries that need importing
+    const importProgressWin = new ztoolkit.ProgressWindow(config.addonName, {
+      closeOnClick: false,
+    });
+    importProgressWin.win.changeHeadline(config.addonName, icon);
+    importProgressWin.createLine({
+      icon: icon,
+      text: getString("references-panel-export-citation-importing", {
+        args: { done: 0, total: entriesNeedingImport.length },
+      }),
+      type: "default",
+    });
+    importProgressWin.show();
+
+    let importedCount = 0;
+    let failedCount = 0;
+    const importedEntries: InspireReferenceEntry[] = [...entriesWithLocalItem];
+
+    // Import entries one by one (to avoid overwhelming the API)
+    for (let i = 0; i < entriesNeedingImport.length; i++) {
+      const entry = entriesNeedingImport[i];
+      try {
+        const newItem = await this.importReference(entry.recid!, selection);
+        if (newItem) {
+          // Update entry with new localItemID
+          entry.localItemID = newItem.id;
+          entry.displayText = buildDisplayText(entry);
+          entry.searchText = "";
+          importedEntries.push(entry);
+          importedCount++;
+        } else {
+          failedCount++;
+        }
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] Citation export import error: ${err}`,
+        );
+        failedCount++;
+      }
+
+      // Update progress
+      importProgressWin.changeLine({
+        icon: icon,
+        text: getString("references-panel-export-citation-importing", {
+          args: { done: i + 1, total: entriesNeedingImport.length },
+        }),
+        type: "default",
+      });
+    }
+
+    importProgressWin.close();
+
+    // Re-render to show updated local item status
+    if (importedCount > 0) {
+      this.renderReferenceList({ preserveScroll: true });
+    }
+
+    // Check if we have any entries to format
+    const entriesWithLocalItemNow = importedEntries.filter(
+      (e) => typeof e.localItemID === "number" && e.localItemID > 0,
+    );
+
+    if (entriesWithLocalItemNow.length === 0) {
+      const errorWin = new ztoolkit.ProgressWindow(config.addonName);
+      errorWin.win.changeHeadline(config.addonName, icon);
+      errorWin.createLine({
+        icon: icon,
+        text: getString("references-panel-export-citation-no-local"),
+        type: "fail",
+      });
+      errorWin.show();
+      setTimeout(() => errorWin.close(), PROGRESS_CLOSE_DELAY_MS);
+      return;
+    }
+
+    // If some imports failed, show a warning
+    if (failedCount > 0) {
+      const warningWin = new ztoolkit.ProgressWindow(config.addonName);
+      warningWin.win.changeHeadline(config.addonName, icon);
+      warningWin.createLine({
+        icon: icon,
+        text: getString("references-panel-export-citation-import-failed", {
+          args: {
+            success: entriesWithLocalItemNow.length,
+            total: entriesNeedingImport.length + entriesWithLocalItem.length,
+          },
+        }),
+        type: "fail",
+      });
+      warningWin.show();
+      setTimeout(() => warningWin.close(), PROGRESS_CLOSE_DELAY_MS);
+    }
+
+    // Proceed with bibliography dialog for entries with localItemID
+    await this.openBibliographyDialog(entriesWithLocalItemNow);
+  }
+
   async handleItemChange(
     args: _ZoteroTypes.ItemPaneManagerSection.SectionHookArgs,
   ) {
@@ -7350,6 +8034,18 @@ class InspireReferencePanelController {
         this.updateSortSelector();
         return;
       }
+
+      // Skip redundant processing for same item (e.g., PDF annotation changes)
+      // This avoids unnecessary network requests to INSPIRE for recid lookup
+      if (item.id === this.currentItemID && this.currentRecid) {
+        // Same item and already have recid - no need to re-process
+        // Just handle any scroll restoration if needed
+        if (this.viewMode !== "search") {
+          this.restoreScrollPositionIfNeeded();
+        }
+        return;
+      }
+
       const previousItemID = this.currentItemID;
       const itemChanged = previousItemID !== item.id;
       this.currentItemID = item.id;
@@ -7672,6 +8368,7 @@ class InspireReferencePanelController {
     }
     this.entryCitedSource = undefined;
     this.entryCitedReturnScroll = undefined;
+    this.clearAuthorProfileState();
     this.updateTabSelection();
   }
 
@@ -7969,9 +8666,14 @@ class InspireReferencePanelController {
         // Update cache source indicator
         this.cacheSource = "memory";
         this.cacheSourceAge = undefined;
+        this.cacheSourceExpired = false;
         this.updateCacheSourceDisplay();
         this.renderChart(); // Use deferred render (same as original implementation)
         this.renderReferenceList({ preserveScroll: !shouldReset });
+        if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+          this.updateAuthorStats(entriesForDisplay);
+          this.updateAuthorProfileCard();
+        }
         if (shouldReset) {
           this.resetListScroll();
         } else {
@@ -8050,9 +8752,14 @@ class InspireReferencePanelController {
             // Update cache source indicator (ageHours returned from get() to avoid re-reading file)
             this.cacheSource = "local";
             this.cacheSourceAge = localResult.ageHours;
+            this.cacheSourceExpired = false;
             this.updateCacheSourceDisplay();
             this.renderChart();
             this.renderReferenceList({ preserveScroll: !shouldReset });
+            if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+              this.updateAuthorStats(entriesForDisplay);
+              this.updateAuthorProfileCard();
+            }
             if (shouldReset) {
               this.resetListScroll();
             } else {
@@ -8235,9 +8942,14 @@ class InspireReferencePanelController {
         // Update cache source indicator - data from API
         this.cacheSource = "api";
         this.cacheSourceAge = undefined;
+        this.cacheSourceExpired = false;
         this.updateCacheSourceDisplay();
         this.renderChart(); // Use deferred render (same as original implementation)
         this.renderReferenceList();
+        if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+          this.updateAuthorStats(entriesForDisplay);
+          this.updateAuthorProfileCard();
+        }
         if (options.resetScroll && !hasRenderedFirstPage) {
           this.resetListScroll();
         } else if (!hasRenderedFirstPage) {
@@ -8299,6 +9011,14 @@ class InspireReferencePanelController {
             `[${config.addonName}] Enrichment completed for ${enrichMode}/${enrichRecid}`,
           );
 
+          if (
+            enrichMode === "entryCited" &&
+            this.entryCitedSource?.authorSearchInfo
+          ) {
+            this.updateAuthorStats(entries);
+            this.updateAuthorProfileCard();
+          }
+
           // After enrichment completes, persist enriched data to local cache
           // ALWAYS write to cache after enrichment, even if user switched to another item
           // This ensures the enriched data is saved for future use
@@ -8315,6 +9035,101 @@ class InspireReferencePanelController {
           }
         }
       }, 0);
+    } catch (err) {
+      // Network error - try to fallback to stale local cache (ignoreTTL)
+      // This provides offline support for Cited By and Author Papers modes
+      if ((err as any)?.name === "AbortError") {
+        throw err; // Re-throw abort errors
+      }
+
+      // Only attempt stale cache fallback for modes that have TTL-based caching
+      // (citedBy, entryCited/author) - references are permanent so never expire
+      if (mode !== "references") {
+        const localCacheType = this.getLocalCacheType(mode);
+        if (localCacheType) {
+          Zotero.debug(
+            `[${config.addonName}] Network error, attempting stale cache fallback for ${mode}/${recid}`,
+          );
+
+          let staleResult: {
+            data: InspireReferenceEntry[];
+            fromCache: true;
+            ageHours: number;
+            total?: number;
+            expired?: boolean;
+          } | null = null;
+
+          // Try unsorted cache first (if data was complete), then sorted cache
+          const unsortedResult = await localCache.get<InspireReferenceEntry[]>(
+            localCacheType,
+            recid,
+            undefined,
+            { ignoreTTL: true },
+          );
+          if (
+            unsortedResult &&
+            unsortedResult.total !== undefined &&
+            unsortedResult.total <= CITED_BY_MAX_RESULTS
+          ) {
+            staleResult = unsortedResult;
+          } else {
+            // Try sort-specific cache
+            staleResult = await localCache.get<InspireReferenceEntry[]>(
+              localCacheType,
+              recid,
+              sortOption,
+              { ignoreTTL: true },
+            );
+          }
+
+          if (staleResult) {
+            Zotero.debug(
+              `[${config.addonName}] Using stale cache (${staleResult.ageHours}h old, expired=${staleResult.expired}) for ${mode}/${recid}`,
+            );
+
+            // Populate memory cache and display stale data
+            cache.set(cacheKey, staleResult.data);
+            if (isActiveMode) {
+              const entriesForDisplay = this.getSortedCitedBy(
+                staleResult.data,
+                sortOption as InspireSortOption,
+              );
+              this.allEntries = entriesForDisplay;
+              this.totalApiCount = staleResult.total ?? null;
+              this.chartSelectedBins.clear();
+              // Update cache source indicator with expired flag
+              this.cacheSource = "local";
+              this.cacheSourceAge = staleResult.ageHours;
+              this.cacheSourceExpired = staleResult.expired ?? false;
+              this.updateCacheSourceDisplay();
+              this.renderChart();
+              this.renderReferenceList({ preserveScroll: false });
+              if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+                this.updateAuthorStats(entriesForDisplay);
+                this.updateAuthorProfileCard();
+              }
+              if (options.resetScroll) {
+                this.resetListScroll();
+              }
+
+              // Show warning toast that data may be outdated
+              if (staleResult.expired) {
+                const warningMsg = getString(
+                  "references-panel-status-stale-cache",
+                  {
+                    args: { hours: String(staleResult.ageHours) },
+                  },
+                );
+                this.showToast(warningMsg);
+              }
+            }
+            return; // Successfully used stale cache
+          }
+        }
+      }
+
+      // No stale cache available, re-throw the error
+      throw err;
     } finally {
       if (this.pendingToken === token) {
         this.activeAbort = undefined;
@@ -8820,7 +9635,8 @@ class InspireReferencePanelController {
       ".zinspire-ref-entry__authors",
     ) as HTMLElement;
     if (authorsContainer) {
-      authorsContainer.innerHTML = "";
+      // PERF-FIX-15: Use replaceChildren() instead of innerHTML
+      authorsContainer.replaceChildren();
       this.appendAuthorLinks(authorsContainer, entry, s);
     }
 
@@ -8841,7 +9657,8 @@ class InspireReferencePanelController {
         this.buildMetaContent(meta, entry);
         meta.style.display = "";
       } else {
-        meta.innerHTML = "";
+        // PERF-FIX-15: Use replaceChildren() instead of innerHTML
+        meta.replaceChildren();
         meta.style.display = "none";
       }
     }
@@ -8884,7 +9701,8 @@ class InspireReferencePanelController {
 
   private renderLinkButton(button: HTMLButtonElement, isLinked: boolean) {
     const doc = button.ownerDocument;
-    button.innerHTML = "";
+    // PERF-FIX-15: Use replaceChildren() instead of innerHTML
+    button.replaceChildren();
     button.dataset.state = isLinked ? "linked" : "unlinked";
     button.style.opacity = "1";
     button.style.cursor = "pointer";
@@ -9779,6 +10597,8 @@ class InspireReferencePanelController {
     this.viewMode = mode;
     this.updateTabSelection();
     this.updateSearchUIVisibility();
+    this.updateAuthorProfileCard();
+    this.hideAuthorPreviewCard();
 
     // For search mode, use current search query
     if (mode === "search") {
@@ -9852,6 +10672,10 @@ class InspireReferencePanelController {
       const entriesForDisplay =
         mode === "references" ? this.getSortedReferences(cached) : cached;
       this.allEntries = entriesForDisplay;
+      if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+        this.updateAuthorStats(entriesForDisplay);
+        this.updateAuthorProfileCard();
+      }
       // Reset totalApiCount for cached data (allEntries.length is accurate)
       this.totalApiCount = null;
       // Clear chart selection and render chart for new data
@@ -10374,7 +11198,8 @@ class InspireReferencePanelController {
     if (!this.searchHistoryDropdown || this.searchHistory.length === 0) return;
 
     const doc = this.body.ownerDocument;
-    this.searchHistoryDropdown.innerHTML = "";
+    // PERF-FIX-15: Use replaceChildren() instead of innerHTML
+    this.searchHistoryDropdown.replaceChildren();
 
     for (const historyItem of this.searchHistory) {
       const query = historyItem.query;
@@ -11184,7 +12009,9 @@ class InspireReferencePanelController {
     // Use innerHTML for static elements only (Zotero XHTML removes input/button via innerHTML)
     row.innerHTML = `
       <div class="zinspire-ref-entry__text">
-        <span class="zinspire-ref-entry__dot is-clickable"></span>
+        <div class="zinspire-ref-entry__controls">
+          <span class="zinspire-ref-entry__dot is-clickable"></span>
+        </div>
         <div class="zinspire-ref-entry__content">
           <div class="zinspire-ref-entry__title">
             <span class="zinspire-ref-entry__label"></span>
@@ -11198,6 +12025,9 @@ class InspireReferencePanelController {
 
     const textContainer = row.querySelector(
       ".zinspire-ref-entry__text",
+    ) as HTMLElement;
+    const controls = row.querySelector(
+      ".zinspire-ref-entry__controls",
     ) as HTMLElement;
     const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
     const content = row.querySelector(
@@ -11222,7 +12052,6 @@ class InspireReferencePanelController {
     checkbox.style.margin = "0";
     checkbox.style.cursor = "pointer";
     checkbox.style.flexShrink = "0";
-    Zotero.debug(`[${config.addonName}] createRowTemplate: checkbox created`);
 
     // Create buttons via createElement (required for Zotero XHTML security)
     const linkButton = doc.createElement("button");
@@ -11235,6 +12064,11 @@ class InspireReferencePanelController {
     bibtexButton.classList.add("zinspire-ref-entry__bibtex");
     applyBibTeXButtonStyle(bibtexButton);
 
+    const texkeyButton = doc.createElement("button");
+    texkeyButton.type = "button";
+    texkeyButton.classList.add("zinspire-ref-entry__texkey");
+    applyBibTeXButtonStyle(texkeyButton);
+
     const statsButton = doc.createElement("button");
     statsButton.type = "button";
     statsButton.classList.add(
@@ -11243,12 +12077,13 @@ class InspireReferencePanelController {
     );
 
     // Insert elements at correct positions
-    if (textContainer && marker && content) {
+    if (controls && marker && content) {
       // FTR-BATCH-IMPORT: Insert checkbox before marker (leftmost position)
-      textContainer.insertBefore(checkbox, marker);
-      // Insert link and bibtex buttons before content
-      textContainer.insertBefore(bibtexButton, content);
-      textContainer.insertBefore(linkButton, bibtexButton);
+      controls.insertBefore(checkbox, marker);
+      // Insert link, texkey, and bibtex buttons after marker
+      controls.appendChild(linkButton);
+      controls.appendChild(texkeyButton);
+      controls.appendChild(bibtexButton);
       content.appendChild(statsButton);
     }
 
@@ -11372,6 +12207,24 @@ class InspireReferencePanelController {
       }
     }
 
+    // Update texkey button
+    const texkeyButton = row.querySelector(
+      ".zinspire-ref-entry__texkey",
+    ) as HTMLButtonElement;
+    if (texkeyButton) {
+      texkeyButton.textContent = "T";
+      texkeyButton.setAttribute("title", strings.copyTexkey);
+      if (entry.texkey || entry.recid) {
+        texkeyButton.disabled = false;
+        texkeyButton.style.opacity = "1";
+        texkeyButton.style.cursor = "pointer";
+      } else {
+        texkeyButton.disabled = true;
+        texkeyButton.style.opacity = "0.3";
+        texkeyButton.style.cursor = "not-allowed";
+      }
+    }
+
     // Update label (show/hide)
     const labelSpan = row.querySelector(
       ".zinspire-ref-entry__label",
@@ -11392,7 +12245,8 @@ class InspireReferencePanelController {
     ) as HTMLElement;
     if (authorsContainer) {
       // Clear and rebuild author links (variable count)
-      authorsContainer.innerHTML = "";
+      // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
+      authorsContainer.replaceChildren();
       this.appendAuthorLinks(authorsContainer, entry, strings);
     }
 
@@ -11413,7 +12267,8 @@ class InspireReferencePanelController {
         this.buildMetaContent(meta, entry);
         meta.style.display = "";
       } else {
-        meta.innerHTML = "";
+        // PERF-FIX-15: Use replaceChildren() instead of innerHTML
+        meta.replaceChildren();
         meta.style.display = "none";
       }
     }
@@ -11588,7 +12443,7 @@ class InspireReferencePanelController {
           args: { author: searchInfo.fullName },
         }) + idHint;
       // Event handled by delegation (PERF-14)
-      applyAuthorLinkStyle(authorLink);
+      applyAuthorLinkStyle(authorLink, isDarkMode());
       container.appendChild(authorLink);
     }
 
@@ -11614,7 +12469,7 @@ class InspireReferencePanelController {
     const link = doc.createElement("a");
     link.href = url;
     link.textContent = text;
-    applyMetaLinkStyle(link);
+    applyMetaLinkStyle(link, isDarkMode());
     // Hover underline
     link.addEventListener("mouseenter", () => {
       link.style.textDecoration = "underline";
@@ -11642,7 +12497,8 @@ class InspireReferencePanelController {
     entry: InspireReferenceEntry,
   ): void {
     const doc = this.listEl.ownerDocument;
-    container.innerHTML = "";
+    // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
+    container.replaceChildren();
 
     // Build journal info part
     const journalText = formatPublicationInfo(
@@ -11999,6 +12855,7 @@ class InspireReferencePanelController {
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
+    this.clearAuthorProfileState();
     const previousMode =
       this.viewMode === "entryCited"
         ? this.entryCitedPreviousMode
@@ -12042,22 +12899,366 @@ class InspireReferencePanelController {
     }
   }
 
+  private getAuthorProfileKey(authorInfo: AuthorSearchInfo): string {
+    if (authorInfo.recid) {
+      return `recid:${authorInfo.recid}`;
+    }
+    if (authorInfo.bai) {
+      return `bai:${authorInfo.bai.trim()}`;
+    }
+    return `name:${authorInfo.fullName.trim().toLowerCase()}`;
+  }
+
+  private prepareAuthorProfileState(authorInfo: AuthorSearchInfo) {
+    this.authorProfileAbort?.abort();
+    this.authorProfileAbort = undefined;
+    this.authorProfile = undefined;
+    this.authorStats = undefined;
+    const key = this.getAuthorProfileKey(authorInfo);
+    this.authorProfileKey = key;
+    this.authorProfileCollapsed =
+      this.authorProfileCollapsedByKey.get(key) ?? false;
+    this.startAuthorProfileFetch(authorInfo);
+  }
+
+  private startAuthorProfileFetch(authorInfo: AuthorSearchInfo) {
+    const supportsAbort =
+      typeof AbortController !== "undefined" &&
+      typeof AbortController === "function";
+    this.authorProfileAbort = supportsAbort ? new AbortController() : undefined;
+    const signal = this.authorProfileAbort?.signal;
+    const key = this.getAuthorProfileKey(authorInfo);
+    fetchAuthorProfile(authorInfo, signal)
+      .then((profile) => {
+        const currentInfo = this.entryCitedSource?.authorSearchInfo;
+        const currentKey = currentInfo
+          ? this.getAuthorProfileKey(currentInfo)
+          : undefined;
+        if (!currentKey || currentKey !== key) {
+          return;
+        }
+        this.authorProfile = profile;
+        this.updateAuthorProfileCard();
+      })
+      .catch((err) => {
+        if ((err as Error).name === "AbortError") {
+          return;
+        }
+        this.authorProfile = null;
+        this.updateAuthorProfileCard();
+      });
+  }
+
+  /**
+   * Get entries filtered for author stats calculation.
+   * Applies author filter and published filter (same as chart), but not chart bin selection.
+   * FTR-AUTHOR-CARD-FILTERS: Ensure author card stats respect all active filters.
+   */
+  private getEntriesForAuthorStats(): InspireReferenceEntry[] {
+    return this.getFilteredEntries(this.allEntries, { skipChartFilter: true });
+  }
+
+  private updateAuthorStats(entries: InspireReferenceEntry[]) {
+    if (!this.entryCitedSource?.authorSearchInfo) {
+      this.authorStats = undefined;
+      return;
+    }
+    const citations = entries.map((entry) => this.getCitationValue(entry));
+    const totalCitations = citations.reduce((sum, value) => sum + value, 0);
+    const hIndex = this.calculateHIndex(citations);
+    this.authorStats = {
+      paperCount: entries.length,
+      totalCitations,
+      hIndex,
+      citationsWithoutSelf: this.excludeSelfCitations
+        ? totalCitations
+        : undefined,
+    };
+  }
+
+  private clearAuthorProfileState() {
+    this.authorProfileAbort?.abort();
+    this.authorProfileAbort = undefined;
+    this.authorProfile = undefined;
+    this.authorStats = undefined;
+    this.authorProfileKey = undefined;
+    this.authorProfileCard?.remove();
+    this.authorProfileCard = undefined;
+  }
+
+  private updateAuthorProfileCard() {
+    if (
+      this.viewMode !== "entryCited" ||
+      !this.entryCitedSource?.authorSearchInfo
+    ) {
+      this.authorProfileCard?.remove();
+      this.authorProfileCard = undefined;
+      return;
+    }
+    this.renderAuthorProfileCard();
+  }
+
+  private renderAuthorProfileCard() {
+    if (!this.entryCitedSource?.authorSearchInfo || !this.chartContainer) {
+      return;
+    }
+
+    const doc = this.body.ownerDocument;
+    if (!this.authorProfileCard) {
+      this.authorProfileCard = doc.createElement("div");
+      this.authorProfileCard.classList.add("zinspire-author-profile-card");
+      this.chartContainer.parentElement?.insertBefore(
+        this.authorProfileCard,
+        this.chartContainer,
+      );
+    }
+
+    const card = this.authorProfileCard;
+    card.replaceChildren();
+    applyAuthorProfileCardStyle(card);
+
+    const authorInfo = this.entryCitedSource.authorSearchInfo;
+    const displayName = this.authorProfile?.name || authorInfo.fullName;
+    const bai = this.authorProfile?.bai || authorInfo.bai;
+    // Keep BAI in display for disambiguation, but no copy interaction
+
+    // FTR-CONSISTENT-UI: Match chart header layout exactly
+    // Header: [collapse btn] [name] [spacer]
+    const header = doc.createElement("div");
+    header.style.display = "flex";
+    header.style.alignItems = "center";
+    header.style.gap = "8px";
+    header.style.marginBottom = this.authorProfileCollapsed ? "0" : "6px";
+    card.appendChild(header);
+
+    // Collapse button FIRST (left side, like chart)
+    const collapseBtn = doc.createElement("button");
+    collapseBtn.type = "button";
+    collapseBtn.textContent = this.authorProfileCollapsed ? "▶" : "▼";
+    collapseBtn.title = getString(
+      this.authorProfileCollapsed
+        ? "references-panel-author-profile-expand"
+        : "references-panel-author-profile-collapse",
+    );
+    collapseBtn.style.cssText = `
+      border: 1px solid var(--fill-quaternary, #cbd5e1);
+      background: var(--material-background, #f1f5f9);
+      font-size: 10px;
+      cursor: pointer;
+      color: var(--fill-secondary, #64748b);
+      padding: 2px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    `;
+    collapseBtn.onclick = () => {
+      this.authorProfileCollapsed = !this.authorProfileCollapsed;
+      const key = this.authorProfileKey;
+      if (key) {
+        this.authorProfileCollapsedByKey.set(key, this.authorProfileCollapsed);
+      }
+      this.updateAuthorProfileCard();
+    };
+    header.appendChild(collapseBtn);
+
+    // Name with BAI in parentheses (no copy interaction)
+    const nameEl = doc.createElement("div");
+    nameEl.style.fontWeight = "600";
+    nameEl.style.fontSize = "13px";
+    if (bai) {
+      nameEl.textContent = `📚 ${displayName} (${bai})`;
+    } else {
+      nameEl.textContent = `📚 ${displayName}`;
+    }
+    header.appendChild(nameEl);
+
+    if (this.authorProfileCollapsed) {
+      return;
+    }
+
+    const content = doc.createElement("div");
+    card.appendChild(content);
+
+    if (this.authorProfile === null) {
+      const empty = doc.createElement("div");
+      empty.style.fontSize = "12px";
+      empty.style.color = "var(--fill-secondary, #64748b)";
+      empty.textContent = getString("references-panel-author-profile-unavailable");
+      content.appendChild(empty);
+    }
+
+    if (this.authorProfile === undefined) {
+      const loading = doc.createElement("div");
+      loading.style.fontSize = "12px";
+      loading.style.color = "var(--fill-secondary, #64748b)";
+      loading.textContent = getString("references-panel-author-profile-loading");
+      content.appendChild(loading);
+    }
+
+    if (this.authorProfile?.currentPosition?.institution) {
+      const instEl = doc.createElement("div");
+      instEl.style.fontSize = "12px";
+      instEl.style.color = "var(--fill-secondary, #64748b)";
+      instEl.style.marginTop = "4px";
+      instEl.textContent = this.authorProfile.currentPosition.institution;
+      content.appendChild(instEl);
+    }
+
+    const statsEl = doc.createElement("div");
+    statsEl.style.fontSize = "12px";
+    statsEl.style.fontWeight = "500";
+    statsEl.style.marginTop = "6px";
+    if (this.authorStats) {
+      const statsKey = this.excludeSelfCitations
+        ? "references-panel-author-stats-no-self"
+        : "references-panel-author-stats";
+      statsEl.textContent = getString(statsKey, {
+        args: {
+          papers: this.authorStats.paperCount.toLocaleString(),
+          citations: this.authorStats.totalCitations.toLocaleString(),
+          h: String(this.authorStats.hIndex),
+        },
+      });
+    } else {
+      statsEl.textContent = getString("references-panel-author-stats-loading");
+    }
+    content.appendChild(statsEl);
+
+    if (
+      this.totalApiCount !== null &&
+      this.totalApiCount > this.allEntries.length
+    ) {
+      const partialEl = doc.createElement("div");
+      partialEl.style.fontSize = "11px";
+      partialEl.style.color = "var(--fill-secondary, #64748b)";
+      partialEl.textContent = getString("references-panel-author-stats-partial", {
+        args: { count: String(this.allEntries.length) },
+      });
+      content.appendChild(partialEl);
+    }
+
+    if (this.authorProfile?.arxivCategories?.length) {
+      const catEl = doc.createElement("div");
+      catEl.style.fontSize = "12px";
+      catEl.style.color = "var(--fill-secondary, #64748b)";
+      catEl.style.marginTop = "4px";
+      catEl.textContent = `🔬 ${this.authorProfile.arxivCategories.join(", ")}`;
+      content.appendChild(catEl);
+    }
+
+    if (this.authorProfile?.advisors?.length) {
+      const advisors = this.authorProfile.advisors
+        .map((advisor) => advisor.name)
+        .filter(Boolean)
+        .join(", ");
+      if (advisors) {
+        const advisorEl = doc.createElement("div");
+        advisorEl.style.fontSize = "12px";
+        advisorEl.style.color = "var(--fill-secondary, #64748b)";
+        advisorEl.style.marginTop = "4px";
+        advisorEl.textContent = `${getString("references-panel-author-advisors")}: ${advisors}`;
+        content.appendChild(advisorEl);
+      }
+    }
+
+    const links = this.buildAuthorProfileLinks(doc);
+    if (links) {
+      content.appendChild(links);
+    }
+  }
+
+  private buildAuthorProfileLinks(doc: Document): HTMLDivElement | null {
+    if (!this.authorProfile) {
+      return null;
+    }
+    const links = doc.createElement("div");
+    links.style.display = "flex";
+    links.style.flexWrap = "wrap";
+    links.style.gap = "10px";
+    links.style.marginTop = "6px";
+    const copiedText = getString("references-panel-author-copied");
+    const dark = isDarkMode();
+
+    // Email link - first in the row, with right-click copy
+    if (this.authorProfile.emails?.length) {
+      const email = this.authorProfile.emails[0];
+      const emailLink = doc.createElement("a");
+      applyMetaLinkStyle(emailLink, dark);
+      emailLink.href = `mailto:${encodeURIComponent(email)}`;
+      emailLink.textContent = `📧 Email`;
+      emailLink.title = email; // Show full email on hover
+      emailLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(emailLink.href);
+      });
+      attachCopyableValue(emailLink, email, copiedText);
+      links.appendChild(emailLink);
+    }
+
+    // ORCID link with right-click copy
+    if (this.authorProfile.orcid) {
+      const orcid = this.authorProfile.orcid;
+      const orcidLink = doc.createElement("a");
+      applyMetaLinkStyle(orcidLink, dark);
+      orcidLink.href = `https://orcid.org/${encodeURIComponent(orcid)}`;
+      orcidLink.textContent = `🆔 ORCID`;
+      orcidLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(orcidLink.href);
+      });
+      attachCopyableValue(orcidLink, orcid, copiedText);
+      links.appendChild(orcidLink);
+    }
+
+    // INSPIRE link (no right-click copy)
+    if (this.authorProfile.recid) {
+      const recid = this.authorProfile.recid;
+      const inspireLink = doc.createElement("a");
+      applyMetaLinkStyle(inspireLink, dark);
+      inspireLink.href = `https://inspirehep.net/authors/${encodeURIComponent(recid)}`;
+      inspireLink.textContent = "🔗 INSPIRE";
+      inspireLink.title = getString("references-panel-author-inspire-tooltip");
+      inspireLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(inspireLink.href);
+      });
+      links.appendChild(inspireLink);
+    }
+
+    // Homepage link
+    if (this.authorProfile.homepageUrl) {
+      const homepageLink = doc.createElement("a");
+      applyMetaLinkStyle(homepageLink, dark);
+      homepageLink.href = this.authorProfile.homepageUrl;
+      homepageLink.title = getString("references-panel-author-homepage-tooltip");
+      homepageLink.textContent = "🌐 Home";
+      homepageLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(homepageLink.href);
+      });
+      links.appendChild(homepageLink);
+    }
+
+    return links.children.length ? links : null;
+  }
+
   /**
    * Show author papers in the entryCited tab.
-   * Uses author recid for precise search if available, otherwise converts full name to search query.
+   * Uses BAI for precise search if available, otherwise converts full name to search query.
    */
   private async showAuthorPapersTab(authorInfo: AuthorSearchInfo) {
     if (!authorInfo.fullName) {
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
-    // Generate cache key: priority BAI > name > recid
-    // Note: INSPIRE doesn't currently support author recid queries, so it's lowest priority
+    this.hideAuthorPreviewCard();
+    // Generate cache key: priority recid > BAI > name
     let authorQuery: string;
-    if (authorInfo.bai) {
+    if (authorInfo.recid) {
+      authorQuery = `recid:${authorInfo.recid}`;
+    } else if (authorInfo.bai) {
       authorQuery = `bai:${authorInfo.bai}`;
     } else {
-      // Use name-based query; recid is kept as cache key fallback only (not used for API)
+      // Use name-based query
       authorQuery = convertFullNameToSearchQuery(authorInfo.fullName);
     }
     if (!authorQuery) {
@@ -12092,11 +13293,13 @@ class InspireReferencePanelController {
       authorSearchInfo: authorInfo,
       label: displayLabel, // Just the author name, message templates will add "Papers by"
     };
+    this.prepareAuthorProfileState(authorInfo);
     this.updateTabSelection();
     if (this.viewMode !== "entryCited") {
       await this.activateViewMode("entryCited").catch(() => void 0);
       this.resetListScroll();
       this.pendingEntryScrollReset = false;
+      this.updateAuthorProfileCard();
       return;
     }
     if (queryChanged) {
@@ -12111,6 +13314,7 @@ class InspireReferencePanelController {
       this.resetListScroll();
       this.pendingEntryScrollReset = false;
     }
+    this.updateAuthorProfileCard();
   }
 
   private async exitEntryCitedTab() {
@@ -12726,6 +13930,393 @@ class InspireReferencePanelController {
     }
   }
 
+  /**
+   * Handle TeX key copy button click.
+   * Copies INSPIRE texkey to clipboard.
+   * Priority: 1) cached texkey, 2) Zotero library citationKey, 3) INSPIRE API
+   */
+  private async handleTexkeyCopy(
+    entry: InspireReferenceEntry,
+    button: HTMLButtonElement,
+  ) {
+    if (!entry.recid && !entry.texkey && !entry.localItemID) {
+      return;
+    }
+
+    const originalText = button.textContent;
+    button.textContent = "⏳";
+    button.disabled = true;
+
+    try {
+      let texkey = entry.texkey?.trim() || "";
+
+      // Priority 2: Check Zotero library if entry exists locally
+      if (!texkey && entry.localItemID) {
+        try {
+          const item = Zotero.Items.get(entry.localItemID);
+          if (item) {
+            const citationKey = (
+              item.getField("citationKey") as string | undefined
+            )?.trim();
+            if (citationKey) {
+              texkey = citationKey;
+              entry.texkey = citationKey;
+            }
+          }
+        } catch {
+          // Ignore errors when getting Zotero item
+        }
+      }
+
+      // Priority 3: Fetch from INSPIRE API
+      if (!texkey && entry.recid) {
+        texkey = (await fetchInspireTexkey(entry.recid)) || "";
+        if (texkey) {
+          entry.texkey = texkey;
+        }
+      }
+
+      if (!texkey) {
+        throw new Error("Texkey not found");
+      }
+
+      const success = await copyToClipboard(texkey);
+      if (success) {
+        button.textContent = "✓";
+        const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+        const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+          closeOnClick: true,
+        });
+        progressWindow.win.changeHeadline(config.addonName, icon);
+        progressWindow.createLine({
+          text: getString("references-panel-texkey-copied"),
+          type: "success",
+        });
+        progressWindow.show();
+        progressWindow.startCloseTimer(2000);
+      } else {
+        throw new Error("Clipboard copy failed");
+      }
+    } catch (_err) {
+      button.textContent = "✗";
+      Zotero.debug(`[${config.addonName}] Texkey copy failed: ${_err}`);
+      const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
+      const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+        closeOnClick: true,
+      });
+      progressWindow.win.changeHeadline(config.addonName, icon);
+      progressWindow.createLine({
+        text: getString("references-panel-texkey-failed"),
+        type: "fail",
+      });
+      progressWindow.show();
+      progressWindow.startCloseTimer(2000);
+    }
+
+    // Restore original state after brief delay
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.disabled = false;
+    }, 1500);
+  }
+
+  private getAuthorPreviewCard(): HTMLDivElement {
+    if (!this.authorPreviewCard) {
+      const mainWindow = Zotero.getMainWindow();
+      const doc = mainWindow?.document || this.body.ownerDocument;
+      const card = doc.createElement("div");
+      card.classList.add("zinspire-author-preview-card");
+      applyAuthorPreviewCardStyle(card);
+      card.style.display = "none";
+      card.addEventListener("mouseenter", () => {
+        this.cancelAuthorPreviewHide();
+      });
+      card.addEventListener("mouseleave", () => {
+        this.scheduleAuthorPreviewHide();
+      });
+      const container =
+        doc.getElementById("browser") || doc.documentElement || doc.body;
+      container?.appendChild(card);
+      this.authorPreviewCard = card;
+    }
+    return this.authorPreviewCard;
+  }
+
+  private scheduleAuthorPreview(
+    entry: InspireReferenceEntry,
+    authorIndex: number,
+    anchor: HTMLElement,
+  ) {
+    this.cancelAuthorPreviewShow();
+    this.cancelAuthorPreviewHide();
+    this.authorPreviewAnchor = anchor;
+    this.authorPreviewShowTimeout = setTimeout(() => {
+      this.showAuthorPreview(entry, authorIndex, anchor);
+    }, this.authorPreviewShowDelay);
+  }
+
+  private cancelAuthorPreviewShow() {
+    if (this.authorPreviewShowTimeout) {
+      clearTimeout(this.authorPreviewShowTimeout);
+      this.authorPreviewShowTimeout = undefined;
+    }
+  }
+
+  private scheduleAuthorPreviewHide() {
+    this.cancelAuthorPreviewHide();
+    this.authorPreviewHideTimeout = setTimeout(() => {
+      this.hideAuthorPreviewCard();
+    }, this.authorPreviewHideDelay);
+  }
+
+  private cancelAuthorPreviewHide() {
+    if (this.authorPreviewHideTimeout) {
+      clearTimeout(this.authorPreviewHideTimeout);
+      this.authorPreviewHideTimeout = undefined;
+    }
+  }
+
+  private buildAuthorInfoFromEntry(
+    entry: InspireReferenceEntry,
+    authorIndex: number,
+  ): AuthorSearchInfo | null {
+    const fullName = entry.authors[authorIndex];
+    if (!fullName) {
+      return null;
+    }
+    const searchInfo = entry.authorSearchInfos?.[authorIndex];
+    return {
+      fullName,
+      bai: searchInfo?.bai,
+      recid: searchInfo?.recid,
+    };
+  }
+
+  private showAuthorPreview(
+    entry: InspireReferenceEntry,
+    authorIndex: number,
+    anchor: HTMLElement,
+  ) {
+    const authorInfo = this.buildAuthorInfoFromEntry(entry, authorIndex);
+    if (!authorInfo) {
+      return;
+    }
+    const key = this.getAuthorProfileKey(authorInfo);
+    const card = this.getAuthorPreviewCard();
+    this.authorPreviewCurrentKey = key;
+    this.renderAuthorPreviewCard(card, authorInfo, undefined);
+    this.positionAuthorPreviewCard(card, anchor);
+
+    this.authorPreviewAbort?.abort();
+    const supportsAbort =
+      typeof AbortController !== "undefined" &&
+      typeof AbortController === "function";
+    this.authorPreviewAbort = supportsAbort ? new AbortController() : undefined;
+    const signal = this.authorPreviewAbort?.signal;
+    fetchAuthorProfile(authorInfo, signal)
+      .then((profile) => {
+        if (this.authorPreviewCurrentKey !== key) {
+          return;
+        }
+        this.renderAuthorPreviewCard(card, authorInfo, profile);
+        this.positionAuthorPreviewCard(card, anchor);
+      })
+      .catch((err) => {
+        if ((err as Error).name === "AbortError") {
+          return;
+        }
+        if (this.authorPreviewCurrentKey === key) {
+          this.renderAuthorPreviewCard(card, authorInfo, null);
+        }
+      });
+  }
+
+  private renderAuthorPreviewCard(
+    card: HTMLDivElement,
+    authorInfo: AuthorSearchInfo,
+    profile: InspireAuthorProfile | null | undefined,
+  ) {
+    const doc = card.ownerDocument;
+    card.replaceChildren();
+    const copiedText = getString("references-panel-author-copied");
+    const dark = isDarkMode();
+
+    // Title with name and BAI in parentheses (no copy interaction)
+    const title = doc.createElement("div");
+    title.style.fontWeight = "600";
+    title.style.marginBottom = "4px";
+    const displayName = profile?.name || authorInfo.fullName;
+    const bai = profile?.bai || authorInfo.bai;
+    if (bai) {
+      title.textContent = `${displayName} (${bai})`;
+    } else {
+      title.textContent = displayName;
+    }
+    card.appendChild(title);
+
+    if (profile === null) {
+      const empty = doc.createElement("div");
+      empty.style.color = "var(--fill-secondary, #64748b)";
+      empty.textContent = getString("references-panel-author-profile-unavailable");
+      card.appendChild(empty);
+    } else if (!profile) {
+      const loading = doc.createElement("div");
+      loading.style.color = "var(--fill-secondary, #64748b)";
+      loading.textContent = getString("references-panel-author-profile-loading");
+      card.appendChild(loading);
+    }
+
+    if (profile?.currentPosition?.institution) {
+      const inst = doc.createElement("div");
+      inst.style.color = "var(--fill-secondary, #64748b)";
+      inst.textContent = profile.currentPosition.institution;
+      card.appendChild(inst);
+    }
+
+    if (profile?.arxivCategories?.length) {
+      const cats = doc.createElement("div");
+      cats.style.color = "var(--fill-secondary, #64748b)";
+      cats.textContent = `🔬 ${profile.arxivCategories.join(", ")}`;
+      card.appendChild(cats);
+    }
+
+    if (profile?.advisors?.length) {
+      const advisorNames = profile.advisors
+        .map((advisor) => advisor.name)
+        .filter(Boolean)
+        .slice(0, 2)
+        .join(", ");
+      if (advisorNames) {
+        const advisors = doc.createElement("div");
+        advisors.style.color = "var(--fill-secondary, #64748b)";
+        advisors.textContent = `${getString("references-panel-author-advisors")}: ${advisorNames}`;
+        card.appendChild(advisors);
+      }
+    }
+
+    const actions = doc.createElement("div");
+    actions.style.display = "flex";
+    actions.style.flexWrap = "wrap";
+    actions.style.gap = "8px";
+    actions.style.marginTop = "6px";
+
+    // Email link - first in the row, with right-click copy
+    if (profile?.emails?.length) {
+      const email = profile.emails[0];
+      const emailLink = doc.createElement("a");
+      applyMetaLinkStyle(emailLink, dark);
+      emailLink.href = `mailto:${encodeURIComponent(email)}`;
+      emailLink.textContent = `📧 Email`;
+      emailLink.title = email; // Show full email on hover
+      emailLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(emailLink.href);
+      });
+      attachCopyableValue(emailLink, email, copiedText);
+      actions.appendChild(emailLink);
+    }
+
+    // ORCID link with right-click copy
+    if (profile?.orcid) {
+      const orcid = profile.orcid;
+      const orcidLink = doc.createElement("a");
+      applyMetaLinkStyle(orcidLink, dark);
+      orcidLink.href = `https://orcid.org/${encodeURIComponent(orcid)}`;
+      orcidLink.textContent = "ORCID";
+      orcidLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(orcidLink.href);
+      });
+      attachCopyableValue(orcidLink, orcid, copiedText);
+      actions.appendChild(orcidLink);
+    }
+
+    // INSPIRE link (no right-click copy)
+    if (profile?.recid) {
+      const inspireLink = doc.createElement("a");
+      applyMetaLinkStyle(inspireLink, dark);
+      inspireLink.href = `https://inspirehep.net/authors/${encodeURIComponent(profile.recid)}`;
+      inspireLink.textContent = "INSPIRE";
+      inspireLink.title = getString("references-panel-author-inspire-tooltip");
+      inspireLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(inspireLink.href);
+      });
+      actions.appendChild(inspireLink);
+    }
+
+    // Homepage link
+    if (profile?.homepageUrl) {
+      const homepageLink = doc.createElement("a");
+      applyMetaLinkStyle(homepageLink, dark);
+      homepageLink.href = profile.homepageUrl;
+      homepageLink.title = getString("references-panel-author-homepage-tooltip");
+      homepageLink.textContent = "Home";
+      homepageLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(homepageLink.href);
+      });
+      actions.appendChild(homepageLink);
+    }
+
+    const viewLink = doc.createElement("a");
+    applyMetaLinkStyle(viewLink, dark);
+    viewLink.href = "#";
+    viewLink.textContent = getString("references-panel-author-preview-view-papers");
+    viewLink.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.hideAuthorPreviewCard();
+      this.showAuthorPapersTab(authorInfo).catch(() => void 0);
+    });
+    actions.appendChild(viewLink);
+
+    if (actions.children.length) {
+      card.appendChild(actions);
+    }
+
+    card.style.display = "block";
+  }
+
+  private positionAuthorPreviewCard(card: HTMLDivElement, anchor: HTMLElement) {
+    const win = this.body.ownerDocument.defaultView || Zotero.getMainWindow();
+    const rect = anchor.getBoundingClientRect();
+    const spacing = 8;
+    const cardWidth = card.offsetWidth || 220;
+    const cardHeight = card.offsetHeight || 120;
+
+    let left = rect.right + spacing;
+    if (left + cardWidth > win.innerWidth - spacing) {
+      left = rect.left - cardWidth - spacing;
+    }
+    if (left < spacing) {
+      left = spacing;
+    }
+
+    let top = rect.top;
+    if (top + cardHeight > win.innerHeight - spacing) {
+      top = rect.bottom - cardHeight;
+    }
+    if (top < spacing) {
+      top = spacing;
+    }
+
+    card.style.left = `${Math.round(left)}px`;
+    card.style.top = `${Math.round(top)}px`;
+  }
+
+  private hideAuthorPreviewCard() {
+    this.cancelAuthorPreviewShow();
+    this.cancelAuthorPreviewHide();
+    this.authorPreviewAbort?.abort();
+    this.authorPreviewAbort = undefined;
+    this.authorPreviewCurrentKey = undefined;
+    this.authorPreviewAnchor = undefined;
+    if (this.authorPreviewCard) {
+      this.authorPreviewCard.style.display = "none";
+      this.authorPreviewCard.replaceChildren();
+    }
+  }
+
   private doHideTooltip() {
     // Clear show timeout
     if (this.abstractHoverTimeout) {
@@ -12912,7 +14503,8 @@ class InspireReferencePanelController {
 
     if (this.previewCard) {
       this.previewCard.style.display = "none";
-      this.previewCard.innerHTML = "";
+      // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
+      this.previewCard.replaceChildren();
     }
   }
 
@@ -12933,7 +14525,8 @@ class InspireReferencePanelController {
     const doc = card.ownerDocument;
 
     // Clear previous content
-    card.innerHTML = "";
+    // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
+    card.replaceChildren();
 
     // Build card content
     this.buildPreviewCardContent(card, entry, doc);
@@ -12957,6 +14550,7 @@ class InspireReferencePanelController {
     doc: Document,
   ) {
     const s = getCachedStrings();
+    const dark = isDarkMode();
 
     // Title
     const titleEl = doc.createElement("div");
@@ -13004,7 +14598,7 @@ class InspireReferencePanelController {
         const arxivLink = doc.createElement("a");
         arxivLink.href = `${ARXIV_ABS_URL}/${arxivDetails.id}`;
         arxivLink.textContent = `arXiv:${arxivDetails.id}`;
-        applyMetaLinkStyle(arxivLink);
+        applyMetaLinkStyle(arxivLink, dark);
         arxivLink.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -13024,7 +14618,7 @@ class InspireReferencePanelController {
         const doiLink = doc.createElement("a");
         doiLink.href = `${DOI_ORG_URL}/${entry.doi}`;
         doiLink.textContent = `DOI:${entry.doi}`;
-        applyMetaLinkStyle(doiLink);
+        applyMetaLinkStyle(doiLink, dark);
         doiLink.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -13063,6 +14657,7 @@ class InspireReferencePanelController {
   /**
    * FTR-HOVER-PREVIEW: Build the action row for preview card.
    * Shows local status indicator and action buttons (Add/Link/Unlink).
+   * Layout: [Buttons] --- [Status Indicator] (buttons closer to mouse for quick access)
    */
   private buildPreviewCardActionRow(
     card: HTMLDivElement,
@@ -13083,38 +14678,7 @@ class InspireReferencePanelController {
       borderTop: "1px solid var(--fill-quinary, #e2e8f0)",
     });
 
-    // Status indicator
-    const statusEl = doc.createElement("span");
-    statusEl.classList.add("zinspire-preview-card__status");
-    Object.assign(statusEl.style, {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "4px",
-      fontSize: "12px",
-      color: isLocal
-        ? "var(--accent-green, #10b981)"
-        : "var(--fill-secondary, #6b7280)",
-    });
-
-    const statusIcon = doc.createElement("span");
-    statusIcon.textContent = isLocal ? "●" : "○";
-    statusIcon.style.fontSize = "10px";
-    statusEl.appendChild(statusIcon);
-
-    const statusText = doc.createElement("span");
-    statusText.textContent = isLocal
-      ? getString("references-panel-status-local")
-      : getString("references-panel-status-online");
-    statusEl.appendChild(statusText);
-
-    actionRow.appendChild(statusEl);
-
-    // Spacer
-    const spacer = doc.createElement("span");
-    spacer.style.flex = "1";
-    actionRow.appendChild(spacer);
-
-    // Action button(s)
+    // Action button(s) - placed first (left side) for quick mouse access
     if (!isLocal) {
       // Not in library - show Add button
       if (entry.recid) {
@@ -13133,23 +14697,7 @@ class InspireReferencePanelController {
         actionRow.appendChild(addButton);
       }
     } else {
-      // In library - show Link/Unlink button
-      const isLinked = Boolean(entry.isRelated);
-      const linkButton = this.createPreviewActionButton(
-        doc,
-        isLinked
-          ? getString("references-panel-button-unlink")
-          : getString("references-panel-button-link"),
-        isLinked ? "unlink" : "link",
-      );
-      linkButton.addEventListener("click", async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        await this.handleLinkAction(entry, card);
-        // Update the action row after linking/unlinking
-        this.updatePreviewCardActionRow(card, entry);
-      });
-      actionRow.appendChild(linkButton);
+      // In library - show Open PDF, Select, then Link/Unlink (most used first)
 
       // Add "Open PDF" button if item has PDF attachment
       const pdfAttachmentID = this.getFirstPdfAttachmentID(entry.localItemID!);
@@ -13171,7 +14719,7 @@ class InspireReferencePanelController {
         actionRow.appendChild(pdfButton);
       }
 
-      // Also add "Select in Library" button
+      // "Select in Library" button
       const selectButton = this.createPreviewActionButton(
         doc,
         getString("references-panel-button-select"),
@@ -13196,7 +14744,56 @@ class InspireReferencePanelController {
         }
       });
       actionRow.appendChild(selectButton);
+
+      // Link/Unlink button
+      const isLinked = Boolean(entry.isRelated);
+      const linkButton = this.createPreviewActionButton(
+        doc,
+        isLinked
+          ? getString("references-panel-button-unlink")
+          : getString("references-panel-button-link"),
+        isLinked ? "unlink" : "link",
+      );
+      linkButton.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await this.handleLinkAction(entry, card);
+        // Update the action row after linking/unlinking
+        this.updatePreviewCardActionRow(card, entry);
+      });
+      actionRow.appendChild(linkButton);
     }
+
+    // Spacer
+    const spacer = doc.createElement("span");
+    spacer.style.flex = "1";
+    actionRow.appendChild(spacer);
+
+    // Status indicator - placed last (right side)
+    const statusEl = doc.createElement("span");
+    statusEl.classList.add("zinspire-preview-card__status");
+    Object.assign(statusEl.style, {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "4px",
+      fontSize: "12px",
+      color: isLocal
+        ? "var(--accent-green, #10b981)"
+        : "var(--fill-secondary, #6b7280)",
+    });
+
+    const statusIcon = doc.createElement("span");
+    statusIcon.textContent = isLocal ? "●" : "○";
+    statusIcon.style.fontSize = "10px";
+    statusEl.appendChild(statusIcon);
+
+    const statusText = doc.createElement("span");
+    statusText.textContent = isLocal
+      ? getString("references-panel-status-local")
+      : getString("references-panel-status-online");
+    statusEl.appendChild(statusText);
+
+    actionRow.appendChild(statusEl);
 
     card.appendChild(actionRow);
   }
@@ -13369,7 +14966,10 @@ class InspireReferencePanelController {
     this.hideAbstractTooltipImmediate();
 
     // Store pagination state (cap entries to prevent memory issues)
-    this.previewEntries = entryArray.slice(0, InspireReferencePanelController.MAX_PREVIEW_ENTRIES);
+    this.previewEntries = entryArray.slice(
+      0,
+      InspireReferencePanelController.MAX_PREVIEW_ENTRIES,
+    );
     this.previewCurrentIndex = 0;
     this.previewCurrentEntryId = entry.id;
     this.previewLabel = label;
@@ -13385,7 +14985,8 @@ class InspireReferencePanelController {
     );
 
     // Clear previous content
-    card.innerHTML = "";
+    // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
+    card.replaceChildren();
 
     // Build card content for current entry
     this.buildPreviewCardContent(card, entry, doc);
@@ -13441,7 +15042,10 @@ class InspireReferencePanelController {
       height: "24px",
       border: "1px solid var(--fill-quinary, #d1d1d5)",
       borderRadius: "4px",
-      backgroundColor: current <= 1 ? "var(--fill-quinary, #e0e0e0)" : "var(--material-background, #fff)",
+      backgroundColor:
+        current <= 1
+          ? "var(--fill-quinary, #e0e0e0)"
+          : "var(--material-background, #fff)",
       cursor: current <= 1 ? "default" : "pointer",
       fontSize: "14px",
       fontWeight: "bold",
@@ -13472,7 +15076,10 @@ class InspireReferencePanelController {
       height: "24px",
       border: "1px solid var(--fill-quinary, #d1d1d5)",
       borderRadius: "4px",
-      backgroundColor: current >= total ? "var(--fill-quinary, #e0e0e0)" : "var(--material-background, #fff)",
+      backgroundColor:
+        current >= total
+          ? "var(--fill-quinary, #e0e0e0)"
+          : "var(--material-background, #fff)",
       cursor: current >= total ? "default" : "pointer",
       fontSize: "14px",
       fontWeight: "bold",
@@ -13529,7 +15136,8 @@ class InspireReferencePanelController {
     const doc = card.ownerDocument;
 
     // Clear and rebuild content
-    card.innerHTML = "";
+    // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
+    card.replaceChildren();
     this.buildPreviewCardContent(card, entry, doc);
 
     // Rebuild pagination
@@ -13592,7 +15200,10 @@ class InspireReferencePanelController {
       // Calculate so the top of the card starts just below the button
       // Card bottom = viewportHeight - (rect.bottom + gap + cardMaxHeight)
       // But we want the bottom to be stable, so:
-      bottom = Math.max(gap, viewportHeight - rect.bottom - cardMaxHeight - gap);
+      bottom = Math.max(
+        gap,
+        viewportHeight - rect.bottom - cardMaxHeight - gap,
+      );
     }
 
     // Ensure card stays within viewport (top doesn't go off screen)
@@ -13861,19 +15472,8 @@ class InspireReferencePanelController {
     });
     this.batchToolbar.appendChild(this.batchImportButton);
 
-    // Insert batch toolbar after main toolbar, before chart
-    const chartContainer = this.body.querySelector(".zinspire-chart-container");
-    if (chartContainer) {
-      this.body.insertBefore(this.batchToolbar, chartContainer);
-      Zotero.debug(
-        `[${config.addonName}] createBatchToolbar: inserted before chart container`,
-      );
-    } else {
-      this.body.insertBefore(this.batchToolbar, this.listEl);
-      Zotero.debug(
-        `[${config.addonName}] createBatchToolbar: inserted before list element`,
-      );
-    }
+    // Insert batch toolbar after chart (before list), closer to the items it operates on
+    this.body.insertBefore(this.batchToolbar, this.listEl);
   }
 
   /**

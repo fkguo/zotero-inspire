@@ -292,3 +292,97 @@ export function clearAllHistoryPrefs(): void {
     Zotero.debug(`[${config.addonName}] Failed to clear history: ${err}`);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AbortController Utilities (FTR-ABORT-CONTROLLER-FIX)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get AbortController class that works in Zotero's environment.
+ *
+ * In Zotero plugins, AbortController may not be available in the global scope.
+ * This function tries multiple sources to find the AbortController class:
+ * 1. Global scope (if available)
+ * 2. Zotero main window (most reliable in Zotero 7)
+ *
+ * @returns AbortController class or null if not available
+ *
+ * @example
+ * const AC = getAbortControllerClass();
+ * const controller = AC ? new AC() : null;
+ */
+export function getAbortControllerClass(): typeof AbortController | null {
+  // Try global scope first
+  if (typeof AbortController !== "undefined") {
+    return AbortController;
+  }
+
+  // Try Zotero main window (most reliable in Zotero 7)
+  try {
+    const win = Zotero.getMainWindow();
+    if (win && (win as any).AbortController) {
+      return (win as any).AbortController;
+    }
+  } catch (err) {
+    Zotero.debug(
+      `[${config.addonName}] Failed to get AbortController from main window: ${err}`,
+    );
+  }
+
+  return null;
+}
+
+/**
+ * Create an AbortController instance or return undefined if not available.
+ * Convenience wrapper around getAbortControllerClass().
+ *
+ * @returns AbortController instance or undefined if not available
+ *
+ * @example
+ * const controller = createAbortController();
+ * if (controller) {
+ *   fetch(url, { signal: controller.signal });
+ * }
+ */
+export function createAbortController(): AbortController | undefined {
+  const AC = getAbortControllerClass();
+  return AC ? new AC() : undefined;
+}
+
+/**
+ * Create a mock AbortSignal for fallback when AbortController is not available.
+ * This allows code to continue executing even when cancellation is not supported.
+ *
+ * @returns Mock AbortSignal with minimal implementation
+ */
+export function createMockSignal(): AbortSignal {
+  return {
+    aborted: false,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+    onabort: null,
+    reason: undefined,
+    throwIfAborted: () => {},
+  } as unknown as AbortSignal;
+}
+
+/**
+ * Safely create an AbortController with signal, providing mock signal as fallback.
+ *
+ * @returns Object with controller (or undefined) and signal (real or mock)
+ *
+ * @example
+ * const { controller, signal } = createAbortControllerWithSignal();
+ * fetch(url, { signal }); // Always works, even if controller is undefined
+ */
+export function createAbortControllerWithSignal(): {
+  controller: AbortController | undefined;
+  signal: AbortSignal;
+} {
+  const controller = createAbortController();
+  return {
+    controller,
+    signal: controller?.signal || createMockSignal(),
+  };
+}

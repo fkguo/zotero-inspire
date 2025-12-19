@@ -124,4 +124,25 @@ pref-smart-update-protected-names-desc = Author names in this list will be prese
 pref-smart-update-protected-names-input =
     .placeholder = e.g., Meißner, Müller, O'Brien
 
+pref-preprint-watch = Preprint Watch
+pref-preprint-watch-enable =
+    .label = Enable preprint publication monitoring
+pref-preprint-watch-enable-desc = Detect unpublished arXiv preprints in your library and check if they have been published.
+pref-preprint-watch-startup =
+    .label = Check automatically on Zotero startup
+pref-preprint-watch-startup-desc = Checks once per day on the first startup. Skips if already checked within the last 24 hours.
+pref-preprint-watch-notify =
+    .label = Show notification when publications found
+pref-preprint-watch-notify-desc = Display a notification when preprints are found to have been published.
+
+pref-collab-tags = Collaboration Tags
+pref-collab-tag-enable =
+    .label = Enable collaboration tags
+pref-collab-tag-enable-desc = Automatically add tags based on INSPIRE collaboration information (e.g., ATLAS, CMS, LHCb).
+pref-collab-tag-auto =
+    .label = Add tags when updating/importing
+pref-collab-tag-auto-desc = Automatically add collaboration tags when items are updated from INSPIRE or imported.
+pref-collab-tag-template-label = Tag format:
+pref-collab-tag-template-desc = Use {"{name}"} for collaboration name. Examples: {"{name}"}, #collab/{"{name}"}, collab:{"{name}"}
+
 pref-help = { $name } Build { $version } { $time }

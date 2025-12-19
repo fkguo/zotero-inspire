@@ -3,7 +3,15 @@
 // Tests event emission, matching logic, and multi-entry pagination
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, beforeEach, vi, beforeAll, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  vi,
+  beforeAll,
+  afterEach,
+} from "vitest";
 import { LabelMatcher } from "../src/modules/inspire/pdfAnnotate/labelMatcher";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 import type {
@@ -27,7 +35,9 @@ beforeAll(() => {
 // Note: InspireReferenceEntry.authors is string[] (e.g., ["Guo, F.K.", "Chen, X."])
 // ─────────────────────────────────────────────────────────────────────────────
 
-function createMockEntry(overrides: Partial<InspireReferenceEntry> = {}): InspireReferenceEntry {
+function createMockEntry(
+  overrides: Partial<InspireReferenceEntry> = {},
+): InspireReferenceEntry {
   return {
     id: `entry-${Math.random().toString(36).slice(2, 8)}`,
     title: "Test Paper Title",
@@ -278,11 +288,17 @@ describe("LabelMatcher for Preview - Author-Year Citations", () => {
       expect(results.length).toBeGreaterThanOrEqual(1);
       // Should find entries with Guo and 2015
       const matchedEntries = results.map((r) => entries[r.entryIndex]);
-      expect(matchedEntries.some((e) => e.authors?.[0]?.includes("Guo"))).toBe(true);
+      expect(matchedEntries.some((e) => e.authors?.[0]?.includes("Guo"))).toBe(
+        true,
+      );
     });
 
     it("should match 'et al.' format label", () => {
-      const results = matcher.matchAuthorYear(["Guo", "2015", "Guo et al. 2015"]);
+      const results = matcher.matchAuthorYear([
+        "Guo",
+        "2015",
+        "Guo et al. 2015",
+      ]);
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -296,7 +312,9 @@ describe("LabelMatcher for Preview - Author-Year Citations", () => {
       const results = matcher.matchAuthorYear(["Weinberg", "Glashow", "2020"]);
       expect(results.length).toBeGreaterThanOrEqual(1);
       const matchedEntries = results.map((r) => entries[r.entryIndex]);
-      expect(matchedEntries.some((e) => e.authors?.[0]?.includes("Weinberg"))).toBe(true);
+      expect(
+        matchedEntries.some((e) => e.authors?.[0]?.includes("Weinberg")),
+      ).toBe(true);
     });
 
     it("should detect ambiguous matches (same author, same year)", () => {
@@ -523,11 +541,19 @@ describe("Preview Card Position Calculation", () => {
   const cardMaxHeight = 400;
   const gap = 8;
 
-  function calculatePosition(buttonRect: { top: number; left: number; bottom: number; right: number }) {
+  function calculatePosition(buttonRect: {
+    top: number;
+    left: number;
+    bottom: number;
+    right: number;
+  }) {
     const spaceAbove = buttonRect.top - gap;
     const spaceBelow = viewportHeight - buttonRect.bottom - gap;
 
-    let left = Math.max(gap, Math.min(buttonRect.left, viewportWidth - cardWidth - gap));
+    const left = Math.max(
+      gap,
+      Math.min(buttonRect.left, viewportWidth - cardWidth - gap),
+    );
     let bottom: number;
 
     if (spaceAbove >= cardMaxHeight || spaceAbove >= spaceBelow) {
@@ -535,7 +561,10 @@ describe("Preview Card Position Calculation", () => {
       bottom = viewportHeight - buttonRect.top + gap;
     } else {
       // Position below
-      bottom = Math.max(gap, viewportHeight - buttonRect.bottom - cardMaxHeight - gap);
+      bottom = Math.max(
+        gap,
+        viewportHeight - buttonRect.bottom - cardMaxHeight - gap,
+      );
     }
 
     // Clamp bottom value
@@ -601,9 +630,39 @@ describe("OverlayReferenceMapping", () => {
   it("should mark as reliable when enough overlays found", () => {
     const mapping: OverlayReferenceMapping = {
       labelToReference: new Map([
-        ["1", [{ index: 1, text: "Ref 1", chars: [], position: { pageIndex: 10, rects: [] } }]],
-        ["2", [{ index: 2, text: "Ref 2", chars: [], position: { pageIndex: 10, rects: [] } }]],
-        ["3", [{ index: 3, text: "Ref 3", chars: [], position: { pageIndex: 10, rects: [] } }]],
+        [
+          "1",
+          [
+            {
+              index: 1,
+              text: "Ref 1",
+              chars: [],
+              position: { pageIndex: 10, rects: [] },
+            },
+          ],
+        ],
+        [
+          "2",
+          [
+            {
+              index: 2,
+              text: "Ref 2",
+              chars: [],
+              position: { pageIndex: 10, rects: [] },
+            },
+          ],
+        ],
+        [
+          "3",
+          [
+            {
+              index: 3,
+              text: "Ref 3",
+              chars: [],
+              position: { pageIndex: 10, rects: [] },
+            },
+          ],
+        ],
       ]),
       totalMappedLabels: 3,
       totalCitationOverlays: 10,
@@ -617,9 +676,24 @@ describe("OverlayReferenceMapping", () => {
 
   it("should support multi-reference per label", () => {
     const refs: ZoteroOverlayReference[] = [
-      { index: 1, text: "Paper A", chars: [], position: { pageIndex: 10, rects: [] } },
-      { index: 1, text: "Paper B", chars: [], position: { pageIndex: 10, rects: [] } },
-      { index: 1, text: "Paper C", chars: [], position: { pageIndex: 10, rects: [] } },
+      {
+        index: 1,
+        text: "Paper A",
+        chars: [],
+        position: { pageIndex: 10, rects: [] },
+      },
+      {
+        index: 1,
+        text: "Paper B",
+        chars: [],
+        position: { pageIndex: 10, rects: [] },
+      },
+      {
+        index: 1,
+        text: "Paper C",
+        chars: [],
+        position: { pageIndex: 10, rects: [] },
+      },
     ];
 
     const mapping: OverlayReferenceMapping = {
@@ -654,7 +728,7 @@ describe("Abstract Fetch Race Condition Handling", () => {
   });
 
   it("should update when entry is still being shown", async () => {
-    let currentEntryId: string | undefined = "entry-1";
+    const currentEntryId: string | undefined = "entry-1";
     const fetchEntryId = currentEntryId;
 
     // Simulate fetch completing while same entry shown

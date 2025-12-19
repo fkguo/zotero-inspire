@@ -7,6 +7,13 @@ import {
   getReaderIntegration,
   recidLookupCache,
   MemoryMonitor,
+  findUnpublishedPreprints,
+  batchCheckPublicationStatus,
+  buildCheckSummary,
+  shouldRunBackgroundCheck,
+  updateLastCheckTime,
+  trackPreprintCandidates,
+  cleanupLegacyPreprintFiles,
 } from "./modules/inspire";
 import {
   ENRICH_BATCH_RANGE,
@@ -15,6 +22,11 @@ import {
 } from "./modules/inspire/enrichConfig";
 import { getPref, setPref } from "./utils/prefs";
 import { registerPrefsScripts } from "./modules/prefScript";
+
+// Track background timers for cleanup on shutdown (PERF-FIX-1)
+let purgeTimer: ReturnType<typeof setTimeout> | undefined;
+let preprintCheckTimer: ReturnType<typeof setTimeout> | undefined;
+let preprintCheckController: AbortController | undefined;
 
 async function onStartup() {
   await Promise.all([
@@ -35,14 +47,19 @@ async function onStartup() {
   // Expose console commands for debugging
   exposeConsoleCommands();
 
-  // Purge expired local cache entries in background after startup
-  setTimeout(() => {
+  // Purge expired local cache entries in background after startup (PERF-FIX-1: tracked timer)
+  purgeTimer = setTimeout(() => {
     localCache.purgeExpired().catch((err) => {
       Zotero.debug(
         `[${config.addonName}] Failed to purge expired cache: ${err}`,
       );
     });
   }, 10000); // Delay 10s to avoid startup contention
+
+  // FTR-PREPRINT-WATCH: Background preprint check on startup/daily (PERF-FIX-1: tracked timer)
+  preprintCheckTimer = setTimeout(() => {
+    runBackgroundPreprintCheck();
+  }, 30000); // Delay 30s to avoid startup contention
 }
 
 /**
@@ -65,13 +82,81 @@ function exposeConsoleCommands(): void {
   }
 }
 
+/**
+ * FTR-PREPRINT-WATCH: Run background preprint check based on preferences.
+ * Non-interactive, only shows notification if publications found.
+ */
+async function runBackgroundPreprintCheck(): Promise<void> {
+  // Abort previous background check if still running
+  preprintCheckController?.abort();
+  preprintCheckController = typeof AbortController !== "undefined"
+    ? new AbortController()
+    : undefined;
+  const signal = preprintCheckController?.signal;
+
+  try {
+    // Check if preprint watch is enabled
+    const enabled = getPref("preprint_watch_enabled" as any) as boolean;
+    if (!enabled) {
+      Zotero.debug(
+        `[${config.addonName}] Preprint watch disabled, skipping background check`,
+      );
+      return;
+    }
+
+    // Check if we should run based on timing preference
+    if (!shouldRunBackgroundCheck()) {
+      return;
+    }
+
+    Zotero.debug(`[${config.addonName}] Starting background preprint check`);
+
+    // Update last check time
+    updateLastCheckTime();
+
+    // Find unpublished preprints in library
+    const preprints = await findUnpublishedPreprints(undefined, undefined, {
+      signal,
+    });
+    if (signal?.aborted) return;
+    if (preprints.length === 0) {
+      Zotero.debug(
+        `[${config.addonName}] No unpublished preprints found in library`,
+      );
+      return;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] Found ${preprints.length} unpublished preprints, checking INSPIRE...`,
+    );
+
+    // Check publication status (updates unified cache internally)
+    const results = await batchCheckPublicationStatus(preprints, { signal });
+    if (signal?.aborted) return;
+    const summary = buildCheckSummary(results);
+
+    // If publications found, show results dialog for user to review and update
+    if (summary.published > 0) {
+      // Show results dialog through ZInspire instance
+      // This allows user to select which items to update
+      await _globalThis.inspire.showBackgroundPreprintResults(results);
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] Background preprint check completed: ${summary.published} published, ${summary.unpublished} unpublished, ${summary.errors} errors`,
+    );
+  } catch (err) {
+    Zotero.debug(
+      `[${config.addonName}] Background preprint check failed: ${err}`,
+    );
+  }
+}
+
 async function onMainWindowLoad(_win: Window): Promise<void> {
   // Create ztoolkit for every window
   addon.data.ztoolkit = createZToolkit();
 
   ZInspireReferencePane.registerPanel();
-
-  // UIExampleFactory.registerRightClickMenuItem();
 
   ZInsMenu.registerRightClickMenuPopup();
   ZInsMenu.registerRightClickCollectionMenu();
@@ -86,6 +171,18 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  // PERF-FIX-1: Clear tracked timers before shutdown
+  if (purgeTimer) {
+    clearTimeout(purgeTimer);
+    purgeTimer = undefined;
+  }
+  if (preprintCheckTimer) {
+    clearTimeout(preprintCheckTimer);
+    preprintCheckTimer = undefined;
+  }
+  preprintCheckController?.abort();
+  preprintCheckController = undefined;
+
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   ZInspireReferencePane.unregisterPanel();
@@ -107,21 +204,38 @@ function onShutdown(): void {
  */
 async function onNotify(
   event: string,
-  type: string,
+  _type: string,
   ids: Array<any>,
-  extraData: { [key: string]: any },
+  _extraData: { [key: string]: any },
 ) {
   // You can add your code to the corresponding notify type
   if (event === "add") {
+    // Filter to only regular items - skip annotations, attachments, notes
+    // PDF annotations trigger 'add' events but should not initiate INSPIRE lookups
+    const allItems = Zotero.Items.get(ids);
+    const regularItems = allItems.filter(
+      (item: Zotero.Item) => item && item.isRegularItem(),
+    );
+    if (regularItems.length === 0) {
+      return;
+    }
+
+    // Track potential preprint candidates to avoid full-library rescans later
+    trackPreprintCandidates(regularItems).catch((err) => {
+      Zotero.debug(
+        `[${config.addonName}] Failed to track preprint candidates: ${err}`,
+      );
+    });
+
     switch (getPref("meta")) {
       case "full":
-        _globalThis.inspire.updateItems(Zotero.Items.get(ids), "full");
+        _globalThis.inspire.updateItems(regularItems, "full");
         break;
       case "noabstract":
-        _globalThis.inspire.updateItems(Zotero.Items.get(ids), "noabstract");
+        _globalThis.inspire.updateItems(regularItems, "noabstract");
         break;
       case "citations":
-        _globalThis.inspire.updateItems(Zotero.Items.get(ids), "citations");
+        _globalThis.inspire.updateItems(regularItems, "citations");
         break;
       default:
         break;
@@ -309,6 +423,105 @@ function updateSmartUpdateControls(doc: Document, syncCheckbox = true) {
 }
 
 /**
+ * Update Collaboration Tags controls.
+ * - collab_tag_enable: main toggle (must be on for sub-options to work)
+ * - collab_tag_auto: auto-apply toggle
+ * - collab_tag_template: template input
+ *
+ * When disabled, sub-options are grayed out and non-interactive.
+ * Template input shows placeholder when empty (not "undefined").
+ */
+function updateCollabTagControls(doc: Document, syncCheckbox = true) {
+  const enableCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-collab_tag_enable",
+  ) as HTMLInputElement | null;
+
+  // Read current state - either from pref (on load) or from checkbox (on user click)
+  // Note: Zotero's preference binding auto-syncs checkbox to pref on user click,
+  // so we just need to read the current state, not set it again
+  const enabled = syncCheckbox
+    ? (getPref("collab_tag_enable") as boolean)
+    : (enableCheckbox?.checked ?? false);
+
+  if (enableCheckbox && syncCheckbox) {
+    enableCheckbox.checked = enabled;
+  }
+
+  // Sub-options that should be disabled when collab tags is off
+  const subControlIds = [
+    "zotero-prefpane-zoteroinspire-collab_tag_auto",
+    "zotero-prefpane-zoteroinspire-collab_tag_template",
+  ];
+
+  subControlIds.forEach((id) => {
+    const el = doc.getElementById(id) as HTMLInputElement | null;
+    if (!el) return;
+    el.disabled = !enabled;
+  });
+
+  // Handle template input: ensure "undefined" is not displayed, show placeholder instead
+  const templateInput = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-collab_tag_template",
+  ) as HTMLInputElement | null;
+  if (templateInput) {
+    const templateValue = getPref("collab_tag_template") as string;
+    // If value is undefined, null, or "undefined" string, clear it and show placeholder
+    if (
+      templateValue === undefined ||
+      templateValue === null ||
+      templateValue === "undefined"
+    ) {
+      templateInput.value = "";
+    }
+  }
+}
+
+/**
+ * Update Preprint Watch controls.
+ * - preprint_watch_enabled: main toggle (must be on for sub-options to work)
+ * - on_startup checkbox: whether to check on startup (once per day)
+ * - notify checkbox: whether to show notification
+ *
+ * Mapping for auto_check:
+ * - checkbox checked → pref = "daily" (check once per day on first startup)
+ * - checkbox unchecked → pref = "never" (manual only)
+ */
+function updatePreprintWatchControls(doc: Document, syncFromPref = true) {
+  const enabledCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-preprint_watch_enabled",
+  ) as HTMLInputElement | null;
+  const onStartupCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-preprint_watch_on_startup",
+  ) as HTMLInputElement | null;
+  const notifyCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-preprint_watch_notify",
+  ) as HTMLInputElement | null;
+
+  if (!enabledCheckbox || !onStartupCheckbox) return;
+
+  // Get main toggle state
+  const mainEnabled = enabledCheckbox.checked;
+
+  // Disable sub-options when main toggle is off
+  onStartupCheckbox.disabled = !mainEnabled;
+  if (notifyCheckbox) {
+    notifyCheckbox.disabled = !mainEnabled;
+  }
+
+  if (syncFromPref) {
+    // Initialize checkbox from pref value
+    const autoCheck = getPref("preprint_watch_auto_check" as any) as string;
+    // Both "startup" and "daily" mean the checkbox should be checked
+    // We treat them the same now (always limit to once per day)
+    onStartupCheckbox.checked = autoCheck !== "never";
+  } else {
+    // Update pref from checkbox state
+    const newValue = onStartupCheckbox.checked ? "daily" : "never";
+    setPref("preprint_watch_auto_check" as any, newValue);
+  }
+}
+
+/**
  * This function is just an example of dispatcher for Preference UI events.
  * Any operations should be placed in a function to keep this funcion clear.
  * @param type event type
@@ -327,6 +540,8 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         updateLocalCacheControls(doc);
         updatePDFParseControls(doc);
         updateSmartUpdateControls(doc);
+        updatePreprintWatchControls(doc);
+        updateCollabTagControls(doc);
         const enableCheckbox = doc.getElementById(
           "zotero-prefpane-zoteroinspire-local_cache_enable",
         ) as HTMLInputElement | null;
@@ -353,6 +568,26 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         ) as HTMLInputElement | null;
         smartUpdateCheckbox?.addEventListener("command", () => {
           updateSmartUpdateControls(doc, false);
+        });
+        // Preprint Watch checkbox listeners
+        const preprintEnabledCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-preprint_watch_enabled",
+        ) as HTMLInputElement | null;
+        const preprintOnStartupCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-preprint_watch_on_startup",
+        ) as HTMLInputElement | null;
+        preprintEnabledCheckbox?.addEventListener("command", () => {
+          updatePreprintWatchControls(doc, true); // sync from pref, update disabled state
+        });
+        preprintOnStartupCheckbox?.addEventListener("command", () => {
+          updatePreprintWatchControls(doc, false);
+        });
+        // Collab Tags enable checkbox listener
+        const collabTagCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-collab_tag_enable",
+        ) as HTMLInputElement | null;
+        collabTagCheckbox?.addEventListener("command", () => {
+          updateCollabTagControls(doc, false);
         });
         const batchInput = doc.getElementById(
           "zotero-prefpane-zoteroinspire-local_cache_enrich_batch",
@@ -516,35 +751,6 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
       return;
   }
 }
-
-// function onShortcuts(type: string) {
-// }
-
-// function onDialogEvents(type: string) {
-//   switch (type) {
-//     case "dialogExample":
-//       HelperExampleFactory.dialogExample();
-//       break;
-//     case "clipboardExample":
-//       HelperExampleFactory.clipboardExample();
-//       break;
-//     case "filePickerExample":
-//       HelperExampleFactory.filePickerExample();
-//       break;
-//     case "progressWindowExample":
-//       HelperExampleFactory.progressWindowExample();
-//       break;
-//     case "vtableExample":
-//       HelperExampleFactory.vtableExample();
-//       break;
-//     default:
-//       break;
-//   }
-// }
-
-// Add your hooks here. For element click, etc.
-// Keep in mind hooks only do dispatch. Don't add code that does real jobs in hooks.
-// Otherwise the code would be hard to read and maintian.
 
 export default {
   onStartup,

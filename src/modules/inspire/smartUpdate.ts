@@ -600,6 +600,7 @@ function isEmptyValue(value: any): boolean {
  * - Trim leading/trailing whitespace
  * - Collapse multiple spaces to single space
  * - Remove spaces around dots (J. R. → J.R.)
+ * - Normalize hyphens/spaces (Ulf-G. ≈ Ulf G.)
  */
 function normalizeNameForComparison(name: string): string {
   return name
@@ -607,6 +608,23 @@ function normalizeNameForComparison(name: string): string {
     .replace(/\s+/g, " ") // Collapse multiple spaces
     .replace(/\s*\.\s*/g, ".") // Remove spaces around dots: "J. R." → "J.R."
     .replace(/\s*-\s*/g, "-"); // Remove spaces around hyphens
+}
+
+/**
+ * Check if two name strings are equivalent considering hyphen/space variations.
+ * "Ulf-G." and "Ulf G." should be considered equivalent.
+ */
+function areNamesEquivalent(name1: string, name2: string): boolean {
+  if (name1.toLowerCase() === name2.toLowerCase()) return true;
+
+  // Normalize hyphens and spaces to a common form for comparison
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[-\s]+/g, " ") // Replace hyphens and spaces with single space
+      .trim();
+
+  return normalize(name1) === normalize(name2);
 }
 
 /**
@@ -672,17 +690,19 @@ function creatorsAreEqual(
       (r as any).name || r.lastName || "",
     );
 
-    // Check firstName: either exact match (case-insensitive) or diacritic equivalent
+    // Check firstName: exact match, diacritic equivalent, or hyphen/space equivalent
     if (
       localFirst.toLowerCase() !== inspireFirst.toLowerCase() &&
-      !isDiacriticEquivalent(localFirst, inspireFirst)
+      !isDiacriticEquivalent(localFirst, inspireFirst) &&
+      !areNamesEquivalent(localFirst, inspireFirst)
     ) {
       return false;
     }
-    // Check lastName: either exact match (case-insensitive) or diacritic equivalent
+    // Check lastName: exact match, diacritic equivalent, or hyphen/space equivalent
     if (
       localLast.toLowerCase() !== inspireLast.toLowerCase() &&
-      !isDiacriticEquivalent(localLast, inspireLast)
+      !isDiacriticEquivalent(localLast, inspireLast) &&
+      !areNamesEquivalent(localLast, inspireLast)
     ) {
       return false;
     }

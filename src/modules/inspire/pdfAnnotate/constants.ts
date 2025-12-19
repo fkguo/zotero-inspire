@@ -4,6 +4,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Debug mode switch for verbose logging.
+ * Set to true to enable detailed debug output in console.
+ * S-002: Centralized debug control for pdfAnnotate module.
+ */
+export const DEBUG_MODE = false;
+
+/**
  * Score thresholds for matching decisions.
  * Higher scores indicate better matches.
  */
@@ -42,6 +49,33 @@ export const SCORE = {
   JOURNAL_MATCH: 4,
   /** Marginal score threshold - scores <= this are weak (just author+year+small bonus) */
   MARGINAL_THRESHOLD: 7,
+} as const;
+
+/**
+ * Author scoring constants for Author-Year matching.
+ * N-001: Extracted magic numbers for author matching algorithm.
+ */
+export const AUTHOR_SCORE = {
+  /** Score for first author match (critical for identification) */
+  FIRST_AUTHOR_MATCH: 5,
+  /** Score for first author found in authorText field */
+  FIRST_AUTHOR_IN_TEXT: 4,
+  /** Multiplier for additional author matches */
+  ADDITIONAL_MULTIPLIER: 1.5,
+  /** Maximum score from additional author matches */
+  MAX_ADDITIONAL: 4,
+  /** Maximum score from authorText matches */
+  MAX_TEXT_MATCH: 3,
+  /** Bonus for exact author count match (without et al.) */
+  COUNT_MATCH_BONUS: 3,
+  /** Penalty for author count mismatch (without et al.) */
+  COUNT_MISMATCH_PENALTY: -5,
+  /** Bonus when entry has 3+ authors and citation uses "et al." */
+  ET_AL_MATCH_BONUS: 1,
+  /** Penalty when entry has ≤2 authors but citation uses "et al." */
+  ET_AL_MISMATCH_PENALTY: -3,
+  /** Threshold below which authorText scoring is applied */
+  TEXT_FALLBACK_THRESHOLD: 5,
 } as const;
 
 /**

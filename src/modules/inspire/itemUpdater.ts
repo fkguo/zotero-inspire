@@ -40,6 +40,21 @@ import {
   mergeCreatorsWithProtectedNames,
   type FieldChange,
 } from "./smartUpdate";
+import {
+  isUnpublishedPreprint,
+  findUnpublishedPreprints,
+  batchCheckPublicationStatus,
+  buildCheckSummary,
+  batchUpdatePreprints,
+  type PreprintCheckResult,
+  type PreprintCheckSummary,
+} from "./preprintWatchService";
+import {
+  isCollabTagEnabled,
+  isCollabTagAutoEnabled,
+  addCollabTagsToItem,
+  batchAddCollabTags,
+} from "./collabTagService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -57,6 +72,7 @@ export class ZInspire {
   error_norecid_shown: boolean;
   final_count_shown: boolean;
   progressWindow: ProgressWindowHelper;
+  private updateController: AbortController | null = null;
   private isCancelled: boolean = false;
   private escapeHandler?: (e: KeyboardEvent) => void;
 
@@ -164,6 +180,7 @@ export class ZInspire {
 
   cancelUpdate() {
     this.isCancelled = true;
+    this.updateController?.abort();
     this.removeEscapeListener();
   }
 
@@ -312,6 +329,12 @@ export class ZInspire {
   async updateItems(items: Zotero.Item[], operation: string) {
     this.resetState("initial");
     this.isCancelled = false;
+    // Abort any previous update run
+    this.updateController?.abort();
+    this.updateController = typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
+
     const filteredItems = items.filter((item) => item.isRegularItem());
     this.itemsToUpdate = filteredItems;
     this.toUpdate = filteredItems.length;
@@ -360,7 +383,11 @@ export class ZInspire {
         }
 
         try {
-          await this.updateItemInternal(item, operation);
+          await this.updateItemInternal(
+            item,
+            operation,
+            this.updateController?.signal,
+          );
         } catch (err) {
           Zotero.debug(
             `[${config.addonName}] updateItemsConcurrent: error updating item ${item.id}: ${err}`,
@@ -615,7 +642,11 @@ export class ZInspire {
   /**
    * Internal method to update a single item (used by concurrent processor)
    */
-  private async updateItemInternal(item: Zotero.Item, operation: string) {
+  private async updateItemInternal(
+    item: Zotero.Item,
+    operation: string,
+    signal?: AbortSignal,
+  ) {
     Zotero.debug(
       `[${config.addonName}] updateItemInternal: starting, item=${item.id}, operation=${operation}`,
     );
@@ -627,7 +658,7 @@ export class ZInspire {
       Zotero.debug(
         `[${config.addonName}] updateItemInternal: calling getInspireMeta`,
       );
-      const metaInspire = await getInspireMeta(item, operation);
+      const metaInspire = await getInspireMeta(item, operation, signal);
       Zotero.debug(
         `[${config.addonName}] updateItemInternal: getInspireMeta returned, recid=${metaInspire !== -1 ? (metaInspire as jsobject).recid : "N/A"}`,
       );
@@ -1071,6 +1102,759 @@ export class ZInspire {
     const matches = content.match(/@\w+\s*\{/g);
     return matches ? matches.length : 0;
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Preprint Watch Methods (FTR-PREPRINT-WATCH)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Show results from background preprint check.
+   * Called from hooks.ts when background check finds published preprints.
+   * This allows users to review and update items even from automatic checks.
+   */
+  async showBackgroundPreprintResults(
+    results: PreprintCheckResult[],
+  ): Promise<void> {
+    const summary = buildCheckSummary(results);
+    const { selectedItemIDs, cancelled } =
+      await this.showPreprintCheckResultsDialog(summary);
+
+    if (cancelled || selectedItemIDs.length === 0) return;
+
+    // Filter results to only selected items
+    const selectedResults = summary.results.filter(
+      (r) => selectedItemIDs.includes(r.itemID) && r.status === "published",
+    );
+
+    // Perform updates
+    const updateResult = await batchUpdatePreprints(selectedResults);
+
+    // Show completion notification
+    this.showPreprintNotification(
+      getString("preprint-update-success" as any, {
+        args: { count: updateResult.success },
+      }),
+      "success",
+    );
+  }
+
+  /**
+   * Check preprint status for selected items.
+   * Main entry point from item context menu.
+   */
+  async checkSelectedItemsPreprints(): Promise<void> {
+    Zotero.debug(`[${config.addonName}] checkSelectedItemsPreprints: starting`);
+
+    try {
+      const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
+      Zotero.debug(
+        `[${config.addonName}] checkSelectedItemsPreprints: selected ${items.length} items`,
+      );
+
+      if (!items.length) {
+        Zotero.debug(
+          `[${config.addonName}] checkSelectedItemsPreprints: no items selected, returning`,
+        );
+        return;
+      }
+
+      // Filter to unpublished preprints only
+      const preprints = items.filter((item) => {
+        const result = isUnpublishedPreprint(item);
+        Zotero.debug(
+          `[${config.addonName}] isUnpublishedPreprint for "${item.getField("title")}": ${result}, itemType=${item.itemType}, journalAbbrev="${item.getField("journalAbbreviation")}", DOI="${item.getField("DOI")}"`,
+        );
+        return result;
+      });
+
+      Zotero.debug(
+        `[${config.addonName}] checkSelectedItemsPreprints: found ${preprints.length} unpublished preprints`,
+      );
+
+      if (preprints.length === 0) {
+        Zotero.debug(
+          `[${config.addonName}] checkSelectedItemsPreprints: no preprints, showing notification`,
+        );
+        this.showPreprintNotification(
+          getString("preprint-no-preprints" as any),
+          "default",
+        );
+        return;
+      }
+
+      await this.checkPreprintsWithProgressAndDialog(preprints);
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] checkSelectedItemsPreprints error: ${err}`,
+      );
+    }
+  }
+
+  /**
+   * Check preprints in selected collection.
+   * Entry point from collection context menu.
+   */
+  async checkPreprintsInCollection(): Promise<void> {
+    Zotero.debug(`[${config.addonName}] checkPreprintsInCollection: starting`);
+    const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
+    if (!collection) {
+      Zotero.debug(
+        `[${config.addonName}] checkPreprintsInCollection: no collection selected`,
+      );
+      return;
+    }
+
+    // Show scanning progress
+    Zotero.debug(
+      `[${config.addonName}] checkPreprintsInCollection: showing scan progress`,
+    );
+    const scanProgress = new ProgressWindowHelper(config.addonName);
+    scanProgress.createLine({
+      icon: PLUGIN_ICON,
+      text: getString("preprint-check-scanning" as any),
+      progress: 0,
+    });
+    scanProgress.show(-1);
+
+    try {
+      const preprints = await findUnpublishedPreprints(
+        collection.libraryID,
+        collection.id,
+      );
+      scanProgress.close();
+      Zotero.debug(
+        `[${config.addonName}] checkPreprintsInCollection: found ${preprints.length} preprints`,
+      );
+
+      if (preprints.length === 0) {
+        this.showPreprintNotification(
+          getString("preprint-no-preprints" as any),
+          "default",
+        );
+        return;
+      }
+
+      await this.checkPreprintsWithProgressAndDialog(preprints);
+    } catch (err) {
+      scanProgress.close();
+      Zotero.debug(
+        `[${config.addonName}] checkPreprintsInCollection error: ${err}`,
+      );
+    }
+  }
+
+  /**
+   * Check all preprints in user library.
+   * Entry point from collection context menu.
+   */
+  async checkAllPreprintsInLibrary(): Promise<void> {
+    Zotero.debug(`[${config.addonName}] checkAllPreprintsInLibrary: starting`);
+
+    // Show scanning progress
+    const scanProgress = new ProgressWindowHelper(config.addonName);
+    scanProgress.createLine({
+      icon: PLUGIN_ICON,
+      text: getString("preprint-check-scanning" as any),
+      progress: 0,
+    });
+    scanProgress.show(-1);
+
+    try {
+      const preprints = await findUnpublishedPreprints();
+      scanProgress.close();
+      Zotero.debug(
+        `[${config.addonName}] checkAllPreprintsInLibrary: found ${preprints.length} preprints`,
+      );
+
+      if (preprints.length === 0) {
+        this.showPreprintNotification(
+          getString("preprint-no-preprints" as any),
+          "default",
+        );
+        return;
+      }
+
+      await this.checkPreprintsWithProgressAndDialog(preprints);
+    } catch (err) {
+      scanProgress.close();
+      Zotero.debug(
+        `[${config.addonName}] checkAllPreprintsInLibrary error: ${err}`,
+      );
+    }
+  }
+
+  /**
+   * Check preprints with progress display and results dialog.
+   * Shared implementation for all check entry points.
+   */
+  private async checkPreprintsWithProgressAndDialog(
+    preprints: Zotero.Item[],
+  ): Promise<void> {
+    Zotero.debug(
+      `[${config.addonName}] checkPreprintsWithProgressAndDialog: starting with ${preprints.length} preprints`,
+    );
+
+    // Get AbortController from main window (may not be available in all contexts)
+    let AbortControllerClass =
+      typeof AbortController !== "undefined" ? AbortController : null;
+    if (!AbortControllerClass) {
+      const win = Zotero.getMainWindow();
+      if (win && (win as any).AbortController) {
+        AbortControllerClass = (win as any).AbortController;
+      }
+    }
+
+    const abortController = AbortControllerClass
+      ? new AbortControllerClass()
+      : null;
+
+    this.isCancelled = false;
+    this.setupEscapeListener();
+
+    // Override cancel handler to also abort the controller
+    const originalCancelUpdate = this.cancelUpdate.bind(this);
+    this.cancelUpdate = () => {
+      abortController?.abort();
+      originalCancelUpdate();
+    };
+
+    const progressWindow = new ProgressWindowHelper(config.addonName);
+    progressWindow.createLine({
+      icon: PLUGIN_ICON,
+      text: getString("preprint-check-progress" as any, {
+        args: { current: 0, total: preprints.length },
+      }),
+      progress: 0,
+    });
+    progressWindow.show(-1);
+    Zotero.debug(
+      `[${config.addonName}] checkPreprintsWithProgressAndDialog: progress window shown`,
+    );
+
+    try {
+      const results = await batchCheckPublicationStatus(preprints, {
+        signal: abortController?.signal,
+        onProgress: (current, total, _found) => {
+          // Also check isCancelled flag for environments without AbortController
+          if (this.isCancelled) return;
+          progressWindow.changeLine({
+            icon: PLUGIN_ICON,
+            text: getString("preprint-check-progress" as any, {
+              args: { current, total },
+            }),
+            progress: Math.round((current / total) * 100),
+          });
+        },
+      });
+      // Note: batchCheckPublicationStatus updates cache internally
+
+      Zotero.debug(
+        `[${config.addonName}] checkPreprintsWithProgressAndDialog: check completed, closing progress`,
+      );
+      progressWindow.close();
+      this.removeEscapeListener();
+
+      if (this.isCancelled) {
+        this.showPreprintNotification(
+          getString("preprint-check-cancelled" as any),
+          "fail",
+        );
+        return;
+      }
+
+      const summary = buildCheckSummary(results);
+      const { selectedItemIDs, cancelled } =
+        await this.showPreprintCheckResultsDialog(summary);
+
+      if (cancelled || selectedItemIDs.length === 0) return;
+
+      // Filter results to only selected items
+      const selectedResults = summary.results.filter(
+        (r) => selectedItemIDs.includes(r.itemID) && r.status === "published",
+      );
+
+      // Perform updates
+      const updateResult = await batchUpdatePreprints(selectedResults);
+
+      // Show completion notification
+      this.showPreprintNotification(
+        getString("preprint-update-success" as any, {
+          args: { count: updateResult.success },
+        }),
+        "success",
+      );
+    } catch (err: any) {
+      progressWindow.close();
+      this.removeEscapeListener();
+      if (err.name === "AbortError") {
+        this.showPreprintNotification(
+          getString("preprint-check-cancelled" as any),
+          "fail",
+        );
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] checkPreprintsWithProgressAndDialog error: ${err}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Show preprint check results dialog.
+   * Allows user to select which items to update.
+   */
+  private async showPreprintCheckResultsDialog(
+    summary: PreprintCheckSummary,
+  ): Promise<{ selectedItemIDs: number[]; cancelled: boolean }> {
+    return new Promise((resolve) => {
+      const win = Zotero.getMainWindow();
+      if (!win) {
+        resolve({ selectedItemIDs: [], cancelled: true });
+        return;
+      }
+
+      const doc = win.document;
+      const publishedResults = summary.results.filter(
+        (r) => r.status === "published" && r.publicationInfo,
+      );
+
+      // If no published items found, show simple notification
+      if (publishedResults.length === 0) {
+        this.showPreprintNotification(
+          getString("preprint-all-current" as any),
+          "default",
+        );
+        resolve({ selectedItemIDs: [], cancelled: false });
+        return;
+      }
+
+      // Create overlay
+      const overlay = doc.createElement("div");
+      overlay.id = "zinspire-preprint-results-overlay";
+      overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        z-index: 10000; background-color: rgba(0, 0, 0, 0.4);
+        display: flex; align-items: center; justify-content: center;
+      `;
+
+      // Create panel
+      const panel = doc.createElement("div");
+      panel.style.cssText = `
+        background-color: var(--material-background, #fff);
+        color: var(--fill-primary, #000);
+        border: 1px solid var(--fill-quinary, #ccc);
+        border-radius: 8px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+        display: flex; flex-direction: column; font-size: 13px;
+        max-width: 600px; width: 90%; max-height: 70vh; overflow: hidden;
+      `;
+      overlay.appendChild(panel);
+
+      // Header
+      const header = doc.createElement("div");
+      header.style.cssText = `
+        padding: 12px 16px; font-weight: 600; font-size: 14px;
+        border-bottom: 1px solid var(--fill-quinary, #eee);
+        background-color: var(--material-sidepane, #f5f5f5);
+        border-radius: 8px 8px 0 0;
+      `;
+      header.textContent = getString("preprint-found-published" as any, {
+        args: { count: publishedResults.length },
+      });
+      panel.appendChild(header);
+
+      // Summary bar
+      const summaryBar = doc.createElement("div");
+      summaryBar.style.cssText = `
+        padding: 8px 16px; font-size: 12px;
+        color: var(--fill-secondary, #666);
+        border-bottom: 1px solid var(--fill-quinary, #eee);
+        display: flex; gap: 16px;
+      `;
+      summaryBar.innerHTML = `
+        <span>${getString("preprint-results-published" as any)}: ${summary.published}</span>
+        <span>${getString("preprint-results-unpublished" as any)}: ${summary.unpublished}</span>
+        <span>${getString("preprint-results-errors" as any)}: ${summary.errors}</span>
+      `;
+      panel.appendChild(summaryBar);
+
+      // List container
+      const listContainer = doc.createElement("div");
+      listContainer.style.cssText = `flex: 1; overflow-y: auto; padding: 8px 16px;`;
+      panel.appendChild(listContainer);
+
+      // Track selected items (all selected by default)
+      const selectedIDs = new Set<number>(
+        publishedResults.map((r) => r.itemID),
+      );
+
+      // Create rows for each published item using DocumentFragment for batching
+      const fragment = doc.createDocumentFragment();
+      for (const result of publishedResults) {
+        const row = this.createPreprintResultRow(doc, result, selectedIDs);
+        fragment.appendChild(row);
+      }
+      listContainer.appendChild(fragment);
+
+      // Actions bar
+      const actions = doc.createElement("div");
+      actions.style.cssText = `
+        padding: 12px 16px; display: flex; justify-content: space-between;
+        align-items: center; gap: 8px;
+        border-top: 1px solid var(--fill-quinary, #eee);
+        background-color: var(--material-sidepane, #f5f5f5);
+        border-radius: 0 0 8px 8px;
+      `;
+
+      // Select all checkbox
+      const selectAllContainer = doc.createElement("label");
+      selectAllContainer.style.cssText = `display: flex; align-items: center; gap: 6px; cursor: pointer;`;
+      const selectAllCheckbox = doc.createElement("input");
+      selectAllCheckbox.type = "checkbox";
+      selectAllCheckbox.checked = true;
+      selectAllCheckbox.addEventListener("change", () => {
+        const checkboxes = listContainer.querySelectorAll(
+          'input[type="checkbox"]',
+        );
+        checkboxes.forEach((cb: any) => {
+          cb.checked = selectAllCheckbox.checked;
+          const itemID = parseInt(cb.dataset.itemId, 10);
+          if (selectAllCheckbox.checked) {
+            selectedIDs.add(itemID);
+          } else {
+            selectedIDs.delete(itemID);
+          }
+        });
+      });
+      selectAllContainer.appendChild(selectAllCheckbox);
+      selectAllContainer.appendChild(
+        doc.createTextNode(getString("preprint-select-all" as any)),
+      );
+      actions.appendChild(selectAllContainer);
+
+      // Button container
+      const buttonContainer = doc.createElement("div");
+      buttonContainer.style.cssText = `display: flex; gap: 8px;`;
+
+      // Cancel button
+      const cancelBtn = doc.createElement("button");
+      cancelBtn.textContent = getString("preprint-cancel" as any);
+      cancelBtn.style.cssText = `
+        padding: 6px 16px; min-width: 80px;
+        border: 1px solid var(--fill-quinary, #ccc);
+        border-radius: 4px; background-color: var(--material-background, #fff);
+        cursor: pointer; font-size: 13px;
+      `;
+      buttonContainer.appendChild(cancelBtn);
+
+      // Update button
+      const updateBtn = doc.createElement("button");
+      updateBtn.textContent = getString("preprint-update-selected" as any);
+      updateBtn.style.cssText = `
+        padding: 6px 16px; min-width: 80px; border: none;
+        border-radius: 4px; background-color: #0066cc; color: #fff;
+        cursor: pointer; font-size: 13px; font-weight: 500;
+      `;
+      buttonContainer.appendChild(updateBtn);
+      actions.appendChild(buttonContainer);
+      panel.appendChild(actions);
+
+      // Add to document
+      doc.documentElement.appendChild(overlay);
+
+      // Event handlers
+      let isFinished = false;
+      const finish = (cancelled: boolean) => {
+        if (isFinished) return;
+        isFinished = true;
+        overlay.remove();
+        doc.removeEventListener("keydown", onKeyDown, true);
+        resolve({
+          selectedItemIDs: cancelled ? [] : Array.from(selectedIDs),
+          cancelled,
+        });
+      };
+
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          finish(true);
+        }
+      };
+
+      cancelBtn.addEventListener("click", () => finish(true));
+      updateBtn.addEventListener("click", () => finish(false));
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) finish(true);
+      });
+      doc.addEventListener("keydown", onKeyDown, true);
+    });
+  }
+
+  /**
+   * Create a row for a single preprint result item.
+   */
+  private createPreprintResultRow(
+    doc: Document,
+    result: PreprintCheckResult,
+    selectedIDs: Set<number>,
+  ): HTMLElement {
+    const row = doc.createElement("div");
+    row.style.cssText = `
+      display: flex; align-items: flex-start; padding: 10px;
+      margin-bottom: 8px; border-radius: 6px;
+      background-color: var(--material-background, #fafafa);
+      border: 1px solid var(--fill-quinary, #e0e0e0);
+    `;
+
+    // Checkbox
+    const checkbox = doc.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.dataset.itemId = String(result.itemID);
+    checkbox.style.cssText = `margin-right: 10px; margin-top: 3px; cursor: pointer;`;
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedIDs.add(result.itemID);
+      } else {
+        selectedIDs.delete(result.itemID);
+      }
+    });
+    row.appendChild(checkbox);
+
+    // Content
+    const content = doc.createElement("div");
+    content.style.cssText = `flex: 1; min-width: 0;`;
+
+    // Title
+    const titleDiv = doc.createElement("div");
+    titleDiv.style.cssText = `font-weight: 500; margin-bottom: 4px; word-break: break-word;`;
+    titleDiv.textContent = result.title || `arXiv:${result.arxivId}`;
+    content.appendChild(titleDiv);
+
+    // Publication info
+    if (result.publicationInfo) {
+      const pubInfo = result.publicationInfo;
+      const infoDiv = doc.createElement("div");
+      infoDiv.style.cssText = `font-size: 12px; color: var(--fill-secondary, #666);`;
+
+      const journalInfo = [
+        pubInfo.journalTitle,
+        pubInfo.volume,
+        pubInfo.pageStart ? `${pubInfo.pageStart}` : null,
+        pubInfo.year ? `(${pubInfo.year})` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      infoDiv.innerHTML = `
+        <div style="color: #16a34a; margin-bottom: 2px;">\u2192 ${journalInfo}</div>
+        ${pubInfo.doi ? `<div>DOI: ${pubInfo.doi}</div>` : ""}
+      `;
+      content.appendChild(infoDiv);
+    }
+
+    row.appendChild(content);
+    return row;
+  }
+
+  /**
+   * Show a notification for preprint operations.
+   */
+  private showPreprintNotification(
+    text: string,
+    type: "success" | "fail" | "default",
+  ): void {
+    Zotero.debug(
+      `[${config.addonName}] showPreprintNotification: "${text}", type=${type}`,
+    );
+    const progressWindow = new ProgressWindowHelper(config.addonName);
+    const icon =
+      type === "fail" ? "chrome://zotero/skin/cross.png" : PLUGIN_ICON;
+    progressWindow.createLine({
+      text,
+      icon,
+      type: type === "default" ? "success" : type,
+    });
+    progressWindow.show();
+    progressWindow.startCloseTimer(2500);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Collaboration Tags Methods (FTR-COLLAB-TAGS)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Add collaboration tags to selected items.
+   * Entry point from item context menu.
+   */
+  async addCollabTagsToSelection(): Promise<void> {
+    Zotero.debug(`[${config.addonName}] addCollabTagsToSelection: starting`);
+
+    if (!isCollabTagEnabled()) {
+      this.showCollabTagNotification(
+        getString("collab-tag-disabled" as any),
+        "fail",
+      );
+      return;
+    }
+
+    const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
+    const regularItems = items.filter((item) => item?.isRegularItem());
+
+    if (!regularItems.length) {
+      this.showCollabTagNotification(
+        getString("collab-tag-no-selection" as any),
+        "fail",
+      );
+      return;
+    }
+
+    // Show progress
+    const progressWindow = new ProgressWindowHelper(config.addonName);
+    progressWindow.createLine({
+      icon: PLUGIN_ICON,
+      text: getString("collab-tag-progress" as any),
+      progress: 0,
+    });
+    progressWindow.show(-1);
+
+    try {
+      const result = await batchAddCollabTags(regularItems, (done, total) => {
+        progressWindow.changeLine({
+          icon: PLUGIN_ICON,
+          text: getString("collab-tag-progress" as any),
+          progress: Math.round((done / total) * 100),
+        });
+      });
+
+      progressWindow.close();
+
+      // Show result notification
+      this.showCollabTagNotification(
+        getString("collab-tag-result" as any, {
+          args: {
+            added: result.added,
+            updated: result.updated,
+            skipped: result.skipped,
+          },
+        }),
+        result.added > 0 || result.updated > 0 ? "success" : "default",
+      );
+    } catch (err) {
+      progressWindow.close();
+      Zotero.debug(
+        `[${config.addonName}] addCollabTagsToSelection error: ${err}`,
+      );
+      this.showCollabTagNotification(
+        getString("collab-tag-result" as any, {
+          args: { added: 0, updated: 0, skipped: 0 },
+        }),
+        "fail",
+      );
+    }
+  }
+
+  /**
+   * Reapply collaboration tags to all items in selected collection.
+   * Entry point from collection context menu.
+   */
+  async reapplyCollabTagsToCollection(): Promise<void> {
+    Zotero.debug(
+      `[${config.addonName}] reapplyCollabTagsToCollection: starting`,
+    );
+
+    if (!isCollabTagEnabled()) {
+      this.showCollabTagNotification(
+        getString("collab-tag-disabled" as any),
+        "fail",
+      );
+      return;
+    }
+
+    const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
+    if (!collection) {
+      this.showCollabTagNotification(
+        getString("collab-tag-no-selection" as any),
+        "fail",
+      );
+      return;
+    }
+
+    const items = collection
+      .getChildItems()
+      .filter((item) => item?.isRegularItem());
+
+    if (!items.length) {
+      this.showCollabTagNotification(
+        getString("collab-tag-no-selection" as any),
+        "fail",
+      );
+      return;
+    }
+
+    // Show progress
+    const progressWindow = new ProgressWindowHelper(config.addonName);
+    progressWindow.createLine({
+      icon: PLUGIN_ICON,
+      text: getString("collab-tag-progress" as any),
+      progress: 0,
+    });
+    progressWindow.show(-1);
+
+    try {
+      const result = await batchAddCollabTags(items, (done, total) => {
+        progressWindow.changeLine({
+          icon: PLUGIN_ICON,
+          text: getString("collab-tag-progress" as any),
+          progress: Math.round((done / total) * 100),
+        });
+      });
+
+      progressWindow.close();
+
+      // Show result notification
+      this.showCollabTagNotification(
+        getString("collab-tag-result" as any, {
+          args: {
+            added: result.added,
+            updated: result.updated,
+            skipped: result.skipped,
+          },
+        }),
+        result.added > 0 || result.updated > 0 ? "success" : "default",
+      );
+    } catch (err) {
+      progressWindow.close();
+      Zotero.debug(
+        `[${config.addonName}] reapplyCollabTagsToCollection error: ${err}`,
+      );
+      this.showCollabTagNotification(
+        getString("collab-tag-result" as any, {
+          args: { added: 0, updated: 0, skipped: 0 },
+        }),
+        "fail",
+      );
+    }
+  }
+
+  /**
+   * Show a notification for collaboration tag operations.
+   */
+  private showCollabTagNotification(
+    text: string,
+    type: "success" | "fail" | "default",
+  ): void {
+    const progressWindow = new ProgressWindowHelper(config.addonName);
+    const icon =
+      type === "fail" ? "chrome://zotero/skin/cross.png" : PLUGIN_ICON;
+    progressWindow.createLine({
+      text,
+      icon,
+      type: type === "default" ? "success" : type,
+    });
+    progressWindow.show();
+    progressWindow.startCloseTimer(3000);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1094,6 +1878,15 @@ export async function setInspireMeta(
       if (metaInspire.journalAbbreviation) {
         if (item.itemType === "journalArticle") {
           item.setField("journalAbbreviation", metaInspire.journalAbbreviation);
+          // Also update publicationTitle for better display in Zotero UI
+          // Set to journal name if currently empty or contains arXiv info
+          if (
+            !publication ||
+            publication.startsWith("arXiv:") ||
+            publication.toLowerCase().includes("arxiv")
+          ) {
+            item.setField("publicationTitle", metaInspire.journalAbbreviation);
+          }
         } else if (
           metaInspire.document_type[0] === "book" &&
           item.itemType === "book"
@@ -1182,7 +1975,11 @@ export async function setInspireMeta(
           if (item.itemType == "journalArticle") {
             item.setField("journalAbbreviation", arXivInfo);
           }
-          if (publication.startsWith("arXiv:")) {
+          // Clear publicationTitle if it contains arXiv info (unpublished preprint should have empty Publication field)
+          if (
+            publication.startsWith("arXiv:") ||
+            publication.toLowerCase().includes("arxiv")
+          ) {
             item.setField("publicationTitle", "");
           }
         }
@@ -1200,6 +1997,11 @@ export async function setInspireMeta(
           "\n" +
           "tex.collaboration: " +
           metaInspire.collaborations.join(", ");
+      }
+
+      // Auto-add collaboration tags (FTR-COLLAB-TAGS)
+      if (isCollabTagAutoEnabled() && metaInspire.collaborations) {
+        await addCollabTagsToItem(item, metaInspire.collaborations, false);
       }
 
       extra = setCitations(
@@ -1277,6 +2079,18 @@ export async function setInspireMetaSelective(
               "journalAbbreviation",
               metaInspire.journalAbbreviation,
             );
+            // Also update publicationTitle for better display in Zotero UI
+            // Set to journal name if currently empty or contains arXiv info
+            if (
+              !publication ||
+              publication.startsWith("arXiv:") ||
+              publication.toLowerCase().includes("arxiv")
+            ) {
+              item.setField(
+                "publicationTitle",
+                metaInspire.journalAbbreviation,
+              );
+            }
           } else if (
             metaInspire.document_type?.[0] === "book" &&
             item.itemType === "book"
@@ -1397,8 +2211,13 @@ export async function setInspireMetaSelective(
           extra = extra.replace(/^.*(arXiv:|_eprint:).*$/gim, arXivInfo);
         }
 
-        // Clear publicationTitle if it contains old arXiv info
-        if (publication.startsWith("arXiv:")) {
+        // Clear publicationTitle if it contains arXiv info AND no journal info
+        // (unpublished preprint should have empty Publication field)
+        if (
+          !metaInspire.journalAbbreviation &&
+          (publication.startsWith("arXiv:") ||
+            publication.toLowerCase().includes("arxiv"))
+        ) {
           item.setField("publicationTitle", "");
         }
         // Set URL if empty
@@ -1421,6 +2240,15 @@ export async function setInspireMetaSelective(
           "\n" +
           "tex.collaboration: " +
           metaInspire.collaborations.join(", ");
+      }
+
+      // Auto-add collaboration tags (FTR-COLLAB-TAGS)
+      if (
+        allowedFields.has("collaboration") &&
+        isCollabTagAutoEnabled() &&
+        metaInspire.collaborations
+      ) {
+        await addCollabTagsToItem(item, metaInspire.collaborations, false);
       }
 
       // Citations (always update if in allowed list)

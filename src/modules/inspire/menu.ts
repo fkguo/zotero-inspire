@@ -66,6 +66,7 @@ export class ZInsMenu {
     ];
 
     if (isItem) {
+      // Copy actions for items
       children.push(
         { tag: "menuseparator" },
         {
@@ -101,6 +102,75 @@ export class ZInsMenu {
           label: getString("menuitem-copy-zotero-link"),
           commandListener: () => {
             _globalThis.inspire.copyZoteroLink();
+          },
+        },
+        // Collaboration tags for selected items (FTR-COLLAB-TAGS)
+        { tag: "menuseparator" },
+        {
+          tag: "menuitem",
+          // Cast to any to handle type generation timing
+          label: getString("collab-tag-menu-add" as any),
+          commandListener: () => {
+            _globalThis.inspire.addCollabTagsToSelection?.();
+          },
+        },
+        // Preprint check for selected items (FTR-PREPRINT-WATCH)
+        { tag: "menuseparator" },
+        {
+          tag: "menuitem",
+          // Cast to any to handle type generation timing - these strings are defined in addon.ftl
+          label: getString("preprint-check-menu" as any),
+          commandListener: () => {
+            _globalThis.inspire.checkSelectedItemsPreprints?.();
+          },
+        },
+      );
+    } else {
+      // Collection-specific actions (FTR-PREPRINT-WATCH)
+      children.push(
+        { tag: "menuseparator" },
+        {
+          tag: "menuitem",
+          // Cast to any to handle type generation timing
+          label: getString("preprint-check-collection-menu" as any),
+          commandListener: async () => {
+            Zotero.debug(
+              "[zotero-inspire] Menu: checkPreprintsInCollection clicked",
+            );
+            try {
+              await _globalThis.inspire.checkPreprintsInCollection();
+            } catch (err) {
+              Zotero.debug(
+                `[zotero-inspire] Menu: checkPreprintsInCollection error: ${err}`,
+              );
+            }
+          },
+        },
+        {
+          tag: "menuitem",
+          // Cast to any to handle type generation timing
+          label: getString("preprint-check-all-menu" as any),
+          commandListener: async () => {
+            Zotero.debug(
+              "[zotero-inspire] Menu: checkAllPreprintsInLibrary clicked",
+            );
+            try {
+              await _globalThis.inspire.checkAllPreprintsInLibrary();
+            } catch (err) {
+              Zotero.debug(
+                `[zotero-inspire] Menu: checkAllPreprintsInLibrary error: ${err}`,
+              );
+            }
+          },
+        },
+        // Collaboration tags for collection items (FTR-COLLAB-TAGS)
+        { tag: "menuseparator" },
+        {
+          tag: "menuitem",
+          // Cast to any to handle type generation timing
+          label: getString("collab-tag-menu-reapply" as any),
+          commandListener: () => {
+            _globalThis.inspire.reapplyCollabTagsToCollection?.();
           },
         },
       );

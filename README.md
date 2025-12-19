@@ -3,359 +3,260 @@
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-This add-on for the excellent open-source reference manager [Zotero](https://github.com/zotero/zotero) seamlessly integrates [INSPIRE-HEP](https://inspirehep.net), a community-maintained database for **high energy physics and related fields**, into your reference management workflow.
+A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net) into your reference management workflow. Browse references, citations, and author papers directly in Zotero without leaving your library.
 
-> 📖 **[中文功能说明](docs/FEATURES_CN.md)** - 详细的中文功能介绍
+> 📖 **[中文功能说明](docs/FEATURES_CN.md)** | **[Technical Reference](docs/FEATURES_REFERENCE.md)**
 
-## Table of Contents
-
-- [Zotero INSPIRE References](#zotero-inspire-references)
-  - [Table of Contents](#table-of-contents)
-  - [**VERY USEFUL FEATURE**: INSPIRE References Section in the Item Pane](#very-useful-feature-inspire-references-section-in-the-item-pane)
-    - [Panel tabs](#panel-tabs)
-    - [Smart filtering and sorting](#smart-filtering-and-sorting)
-    - [Status indicators at a glance](#status-indicators-at-a-glance)
-    - [Interactions and importing](#interactions-and-importing)
-    - [Keyboard Navigation (new in v2.1.1)](#keyboard-navigation-new-in-v211)
-    - [Cached data and toolbar controls](#cached-data-and-toolbar-controls)
-    - [Back/Forward Navigation](#backforward-navigation)
-    - [INSPIRE Search from Search Bar (new in 1.1.2)](#inspire-search-from-search-bar-new-in-112)
-  - [What&#39;s new](#whats-new)
-    - [🆕 Smart Update Mode (v2.1.0)](#-smart-update-mode-v210)
-    - [🆕 PDF Reader Citation Detection (v2.0.0)](#-pdf-reader-citation-detection-v200)
-    - [Previous releases (1.1.x)](#previous-releases-11x)
-  - [Installation](#installation)
-    - [Pre-built binaries](#pre-built-binaries)
-    - [Building from source](#building-from-source)
-  - [Usage](#usage)
-  - [Settings](#settings)
-    - [Fetch INSPIRE Metadata for New Items](#fetch-inspire-metadata-for-new-items)
-    - [Set Citekey in Extra Field](#set-citekey-in-extra-field)
-    - [Field Order in Extra](#field-order-in-extra)
-    - [arXiv Primary Category Tag](#arxiv-primary-category-tag)
-    - [References Panel](#references-panel)
-    - [PDF Reader Citation Detection (new in 2.0.0)](#pdf-reader-citation-detection-new-in-200)
-    - [Local Cache (new in 1.1.3)](#local-cache-new-in-113)
-    - [Reader View Navigation](#reader-view-navigation)
-    - [INSPIRE Record Not Found](#inspire-record-not-found)
-    - [Smart Update (new in 2.1.0)](#smart-update-new-in-210)
-  - [Additional tip for citing as you writing LaTeX](#additional-tip-for-citing-as-you-writing-latex)
-  - [References](#references)
-  - [License](#license)
-
-## **VERY USEFUL FEATURE**: INSPIRE References Section in the Item Pane
-
-When an item contains an INSPIRE record ID, the add-on injects an **INSPIRE References** section into Zotero’s item pane (you can pin it by right-clicking the INSPIRE logo on the right). The pane pulls live data from INSPIRE-HEP so you can inspect, import, and link references without leaving Zotero.
-
-### Panel tabs
-
-- **References** lists the current item's bibliography using INSPIRE's canonical order.
-- **Cited by** (new in 1.1.0) runs the official `refersto:recid:<ID>` search to show every record that cites the current item.
-- **Entry Cited** appears when you click the citation count of a reference, letting you inspect who cites that specific entry.
-- **Author Papers** opens when you click an author name.
-- **🔍 Search** (new in 1.1.2) shows results when you search INSPIRE from Zotero's main search bar using the `inspire:` prefix; or you can search INSPIRE directly in the `Search tab` using usual INSPIRE syntax.
-
-### Smart filtering and sorting
-
-- Type multiple keywords to filter the visible entries; special characters are normalized automatically (e.g., `ä → ae`) so international names stay searchable.
-- Switch among INSPIRE order, newest-first, or most-cited-first sorting to focus on relevance or recency.
-- Filtering and sorting work consistently across all tabs, so you can stay inside the same pane for discovery.
-
-### Status indicators at a glance
-
-- `●` (green) means the entry already exists in your library, while `⊕` (red) signals it is missing and ready for import.
-- The link icon is green when the entry is already a related item and gray when the relation is absent.
-- The clipboard icon (📋) fetches a BibTeX entry from INSPIRE and copies it directly to your clipboard.
-
-### Interactions and importing
-
-- Clicking `●` (green) jumps straight to the local item; **double-clicking `●` (green) opens the PDF directly** if available; clicking `⊕` (red) opens the import dialog where you can select the target library (personal or group), drop the item into one or more collections, resize the picker, and prefill tags or notes (the tag field supports auto-complete from existing tags).
-- **Batch import (new in 1.1.4)**: Use checkboxes on the left side of entries to select multiple references, then click the **Import** button in the batch toolbar to import them all at once. The add-on will:
-  - Detect duplicates before importing (based on recid, arXiv ID, or DOI)
-  - Show a dialog listing duplicates where you can choose which ones to import or skip
-  - Import all selected entries to the same target (library/collections/tags/notes) with progress tracking
-  - Support cancellation via ESC key during import
-- Use the link icon to relate or unlink items, or the clipboard icon to copy curated BibTeX snippets.
-- Hover over a title to load its abstract tooltip; click the title to open the INSPIRE record in your browser.
-- Clicking any citation count opens the Entry Cited tab, and clicking an author name opens Author Papers, so you can continue exploring and importing without leaving the panel.
-
-### Keyboard Navigation (new in v2.1.1)
-
-The References Panel supports full keyboard navigation for efficient browsing without a mouse:
-
-| Key                     | Action                                                                |
-| ----------------------- | --------------------------------------------------------------------- |
-| `↑` / `k`          | Navigate to previous entry                                            |
-| `↓` / `j`          | Navigate to next entry                                                |
-| `←`                  | Go back in navigation history                                         |
-| `→`                  | Go forward in navigation history                                      |
-| `Home`                | Jump to first entry                                                   |
-| `End`                 | Jump to last entry                                                    |
-| `Enter`               | Open PDF (if available), select item in library, or trigger import    |
-| `Space` / `l`       | Toggle association status (link/unlink related item)                  |
-| `Tab` / `Shift+Tab` | Switch between tabs (References → Cited By → Entry Cited → Search) |
-| `Ctrl/Cmd+C`          | Copy BibTeX of focused entry to clipboard                             |
-| `Escape`              | Clear focused entry selection                                         |
-
-**Tips:**
-
-- Vim users can use `j`/`k` as alternatives to arrow keys
-- The focused entry is highlighted with a blue left border and light background
-- Keyboard navigation works with filtering—navigate through the filtered results
-
-### Cached data and toolbar controls
-
-- Reference lists, citing records, abstract tooltips, and BibTeX payloads are cached for the session to reduce API calls.
-- The panel toolbar provides two convenient buttons:
-  - **Refresh button**: Bypass the cache and fetch fresh data from INSPIRE for the current view.
-  - **Export button**: Click to open a menu with multiple export options:
-    - **Copy to Clipboard**: Copy all references (or selected entries if any are checked) in BibTeX, LaTeX (US), or LaTeX (EU) format to your clipboard.
-    - **Export to File**: Save all references (or selected entries if any are checked) to a `.bib` or `.tex` file for large reference lists that may exceed clipboard limits.
-    - **Smart selection detection (new in 1.1.4)**: If you have selected entries using checkboxes, the export menu will show the count and only export selected entries; otherwise, it exports all visible entries.
-- **Automatic local caching (new in 1.1.3)**: When persistent cache is enabled in Preferences, every time you open a recid the References list is written to disk (cited-by / author tabs honor the configurable TTL), so subsequent loads—or offline sessions—reuse the cached payload instantly.
-- **Offline cache prefetch (new in 1.1.3)**: Right-click selected items or an entire collection, then choose `Download references cache` to pre-fetch the INSPIRE references into the local persistent cache (with a progress window and success/failure stats) so the panel can render instantly even when offline.
-
-### Back/Forward Navigation
-
-When you click `●` (green) to jump to an existing item in your library, the add-on remembers your navigation history. Use the **Back** and **Forward** buttons in the panel toolbar to navigate between previously viewed items—just like browser history. This works seamlessly across both the library view and the PDF reader view:
-
-- Navigate from a reference in the reader's side panel to another item
-- Click **Back** to return directly to the original reader tab
-- If the reader tab was closed, you can optionally have it reopened automatically (configurable in Preferences)
-
-### INSPIRE Search from Search Bar (new in 1.1.2)
-
-Search INSPIRE directly from Zotero's main search bar by typing the `inspire:` prefix followed by your query:
-
-- Type `inspire: a Witten` to search for papers by author Witten
-- Type `inspire: t quark mass` to search for papers with "quark mass" in the title
-- Type `inspire: arXiv:2305.12345` to search for a specific arXiv paper
-- Press **Enter** to execute the search
-
-Results appear in the new **🔍 Search** tab in the INSPIRE panel, where you can browse, filter, and import papers just like any other tab. Your last 10 searches are saved for quick re-access via the history dropdown.
-
-![showcase](images/screenshot1.png)
-![collectionwindow](images/screenshot2.png)
-
-## What's new
-
-### 🆕 Smart Update Mode (v2.1.0)
-
-- **Preserve manual edits** when updating INSPIRE metadata
-- **Preview dialog** to select which fields to update
-- **Auto-preserve diacritic author names** (e.g., Meißner vs Meissner)
-- **Configurable field protection** in Preferences (title, authors, abstract, journal)
-- **UI toolbar redesign**: Modern 3-row layout with pill-style tabs, compact navigation buttons
-- **Chinese localization**: Complete simplified Chinese translation for all UI strings
-
-### 🆕 PDF Reader Citation Detection (v2.0.0)
-
-A major new feature: **automatic citation detection in the PDF reader**!
-
-- **Select text containing citations** (e.g., "see Refs. [1,2,3]") in the PDF reader
-- The add-on **automatically detects citation patterns** and shows "INSPIRE Refs. [n]" buttons
-- **Hover preview**: Hovering over a citation button shows a preview card with title, authors, and abstract
-- **Click to jump** to the corresponding reference in the References Panel
-- **Supports multiple formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, `[arXiv:2301.12345]`, superscript digits
-- **Optional fuzzy detection** for PDFs with broken text layers (e.g., truncated brackets)
-
-### Previous releases (1.1.x)
-
-- The multi-tab INSPIRE panel described above, including the new Cited by, Entry Cited, and Author Papers views with shared filtering/sorting controls.
-- A richer import dialog that lets you pick personal or group libraries, select multiple collections, and prefill tags or notes before fetching items.
-- Reader-friendly navigation with Back/Forward history that can reopen closed PDF reader tabs when desired.
-- Inline abstract tooltips, BibTeX clipboard actions, and toolbar buttons (Refresh and Export with multiple format options) so you can inspect, copy, or update entries entirely inside Zotero.
-- Filter supports common journal abbreviations such as "prl", "epja", "cpc", "ctp" etc.
-- Statistics chart (by years or by citations): switched off by default.
-- **INSPIRE Search from Search Bar** (1.1.2): Type `inspire:` followed by your query in Zotero's main search bar to search INSPIRE directly. Results appear in a new Search tab with full filtering/sorting support and search history.
-- **Right-click cache download** (1.1.3): Right-click items or collections and choose `INSPIRE` → `Download references cache` to prefetch the long-lived References cache for offline use; the command reuses the same parsing logic as the References panel and reports success/failure counts.
-- **Copy links in context menu** (1.1.4): Copy INSPIRE/zoteto links, BibTeX of selected item in the right-click `INSPIRE` submenu.
-- **Batch import with duplicate detection** (1.1.4): Select multiple references using checkboxes, then import them all at once with automatic duplicate detection (recid/arXiv/DOI). The export button also respects checkbox selections—export only selected entries when any are checked, or export all when none are selected.
+---
 
 ## Installation
 
-### Pre-built binaries
+### From Release
 
-- This version is compatible only with Zotero 7, whose stable version has been released.
-- The pre-built `.xpi` file can be downloaded from https://github.com/fkguo/zotero-inspire/releases/. If you want a version compatible with Zotero 6, download the version 0.2.20 from the releases.
+1. Download the latest `.xpi` file from [Releases](https://github.com/fkguo/zotero-inspire/releases/)
+2. In Zotero: `Tools` → `Add-ons` → click gear icon → `Install Add-on From File...`
+3. Select the downloaded `.xpi` file
 
-### Building from source
+### From Source
 
-- Clone this repo
-- Run `npm install` and `npm run build`
-- In Zotero, the add-on can be installed by going to `Tools` → `Add-ons`, then click the top-right button and choose `Install Add-ons From File...`.
-- It can be updated in `Add-ons Manager` → `Check for Updates`.
+```bash
+git clone https://github.com/fkguo/zotero-inspire.git
+cd zotero-inspire
+npm install
+npm run build
+```
 
-## Usage
+Then install `build/*.xpi` as above.
 
-- **Right-click a selected item or multiple selected items**, then click `INSPIRE` to access:
+---
 
-  - **Update Metadata**: Choose from three options:
-    - `With abstracts` - Fetch full metadata including abstracts
-    - `Without abstracts` - Fetch metadata excluding abstracts
-    - `Citation counts only` - Only update citation counts (with/without self-citations; falls back to [CrossRef](https://www.crossref.org/) if INSPIRE record not found)
-  - **Download references cache** (v1.1.3+): Prefetch INSPIRE references into local cache for offline use
-  - **Copy actions** (v1.1.4+, item menu only):
-    - `Copy BibTeX` - Fetch and copy BibTeX from INSPIRE
-    - `Copy INSPIRE link` - Copy INSPIRE literature URL
-    - `Copy citation key` - Copy item's citation key
-    - `Copy Zotero link` - Copy Zotero select link
-  - **Cancel update**: Cancel any ongoing update operation
-- **Right-click a selected collection**, then click `INSPIRE` to access update and cache options for all items in the collection.
-- Automatically retrieve the metadata from INSPIRE when adding a new item to the Zotero library. Options with or without getting abstracts can be set through the `Preferences` panel
-- Metadata can be fetched as long as one of the following is provided:
+## Quick Start
 
-  - DOI in the field of `DOI` or `Extra`; if it is only in `Extra`, then it should contain `DOI:` or `doi.org/` followed by the DOI.
-  - arXiv link in `URL` or arXiv ID in `Extra` in the form of `arXiv:`.
-  - INSPIRE Citation key in `Extra` in the form of `Citation Key: `.
-    - If one does not want to set the citation keys to the INSPIRE ones, then set `Set citekeys in Extra` in `INSPIRE Metadata Updater Preferences` under `Tools` menu to `No`.
-  - INSPIRE `recid` in `Loc. in Archive` or the url containing `/literature/recid` in `URL`.
-- The add-on will update the following fields:
+### Update Metadata from INSPIRE
 
-  - **Notice**: the INSPIRE standard journal abbreviations (instead of the fill journal name) will be put into the `Publication` field.
-  - INSPIRE uses a unique `recid` for each publication in the database (called `control_number` in the `.json` file obtained via the [INSPIRE API](https://github.com/inspirehep/rest-api-doc)). The INSPIRE `recid` is set to the field of `Loc. in Archive` (and `INSPIRE` to `Archive`) for the selected Zotero item.
+**Right-click any item** → `INSPIRE` → `Update Metadata`:
 
-    - This also enables to write look-up engines using this `recid` to exactly reach the INSPIRE page of that publication. The look-up engines can be added by editing the `engines.json` file in the `locate` folder of the Zotero Data Directory. The directory can be found by clicking `Zotero Preferences` → `Advanced` → `Files and Folders` → `Show Data Directory`. Add the following code to the `engines.json` file:
+- **With abstracts** — Full metadata including abstract
+- **Without abstracts** — Skip abstract field
+- **Citation counts only** — Just update citation numbers
 
-      ```json
-      {
-      	"_name": "INSPIRE",
-      	"_alias": "INSPIRE",
-      	"_description": "INSPIRE",
-      	"_icon": "https://inspirehep.net/favicon.ico",  // or local path to the INSPIRE icon,
-      	"_hidden": false,
-      	"_urlTemplate": "https://inspirehep.net/literature/{z:archiveLocation}",
-      	"_urlNamespaces": {
-      		"z": "http://www.zotero.org/namespaces/openSearch#"
-      	}
-      }
-      ```
-  - `journal` (set to `Journal Abbr` in Zotero), `volume`, `year`, `pages` (either the page numbers or the modern article IDs), `issue`, `DOI`, `authors`, `title`, `abstract`, etc.
+The plugin automatically fetches metadata when you add new items (configurable in Preferences).
 
-    - **Note**: All fields are overwritten with INSPIRE data. Use **Smart Update** mode (see Settings below) if you want to protect specific fields from being overwritten.
-  - Set the arXiv number of articles that are not published to the `Journal Abbr` field. Items of type `report` or `preprint` are set to `journalArticle`.
-  - It will also get the citation counts with and without self-citations for each selected item. One can also choose to update only the citation counts using `Citation counts only` in the right-click menu.
+### Copy Actions
 
-    - The current INSPIRE system does not display the citation count without self citations for a given paper. However, this number is in the metadata, and can be extracted with this add-on.
-    - Citation counts are changed only when they are different from those of the last fetching.
-  - The [Better BibTeX (BBT)](https://retorque.re/zotero-better-bibtex) plugin can pin the citation key from INSPIRE. When we add new arXiv articles, sometimes BBT fails to get the INSPIRE record. In that case, this plugin writes the INSPIRE citation key to the `Extra` field so that it is pinned correctly (the BBT plugin needs to be installed).
-  - Work with the [INSPIRE Zotero translator](https://github.com/zotero/translators/blob/master/INSPIRE.js), and change `"_eprint"` in `Extra` to `arXiv`.
-  - Erratum information and additional publication information added as notes.
+**Right-click any item** → `INSPIRE` for quick copy options:
 
-## Settings
+- **Copy BibTeX** — Fetch and copy BibTeX from INSPIRE
+- **Copy citation key** — Copy the INSPIRE texkey
+- **Copy INSPIRE link** — Copy the INSPIRE literature URL
+- **Copy INSPIRE link (Markdown)** — Copy as markdown link
+- **Copy Zotero link** — Copy Zotero select link
 
-The add-on provides several customization options in `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences`:
+### Other Item Actions
 
-### Fetch INSPIRE Metadata for New Items
+- **Add Collaboration Tags** — Tag large collaboration papers (ATLAS, CMS, etc.)
+- **Check Preprint Status** — Check if arXiv preprints have been published
 
-Control automatic metadata fetching when adding new items to your Zotero library:
+### Browse References Panel
 
-- **With abstracts**: Fetch full metadata including abstracts (default)
-- **Without abstracts**: Fetch metadata without abstracts
-- **Citation counts only**: Only update citation counts, skip other metadata
-- **Disabled**: Do not automatically fetch metadata for new items
+Select an item with an INSPIRE record, then find the **INSPIRE** section in the right panel:
 
-### Set Citekey in Extra Field
+| Tab                     | What it shows                      |
+| ----------------------- | ---------------------------------- |
+| **References**    | Papers cited by this item          |
+| **Cited by**      | Papers that cite this item         |
+| **Entry Cited**   | Papers citing a specific reference |
+| **Author Papers** | All papers by a clicked author     |
+| **🔍 Search**     | INSPIRE search results             |
 
-Control whether INSPIRE citation keys are written to the `Extra` field:
+### Search INSPIRE
 
-- **INSPIRE citekey**: Write INSPIRE citation keys to `Extra` field (useful for Better BibTeX integration)
-- **Disabled**: Do not write INSPIRE citation keys to `Extra` field
+**From Zotero's search bar**: Type `inspire:` followed by your query and press Enter.
 
-### Field Order in Extra
+```
+inspire: a Witten           → Search by author
+inspire: t quark mass       → Search by title
+inspire: arXiv:2305.12345   → Search by arXiv ID
+inspire: j Phys.Rev.D       → Search by journal
+```
 
-Choose the order of fields in the `Extra` field:
+**From the panel**: Click the 🔍 Search tab and enter your query directly (no prefix needed). Search history is saved and accessible via dropdown.
 
-- **Citations first** (default): Citation counts appear at the top, followed by arXiv ID and other fields
-- **arXiv ID first**: arXiv ID appears at the top, followed by other fields, with citations at the bottom
+---
 
-### arXiv Primary Category Tag
+## Panel Features
 
-Automatically add the arXiv primary category as a tag to items with arXiv IDs:
+### Status Indicators
 
-- When enabled, the add-on extracts the primary category from the arXiv ID (e.g., `hep-ph`, `nucl-th`) and adds it as a tag
-- Disabled by default
+| Icon       | Meaning                     |
+| ---------- | --------------------------- |
+| ● (green) | Item exists in your library |
+| ⊕ (red)   | Item can be imported        |
+| 🔗 (green) | Linked as related item      |
+| 🔗 (gray)  | Not linked                  |
+| 📋         | Copy BibTeX                 |
+| T          | Copy citation key           |
 
-### References Panel
+### Interactions
 
-Configure the INSPIRE References Panel behavior:
+| Action               | Result                   |
+| -------------------- | ------------------------ |
+| Click ●             | Jump to local item       |
+| Double-click ●      | Open PDF directly        |
+| Click ⊕             | Open import dialog       |
+| Click 🔗             | Toggle related item link |
+| Click title          | Open in INSPIRE          |
+| Hover title          | Show abstract            |
+| Click author         | View author's papers     |
+| Hover author         | Show author profile      |
+| Click citation count | View citing papers       |
+| Click 📋             | Copy BibTeX              |
+| Click T              | Copy citation key        |
 
-- **Maximum authors to display**: Number of authors shown before "et al." in the references panel (range: 1-20, default: 3)
-- **Enable statistics chart**: Show interactive statistics chart (by year/citations) at the top of the panel (disabled by default)
-  - **Collapsed by default**: When enabled, the chart starts collapsed and can be expanded by clicking the toggle button (enabled by default)
-- **Search history retention**: Number of days to keep INSPIRE search history (range: 1-365, default: 30)
+### Filtering & Sorting
 
-### PDF Reader Citation Detection (new in 2.0.0)
+- **Text filter**: Type keywords to filter entries; supports multi-word, phrase search (`"exact phrase"`), journal abbreviations (`"PRL"`, `"PRD"`, `"JHEP"`, etc.), and international characters (ä→ae)
+- **Quick filters**: Click the Filters button for presets (high citations, recent papers, published only, etc.)
+- **Sort options**: INSPIRE order, newest first, or most cited first
+- **Chart filters**: Click bars in the statistics chart to filter by year or citation range; Ctrl/Cmd+click for multi-select, Shift+click for range
 
-Configure how the add-on detects citations in PDF reader:
+### Navigation
 
-- **Fuzzy citation detection (experimental)**: Enable aggressive citation detection for PDFs with broken text layers (e.g., truncated brackets). Disabled by default to avoid false positives.
-- **Parse PDF reference list**: Parse the reference list from PDF to improve label-to-entry matching, especially useful for multi-citation references like `[1,2,3]`. Disabled by default.
-  - **Force mapping on mismatch**: When enabled (default), if the PDF reference count diverges from INSPIRE, force PDF-based mapping and skip index fallback. This helps prevent wrong matches when PDF and INSPIRE have different reference lists.
+- **Back/Forward**: Use the ← → buttons to navigate between previously viewed items, like browser history
+- **Keyboard**: Arrow keys, Home/End, and vim-style j/k navigation (see Keyboard Shortcuts)
 
-### Local Cache (new in 1.1.3)
+### Batch Operations
 
-Control the persistent cache used for offline viewing:
+- **Checkbox selection**: Use checkboxes on the left side of entries; supports single click, Shift+Click for range selection, Ctrl/Cmd+Click for multi-select
+- **Batch toolbar**: Shows "Select All", "Clear", and "Import" buttons when entries are selected
+- **Duplicate detection**: Automatically detects duplicates before importing
+- **Batch import**: Select target library/collections/tags once for all items; shows progress and supports ESC to cancel
 
-- **Enable local cache**: Master toggle; when disabled only in-memory caches are used.
-- **Show cache source indicator**: Displays whether the current view came from INSPIRE, memory, or local disk.
-- **Compress cache files (gzip)**: Enabled by default. Uses the pako library to shrink large cache files by ~80% while keeping read/write transparent. Disable if you need raw JSON files.
-- **Metadata enrichment settings** (new in 1.1.4): Control how reference metadata is fetched when loading cached references.
-  - **Batch size**: Number of entries per metadata request (range: 25-110, default: 100). Lower values reduce INSPIRE API load but increase total requests.
-  - **Parallel requests**: Number of concurrent batch requests (range: 1-5, default: 4). Lower values are gentler on INSPIRE servers.
-- **Cache TTL (hours)**: Applies to Cited-by and Author tabs; References are always permanent.
-- **Custom cache directory**: Leave empty to use the Zotero data directory or click "Browse…" / "Reset" to manage a custom folder.
-- **Clear cache**: Removes all on-disk cache files and reports the number of entries deleted.
+### Export Options
 
-### Reader View Navigation
+Click the export button in the toolbar:
 
-Control navigation behavior in the PDF reader:
+- **Copy to Clipboard** — BibTeX, LaTeX (US), or LaTeX (EU) format
+- **Copy citation keys** — Comma-separated keys for `\cite{}`
+- **Export to File** — Save as `.bib` or `.tex` file
+- **Select Citation Style...** — Export using any Zotero citation style
 
-- **Reopen reader tab when navigating back/forward**: When enabled, if the reader tab was closed, it will be reopened automatically when using Back or Forward navigation (disabled by default)
+---
 
-### INSPIRE Record Not Found
+## PDF Reader Integration
 
-Handle items that could not be found in the INSPIRE database:
+When reading a PDF in Zotero:
 
-- **Add tag to items without INSPIRE record**: Tag items that could not be found in INSPIRE (enabled by default)
-- **Tag name**: Customize the tag name used for items without INSPIRE records (default: `⛔ No INSPIRE recid found`)
+1. **Select text containing citations** (e.g., "see Refs. [1,2,3]")
+2. **Hover** over the **INSPIRE Refs. [n]** button to preview the reference (title, authors, abstract)
+3. **Click** to jump to and highlight the corresponding reference in the panel
 
-### Smart Update (new in 2.1.0)
+**Supported formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, superscripts
 
-Control how metadata updates are applied to preserve your manual edits:
+---
 
-- **Enable smart update mode**: When enabled, the add-on compares local item data with INSPIRE metadata and only updates fields that have changed. Disabled by default (standard mode overwrites all fields).
-- **Show preview dialog before updating**: When updating a single item, displays a dialog showing all detected changes with checkboxes, allowing you to select which fields to update. Only shown for single-item updates (batch updates apply changes automatically based on protection settings). Enabled by default when Smart Update is active.
-- **Protected fields**: Select which fields should be protected when you have existing data. Protected fields will not be overwritten if they already contain non-empty values:
-  - **Title**: Protect manually edited titles
-  - **Authors**: Protect manually edited author names
-  - **Abstract**: Protect manually edited abstracts
-  - **Journal**: Protect manually edited journal abbreviations
-- **Protected author names**: A comma-separated list of author names that should always be preserved, even when the Authors field is not protected. This is useful for names with special characters that INSPIRE may store differently (e.g., "Meißner" vs "Meissner", "Müller" vs "Mueller", "O'Brien"). The matching is case-insensitive and works with last names.
-- **Automatic diacritic preservation**: The add-on automatically detects when your local author names contain diacritics (ä, ö, ü, ß, é, ñ, etc.) that INSPIRE stores as ASCII equivalents. In such cases, your local spelling is preserved automatically without needing to add names to the protected list. For example, if you have "Meißner" locally and INSPIRE has "Meissner", the local version is kept.
+## Keyboard Shortcuts
 
-## Additional tip for citing as you writing LaTeX
+| Key                  | Action             |
+| -------------------- | ------------------ |
+| `↑` / `k`       | Previous entry     |
+| `↓` / `j`       | Next entry         |
+| `←` / `→`      | Navigate history   |
+| `Home` / `End`   | Jump to first/last |
+| `Enter`            | Open PDF or import |
+| `Space` / `l`    | Toggle link        |
+| `Tab`              | Next tab           |
+| `Ctrl/Cmd+Shift+C` | Copy BibTeX        |
+| `Escape`           | Clear selection    |
 
-After building our own Zotero library, we can make the LaTeX writing process much more enjoyable in VS code (with the [LaTeX Workshop](https://github.com/James-Yu/LaTeX-Workshop) extension) with the [Zotero-cite](https://gitee.com/rusterx/zotero-cite) VS code extension.
+---
 
-- usage:
-  - press `Ctrl+Shift+P` or `Cmd+Shift+P`, choose `Zotero Cite: Cite and Create Bibliography for Pandoc/LaTeX` and bind a hotkey, e.g., `Alt+z`.
-  - in `Settings` of VS code, set `Zotero-cite: Default Bib Name` to `./refs.bib`, which allows the extension update or create the `refs.bib` file under the same directory of the `.tex` file.
-  - now when you're writing, press the hotkey, a Zotero reference picker window will pop up, select the references you want to cite, then it is cited with the `\cite{}` command and the `refs.bib` file gets automatically updated if the cited reference does not exist in the `bib` file.
+## Tips & Tricks
 
-## References
+### Offline Usage
 
-I knew basically nothing about javascript or typescript. The first version of this add-on was developed by modifying the codes of the following two add-ons:
+Right-click items or collections → `INSPIRE` → `Download references cache` to prefetch data for offline viewing.
 
-- https://github.com/bwiernik/zotero-shortdoi
-- https://github.com/eschnett/zotero-citationcounts
+### Preprint Monitoring
 
-Versions from 0.3.0 on (for Zotero 7) were developed based on:
+Enable **Preprint Watch** in Preferences to automatically check if your arXiv preprints have been published.
 
-- https://github.com/windingwind/zotero-plugin-template
+### Smart Update Mode
 
-Versions from 1.0.0 were developed with the help of verious AI tools
+Enable **Smart Update** in Preferences to preserve your manual edits when updating metadata. You can protect specific fields (title, authors, abstract, journal). Author names with diacritics (ä, ö, ü, etc.) are automatically preserved.
+
+### Generate Publication Lists for Reports
+
+Perfect for annual or grant reports:
+1. Search with `ft <grant_number>` to find papers acknowledging a specific grant
+2. Click **Published** filter to show only formally published papers
+3. Select entries to export (or export all visible)
+4. Click the export button → **Select Citation Style...** → choose your format (e.g., APS)
+5. Save as RTF file and paste directly into Word
+
+### Better BibTeX Integration
+
+The plugin automatically sets INSPIRE citation keys in the Extra field, which Better BibTeX can use for pinning.
+
+### INSPIRE Lookup Engine
+
+Add this to your Zotero `engines.json` for quick INSPIRE lookups:
+
+```json
+{
+  "_name": "INSPIRE",
+  "_alias": "INSPIRE",
+  "_description": "INSPIRE",
+  "_icon": "https://inspirehep.net/favicon.ico",
+  "_hidden": false,
+  "_urlTemplate": "https://inspirehep.net/literature/{z:archiveLocation}"
+}
+```
+
+---
+
+## Preferences
+
+Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences`:
+
+| Setting                            | Description                                    |
+| ---------------------------------- | ---------------------------------------------- |
+| **Auto-fetch for new items** | Fetch metadata automatically when adding items |
+| **Citation key in Extra**    | Write INSPIRE texkey to Extra field            |
+| **Max authors**              | Number of authors shown before "et al."        |
+| **Statistics chart**         | Show year/citation distribution chart          |
+| **Local cache**              | Enable persistent disk cache for offline use   |
+| **Smart Update**             | Preserve manual edits during updates           |
+| **Preprint Watch**           | Monitor unpublished preprints                  |
+| **Fuzzy citation detection** | For PDFs with broken text layers               |
+
+---
+
+## Troubleshooting
+
+**Item not found in INSPIRE?**
+
+- Ensure the item has a DOI, arXiv ID, or INSPIRE recid
+- Check the Extra field for `arXiv:` or `Citation Key:` entries
+
+**Panel not showing?**
+
+- The item needs an INSPIRE record ID (shown in "Loc. in Archive" field)
+- Try updating metadata first to fetch the record ID
+
+**Citation counts not updating?**
+
+- Use `Update Metadata` → `Citation counts only` from the right-click menu
+- Falls back to CrossRef if INSPIRE record not found
+
+---
 
 ## License
 
-Distributed under the Mozilla Public License (MPL) Version 2.0.
+Mozilla Public License (MPL) Version 2.0
+
+---
+
+## Acknowledgments
+
+Built with [zotero-plugin-template](https://github.com/windingwind/zotero-plugin-template). Inspired by [zotero-shortdoi](https://github.com/bwiernik/zotero-shortdoi) and [zotero-citationcounts](https://github.com/eschnett/zotero-citationcounts).

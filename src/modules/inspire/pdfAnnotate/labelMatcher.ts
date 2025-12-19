@@ -24,6 +24,7 @@ import {
   SCORE,
   YEAR_DELTA,
   MATCH_CONFIG,
+  AUTHOR_SCORE,
   type MatchConfidence,
 } from "./constants";
 import { normalizeYear } from "../textUtils";
@@ -54,6 +55,12 @@ import {
 } from "./matchScoring";
 import { computePublicationPriority } from "./matchScoring";
 
+// FTR-REFACTOR M-001: Import extracted author-year matching module
+import {
+  findPreciseMatch as findPreciseMatchExtracted,
+  matchAuthorYear as matchAuthorYearExtracted,
+} from "./labelMatcher/authorYearMatcher";
+
 // Alias for buildDifferentInitialsPattern (used in matchAuthorYear)
 const RE_DIFFERENT_INITIALS = buildDifferentInitialsPattern;
 
@@ -83,6 +90,18 @@ export class LabelMatcher {
   private journalVolIndex: Map<string, number[]> = new Map();
   /** Maps "journal:volume:page" -> entry index (for exact journal match) */
   private journalVolPageIndex: Map<string, number> = new Map();
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PERF-FIX-4: Pre-computed normalized values to avoid redundant normalization
+  // in O(n) loops. normalizeArxivId() and normalizeDoi() have regex operations.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Pre-computed normalized arXiv/DOI/year for each entry */
+  private normalizedEntries: Array<{
+    arxivNorm: string | null;
+    doiNorm: string | null;
+    yearNum: number | null;
+  }> = [];
 
   /** Cached alignment diagnosis */
   private alignmentReport?: AlignmentReport;
@@ -147,12 +166,15 @@ export class LabelMatcher {
   /**
    * FTR-REFACTOR: Build pre-computed identifier indexes for O(1) lookup.
    * This dramatically speeds up matching when entries have arXiv IDs, DOIs, or journal info.
+   * PERF-FIX-4: Also pre-computes normalized values for each entry.
    */
   private buildIdentifierIndexes(): void {
     this.arxivIndex.clear();
     this.doiIndex.clear();
     this.journalVolIndex.clear();
     this.journalVolPageIndex.clear();
+    // PERF-FIX-4: Initialize normalizedEntries array
+    this.normalizedEntries = new Array(this.entries.length);
 
     for (let idx = 0; idx < this.entries.length; idx++) {
       const entry = this.entries[idx];
@@ -168,6 +190,14 @@ export class LabelMatcher {
       if (doi && !this.doiIndex.has(doi)) {
         this.doiIndex.set(doi, idx);
       }
+
+      // PERF-FIX-4: Store pre-computed normalized values
+      // These are reused in O(n) loops instead of calling normalize functions repeatedly
+      this.normalizedEntries[idx] = {
+        arxivNorm: arxiv,
+        doiNorm: doi,
+        yearNum: entry.year ? parseInt(entry.year, 10) : null,
+      };
 
       // Index by journal+volume and journal+volume+page
       if (entry.publicationInfo) {
@@ -195,7 +225,8 @@ export class LabelMatcher {
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] LabelMatcher: built identifier indexes - ` +
         `arxiv=${this.arxivIndex.size}, doi=${this.doiIndex.size}, ` +
-        `journalVol=${this.journalVolIndex.size}, journalVolPage=${this.journalVolPageIndex.size}`,
+        `journalVol=${this.journalVolIndex.size}, journalVolPage=${this.journalVolPageIndex.size}, ` +
+        `normalizedEntries=${this.normalizedEntries.length}`,
     );
   }
 
@@ -254,6 +285,36 @@ export class LabelMatcher {
     if (!normalizedJournal) return -1;
     const key = `${normalizedJournal}:${volume}:${page}`;
     return this.journalVolPageIndex.get(key) ?? -1;
+  }
+
+  /**
+   * PERF-FIX-3: Try O(1) index lookup for arXiv/DOI before falling back to O(n) scoring loops.
+   * Since arXiv and DOI are unique identifiers, a match definitively identifies the correct entry.
+   * @param paperInfos Array of PDF paper info objects to try matching
+   * @returns Object with idx, arxivOk, doiOk if found; null if no direct match
+   */
+  private tryIndexLookupFirst(
+    paperInfos: PDFPaperInfo[] | undefined,
+  ): { idx: number; arxivOk: boolean; doiOk: boolean } | null {
+    if (!paperInfos?.length) return null;
+
+    for (const pdfPaper of paperInfos) {
+      // Try arXiv lookup first (higher confidence)
+      if (pdfPaper.arxivId) {
+        const idx = this.findByArxiv(pdfPaper.arxivId);
+        if (idx !== -1) {
+          return { idx, arxivOk: true, doiOk: false };
+        }
+      }
+      // Try DOI lookup
+      if (pdfPaper.doi) {
+        const idx = this.findByDoi(pdfPaper.doi);
+        if (idx !== -1) {
+          return { idx, arxivOk: false, doiOk: true };
+        }
+      }
+    }
+    return null;
   }
 
   /**
@@ -355,7 +416,9 @@ export class LabelMatcher {
 
       // FTR-OVERLAY-MULTI-REF: Split by semicolons to handle multiple papers in one reference
       // But also try the full text in case semicolons are part of author names
-      const textSegments = refText.split(/;\s*/).filter((s) => s.trim().length > 10);
+      const textSegments = refText
+        .split(/;\s*/)
+        .filter((s) => s.trim().length > 10);
       // If splitting produced nothing useful, use the full text
       if (textSegments.length === 0) {
         textSegments.push(refText);
@@ -392,9 +455,7 @@ export class LabelMatcher {
 
         // Try to extract arXiv ID from this segment
         // Common patterns: arXiv:XXXX.XXXXX, arXiv:hep-th/XXXXXXX
-        const arxivMatch = segment.match(
-          /arXiv[:\s]*([\d.]+|[a-z-]+\/\d+)/i,
-        );
+        const arxivMatch = segment.match(/arXiv[:\s]*([\d.]+|[a-z-]+\/\d+)/i);
         if (arxivMatch) {
           const normalized = normalizeArxivId(arxivMatch[1]);
           if (normalized) {
@@ -462,7 +523,9 @@ export class LabelMatcher {
           /(?:Phys\.?\s*Rev\.?|Nucl\.?\s*Phys\.?|JHEP|JCAP|Eur\.?\s*Phys\.?\s*J\.?|Class\.?\s*Quantum\s*Grav\.?|Phys\.?\s*Lett\.?)[^\d]*(\d+)[^\d]*(\d+[A-Za-z]?\d*)/i,
         );
         if (journalMatch) {
-          const journal = normalizeJournal(journalMatch[0].split(/\d/)[0].trim());
+          const journal = normalizeJournal(
+            journalMatch[0].split(/\d/)[0].trim(),
+          );
           const volume = journalMatch[1];
           const page = journalMatch[2];
 
@@ -1151,6 +1214,9 @@ export class LabelMatcher {
         score: number;
         entryLabel: string | null;
       }> = [];
+      // PERF-FIX-14: Pre-compute paperInfo index map for O(1) lookup
+      const paperInfoIndexMap = new Map<PDFPaperInfo, number>();
+      paperInfos.forEach((p, i) => paperInfoIndexMap.set(p, i));
       let best: {
         idx: number;
         kind: "arxiv" | "doi" | "journal";
@@ -1187,7 +1253,7 @@ export class LabelMatcher {
                   : 1
               : 0;
             candidateLogs.push({
-              pdfIdx: paperInfos.indexOf(pdfPaper),
+              pdfIdx: paperInfoIndexMap.get(pdfPaper) ?? -1,
               entryIdx: i,
               kind: mk.kind,
               score: mk.score,
@@ -1232,15 +1298,14 @@ export class LabelMatcher {
           }
 
           // FTR-MISSING-FIX: Calculate and track the source paper index
-          const pdfPaperIdx = paperInfos
-            ? paperInfos.indexOf(
-                papersForStrong[
-                  papersForStrong.findIndex(
-                    (p) => getStrongMatchKind(p, best.entry) !== null,
-                  )
-                ],
-              )
-            : -1;
+          // PERF-FIX-14: Use pre-computed map for O(1) lookup
+          const matchedPaperForIdx = papersForStrong.find(
+            (p) => getStrongMatchKind(p, best.entry) !== null,
+          );
+          const pdfPaperIdx =
+            matchedPaperForIdx && paperInfoIndexMap
+              ? (paperInfoIndexMap.get(matchedPaperForIdx) ?? -1)
+              : -1;
 
           results.push({
             pdfLabel,
@@ -1549,58 +1614,9 @@ export class LabelMatcher {
 
     // Strategy 0a: If over-parsed, try global best (arXiv/DOI/author/year) before trusting sequence mapping
     if (preferPdfMapping && overParsedActive && paperInfos?.length) {
-      let bestAny: {
-        idx: number;
-        score: number;
-        yearOk: boolean;
-        yearDelta: number | null;
-        arxivOk: boolean;
-        doiOk: boolean;
-      } | null = null;
-      let bestYearOk: {
-        idx: number;
-        score: number;
-        yearOk: boolean;
-        yearDelta: number | null;
-        arxivOk: boolean;
-        doiOk: boolean;
-      } | null = null;
-      let bestArxiv: { idx: number; score: number } | null = null;
-      let bestDoi: { idx: number; score: number } | null = null;
-      for (const pdfPaper of paperInfos) {
-        const pdfArxivNorm = normalizeArxivId(pdfPaper.arxivId);
-        const pdfDoiNorm = normalizeDoi(pdfPaper.doi);
-        for (let i = 0; i < this.entries.length; i++) {
-          const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
-          const entryYear = this.entries[i].year;
-          const yearDelta =
-            pdfPaper.year && entryYear
-              ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10))
-              : null;
-          const yearOk =
-            yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
-          const entryArxivNorm = normalizeArxivId(this.entries[i].arxivDetails);
-          const arxivOk =
-            !!pdfArxivNorm &&
-            !!entryArxivNorm &&
-            pdfArxivNorm === entryArxivNorm;
-          const entryDoiNorm = normalizeDoi(this.entries[i].doi);
-          const doiOk =
-            !!pdfDoiNorm && !!entryDoiNorm && pdfDoiNorm === entryDoiNorm;
-          if (!bestAny || score > bestAny.score) {
-            bestAny = { idx: i, score, yearOk, yearDelta, arxivOk, doiOk };
-          }
-          if (yearOk && (!bestYearOk || score > bestYearOk.score)) {
-            bestYearOk = { idx: i, score, yearOk, yearDelta, arxivOk, doiOk };
-          }
-          if (arxivOk && (!bestArxiv || score > bestArxiv.score)) {
-            bestArxiv = { idx: i, score };
-          }
-          if (doiOk && (!bestDoi || score > bestDoi.score)) {
-            bestDoi = { idx: i, score };
-          }
-        }
-      }
+      // PERF-FIX-3: Try O(1) index lookup first before falling back to O(n) scoring loop
+      // Since arXiv and DOI are unique identifiers, a match definitively identifies the correct entry
+      const directMatch = this.tryIndexLookupFirst(paperInfos);
 
       let chosenIdx: number | null = null;
       let chosenScore = 0;
@@ -1608,32 +1624,100 @@ export class LabelMatcher {
       let chosenYearDelta: number | null = null;
       let chosenArxivOk = false;
       let chosenDoiOk = false;
-      if (bestArxiv) {
-        chosenIdx = bestArxiv.idx;
-        chosenScore = bestArxiv.score;
-        chosenArxivOk = true;
-      } else if (bestDoi) {
-        chosenIdx = bestDoi.idx;
-        chosenScore = bestDoi.score;
-        chosenDoiOk = true;
-      } else if (
-        bestYearOk &&
-        (!bestAny || bestYearOk.score >= bestAny.score - 1)
-      ) {
-        chosenIdx = bestYearOk.idx;
-        chosenScore = bestYearOk.score;
-        chosenYearOk = true;
-        chosenYearDelta = bestYearOk.yearDelta;
-        chosenArxivOk = bestYearOk.arxivOk;
-        chosenDoiOk = bestYearOk.doiOk;
-      } else if (bestAny) {
-        chosenIdx = bestAny.idx;
-        chosenScore = bestAny.score;
-        chosenYearOk = bestAny.yearOk;
-        chosenYearDelta = bestAny.yearDelta;
-        chosenArxivOk = bestAny.arxivOk;
-        chosenDoiOk = bestAny.doiOk;
-      }
+
+      if (directMatch) {
+        // O(1) lookup succeeded - use direct match
+        chosenIdx = directMatch.idx;
+        chosenArxivOk = directMatch.arxivOk;
+        chosenDoiOk = directMatch.doiOk;
+        // Calculate score for the matched entry
+        const matchedPaper = paperInfos.find(
+          (p) =>
+            (directMatch.arxivOk && p.arxivId) ||
+            (directMatch.doiOk && p.doi),
+        );
+        if (matchedPaper) {
+          chosenScore = this.calculateMatchScore(
+            matchedPaper,
+            this.entries[directMatch.idx],
+          );
+        }
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] [PERF-FIX-3] Direct ${directMatch.arxivOk ? "arXiv" : "DOI"} match for [${pdfLabel}] -> idx ${directMatch.idx} (O(1) lookup)`,
+        );
+      } else {
+        // O(1) lookup failed - fall back to O(n) scoring loop
+        let bestAny: {
+          idx: number;
+          score: number;
+          yearOk: boolean;
+          yearDelta: number | null;
+          arxivOk: boolean;
+          doiOk: boolean;
+        } | null = null;
+        let bestYearOk: {
+          idx: number;
+          score: number;
+          yearOk: boolean;
+          yearDelta: number | null;
+          arxivOk: boolean;
+          doiOk: boolean;
+        } | null = null;
+        for (const pdfPaper of paperInfos) {
+          const pdfYearNum = pdfPaper.year ? parseInt(pdfPaper.year, 10) : null;
+          for (let i = 0; i < this.entries.length; i++) {
+            const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
+            // PERF-FIX-4: Use pre-computed normalized values instead of calling normalize functions
+            const norm = this.normalizedEntries[i];
+            const yearDelta =
+              pdfYearNum !== null && norm.yearNum !== null
+                ? Math.abs(pdfYearNum - norm.yearNum)
+                : null;
+            const yearOk =
+              yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
+            if (!bestAny || score > bestAny.score) {
+              bestAny = {
+                idx: i,
+                score,
+                yearOk,
+                yearDelta,
+                arxivOk: false,
+                doiOk: false,
+              };
+            }
+            if (yearOk && (!bestYearOk || score > bestYearOk.score)) {
+              bestYearOk = {
+                idx: i,
+                score,
+                yearOk,
+                yearDelta,
+                arxivOk: false,
+                doiOk: false,
+              };
+            }
+          }
+        }
+
+        // Selection priority: year-matched > highest score (arXiv/DOI already handled by index lookup)
+        if (
+          bestYearOk &&
+          (!bestAny || bestYearOk.score >= bestAny.score - 1)
+        ) {
+          chosenIdx = bestYearOk.idx;
+          chosenScore = bestYearOk.score;
+          chosenYearOk = true;
+          chosenYearDelta = bestYearOk.yearDelta;
+          chosenArxivOk = bestYearOk.arxivOk;
+          chosenDoiOk = bestYearOk.doiOk;
+        } else if (bestAny) {
+          chosenIdx = bestAny.idx;
+          chosenScore = bestAny.score;
+          chosenYearOk = bestAny.yearOk;
+          chosenYearDelta = bestAny.yearDelta;
+          chosenArxivOk = bestAny.arxivOk;
+          chosenDoiOk = bestAny.doiOk;
+        }
+      } // end of O(n) fallback
 
       if (chosenIdx !== null) {
         const entry = this.entries[chosenIdx];
@@ -1801,67 +1885,11 @@ export class LabelMatcher {
         ? this.entries.length - 1
         : Math.min(this.entries.length - 1, labelNumForPos * 2 + 8);
 
-      // Track both local and global best matches
-      type BestMatch = {
-        idx: number;
-        score: number;
-        yearOk: boolean;
-        yearDelta: number | null;
-        arxivOk: boolean;
-      };
-      let bestLocalAny: BestMatch | null = null;
-      let bestLocalYearOk: BestMatch | null = null;
-      let bestLocalArxiv: { idx: number; score: number } | null = null;
-      let bestGlobalAny: BestMatch | null = null;
-      let bestGlobalYearOk: BestMatch | null = null;
-      let bestGlobalArxiv: { idx: number; score: number } | null = null;
+      // PERF-FIX-3: Try O(1) index lookup first before falling back to O(n) scoring loop
+      // Since arXiv and DOI are unique identifiers, a match definitively identifies the correct entry
+      const directMatch = this.tryIndexLookupFirst(paperInfos);
 
-      for (const pdfPaper of paperInfos) {
-        const pdfArxivNorm = normalizeArxivId(pdfPaper.arxivId);
-        for (let i = 0; i < this.entries.length; i++) {
-          const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
-          const entryYear = this.entries[i].year;
-          const yearDelta =
-            pdfPaper.year && entryYear
-              ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10))
-              : null;
-          const yearOk =
-            yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
-          const entryArxivNorm = normalizeArxivId(this.entries[i].arxivDetails);
-          const arxivOk =
-            !!pdfArxivNorm &&
-            !!entryArxivNorm &&
-            pdfArxivNorm === entryArxivNorm;
-          const matchData: BestMatch = {
-            idx: i,
-            score,
-            yearOk,
-            yearDelta,
-            arxivOk,
-          };
-
-          // Determine if this entry is in the expected local range
-          const isLocal = i >= expectedMinIdx && i <= expectedMaxIdx;
-
-          if (isLocal) {
-            if (!bestLocalAny || score > bestLocalAny.score)
-              bestLocalAny = matchData;
-            if (yearOk && (!bestLocalYearOk || score > bestLocalYearOk.score))
-              bestLocalYearOk = matchData;
-            if (arxivOk && (!bestLocalArxiv || score > bestLocalArxiv.score))
-              bestLocalArxiv = { idx: i, score };
-          } else {
-            if (!bestGlobalAny || score > bestGlobalAny.score)
-              bestGlobalAny = matchData;
-            if (yearOk && (!bestGlobalYearOk || score > bestGlobalYearOk.score))
-              bestGlobalYearOk = matchData;
-            if (arxivOk && (!bestGlobalArxiv || score > bestGlobalArxiv.score))
-              bestGlobalArxiv = { idx: i, score };
-          }
-        }
-      }
-
-      // Decision: Prefer local matches, only use global if it has strong identifier or high score
+      // Decision variables
       let chosenIdx: number | null = null;
       let chosenScore = 0;
       let chosenYearOk = false;
@@ -1869,68 +1897,140 @@ export class LabelMatcher {
       let chosenArxivOk = false;
       let chosenPubPri = 0;
 
-      // Priority 1: arXiv match (local first, then global)
-      if (bestLocalArxiv) {
-        chosenIdx = bestLocalArxiv.idx;
-        chosenScore = bestLocalArxiv.score;
-        chosenArxivOk = true;
-      } else if (bestGlobalArxiv) {
-        chosenIdx = bestGlobalArxiv.idx;
-        chosenScore = bestGlobalArxiv.score;
-        chosenArxivOk = true;
-      }
-      // Priority 2: Year-matched with good score (local first)
-      else if (
-        bestLocalYearOk &&
-        bestLocalYearOk.score >= SCORE.YEAR_MATCH_ACCEPT
-      ) {
-        chosenIdx = bestLocalYearOk.idx;
-        chosenScore = bestLocalYearOk.score;
-        chosenYearOk = true;
-        chosenYearDelta = bestLocalYearOk.yearDelta;
-        chosenArxivOk = bestLocalYearOk.arxivOk;
-      }
-      // Priority 3: Global year-matched only if score is high (not marginal)
-      else if (
-        bestGlobalYearOk &&
-        bestGlobalYearOk.score > SCORE.MARGINAL_THRESHOLD
-      ) {
-        chosenIdx = bestGlobalYearOk.idx;
-        chosenScore = bestGlobalYearOk.score;
-        chosenYearOk = true;
-        chosenYearDelta = bestGlobalYearOk.yearDelta;
-        chosenArxivOk = bestGlobalYearOk.arxivOk;
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] [POSITION-AWARE] Accepting global match idx=${chosenIdx} (score=${chosenScore} > ${SCORE.MARGINAL_THRESHOLD})`,
+      if (directMatch) {
+        // O(1) lookup succeeded - use direct match
+        chosenIdx = directMatch.idx;
+        chosenArxivOk = directMatch.arxivOk || directMatch.doiOk;
+        // Calculate score for the matched entry
+        const matchedPaper = paperInfos.find(
+          (p) =>
+            (directMatch.arxivOk && p.arxivId) ||
+            (directMatch.doiOk && p.doi),
         );
-      }
-      // Priority 4: Local best match
-      else if (bestLocalAny && bestLocalAny.score >= SCORE.VALIDATION_ACCEPT) {
-        chosenIdx = bestLocalAny.idx;
-        chosenScore = bestLocalAny.score;
-        chosenYearOk = bestLocalAny.yearOk;
-        chosenYearDelta = bestLocalAny.yearDelta;
-        chosenArxivOk = bestLocalAny.arxivOk;
-      }
-      // Priority 5: Global best only if score is high (reject marginal distant matches)
-      else if (
-        bestGlobalAny &&
-        bestGlobalAny.score > SCORE.MARGINAL_THRESHOLD
-      ) {
-        chosenIdx = bestGlobalAny.idx;
-        chosenScore = bestGlobalAny.score;
-        chosenYearOk = bestGlobalAny.yearOk;
-        chosenYearDelta = bestGlobalAny.yearDelta;
-        chosenArxivOk = bestGlobalAny.arxivOk;
+        if (matchedPaper) {
+          chosenScore = this.calculateMatchScore(
+            matchedPaper,
+            this.entries[directMatch.idx],
+          );
+        }
+        const isLocal =
+          directMatch.idx >= expectedMinIdx &&
+          directMatch.idx <= expectedMaxIdx;
         Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] [POSITION-AWARE] Accepting global match idx=${chosenIdx} (score=${chosenScore} > ${SCORE.MARGINAL_THRESHOLD})`,
+          `[${config.addonName}] [PDF-ANNOTATE] [PERF-FIX-3] Direct ${directMatch.arxivOk ? "arXiv" : "DOI"} match for [${pdfLabel}] -> idx ${directMatch.idx} (O(1) lookup, ${isLocal ? "local" : "global"} range)`,
         );
-      } else if (bestGlobalAny) {
-        // Log rejection of marginal distant match
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] [POSITION-AWARE] Rejecting distant global match idx=${bestGlobalAny.idx} (score=${bestGlobalAny.score} <= ${SCORE.MARGINAL_THRESHOLD}, expected range [${expectedMinIdx}-${expectedMaxIdx}])`,
-        );
-      }
+      } else {
+        // O(1) lookup failed - fall back to O(n) scoring loop
+        // Track both local and global best matches
+        type BestMatch = {
+          idx: number;
+          score: number;
+          yearOk: boolean;
+          yearDelta: number | null;
+          arxivOk: boolean;
+        };
+        let bestLocalAny: BestMatch | null = null;
+        let bestLocalYearOk: BestMatch | null = null;
+        let bestGlobalAny: BestMatch | null = null;
+        let bestGlobalYearOk: BestMatch | null = null;
+
+        for (const pdfPaper of paperInfos) {
+          const pdfYearNum = pdfPaper.year ? parseInt(pdfPaper.year, 10) : null;
+          for (let i = 0; i < this.entries.length; i++) {
+            const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
+            // PERF-FIX-4: Use pre-computed normalized values instead of calling normalize functions
+            const norm = this.normalizedEntries[i];
+            const yearDelta =
+              pdfYearNum !== null && norm.yearNum !== null
+                ? Math.abs(pdfYearNum - norm.yearNum)
+                : null;
+            const yearOk =
+              yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
+            const matchData: BestMatch = {
+              idx: i,
+              score,
+              yearOk,
+              yearDelta,
+              arxivOk: false, // arXiv already handled by O(1) lookup
+            };
+
+            // Determine if this entry is in the expected local range
+            const isLocal = i >= expectedMinIdx && i <= expectedMaxIdx;
+
+            if (isLocal) {
+              if (!bestLocalAny || score > bestLocalAny.score)
+                bestLocalAny = matchData;
+              if (yearOk && (!bestLocalYearOk || score > bestLocalYearOk.score))
+                bestLocalYearOk = matchData;
+            } else {
+              if (!bestGlobalAny || score > bestGlobalAny.score)
+                bestGlobalAny = matchData;
+              if (
+                yearOk &&
+                (!bestGlobalYearOk || score > bestGlobalYearOk.score)
+              )
+                bestGlobalYearOk = matchData;
+            }
+          }
+        }
+
+        // Selection priority (arXiv/DOI already handled by index lookup):
+        // Priority 1: Local year-matched with good score
+        if (
+          bestLocalYearOk &&
+          bestLocalYearOk.score >= SCORE.YEAR_MATCH_ACCEPT
+        ) {
+          chosenIdx = bestLocalYearOk.idx;
+          chosenScore = bestLocalYearOk.score;
+          chosenYearOk = true;
+          chosenYearDelta = bestLocalYearOk.yearDelta;
+          chosenArxivOk = bestLocalYearOk.arxivOk;
+        }
+        // Priority 2: Global year-matched only if score is high
+        else if (
+          bestGlobalYearOk &&
+          bestGlobalYearOk.score > SCORE.MARGINAL_THRESHOLD
+        ) {
+          chosenIdx = bestGlobalYearOk.idx;
+          chosenScore = bestGlobalYearOk.score;
+          chosenYearOk = true;
+          chosenYearDelta = bestGlobalYearOk.yearDelta;
+          chosenArxivOk = bestGlobalYearOk.arxivOk;
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] [POSITION-AWARE] Accepting global match idx=${chosenIdx} (score=${chosenScore} > ${SCORE.MARGINAL_THRESHOLD})`,
+          );
+        }
+        // Priority 3: Local best match
+        else if (
+          bestLocalAny &&
+          bestLocalAny.score >= SCORE.VALIDATION_ACCEPT
+        ) {
+          chosenIdx = bestLocalAny.idx;
+          chosenScore = bestLocalAny.score;
+          chosenYearOk = bestLocalAny.yearOk;
+          chosenYearDelta = bestLocalAny.yearDelta;
+          chosenArxivOk = bestLocalAny.arxivOk;
+        }
+        // Priority 4: Global best only if score is high
+        else if (
+          bestGlobalAny &&
+          bestGlobalAny.score > SCORE.MARGINAL_THRESHOLD
+        ) {
+          chosenIdx = bestGlobalAny.idx;
+          chosenScore = bestGlobalAny.score;
+          chosenYearOk = bestGlobalAny.yearOk;
+          chosenYearDelta = bestGlobalAny.yearDelta;
+          chosenArxivOk = bestGlobalAny.arxivOk;
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] [POSITION-AWARE] Accepting global match idx=${chosenIdx} (score=${chosenScore} > ${SCORE.MARGINAL_THRESHOLD})`,
+          );
+        } else if (bestGlobalAny) {
+          // Log rejection of marginal distant match
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] [POSITION-AWARE] Rejecting distant global match idx=${bestGlobalAny.idx} (score=${bestGlobalAny.score} <= ${SCORE.MARGINAL_THRESHOLD}, expected range [${expectedMinIdx}-${expectedMaxIdx}])`,
+          );
+        }
+      } // end of O(n) fallback
 
       if (chosenIdx !== null) {
         const entry = this.entries[chosenIdx];
@@ -2054,63 +2154,10 @@ export class LabelMatcher {
         `[${config.addonName}] [PDF-ANNOTATE] No INSPIRE labels, trying scoring-based match for [${normalizedLabel}] with ${paperInfos.length} paperInfo(s)`,
       );
 
-      let bestAny: {
-        idx: number;
-        score: number;
-        yearOk: boolean;
-        yearDelta: number | null;
-        arxivOk: boolean;
-        doiOk: boolean;
-      } | null = null;
-      let bestYearOk: {
-        idx: number;
-        score: number;
-        yearOk: boolean;
-        yearDelta: number | null;
-        arxivOk: boolean;
-        doiOk: boolean;
-      } | null = null;
-      let bestArxiv: { idx: number; score: number } | null = null;
-      let bestDoi: { idx: number; score: number } | null = null;
+      // PERF-FIX-3: Try O(1) index lookup first before falling back to O(n) scoring loop
+      // Since arXiv and DOI are unique identifiers, a match definitively identifies the correct entry
+      const directMatch = this.tryIndexLookupFirst(paperInfos);
 
-      for (const pdfPaper of paperInfos) {
-        const pdfArxivNorm = normalizeArxivId(pdfPaper.arxivId);
-        const pdfDoiNorm = normalizeDoi(pdfPaper.doi);
-
-        for (let i = 0; i < this.entries.length; i++) {
-          const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
-          const entryYear = this.entries[i].year;
-          const yearDelta =
-            pdfPaper.year && entryYear
-              ? Math.abs(parseInt(pdfPaper.year, 10) - parseInt(entryYear, 10))
-              : null;
-          const yearOk =
-            yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
-          const entryArxivNorm = normalizeArxivId(this.entries[i].arxivDetails);
-          const arxivOk =
-            !!pdfArxivNorm &&
-            !!entryArxivNorm &&
-            pdfArxivNorm === entryArxivNorm;
-          const entryDoiNorm = normalizeDoi(this.entries[i].doi);
-          const doiOk =
-            !!pdfDoiNorm && !!entryDoiNorm && pdfDoiNorm === entryDoiNorm;
-
-          if (!bestAny || score > bestAny.score) {
-            bestAny = { idx: i, score, yearOk, yearDelta, arxivOk, doiOk };
-          }
-          if (yearOk && (!bestYearOk || score > bestYearOk.score)) {
-            bestYearOk = { idx: i, score, yearOk, yearDelta, arxivOk, doiOk };
-          }
-          if (arxivOk && (!bestArxiv || score > bestArxiv.score)) {
-            bestArxiv = { idx: i, score };
-          }
-          if (doiOk && (!bestDoi || score > bestDoi.score)) {
-            bestDoi = { idx: i, score };
-          }
-        }
-      }
-
-      // Selection priority: arXiv > DOI > year-matched > highest score
       let chosenIdx: number | null = null;
       let chosenScore = 0;
       let chosenYearOk = false;
@@ -2118,32 +2165,81 @@ export class LabelMatcher {
       let chosenArxivOk = false;
       let chosenDoiOk = false;
 
-      if (bestArxiv) {
-        chosenIdx = bestArxiv.idx;
-        chosenScore = bestArxiv.score;
-        chosenArxivOk = true;
-      } else if (bestDoi) {
-        chosenIdx = bestDoi.idx;
-        chosenScore = bestDoi.score;
-        chosenDoiOk = true;
-      } else if (
-        bestYearOk &&
-        (!bestAny || bestYearOk.score >= bestAny.score - 1)
-      ) {
-        chosenIdx = bestYearOk.idx;
-        chosenScore = bestYearOk.score;
-        chosenYearOk = true;
-        chosenYearDelta = bestYearOk.yearDelta;
-        chosenArxivOk = bestYearOk.arxivOk;
-        chosenDoiOk = bestYearOk.doiOk;
-      } else if (bestAny) {
-        chosenIdx = bestAny.idx;
-        chosenScore = bestAny.score;
-        chosenYearOk = bestAny.yearOk;
-        chosenYearDelta = bestAny.yearDelta;
-        chosenArxivOk = bestAny.arxivOk;
-        chosenDoiOk = bestAny.doiOk;
-      }
+      if (directMatch) {
+        // O(1) lookup succeeded - use direct match
+        chosenIdx = directMatch.idx;
+        chosenArxivOk = directMatch.arxivOk;
+        chosenDoiOk = directMatch.doiOk;
+        // Calculate score for the matched entry
+        const matchedPaper = paperInfos.find(
+          (p) =>
+            (directMatch.arxivOk && p.arxivId) ||
+            (directMatch.doiOk && p.doi),
+        );
+        if (matchedPaper) {
+          chosenScore = this.calculateMatchScore(
+            matchedPaper,
+            this.entries[directMatch.idx],
+          );
+        }
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] [PERF-FIX-3] Direct ${directMatch.arxivOk ? "arXiv" : "DOI"} match for [${pdfLabel}] -> idx ${directMatch.idx} (O(1) lookup, no-labels mode)`,
+        );
+      } else {
+        // O(1) lookup failed - fall back to O(n) scoring loop
+        let bestAny: {
+          idx: number;
+          score: number;
+          yearOk: boolean;
+          yearDelta: number | null;
+        } | null = null;
+        let bestYearOk: {
+          idx: number;
+          score: number;
+          yearOk: boolean;
+          yearDelta: number | null;
+        } | null = null;
+
+        for (const pdfPaper of paperInfos) {
+          const pdfYearNum = pdfPaper.year ? parseInt(pdfPaper.year, 10) : null;
+
+          for (let i = 0; i < this.entries.length; i++) {
+            const score = this.calculateMatchScore(pdfPaper, this.entries[i]);
+            // PERF-FIX-4: Use pre-computed normalized values instead of calling normalize functions
+            const norm = this.normalizedEntries[i];
+            const yearDelta =
+              pdfYearNum !== null && norm.yearNum !== null
+                ? Math.abs(pdfYearNum - norm.yearNum)
+                : null;
+            const yearOk =
+              yearDelta !== null && yearDelta <= YEAR_DELTA.MAX_ACCEPTABLE;
+
+            if (!bestAny || score > bestAny.score) {
+              bestAny = { idx: i, score, yearOk, yearDelta };
+            }
+            if (yearOk && (!bestYearOk || score > bestYearOk.score)) {
+              bestYearOk = { idx: i, score, yearOk, yearDelta };
+            }
+          }
+        }
+
+        // Selection priority (arXiv/DOI already handled by index lookup):
+        // year-matched > highest score
+        if (
+          bestYearOk &&
+          (!bestAny || bestYearOk.score >= bestAny.score - 1)
+        ) {
+          chosenIdx = bestYearOk.idx;
+          chosenScore = bestYearOk.score;
+          chosenYearOk = true;
+          chosenYearDelta = bestYearOk.yearDelta;
+        } else if (bestAny) {
+          chosenIdx = bestAny.idx;
+          chosenScore = bestAny.score;
+          chosenYearOk = bestAny.yearOk;
+          chosenYearDelta = bestAny.yearDelta;
+        }
+      } // end of O(n) fallback
 
       if (chosenIdx !== null) {
         const entry = this.entries[chosenIdx];
@@ -2730,6 +2826,7 @@ export class LabelMatcher {
   /**
    * Find precise match using journal/volume/page information from PDF.
    * FTR-PDF-ANNOTATE-AUTHOR-YEAR: Uses bibliographic data for exact matching.
+   * FTR-REFACTOR M-001: Delegates to extracted authorYearMatcher module.
    *
    * @param pdfPaper - Paper info extracted from PDF reference list
    * @param targetAuthors - Author names to match
@@ -2741,868 +2838,30 @@ export class LabelMatcher {
     targetAuthors: string[],
     targetYearBase: string | null,
   ): MatchResult | null {
-    let bestMatch: { idx: number; score: number; method: string } | null = null;
-
-    for (let idx = 0; idx < this.entries.length; idx++) {
-      const entry = this.entries[idx];
-      let score = 0;
-      let matchMethod = "journal";
-
-      // ═══════════════════════════════════════════════════════════════════════════
-      // Priority 1: arXiv ID match (strongest identifier)
-      // ═══════════════════════════════════════════════════════════════════════════
-      if (pdfPaper.arxivId) {
-        const pdfArxiv = normalizeArxivId(pdfPaper.arxivId);
-        const entryArxiv = normalizeArxivId(entry.arxivDetails);
-        if (pdfArxiv && entryArxiv && pdfArxiv === entryArxiv) {
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] findPreciseMatch: arXiv match ${pdfArxiv} -> idx ${idx}`,
-          );
-          return {
-            pdfLabel: `${targetAuthors[0] || "?"} ${targetYearBase || "?"}`,
-            entryIndex: idx,
-            entryId: entry.id,
-            confidence: "high",
-            matchMethod: "exact",
-            score: SCORE.ARXIV_EXACT,
-          };
-        }
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════════
-      // Priority 2: DOI match (second strongest identifier)
-      // ═══════════════════════════════════════════════════════════════════════════
-      if (pdfPaper.doi) {
-        const pdfDoi = normalizeDoi(pdfPaper.doi);
-        const entryDoi = normalizeDoi(entry.doi);
-        if (pdfDoi && entryDoi && pdfDoi === entryDoi) {
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] findPreciseMatch: DOI match ${pdfDoi} -> idx ${idx}`,
-          );
-          return {
-            pdfLabel: `${targetAuthors[0] || "?"} ${targetYearBase || "?"}`,
-            entryIndex: idx,
-            entryId: entry.id,
-            confidence: "high",
-            matchMethod: "exact",
-            score: SCORE.DOI_EXACT,
-          };
-        }
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════════
-      // Priority 3: Journal + Volume + Page match
-      // This is the key for distinguishing 2011a vs 2011b by same author
-      // ═══════════════════════════════════════════════════════════════════════════
-      if (pdfPaper.journalAbbrev && pdfPaper.volume && entry.publicationInfo) {
-        const pub = entry.publicationInfo;
-        const journalMatches = journalsSimilar(
-          pdfPaper.journalAbbrev,
-          pub.journal_title,
-        );
-        const entryVol = pub.journal_volume || pub.volume;
-        const volumeMatches =
-          entryVol && String(entryVol) === String(pdfPaper.volume);
-
-        if (journalMatches && volumeMatches) {
-          score += 4; // Journal + volume match
-
-          // Check page/article ID for extra confidence
-          const entryPage = pub.page_start || pub.artid;
-          if (
-            pdfPaper.pageStart &&
-            entryPage &&
-            String(entryPage) === pdfPaper.pageStart
-          ) {
-            score += 3; // Page also matches - very high confidence
-            matchMethod = "journal-vol-page";
-          } else {
-            matchMethod = "journal-vol";
-          }
-
-          // Verify author matches (sanity check)
-          let authorVerified = false;
-          if (targetAuthors.length > 0) {
-            const targetAuthor = targetAuthors[0];
-            if (entry.authors?.length) {
-              const firstAuthor = extractLastName(
-                entry.authors[0],
-              ).toLowerCase();
-              if (
-                firstAuthor === targetAuthor ||
-                firstAuthor.includes(targetAuthor) ||
-                targetAuthor.includes(firstAuthor)
-              ) {
-                authorVerified = true;
-                score += 2;
-              }
-            }
-            if (!authorVerified && entry.authorText) {
-              if (entry.authorText.toLowerCase().includes(targetAuthor)) {
-                authorVerified = true;
-                score += 1;
-              }
-            }
-          }
-
-          // Verify year matches (sanity check)
-          if (targetYearBase && entry.year) {
-            const entryYearBase = normalizeYear(entry.year);
-            if (entryYearBase === targetYearBase) {
-              score += 1;
-            }
-          }
-
-          if (score > (bestMatch?.score || 0)) {
-            bestMatch = { idx, score, method: matchMethod };
-          }
-        }
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════════
-      // Priority 4: Volume + Page match (when journal name might differ)
-      // Some papers cite abbreviated journal differently
-      // Only try if no match found yet (bestMatch is null)
-      // ═══════════════════════════════════════════════════════════════════════════
-      if (
-        bestMatch === null &&
-        pdfPaper.volume &&
-        pdfPaper.pageStart &&
-        entry.publicationInfo
-      ) {
-        const pub = entry.publicationInfo;
-        const entryVol = pub.journal_volume || pub.volume;
-        const entryPage = pub.page_start || pub.artid;
-
-        if (
-          entryVol &&
-          entryPage &&
-          String(entryVol) === String(pdfPaper.volume) &&
-          String(entryPage) === pdfPaper.pageStart
-        ) {
-          // Volume + page match without journal name verification
-          let tempScore = 3;
-
-          // Must verify at least author or year
-          let verified = false;
-          if (targetAuthors.length > 0 && entry.authors?.length) {
-            const firstAuthor = extractLastName(entry.authors[0]).toLowerCase();
-            if (
-              firstAuthor === targetAuthors[0] ||
-              firstAuthor.includes(targetAuthors[0])
-            ) {
-              verified = true;
-              tempScore += 2;
-            }
-          }
-          if (!verified && targetYearBase && entry.year) {
-            const entryYearBase = normalizeYear(entry.year);
-            if (entryYearBase === targetYearBase) {
-              verified = true;
-              tempScore += 1;
-            }
-          }
-
-          if (verified) {
-            bestMatch = { idx, score: tempScore, method: "vol-page" };
-          }
-        }
-      }
-    }
-
-    // Return best match if score is high enough
-    if (bestMatch && bestMatch.score >= 5) {
-      const entry = this.entries[bestMatch.idx];
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] findPreciseMatch: ${bestMatch.method} match score=${bestMatch.score} -> idx ${bestMatch.idx}`,
-      );
-      return {
-        pdfLabel: `${targetAuthors[0] || "?"} ${targetYearBase || "?"}`,
-        entryIndex: bestMatch.idx,
-        entryId: entry.id,
-        confidence: bestMatch.score >= 7 ? "high" : "medium",
-        matchMethod: "exact",
-        score: bestMatch.score,
-      };
-    }
-
-    // Log why no match was found (score too low or no entries with matching journal/volume)
-    if (bestMatch) {
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] findPreciseMatch: best score ${bestMatch.score} < threshold 5, no match returned`,
-      );
-    } else {
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] findPreciseMatch: no entry matched journal/volume criteria for ${pdfPaper.journalAbbrev} ${pdfPaper.volume}`,
-      );
-    }
-
-    return null;
+    return findPreciseMatchExtracted(
+      this.entries,
+      pdfPaper,
+      targetAuthors,
+      targetYearBase,
+    );
   }
 
   /**
    * Match author-year citation to INSPIRE entries.
    * FTR-PDF-ANNOTATE-AUTHOR-YEAR: Matches citations like "Albaladejo et al. (2017)"
+   * FTR-REFACTOR M-001: Delegates to extracted authorYearMatcher module.
    *
    * @param authorLabels - Array of labels from parseAuthorYearCitation, including
    *   combined labels like "Albaladejo et al. 2017", individual author names, and year
    * @returns Matching results sorted by confidence score
    */
   matchAuthorYear(authorLabels: string[]): MatchResult[] {
-    Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: ENTRY with labels=[${authorLabels.join("; ")}]`,
+    return matchAuthorYearExtracted(
+      {
+        entries: this.entries,
+        authorYearMapping: this.authorYearMapping,
+      },
+      authorLabels,
     );
-    const results: MatchResult[] = [];
-    const seenIndices = new Set<number>();
-
-    // FTR-FIX: Preprocess labels to handle parenthesized years like "Guo et al. (2015)"
-    // Convert "(YYYY)" to "YYYY" for proper matching
-    const preprocessedLabels = authorLabels.map((label) =>
-      label.replace(/\((\d{4}[a-z]?)\)/g, "$1"),
-    );
-
-    // FTR-REFACTOR: Use shared parseAuthorLabels function to extract author/year info
-    const {
-      authors: targetAuthors,
-      authorInitials: targetAuthorInitials,
-      year: targetYear,
-      isEtAl,
-    } = parseAuthorLabels(preprocessedLabels);
-
-    if (targetAuthors.length === 0 && !targetYear) {
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: no valid author/year extracted from labels`,
-      );
-      return results;
-    }
-
-    // Log initials if present for debugging
-    if (targetAuthorInitials.size > 0) {
-      const initialsStr = Array.from(targetAuthorInitials.entries())
-        .map(([author, initials]) => `${initials} ${author}`)
-        .join(", ");
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: author initials for disambiguation: ${initialsStr}`,
-      );
-    }
-
-    Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: searching for authors=[${targetAuthors.join(",")}], year="${targetYear}", isEtAl=${isEtAl}`,
-    );
-
-    // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Strip year suffix for matching (2011a -> 2011)
-    const targetYearBase = normalizeYear(targetYear);
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Try precise matching via PDF mapping first
-    // This uses journal/volume/page info parsed from PDF reference list
-    // ═══════════════════════════════════════════════════════════════════════════
-    Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: hasAuthorYearMapping=${this.authorYearMapping !== undefined}, mapSize=${this.authorYearMapping?.authorYearMap.size ?? 0}`,
-    );
-    if (this.authorYearMapping && targetAuthors.length > 0 && targetYear) {
-      // Build key and variants: handle ß -> ss and diacritics fallback
-      const baseKey = `${targetAuthors[0]} ${targetYear}`.toLowerCase();
-      const keyVariants = new Set<string>([baseKey]);
-      keyVariants.add(baseKey.replace("ß", "ss"));
-      // Also try without diacritics for fallback (e.g., "lü" -> "lu")
-      const keyNoDiacritics = baseKey
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-      keyVariants.add(keyNoDiacritics);
-
-      // FTR-COMPOUND-SURNAME: For compound surnames like "Hiller Blin", PDF parser may only
-      // extract first word "Hiller". Add first-word-only variant as fallback.
-      // This handles: "Hiller Blin 2016" -> try "hiller 2016" if "hiller blin 2016" fails
-      const firstWord = targetAuthors[0].split(/\s+/)[0];
-      if (firstWord !== targetAuthors[0]) {
-        const firstWordKey = `${firstWord} ${targetYear}`.toLowerCase();
-        keyVariants.add(firstWordKey);
-        keyVariants.add(
-          firstWordKey.normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
-        );
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: compound surname detected, adding first-word key "${firstWordKey}"`,
-        );
-      }
-
-      let pdfPaperInfos: PDFPaperInfo[] | undefined;
-      let usedKey: string | null = null;
-      for (const k of keyVariants) {
-        const infos = this.authorYearMapping.authorYearMap.get(k);
-        if (infos && infos.length > 0) {
-          pdfPaperInfos = infos;
-          usedKey = k;
-          break;
-        }
-      }
-      const chosenKey = usedKey ?? baseKey;
-
-      // FTR-COMPOUND-SURNAME-FIX: If PDF mapping exists but this key has no entries,
-      // fall through to fuzzy matching instead of returning empty.
-      // This handles cases where PDF parser extracted only part of compound surname
-      // (e.g., "Hiller" instead of "Hiller Blin") and we need INSPIRE author matching.
-      if (pdfPaperInfos && pdfPaperInfos.length > 0) {
-        // ═══════════════════════════════════════════════════════════════════════════
-        // FTR-AUTHOR-INITIAL-FIX: When targetAuthorInitials exists and we have multiple
-        // PDF candidates, try ALL candidates and filter by INSPIRE authorText initials.
-        // This handles cases where PDF rawText doesn't have enough info to distinguish
-        // "M.-T. Li" from "G. Li", but INSPIRE entries do.
-        // ═══════════════════════════════════════════════════════════════════════════
-        if (targetAuthorInitials.size > 0 && pdfPaperInfos.length > 1) {
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: trying all ${pdfPaperInfos.length} PDF candidates with initials filtering on INSPIRE entries`,
-          );
-
-          // Debug: log each PDF candidate's details
-          for (let i = 0; i < pdfPaperInfos.length; i++) {
-            const p = pdfPaperInfos[i];
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: PDF candidate[${i}]: arxiv=${p.arxivId || "none"}, journal=${p.journalAbbrev || "none"}, vol=${p.volume || "none"}, page=${p.pageStart || "none"}`,
-            );
-          }
-
-          // Collect all precise matches from all candidates
-          const allPreciseMatches: Array<{
-            match: MatchResult;
-            entry: InspireReferenceEntry;
-            pdfInfo: PDFPaperInfo;
-          }> = [];
-          for (const pdfInfo of pdfPaperInfos) {
-            const preciseMatch = this.findPreciseMatch(
-              pdfInfo,
-              targetAuthors,
-              targetYearBase,
-            );
-            if (preciseMatch) {
-              const entry = this.entries[preciseMatch.entryIndex];
-              allPreciseMatches.push({ match: preciseMatch, entry, pdfInfo });
-            }
-          }
-
-          if (allPreciseMatches.length > 0) {
-            // Filter by initials on INSPIRE authorText
-            let bestMatch: {
-              match: MatchResult;
-              entry: InspireReferenceEntry;
-              initialScore: number;
-            } | null = null;
-
-            for (const { match, entry } of allPreciseMatches) {
-              let initialScore = 0;
-
-              if (entry.authorText) {
-                for (const [author, initials] of targetAuthorInitials) {
-                  const pattern = buildInitialsPattern(author, initials);
-
-                  if (pattern.test(entry.authorText)) {
-                    initialScore += 20;
-                    Zotero.debug(
-                      `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: INSPIRE entry idx=${match.entryIndex} matches initials "${initials} ${author}" in authorText`,
-                    );
-                  } else if (entry.authorText.toLowerCase().includes(author)) {
-                    // Check for different initials (penalty)
-                    if (RE_DIFFERENT_INITIALS(author).test(entry.authorText)) {
-                      initialScore -= 15;
-                      Zotero.debug(
-                        `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: INSPIRE entry idx=${match.entryIndex} has WRONG initials (wanted "${initials} ${author}")`,
-                      );
-                    }
-                  }
-                }
-              }
-
-              if (!bestMatch || initialScore > bestMatch.initialScore) {
-                bestMatch = { match, entry, initialScore };
-              }
-            }
-
-            if (bestMatch && bestMatch.initialScore >= 0) {
-              results.push(bestMatch.match);
-              Zotero.debug(
-                `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: selected INSPIRE entry idx=${bestMatch.match.entryIndex} with initialScore=${bestMatch.initialScore}`,
-              );
-              return results;
-            }
-          }
-        }
-
-        // ═══════════════════════════════════════════════════════════════════════════
-        // FTR-AMBIGUOUS-AUTHOR-YEAR: When multiple PDF paper infos exist for same author+year,
-        // check if selectBestPdfPaperInfo can disambiguate. If candidates have tied scores,
-        // we cannot reliably determine which paper the user meant.
-        //
-        // Example: "Guo et al. (2016)" with two papers:
-        // - Phys. Rev. D 93 (8 authors, cited as "Guo, Hanhart et al.")
-        // - Eur. Phys. J. A 52 (4 authors, cited as "Guo, Meißner et al.")
-        //
-        // Resolution: Return first candidate but mark as ambiguous with all candidates,
-        // allowing UI to show a picker for user to choose the correct paper.
-        // ═══════════════════════════════════════════════════════════════════════════
-
-        // Calculate scores for all candidates to detect ties
-        const candidatesWithScores = scorePdfPaperInfos(
-          pdfPaperInfos,
-          targetAuthors,
-          isEtAl,
-          targetAuthorInitials,
-        );
-        const topScore = candidatesWithScores[0]?.score ?? -Infinity;
-        const tiedCandidates = candidatesWithScores.filter(
-          (c) => c.score === topScore,
-        );
-
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: found ${pdfPaperInfos.length} PDF paper info(s) for "${chosenKey}", top score=${topScore}, tied=${tiedCandidates.length}`,
-        );
-
-        if (tiedCandidates.length > 1) {
-          // Multiple candidates with same score - collect all precise matches for user selection
-          const tiedJournals = tiedCandidates
-            .map((c) => `${c.pdfInfo.journalAbbrev} ${c.pdfInfo.volume}`)
-            .join(", ");
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: ⚠️ AMBIGUOUS - ${tiedCandidates.length} candidates tied with score=${topScore}: [${tiedJournals}]. Returning with ambiguous candidates for user selection.`,
-          );
-
-          // Collect all precise matches for ambiguous candidates
-          const ambiguousCandidates: AmbiguousCandidate[] = [];
-          let firstMatch: MatchResult | null = null;
-
-          for (const { pdfInfo } of tiedCandidates) {
-            const preciseMatch = this.findPreciseMatch(
-              pdfInfo,
-              targetAuthors,
-              targetYearBase,
-            );
-            if (preciseMatch) {
-              const entry = this.entries[preciseMatch.entryIndex];
-              const authorCount = entry.authors?.length || 0;
-              const secondAuthor =
-                authorCount >= 2
-                  ? extractLastName(entry.authors![1])
-                  : undefined;
-
-              // Build display text: "Journal Vol, Page (N authors)"
-              const pub = entry.publicationInfo;
-              let displayText = "";
-              if (pub?.journal_title) {
-                displayText = pub.journal_title;
-                if (pub.journal_volume) displayText += ` ${pub.journal_volume}`;
-                if (pub.page_start) displayText += `, ${pub.page_start}`;
-              } else if (pdfInfo.journalAbbrev) {
-                displayText = pdfInfo.journalAbbrev;
-                if (pdfInfo.volume) displayText += ` ${pdfInfo.volume}`;
-                if (pdfInfo.pageStart) displayText += `, ${pdfInfo.pageStart}`;
-              }
-              if (authorCount > 0) {
-                displayText += ` (${authorCount} author${authorCount > 1 ? "s" : ""})`;
-              }
-              if (secondAuthor) {
-                displayText += ` - ${secondAuthor}`;
-              }
-
-              // Get title (truncate if too long)
-              const title = entry.title || undefined;
-
-              ambiguousCandidates.push({
-                entryIndex: preciseMatch.entryIndex,
-                entryId: preciseMatch.entryId,
-                displayText,
-                title,
-                journal: pdfInfo.journalAbbrev,
-                volume: pdfInfo.volume,
-                page: pdfInfo.pageStart,
-                authorCount,
-                secondAuthor,
-              });
-
-              if (!firstMatch) {
-                firstMatch = preciseMatch;
-              }
-            }
-          }
-
-          // Return first match with ambiguous candidates attached
-          if (firstMatch && ambiguousCandidates.length > 1) {
-            firstMatch.isAmbiguous = true;
-            firstMatch.ambiguousCandidates = ambiguousCandidates;
-            firstMatch.confidence = "medium"; // Downgrade confidence for ambiguous match
-            results.push(firstMatch);
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: returning ambiguous match with ${ambiguousCandidates.length} candidates for user selection`,
-            );
-            return results;
-          } else if (firstMatch) {
-            // Only one precise match succeeded - return it as non-ambiguous
-            results.push(firstMatch);
-            return results;
-          }
-        }
-
-        // Single best candidate or no tied candidates - use the normal flow
-        const pdfPaperInfo = tiedCandidates[0]?.pdfInfo ?? pdfPaperInfos[0];
-
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: selected: journal=${pdfPaperInfo.journalAbbrev}, vol=${pdfPaperInfo.volume}, page=${pdfPaperInfo.pageStart}`,
-        );
-
-        // Use precise matching with journal/volume/page
-        const preciseMatch = this.findPreciseMatch(
-          pdfPaperInfo,
-          targetAuthors,
-          targetYearBase,
-        );
-        if (preciseMatch) {
-          results.push(preciseMatch);
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: precise match found via PDF mapping: idx=${preciseMatch.entryIndex}, confidence=${preciseMatch.confidence}`,
-          );
-          return results;
-        } else {
-          // Log why precise matching failed - this helps debug Braaten 2005a/2005b issues
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: findPreciseMatch returned null for "${chosenKey}" (journal=${pdfPaperInfo.journalAbbrev}, vol=${pdfPaperInfo.volume}, page=${pdfPaperInfo.pageStart}). Possible causes: no entry with matching journal/volume/page, or score too low.`,
-          );
-        }
-      } else {
-        // Try without suffix (e.g., "cho 2011" when looking for "cho 2011a")
-        const lookupKeyBase =
-          `${targetAuthors[0]} ${targetYearBase}`.toLowerCase();
-        if (lookupKeyBase !== chosenKey) {
-          const pdfPaperInfosBase =
-            this.authorYearMapping.authorYearMap.get(lookupKeyBase);
-          if (pdfPaperInfosBase && pdfPaperInfosBase.length > 0) {
-            const pdfPaperInfoBase = selectBestPdfPaperInfo(
-              pdfPaperInfosBase,
-              targetAuthors,
-              isEtAl,
-              targetAuthorInitials,
-            );
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: found PDF paper info for base "${lookupKeyBase}"`,
-            );
-            const preciseMatch = this.findPreciseMatch(
-              pdfPaperInfoBase,
-              targetAuthors,
-              targetYearBase,
-            );
-            if (preciseMatch) {
-              results.push(preciseMatch);
-              return results;
-            }
-          }
-        }
-      }
-
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: no PDF paper info for "${chosenKey}", falling back to fuzzy matching`,
-      );
-    }
-
-    // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Log candidate entries for debugging
-    // This helps diagnose why matches fail (e.g., missing author data in INSPIRE)
-    const candidatesWithYear = this.entries.filter((e) => {
-      if (!e.year || !targetYearBase) return false;
-      const entryYearBase = normalizeYear(e.year);
-      return entryYearBase === targetYearBase;
-    });
-    Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: ${candidatesWithYear.length} entries with year=${targetYearBase} (from ${targetYear}) out of ${this.entries.length} total`,
-    );
-    for (const cand of candidatesWithYear.slice(0, 5)) {
-      const candAuthors =
-        cand.authors
-          ?.slice(0, 2)
-          .map((a) => extractLastName(a))
-          .join(", ") || "(no authors)";
-      const candPubInfo = cand.publicationInfo
-        ? `vol=${cand.publicationInfo.journal_volume || "?"}, page=${cand.publicationInfo.page_start || "?"}`
-        : "(no pubInfo)";
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: candidate year=${cand.year}: ${candAuthors}... (id=${cand.id}, label=${cand.label}, ${candPubInfo})`,
-      );
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Special handling for year suffix disambiguation
-    // When targetYear has a suffix (e.g., "2005b"), and we have authorYearMapping,
-    // use journal/volume/page from the mapping to distinguish between entries
-    // ═══════════════════════════════════════════════════════════════════════════
-    const hasYearSuffix = targetYear && RE_YEAR_WITH_SUFFIX.test(targetYear);
-    let pdfPaperInfoForFuzzy: {
-      journalAbbrev?: string;
-      volume?: string;
-      pageStart?: string;
-    } | null = null;
-
-    if (hasYearSuffix && this.authorYearMapping && targetAuthors.length > 0) {
-      // Try to get PDF paper info for disambiguation during fuzzy matching
-      const baseKeyFuzzy = `${targetAuthors[0]} ${targetYear}`.toLowerCase();
-      const fuzzyKeyVariants = new Set<string>([
-        baseKeyFuzzy,
-        baseKeyFuzzy.replace("ß", "ss"),
-      ]);
-      for (const k of fuzzyKeyVariants) {
-        const pdfPaperInfosForFuzzy =
-          this.authorYearMapping.authorYearMap.get(k);
-        if (pdfPaperInfosForFuzzy && pdfPaperInfosForFuzzy.length > 0) {
-          pdfPaperInfoForFuzzy = selectBestPdfPaperInfo(
-            pdfPaperInfosForFuzzy,
-            targetAuthors,
-            isEtAl,
-            targetAuthorInitials,
-          );
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: using PDF paper info for fuzzy disambiguation (key=${k}): vol=${pdfPaperInfoForFuzzy.volume}, page=${pdfPaperInfoForFuzzy.pageStart}`,
-          );
-          break;
-        }
-      }
-    }
-
-    // Score each entry
-    const scoredMatches: Array<{
-      idx: number;
-      score: number;
-      entry: InspireReferenceEntry;
-      yearMatched: boolean;
-    }> = [];
-
-    for (let idx = 0; idx < this.entries.length; idx++) {
-      const entry = this.entries[idx];
-      let score = 0;
-      let yearMatched = false;
-
-      // Check year match (required for high confidence)
-      if (targetYearBase && entry.year) {
-        const entryYear = normalizeYear(entry.year);
-        if (entryYear === targetYearBase) {
-          score += 3;
-          yearMatched = true;
-        } else if (
-          entryYear &&
-          Math.abs(parseInt(entryYear, 10) - parseInt(targetYearBase, 10)) === 1
-        ) {
-          score += 1; // Off by one year (possible preprint vs published)
-        }
-      }
-
-      // Check author matches - score based on how many target authors match
-      if (
-        targetAuthors.length > 0 &&
-        entry.authors &&
-        entry.authors.length > 0
-      ) {
-        let authorMatchCount = 0;
-        const entryAuthorsLower = entry.authors.map((a) =>
-          extractLastName(a).toLowerCase(),
-        );
-
-        for (const targetAuthor of targetAuthors) {
-          // Check for exact match with any entry author
-          if (entryAuthorsLower.some((ea) => ea === targetAuthor)) {
-            authorMatchCount++;
-            continue;
-          }
-          // Check for partial match
-          if (
-            entryAuthorsLower.some(
-              (ea) => ea.includes(targetAuthor) || targetAuthor.includes(ea),
-            )
-          ) {
-            authorMatchCount += 0.5;
-          }
-        }
-
-        if (authorMatchCount > 0) {
-          // Scale score: more matching authors = higher score
-          // First author match is most important
-          const firstAuthorMatched =
-            entryAuthorsLower[0] === targetAuthors[0] ||
-            entryAuthorsLower[0]?.includes(targetAuthors[0]) ||
-            targetAuthors[0]?.includes(entryAuthorsLower[0]);
-
-          if (firstAuthorMatched) {
-            score += 5; // First author match is critical
-          }
-          // Additional authors add more confidence
-          score += Math.min(authorMatchCount * 1.5, 4); // Cap at +4 for additional authors
-        }
-      }
-
-      // Check authorText for broader matching (fallback if authors array is sparse or empty)
-      // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Increase authorText score to allow matching when authors array is missing
-      if (targetAuthors.length > 0 && entry.authorText) {
-        const authorText = entry.authorText.toLowerCase();
-        let textMatchCount = 0;
-        let firstAuthorInText = false;
-        for (let i = 0; i < targetAuthors.length; i++) {
-          if (authorText.includes(targetAuthors[i])) {
-            textMatchCount++;
-            if (i === 0) firstAuthorInText = true;
-          }
-        }
-        // Only add authorText score if we didn't already match via authors array
-        if (textMatchCount > 0 && score < 5) {
-          // If first author matches in authorText, give higher score
-          if (firstAuthorInText) {
-            score += 4; // High confidence for first author in authorText
-          }
-          score += Math.min(textMatchCount * 1.5, 3);
-        }
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════════
-      // AUTHOR COUNT SCORING: Use citation style rules to score candidates
-      // Academic citation conventions:
-      // - "Author (2020)" → exactly 1 author
-      // - "Author and Author (2020)" → exactly 2 authors
-      // - "Author et al. (2020)" → 3+ authors
-      // ═══════════════════════════════════════════════════════════════════════════
-      if (entry.authors && entry.authors.length > 0) {
-        const entryAuthorCount = entry.authors.length;
-        if (!isEtAl && targetAuthors.length <= 2) {
-          // Citation has 1-2 authors without "et al." → paper should have exactly that many
-          if (entryAuthorCount === targetAuthors.length) {
-            score += 3; // Bonus for exact author count match
-          } else {
-            score -= 5; // Strong penalty for wrong author count
-          }
-        } else if (isEtAl) {
-          // Citation uses "et al." → paper should have 3+ authors
-          if (entryAuthorCount > 2) {
-            score += 1; // Bonus for multi-author entry
-          } else {
-            score -= 3; // Penalty for too few authors when "et al." is used
-          }
-        }
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════════
-      // FTR-AUTHOR-INITIAL: Use author initials for disambiguation
-      // This is critical for distinguishing "M.-T. Li" from "G. Li" when both have same year
-      // Check if the entry's authorText contains the specific initial+lastName pattern
-      // ═══════════════════════════════════════════════════════════════════════════
-      if (targetAuthorInitials.size > 0 && entry.authorText) {
-        const authorTextLower = entry.authorText.toLowerCase();
-        let initialMatchScore = 0;
-        let initialMismatchPenalty = 0;
-
-        for (const [author, initials] of targetAuthorInitials) {
-          const pattern = buildInitialsPattern(author, initials);
-
-          if (pattern.test(entry.authorText)) {
-            // This entry has the matching initials - strong positive signal
-            initialMatchScore += 15; // Very high weight for initial match
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: INITIAL MATCH for idx=${idx}: "${initials} ${author}" found in authorText`,
-            );
-          } else if (authorTextLower.includes(author)) {
-            // Entry has the last name but WRONG initials - strong negative signal
-            if (RE_DIFFERENT_INITIALS(author).test(entry.authorText)) {
-              initialMismatchPenalty += 12; // Strong penalty for wrong initials
-              Zotero.debug(
-                `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: INITIAL MISMATCH for idx=${idx}: wanted "${initials} ${author}" but found different initials`,
-              );
-            }
-          }
-        }
-
-        score += initialMatchScore;
-        score -= initialMismatchPenalty;
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════════
-      // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Use journal/volume/page for year suffix disambiguation
-      // This is critical for distinguishing Braaten 2005a from 2005b when both have same author/year
-      // ═══════════════════════════════════════════════════════════════════════════
-      if (pdfPaperInfoForFuzzy && yearMatched && entry.publicationInfo) {
-        const pub = entry.publicationInfo;
-        let pubMatchScore = 0;
-
-        // Volume match: critical for disambiguation
-        if (pdfPaperInfoForFuzzy.volume && pub.journal_volume) {
-          if (pub.journal_volume === pdfPaperInfoForFuzzy.volume) {
-            pubMatchScore += 10; // Very high weight - volume is key for disambiguation
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: volume match for idx=${idx}: entry vol=${pub.journal_volume} == PDF vol=${pdfPaperInfoForFuzzy.volume}`,
-            );
-          } else {
-            // Volume mismatch with same author/year strongly indicates wrong entry
-            pubMatchScore -= 8; // Penalize mismatched volumes
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: volume MISMATCH for idx=${idx}: entry vol=${pub.journal_volume} != PDF vol=${pdfPaperInfoForFuzzy.volume}`,
-            );
-          }
-        }
-
-        // Page match: additional confirmation
-        if (pdfPaperInfoForFuzzy.pageStart && pub.page_start) {
-          if (pub.page_start === pdfPaperInfoForFuzzy.pageStart) {
-            pubMatchScore += 5; // Page match adds confidence
-          }
-        }
-
-        score += pubMatchScore;
-      }
-
-      // Only consider entries with reasonable scores
-      // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Require year match for high-confidence results
-      if (score >= 4) {
-        scoredMatches.push({ idx, score, entry, yearMatched });
-      }
-    }
-
-    // Sort by score (highest first)
-    scoredMatches.sort((a, b) => b.score - a.score);
-
-    // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Filter results more strictly
-    // If we have year-matched results, only return those (filter out year-mismatched)
-    const yearMatchedResults = scoredMatches.filter((m) => m.yearMatched);
-    const resultsToUse =
-      yearMatchedResults.length > 0 ? yearMatchedResults : scoredMatches;
-
-    // Build results from top matches
-    // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Only return multiple if scores are close AND no year suffix
-    const topScore = resultsToUse[0]?.score || 0;
-    for (const match of resultsToUse) {
-      if (seenIndices.has(match.idx)) continue;
-
-      // If year has suffix and we have pdfPaperInfo, trust the score differential
-      // Otherwise, only return the best match (can't distinguish without PDF mapping)
-      if (hasYearSuffix && results.length >= 1 && !pdfPaperInfoForFuzzy) {
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: year has suffix "${targetYear}" but no PDF info, returning only top match`,
-        );
-        break;
-      }
-
-      // Only include matches within 2 points of top score
-      if (match.score < topScore - 2) break;
-      seenIndices.add(match.idx);
-
-      const confidence: MatchConfidence =
-        match.score >= 7 ? "high" : match.score >= 5 ? "medium" : "low";
-
-      results.push({
-        pdfLabel: `${targetAuthors[0] || "?"} ${targetYear || "?"}`,
-        entryIndex: match.idx,
-        entryId: match.entry.id,
-        confidence,
-        matchMethod: "fuzzy",
-        score: match.score,
-      });
-
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] matchAuthorYear: found match idx=${match.idx}, score=${match.score}, yearMatched=${match.yearMatched}, ` +
-          `entry="${match.entry.authors?.[0] || "?"} (${match.entry.year || "?"})"`,
-      );
-
-      // Only return top matches (limit to avoid noise)
-      if (results.length >= 3) break;
-    }
-
-    return results;
   }
 }

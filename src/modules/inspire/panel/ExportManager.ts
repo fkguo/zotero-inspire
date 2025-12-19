@@ -16,6 +16,8 @@ import {
   fetchBibTeX,
   copyToClipboard,
   getCachedStrings,
+  // FTR-ABORT-CONTROLLER-FIX
+  createAbortController,
 } from "../index";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,8 +89,23 @@ export const EXPORT_FORMATS: ExportFormatConfig[] = [
 export class ExportManager {
   private options: ExportManagerOptions;
 
+  // PERF-FIX-2: Track AbortController for cancellable exports
+  private exportAbort?: AbortController;
+
   constructor(options: ExportManagerOptions) {
     this.options = options;
+  }
+
+  /**
+   * PERF-FIX-2: Cancel any ongoing export operation.
+   * Call this when the panel is destroyed or user navigates away.
+   */
+  cancelExport(): void {
+    if (this.exportAbort) {
+      this.exportAbort.abort();
+      this.exportAbort = undefined;
+      Zotero.debug(`[${config.addonName}] Export operation cancelled`);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -98,6 +115,7 @@ export class ExportManager {
   /**
    * Copy all visible references as BibTeX to the clipboard.
    * Uses batch queries to efficiently fetch BibTeX from INSPIRE.
+   * PERF-FIX-2: Now cancellable via AbortController.
    */
   async copyAllBibTeX(): Promise<void> {
     const strings = getCachedStrings();
@@ -109,6 +127,12 @@ export class ExportManager {
       return;
     }
 
+    // PERF-FIX-2: Create AbortController for this export operation
+    this.cancelExport(); // Cancel any previous export
+    // FTR-ABORT-CONTROLLER-FIX: Use utility function to safely create AbortController
+    // Don't create mock signal - only pass real signal to fetch()
+    this.exportAbort = createAbortController();
+
     const allBibTeX: string[] = [];
     let successCount = 0;
 
@@ -116,13 +140,24 @@ export class ExportManager {
 
     try {
       for (let i = 0; i < entriesWithRecid.length; i += METADATA_BATCH_SIZE) {
+        // PERF-FIX-2: Check abort before each batch (use optional chaining)
+        if (this.exportAbort?.signal?.aborted) {
+          Zotero.debug(`[${config.addonName}] BibTeX export aborted`);
+          progressWin.changeLine({ text: "Export cancelled", type: "default" });
+          break;
+        }
+
         const batch = entriesWithRecid.slice(i, i + METADATA_BATCH_SIZE);
         const recids = batch.map((e) => e.recid!);
         const query = recids.map((r) => `recid:${r}`).join(" OR ");
         const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${recids.length}&format=bibtex`;
 
         try {
-          const response = await inspireFetch(url);
+          // PERF-FIX-2: Only pass signal to fetch if it's a real AbortSignal
+          const fetchOptions = this.exportAbort?.signal
+            ? { signal: this.exportAbort.signal }
+            : {};
+          const response = await inspireFetch(url, fetchOptions);
           if (response.ok) {
             const bibtex = await response.text();
             if (bibtex?.trim()) {
@@ -131,13 +166,19 @@ export class ExportManager {
             }
           }
         } catch (e) {
+          // PERF-FIX-2: Handle abort error gracefully
+          if ((e as Error).name === "AbortError") {
+            Zotero.debug(`[${config.addonName}] BibTeX batch aborted`);
+            break;
+          }
           Zotero.debug(
             `[${config.addonName}] Failed to fetch BibTeX batch: ${e}`,
           );
         }
       }
 
-      if (allBibTeX.length) {
+      // PERF-FIX-2: Only show success if not aborted (use optional chaining)
+      if (!this.exportAbort?.signal?.aborted && allBibTeX.length) {
         const success = await copyToClipboard(allBibTeX.join("\n\n"));
         if (success) {
           progressWin.changeLine({
@@ -147,18 +188,23 @@ export class ExportManager {
             type: "success",
           });
         }
-      } else {
+      } else if (!this.exportAbort?.signal?.aborted) {
         progressWin.changeLine({
           text: strings.bibtexAllFailed,
           type: "fail",
         });
       }
     } catch (e) {
-      Zotero.debug(`[${config.addonName}] Copy all BibTeX error: ${e}`);
-      progressWin.changeLine({
-        text: strings.bibtexAllFailed,
-        type: "fail",
-      });
+      if ((e as Error).name !== "AbortError") {
+        Zotero.debug(`[${config.addonName}] Copy all BibTeX error: ${e}`);
+        progressWin.changeLine({
+          text: strings.bibtexAllFailed,
+          type: "fail",
+        });
+      }
+    } finally {
+      // PERF-FIX-2: Clear abort controller after export completes
+      this.exportAbort = undefined;
     }
 
     setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
@@ -249,6 +295,7 @@ export class ExportManager {
   /**
    * Export entries in specified format to clipboard or file.
    * Supports: bibtex, latex-us, latex-eu
+   * PERF-FIX-2: Now cancellable via AbortController.
    */
   async exportEntries(
     format: ExportFormat,
@@ -266,6 +313,12 @@ export class ExportManager {
     const entriesWithRecid = targetEntries.filter((e) => e.recid);
     const strings = getCachedStrings();
 
+    // PERF-FIX-2: Create AbortController for this export operation
+    this.cancelExport(); // Cancel any previous export
+    // FTR-ABORT-CONTROLLER-FIX: Use utility function to safely create AbortController
+    // Don't create mock signal - only pass real signal to fetch()
+    this.exportAbort = createAbortController();
+
     const allContent: string[] = [];
     let successCount = 0;
     let failedBatches = 0;
@@ -274,13 +327,25 @@ export class ExportManager {
 
     try {
       for (let i = 0; i < entriesWithRecid.length; i += METADATA_BATCH_SIZE) {
+        // PERF-FIX-2: Check abort before each batch (use optional chaining)
+        if (this.exportAbort?.signal?.aborted) {
+          Zotero.debug(`[${config.addonName}] ${format} export aborted`);
+          progressWin.changeLine({ text: "Export cancelled", type: "default" });
+          setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+          return { success: false, count: 0, format, message: "Export cancelled" };
+        }
+
         const batch = entriesWithRecid.slice(i, i + METADATA_BATCH_SIZE);
         const recids = batch.map((e) => e.recid!);
         const query = recids.map((r) => `recid:${r}`).join(" OR ");
         const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${recids.length}&format=${format}`;
 
         try {
-          const response = await inspireFetch(url);
+          // PERF-FIX-2: Only pass signal to fetch if it's a real AbortSignal
+          const fetchOptions = this.exportAbort?.signal
+            ? { signal: this.exportAbort.signal }
+            : {};
+          const response = await inspireFetch(url, fetchOptions);
           if (response.ok) {
             const content = await response.text();
             if (content?.trim()) {
@@ -298,6 +363,13 @@ export class ExportManager {
             failedBatches++;
           }
         } catch (e) {
+          // PERF-FIX-2: Handle abort error gracefully
+          if ((e as Error).name === "AbortError") {
+            Zotero.debug(`[${config.addonName}] ${format} batch aborted`);
+            progressWin.changeLine({ text: "Export cancelled", type: "default" });
+            setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+            return { success: false, count: 0, format, message: "Export cancelled" };
+          }
           Zotero.debug(
             `[${config.addonName}] Failed to fetch ${format} batch: ${e}`,
           );
@@ -341,10 +413,19 @@ export class ExportManager {
         );
       }
     } catch (e) {
+      // PERF-FIX-2: Handle abort error at top level
+      if ((e as Error).name === "AbortError") {
+        progressWin.changeLine({ text: "Export cancelled", type: "default" });
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+        return { success: false, count: 0, format, message: "Export cancelled" };
+      }
       Zotero.debug(`[${config.addonName}] Export error: ${e}`);
       progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
       setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
       return { success: false, count: 0, format, message: String(e) };
+    } finally {
+      // PERF-FIX-2: Clear abort controller after export completes
+      this.exportAbort = undefined;
     }
   }
 

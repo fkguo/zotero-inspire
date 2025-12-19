@@ -5,7 +5,7 @@
 
 import type { InspireReferenceEntry, InspireArxivDetails } from "../types";
 import type { PDFPaperInfo } from "./pdfReferencesParser";
-import { SCORE, YEAR_DELTA } from "./constants";
+import { SCORE, YEAR_DELTA, AUTHOR_SCORE } from "./constants";
 import {
   normalizeAuthorName,
   normalizeAuthorCompact,
@@ -820,9 +820,12 @@ export function scoreEntryForAuthorYear(
         targetAuthors[0]?.includes(entryAuthorsLower[0]);
 
       if (firstAuthorMatched) {
-        score += 5;
+        score += AUTHOR_SCORE.FIRST_AUTHOR_MATCH;
       }
-      score += Math.min(authorMatchCount * 1.5, 4);
+      score += Math.min(
+        authorMatchCount * AUTHOR_SCORE.ADDITIONAL_MULTIPLIER,
+        AUTHOR_SCORE.MAX_ADDITIONAL,
+      );
     }
   }
 
@@ -837,11 +840,14 @@ export function scoreEntryForAuthorYear(
         if (i === 0) firstAuthorInText = true;
       }
     }
-    if (textMatchCount > 0 && score < 5) {
+    if (textMatchCount > 0 && score < AUTHOR_SCORE.TEXT_FALLBACK_THRESHOLD) {
       if (firstAuthorInText) {
-        score += 4;
+        score += AUTHOR_SCORE.FIRST_AUTHOR_IN_TEXT;
       }
-      score += Math.min(textMatchCount * 1.5, 3);
+      score += Math.min(
+        textMatchCount * AUTHOR_SCORE.ADDITIONAL_MULTIPLIER,
+        AUTHOR_SCORE.MAX_TEXT_MATCH,
+      );
     }
   }
 
@@ -850,15 +856,15 @@ export function scoreEntryForAuthorYear(
     const entryAuthorCount = entry.authors.length;
     if (!isEtAl && targetAuthors.length <= 2) {
       if (entryAuthorCount === targetAuthors.length) {
-        score += 3;
+        score += AUTHOR_SCORE.COUNT_MATCH_BONUS;
       } else {
-        score -= 5;
+        score += AUTHOR_SCORE.COUNT_MISMATCH_PENALTY;
       }
     } else if (isEtAl) {
       if (entryAuthorCount > 2) {
-        score += 1;
+        score += AUTHOR_SCORE.ET_AL_MATCH_BONUS;
       } else {
-        score -= 3;
+        score += AUTHOR_SCORE.ET_AL_MISMATCH_PENALTY;
       }
     }
   }

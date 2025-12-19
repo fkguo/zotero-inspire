@@ -14,6 +14,8 @@ import type { jsobject } from "./types";
 import { recidLookupCache } from "./apiUtils";
 import { inspireFetch } from "./rateLimiter";
 import { crossrefFetch } from "./crossrefService";
+import { LRUCache } from "./utils";
+import { localCache } from "./localCache";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RegExp Constants (hoisted to module level for performance)
@@ -25,6 +27,7 @@ const ARXIV_URL_REGEX =
 const RECID_FROM_URL_REGEX = /[^/]*$/;
 const DOI_IN_EXTRA_REGEX = /DOI:(.+)/i;
 const DOI_ORG_IN_EXTRA_REGEX = /doi\.org\/(.+)/i;
+const URL_IDENTIFIER_REGEX = /(doi|arxiv|\/literature\/)/i;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Identifier Extraction (FTR-REFACTOR: Extracted for clarity)
@@ -67,7 +70,7 @@ function extractIdentifierFromItem(
   }
 
   // Check URL for various identifiers
-  if (/(doi|arxiv|\/literature\/)/i.test(url)) {
+  if (URL_IDENTIFIER_REGEX.test(url)) {
     // arXiv from URL
     const arxivUrlMatch = ARXIV_URL_REGEX.exec(url);
     if (arxivUrlMatch) {
@@ -121,6 +124,7 @@ function extractIdentifierFromItem(
 export async function getInspireMeta(
   item: Zotero.Item,
   operation: string,
+  signal?: AbortSignal,
 ): Promise<jsobject | -1> {
   const identifier = extractIdentifierFromItem(item);
   if (!identifier) {
@@ -150,9 +154,11 @@ export async function getInspireMeta(
     const edoi = encodeURIComponent(doi);
     urlInspire = `${INSPIRE_API_BASE}/${idtype}/${edoi}${fieldsParam ? "?" + fieldsParam.slice(1) : ""}`;
   } else if (searchOrNot === 1) {
-    const citekey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0].split(
-      ": ",
-    )[1];
+    const citekeyMatch = extra.match(/^.*Citation\sKey:\s*(.+)$/m);
+    const citekey = citekeyMatch?.[1]?.trim();
+    if (!citekey) {
+      return -1;
+    }
     urlInspire = `${INSPIRE_API_BASE}/literature?q=texkey%20${encodeURIComponent(citekey)}${fieldsParam}`;
   }
 
@@ -161,7 +167,7 @@ export async function getInspireMeta(
   }
 
   let status: number | null = null;
-  const response = (await inspireFetch(urlInspire)
+  const response = (await inspireFetch(urlInspire, { signal })
     .then((response) => {
       if (response.status !== 404) {
         status = 1;
@@ -205,13 +211,14 @@ export async function getInspireMeta(
 
 export async function fetchRecidFromInspire(
   item: Zotero.Item,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   // Validate item.id before using as cache key
   if (typeof item.id !== "number" || !Number.isFinite(item.id)) {
     Zotero.debug(
       `[${config.addonName}] Invalid item.id: ${item.id}, skipping cache`,
     );
-    const meta = (await getInspireMeta(item, "literatureLookup")) as
+    const meta = (await getInspireMeta(item, "literatureLookup", signal)) as
       | jsobject
       | -1;
     if (meta === -1 || typeof meta !== "object") return null;
@@ -228,7 +235,7 @@ export async function fetchRecidFromInspire(
     return cached;
   }
 
-  const meta = (await getInspireMeta(item, "literatureLookup")) as
+  const meta = (await getInspireMeta(item, "literatureLookup", signal)) as
     | jsobject
     | -1;
   if (meta === -1 || typeof meta !== "object") {
@@ -337,11 +344,41 @@ export async function fetchBibTeX(
   }
 }
 
+/**
+ * Fetch texkey for a given INSPIRE recid.
+ * Uses lightweight fields query to avoid full metadata payload.
+ */
+export async function fetchInspireTexkey(
+  recid: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const url = `${INSPIRE_API_BASE}/literature/${encodeURIComponent(recid)}?fields=metadata.texkeys`;
+  try {
+    const response = await inspireFetch(url, { signal }).catch(() => null);
+    if (!response || !response.ok) {
+      return null;
+    }
+    const payload: any = await response.json();
+    const texkeys = payload?.metadata?.texkeys;
+    if (Array.isArray(texkeys) && texkeys.length) {
+      return typeof texkeys[0] === "string" ? texkeys[0] : null;
+    }
+  } catch (_err) {
+    return null;
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CrossRef Integration
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function getCrossrefCount(item: Zotero.Item): Promise<number> {
+const crossrefCountCache = new LRUCache<string, number>(200);
+
+export async function getCrossrefCount(
+  item: Zotero.Item,
+  signal?: AbortSignal,
+): Promise<number> {
   const doi = item.getField("DOI");
   if (!doi) {
     return -1;
@@ -351,12 +388,32 @@ export async function getCrossrefCount(item: Zotero.Item): Promise<number> {
   const t0 = performance.now();
   let response: any = null;
 
+  const normalizedDoi = doi.toLowerCase();
+
+  // Memory cache
+  const cachedMem = crossrefCountCache.get(normalizedDoi);
+  if (cachedMem !== undefined) {
+    return cachedMem;
+  }
+
+  // Disk cache (TTL from prefs, default 24h)
+  const cachedDisk = await localCache.get<number>(
+    "crossref",
+    normalizedDoi,
+    undefined,
+    { ignoreTTL: false },
+  );
+  if (cachedDisk?.data !== undefined) {
+    crossrefCountCache.set(normalizedDoi, cachedDisk.data);
+    return cachedDisk.data;
+  }
+
   // Try CrossRef API first
   if (response === null) {
     const style = "vnd.citationstyles.csl+json";
     const xform = "transform/application/" + style;
     const url = `${CROSSREF_API_URL}/${edoi}/${xform}`;
-    const fetchResponse = await crossrefFetch(url);
+    const fetchResponse = await crossrefFetch(url, { signal });
     response = fetchResponse
       ? await fetchResponse.json().catch(() => null)
       : null;
@@ -370,6 +427,7 @@ export async function getCrossrefCount(item: Zotero.Item): Promise<number> {
       headers: {
         Accept: "application/" + style,
       },
+      signal,
     });
     response = fetchResponse
       ? await fetchResponse.json().catch(() => null)
@@ -391,6 +449,12 @@ export async function getCrossrefCount(item: Zotero.Item): Promise<number> {
   }
 
   const count = str ? parseInt(str) : -1;
+
+  if (count >= 0) {
+    crossrefCountCache.set(normalizedDoi, count);
+    await localCache.set("crossref", normalizedDoi, count);
+  }
+
   return count;
 }
 
@@ -415,62 +479,75 @@ export function buildMetaFromMetadata(meta: any, operation: string): jsobject {
 
     if (meta["publication_info"]) {
       const publicationInfo = meta["publication_info"];
-      const first = publicationInfo[0];
-      if (first?.journal_title) {
-        const jAbbrev = first.journal_title as string;
+
+      // Find the primary publication entry (first one with journal_title that's not erratum)
+      // Some INSPIRE records have pubinfo_freetext in [0] and structured data in [1]
+      const primaryIdx = publicationInfo.findIndex(
+        (p: any) => p.journal_title && p.material !== "erratum",
+      );
+      const primary = primaryIdx >= 0 ? publicationInfo[primaryIdx] : null;
+
+      if (primary?.journal_title) {
+        const jAbbrev = primary.journal_title as string;
         metaInspire.journalAbbreviation = jAbbrev.replace(/\.\s|\./g, ". ");
-        if (first.journal_volume) {
-          metaInspire.volume = first.journal_volume;
+        if (primary.journal_volume) {
+          metaInspire.volume = primary.journal_volume;
         }
-        if (first.artid) {
-          metaInspire.pages = first.artid;
-        } else if (first.page_start) {
-          metaInspire.pages = first.page_start;
-          if (first.page_end) {
-            metaInspire.pages = metaInspire.pages + "-" + first.page_end;
+        if (primary.artid) {
+          metaInspire.pages = primary.artid;
+        } else if (primary.page_start) {
+          metaInspire.pages = primary.page_start;
+          if (primary.page_end) {
+            metaInspire.pages = metaInspire.pages + "-" + primary.page_end;
           }
         }
-        metaInspire.date = first.year;
-        metaInspire.issue = first.journal_issue;
+        metaInspire.date = primary.year;
+        metaInspire.issue = primary.journal_issue;
       }
 
-      if (publicationInfo.length > 1) {
-        const errNotes: string[] = [];
-        for (let i = 1; i < publicationInfo.length; i++) {
-          const next = publicationInfo[i];
-          if (next.material === "erratum") {
-            const jAbbrev = next.journal_title;
-            let pagesErr = "";
-            if (next.artid) {
-              pagesErr = next.artid;
-            } else if (next.page_start) {
-              pagesErr = next.page_start;
-              if (next.page_end) {
-                pagesErr = pagesErr + "-" + next.page_end;
-              }
+      // Process remaining entries (errata, additional publications) - skip the primary
+      const errNotes: string[] = [];
+      for (let i = 0; i < publicationInfo.length; i++) {
+        if (i === primaryIdx) continue; // Skip the primary publication
+
+        const entry = publicationInfo[i];
+        // Skip entries that only have pubinfo_freetext (these are summaries, not additional pubs)
+        if (!entry.journal_title && entry.pubinfo_freetext) continue;
+
+        if (entry.material === "erratum" && entry.journal_title) {
+          // Format journal title consistently (add spaces after dots)
+          const jAbbrev = entry.journal_title.replace(/\.\s|\./g, ". ");
+          let pagesErr = "";
+          if (entry.artid) {
+            pagesErr = entry.artid;
+          } else if (entry.page_start) {
+            pagesErr = entry.page_start;
+            if (entry.page_end) {
+              pagesErr = pagesErr + "-" + entry.page_end;
             }
-            errNotes[i - 1] =
-              `Erratum: ${jAbbrev} ${next.journal_volume}, ${pagesErr} (${next.year})`;
-          } else if (next.journal_title && (next.page_start || next.artid)) {
-            let pagesNext = "";
-            if (next.page_start) {
-              pagesNext = next.page_start;
-              if (next.page_end) {
-                pagesNext = pagesNext + "-" + next.page_end;
-              }
-            } else if (next.artid) {
-              pagesNext = next.artid;
+          }
+          errNotes.push(
+            `Erratum: ${jAbbrev} ${entry.journal_volume}, ${pagesErr} (${entry.year})`,
+          );
+        } else if (entry.journal_title && (entry.page_start || entry.artid)) {
+          // Format journal title consistently (add spaces after dots)
+          const formattedJournal = entry.journal_title.replace(/\.\s|\./g, ". ");
+          let pagesNext = "";
+          if (entry.page_start) {
+            pagesNext = entry.page_start;
+            if (entry.page_end) {
+              pagesNext = pagesNext + "-" + entry.page_end;
             }
-            errNotes[i - 1] =
-              `${next.journal_title}  ${next.journal_volume} (${next.year}) ${pagesNext}`;
+          } else if (entry.artid) {
+            pagesNext = entry.artid;
           }
-          if (next.pubinfo_freetext) {
-            errNotes[i - 1] = next.pubinfo_freetext;
-          }
+          errNotes.push(
+            `${formattedJournal}  ${entry.journal_volume} (${entry.year}) ${pagesNext}`,
+          );
         }
-        if (errNotes.length > 0) {
-          metaInspire.note = `[${errNotes.join(", ")}]`;
-        }
+      }
+      if (errNotes.length > 0) {
+        metaInspire.note = `[${errNotes.join(", ")}]`;
       }
     }
 

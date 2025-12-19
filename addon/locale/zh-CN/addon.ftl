@@ -49,6 +49,7 @@ references-panel-status-loading-cited = 正在加载被引记录...
 references-panel-status-loading-entry = 正在加载所选引用的被引记录...
 references-panel-status-loading-author = 正在加载作者论文...
 references-panel-status-error = 从 INSPIRE 加载数据失败
+references-panel-status-stale-cache = 使用离线缓存（{ $hours }小时前）- 数据可能已过期
 references-panel-empty-list = 暂无引用
 references-panel-empty-cited = 未找到被引记录
 references-panel-entry-empty = 选择一条引用以查看被引记录
@@ -146,9 +147,30 @@ references-panel-preview-loading = 正在加载详情...
 references-panel-preview-abstract-truncated = [已截断]
 references-panel-author-papers-label = { $author } 的论文
 references-panel-author-click-hint = 点击查看 { $author } 的论文
+references-panel-author-profile-loading = 正在加载作者信息...
+references-panel-author-profile-unavailable = 暂无作者信息
+references-panel-author-stats-loading = 正在加载统计数据...
+references-panel-author-stats = { $papers } 篇论文 · { $citations } 次引用 · h-index：{ $h }
+references-panel-author-stats-no-self = { $papers } 篇论文 · { $citations } 次引用（不含自引） · h-index：{ $h }
+references-panel-author-stats-partial = 基于已加载 { $count } 篇论文
+references-panel-author-advisors = 导师
+references-panel-author-emails = 邮箱
+references-panel-author-orcid-tooltip = 打开 ORCID 页面
+references-panel-author-inspire-tooltip = 在 INSPIRE 中查看
+references-panel-author-homepage-tooltip = 打开个人主页
+references-panel-author-profile-collapse = 收起
+references-panel-author-profile-expand = 展开
+references-panel-author-preview-view-papers = 查看全部论文
+references-panel-author-copied = 已复制
+references-panel-author-orcid-label = ORCID
+references-panel-author-bai-label = BAI
+references-panel-author-recid-label = INSPIRE ID
 references-panel-copy-bibtex = 复制 BibTeX
+references-panel-copy-texkey = 复制 TeX Key
 references-panel-bibtex-copied = BibTeX 已复制到剪贴板
 references-panel-bibtex-failed = 获取 BibTeX 失败
+references-panel-texkey-copied = TeX Key 已复制到剪贴板
+references-panel-texkey-failed = 获取 TeX Key 失败
 
 # 预览卡片操作按钮 (FTR-HOVER-PREVIEW)
 references-panel-status-local = 本地库中
@@ -174,12 +196,25 @@ references-panel-no-recid-entries = 无 INSPIRE 记录可导出
 # 导出菜单本地化字符串
 references-panel-export-copy-header = 📋 复制到剪贴板
 references-panel-export-file-header = 💾 导出到文件
+references-panel-export-copy-texkey = 复制 citation key
+references-panel-export-texkey-copying = 正在复制 citation key...
+references-panel-export-texkey-copied = 已复制 { $count } 个 citation key
+references-panel-export-texkey-failed = 复制 citation key 失败
 references-panel-export-copied = 已复制 { $count } 条 { $format } 条目
 references-panel-export-saved = 已保存 { $count } 条 { $format } 条目
 references-panel-export-clipboard-failed = 复制到剪贴板失败（内容过大？）
 references-panel-export-too-large = 内容过大（{ $size }KB）- 请改用「导出到文件」
 references-panel-export-cancelled = 导出已取消
 references-panel-export-save-title = 导出引用
+
+# 引用样式导出（使用 Zotero 内置的参考文献对话框）
+references-panel-export-citation-header = 📝 引用样式
+references-panel-export-citation-copied = 已复制 { $count } 条格式化引用
+references-panel-export-citation-no-local = 无可格式化的本地 Zotero 条目（仅支持本地库中的条目）
+references-panel-export-citation-select-style = 选择引用样式...
+references-panel-export-citation-import-needed = 需要先将 { $count } 条引用导入到 Zotero 库中。请选择目标文件夹。
+references-panel-export-citation-importing = 正在导入 { $done } / { $total } 以供引用导出...
+references-panel-export-citation-import-failed = 部分引用导入失败。{ $total } 条中仅 { $success } 条可格式化。
 
 # 图表本地化字符串
 references-panel-chart-collapse = 折叠图表
@@ -225,6 +260,7 @@ references-panel-filter-count-search =
 references-panel-cache-source-api = 来自 INSPIRE
 references-panel-cache-source-memory = 来自内存缓存
 references-panel-cache-source-local = 来自本地缓存（{ $age } 小时前）
+references-panel-cache-source-local-expired = 来自过期缓存（{ $age } 小时前）- 离线模式
 
 # 右键菜单复制操作
 menuitem-copy-bibtex = 复制 BibTeX
@@ -339,3 +375,56 @@ pdf-annotate-ambiguous-title = "{ $citation }" 有多个匹配
 pdf-annotate-ambiguous-message = 此引用匹配多篇论文。请选择正确的一篇：
 pdf-annotate-ambiguous-cancel = 取消
 pdf-annotate-ambiguous-preview-hint = 仅作者-年份匹配；点击选择
+
+# 预印本监控功能 (FTR-PREPRINT-WATCH)
+preprint-check-menu = 检查预印本状态
+preprint-check-collection-menu = 检查该分类中的预印本
+preprint-check-all-menu = 检查全部预印本
+preprint-check-progress = 正在检查预印本... ({ $current }/{ $total })
+preprint-check-scanning = 正在扫描库中的预印本...
+preprint-check-cancelled = 检查已取消
+preprint-found-published =
+  { $count ->
+    [one] 发现 1 篇预印本已正式发表！
+   *[other] 发现 { $count } 篇预印本已正式发表！
+  }
+preprint-all-current = 所有预印本均未正式发表。
+preprint-no-preprints = 未找到未发表的预印本。
+preprint-update-success =
+  { $count ->
+    [one] 成功更新 1 个条目。
+   *[other] 成功更新 { $count } 个条目。
+  }
+preprint-update-selected = 更新所选
+preprint-select-all = 全选
+preprint-cancel = 取消
+preprint-doi-updated = DOI 已更新: { $oldDoi } → { $newDoi }
+preprint-results-published = 已发表
+preprint-results-unpublished = 未发表
+preprint-results-errors = 错误
+
+# Collaboration Tags feature (FTR-COLLAB-TAGS)
+collab-tag-menu-add = 添加合作组标签
+collab-tag-menu-reapply = 重新应用合作组标签
+collab-tag-progress = 正在添加合作组标签...
+collab-tag-result =
+  { $added ->
+    [0] { $updated ->
+      [0] 无更改
+      [one] 更新了 1 个标签
+     *[other] 更新了 { $updated } 个标签
+    }
+    [one] 添加了 1 个标签{ $updated ->
+      [0] {""}
+     *[other] ，更新了 { $updated } 个
+    }
+   *[other] 添加了 { $added } 个标签{ $updated ->
+      [0] {""}
+     *[other] ，更新了 { $updated } 个
+    }
+  }{ $skipped ->
+    [0] {""}
+   *[other] ，跳过 { $skipped } 个
+  }
+collab-tag-no-selection = 请至少选择一个条目以添加合作组标签
+collab-tag-disabled = 请在 首选项 → INSPIRE 中启用合作组标签功能

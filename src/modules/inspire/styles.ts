@@ -128,6 +128,39 @@ export const CHART_STYLES = {
   } as CSSProperties,
 } as const;
 
+/**
+ * Get dark mode aware chart "no data" styles.
+ * Use this instead of CHART_STYLES for proper dark mode support.
+ */
+export function getChartNoDataStyle(): CSSProperties {
+  const dark = isDarkMode();
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    color: dark ? "#6b7280" : "#9ca3af",
+    fontSize: "12px",
+  };
+}
+
+/**
+ * Get dark mode aware chart "no data" italic styles.
+ * Use this instead of CHART_STYLES for proper dark mode support.
+ */
+export function getChartNoDataItalicStyle(): CSSProperties {
+  const dark = isDarkMode();
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    color: dark ? "#6b7280" : "#9ca3af",
+    fontSize: "12px",
+    fontStyle: "italic",
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Style Application Utilities
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,14 +217,57 @@ export function toStyleString(styles: CSSProperties): string {
 
 /**
  * Check if the current Zotero theme is dark mode.
+ * Uses multiple detection methods for reliability:
+ * 1. Check Zotero's platform-darkmode attribute (most reliable)
+ * 2. Check data-color-scheme attribute
+ * 3. Fall back to system preference via matchMedia
  */
 export function isDarkMode(): boolean {
-  const doc = Zotero.getMainWindow?.()?.document;
-  if (!doc) return false;
-  return (
-    doc.documentElement.getAttribute("zotero-platform-darkmode") === "true" ||
-    doc.documentElement.getAttribute("data-color-scheme") === "dark"
-  );
+  try {
+    // Try to get the main window document
+    const mainWindow = Zotero.getMainWindow?.();
+    const doc = mainWindow?.document;
+
+    if (doc) {
+      // Check Zotero-specific dark mode attribute (most reliable for Zotero 7)
+      const platformDarkMode = doc.documentElement.getAttribute("zotero-platform-darkmode");
+      if (platformDarkMode === "true") {
+        return true;
+      }
+      if (platformDarkMode === "false") {
+        return false;
+      }
+
+      // Check data-color-scheme attribute (explicit light/dark)
+      const colorScheme = doc.documentElement.getAttribute("data-color-scheme");
+      if (colorScheme === "dark") {
+        return true;
+      }
+      if (colorScheme === "light") {
+        return false;
+      }
+    }
+
+    // Fallback: Check system preference via matchMedia
+    if (mainWindow?.matchMedia) {
+      const mediaQuery = mainWindow.matchMedia("(prefers-color-scheme: dark)");
+      if (mediaQuery) {
+        return mediaQuery.matches;
+      }
+    }
+
+    // Last resort: check global matchMedia if available
+    if (typeof matchMedia !== "undefined") {
+      const globalMediaQuery = matchMedia("(prefers-color-scheme: dark)");
+      if (globalMediaQuery) {
+        return globalMediaQuery.matches;
+      }
+    }
+  } catch {
+    // Ignore errors and return false
+  }
+
+  return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
