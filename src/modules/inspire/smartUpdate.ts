@@ -158,222 +158,124 @@ export function isFieldProtected(
  * Character equivalence map for diacritics/umlauts (German-style expansion)
  * Maps special characters to their traditional ASCII equivalents
  */
-const DIACRITIC_EQUIVALENTS: Record<string, string> = {
-  // German umlauts (expanded form)
-  ä: "ae",
-  ö: "oe",
-  ü: "ue",
-  Ä: "Ae",
-  Ö: "Oe",
-  Ü: "Ue",
-  ß: "ss",
+interface DiacriticMapping {
+  /** German-style expansion (ä → ae) */
+  expanded: string;
+  /** Simple strip (ä → a) */
+  stripped: string;
+}
+
+const DIACRITIC_MAP: Record<string, DiacriticMapping> = {
+  // German umlauts
+  ä: { expanded: "ae", stripped: "a" },
+  ö: { expanded: "oe", stripped: "o" },
+  ü: { expanded: "ue", stripped: "u" },
+  Ä: { expanded: "Ae", stripped: "A" },
+  Ö: { expanded: "Oe", stripped: "O" },
+  Ü: { expanded: "Ue", stripped: "U" },
+  ß: { expanded: "ss", stripped: "s" },
   // French/Spanish accents
-  é: "e",
-  è: "e",
-  ê: "e",
-  ë: "e",
-  É: "E",
-  È: "E",
-  Ê: "E",
-  Ë: "E",
-  á: "a",
-  à: "a",
-  â: "a",
-  ã: "a",
-  Á: "A",
-  À: "A",
-  Â: "A",
-  Ã: "A",
-  í: "i",
-  ì: "i",
-  î: "i",
-  ï: "i",
-  Í: "I",
-  Ì: "I",
-  Î: "I",
-  Ï: "I",
-  ó: "o",
-  ò: "o",
-  ô: "o",
-  õ: "o",
-  Ó: "O",
-  Ò: "O",
-  Ô: "O",
-  Õ: "O",
-  ú: "u",
-  ù: "u",
-  û: "u",
-  Ú: "U",
-  Ù: "U",
-  Û: "U",
-  ñ: "n",
-  Ñ: "N",
-  ç: "c",
-  Ç: "C",
+  é: { expanded: "e", stripped: "e" },
+  è: { expanded: "e", stripped: "e" },
+  ê: { expanded: "e", stripped: "e" },
+  ë: { expanded: "e", stripped: "e" },
+  É: { expanded: "E", stripped: "E" },
+  È: { expanded: "E", stripped: "E" },
+  Ê: { expanded: "E", stripped: "E" },
+  Ë: { expanded: "E", stripped: "E" },
+  á: { expanded: "a", stripped: "a" },
+  à: { expanded: "a", stripped: "a" },
+  â: { expanded: "a", stripped: "a" },
+  ã: { expanded: "a", stripped: "a" },
+  Á: { expanded: "A", stripped: "A" },
+  À: { expanded: "A", stripped: "A" },
+  Â: { expanded: "A", stripped: "A" },
+  Ã: { expanded: "A", stripped: "A" },
+  í: { expanded: "i", stripped: "i" },
+  ì: { expanded: "i", stripped: "i" },
+  î: { expanded: "i", stripped: "i" },
+  ï: { expanded: "i", stripped: "i" },
+  Í: { expanded: "I", stripped: "I" },
+  Ì: { expanded: "I", stripped: "I" },
+  Î: { expanded: "I", stripped: "I" },
+  Ï: { expanded: "I", stripped: "I" },
+  ó: { expanded: "o", stripped: "o" },
+  ò: { expanded: "o", stripped: "o" },
+  ô: { expanded: "o", stripped: "o" },
+  õ: { expanded: "o", stripped: "o" },
+  Ó: { expanded: "O", stripped: "O" },
+  Ò: { expanded: "O", stripped: "O" },
+  Ô: { expanded: "O", stripped: "O" },
+  Õ: { expanded: "O", stripped: "O" },
+  ú: { expanded: "u", stripped: "u" },
+  ù: { expanded: "u", stripped: "u" },
+  û: { expanded: "u", stripped: "u" },
+  Ú: { expanded: "U", stripped: "U" },
+  Ù: { expanded: "U", stripped: "U" },
+  Û: { expanded: "U", stripped: "U" },
+  ñ: { expanded: "n", stripped: "n" },
+  Ñ: { expanded: "N", stripped: "N" },
+  ç: { expanded: "c", stripped: "c" },
+  Ç: { expanded: "C", stripped: "C" },
   // Nordic characters
-  å: "a",
-  Å: "A",
-  æ: "ae",
-  Æ: "Ae",
-  ø: "o",
-  Ø: "O",
+  å: { expanded: "a", stripped: "a" },
+  Å: { expanded: "A", stripped: "A" },
+  æ: { expanded: "ae", stripped: "a" },
+  Æ: { expanded: "Ae", stripped: "A" },
+  ø: { expanded: "o", stripped: "o" },
+  Ø: { expanded: "O", stripped: "O" },
   // Polish/Czech/etc
-  ł: "l",
-  Ł: "L",
-  ś: "s",
-  Ś: "S",
-  ź: "z",
-  Ź: "Z",
-  ż: "z",
-  Ż: "Z",
-  ć: "c",
-  Ć: "C",
-  ń: "n",
-  Ń: "N",
-  ř: "r",
-  Ř: "R",
-  š: "s",
-  Š: "S",
-  ž: "z",
-  Ž: "Z",
-  č: "c",
-  Č: "C",
-  ě: "e",
-  Ě: "E",
-  ů: "u",
-  Ů: "U",
-  ý: "y",
-  Ý: "Y",
+  ł: { expanded: "l", stripped: "l" },
+  Ł: { expanded: "L", stripped: "L" },
+  ś: { expanded: "s", stripped: "s" },
+  Ś: { expanded: "S", stripped: "S" },
+  ź: { expanded: "z", stripped: "z" },
+  Ź: { expanded: "Z", stripped: "Z" },
+  ż: { expanded: "z", stripped: "z" },
+  Ż: { expanded: "Z", stripped: "Z" },
+  ć: { expanded: "c", stripped: "c" },
+  Ć: { expanded: "C", stripped: "C" },
+  ń: { expanded: "n", stripped: "n" },
+  Ń: { expanded: "N", stripped: "N" },
+  ř: { expanded: "r", stripped: "r" },
+  Ř: { expanded: "R", stripped: "R" },
+  š: { expanded: "s", stripped: "s" },
+  Š: { expanded: "S", stripped: "S" },
+  ž: { expanded: "z", stripped: "z" },
+  Ž: { expanded: "Z", stripped: "Z" },
+  č: { expanded: "c", stripped: "c" },
+  Č: { expanded: "C", stripped: "C" },
+  ě: { expanded: "e", stripped: "e" },
+  Ě: { expanded: "E", stripped: "E" },
+  ů: { expanded: "u", stripped: "u" },
+  Ů: { expanded: "U", stripped: "U" },
+  ý: { expanded: "y", stripped: "y" },
+  Ý: { expanded: "Y", stripped: "Y" },
   // Turkish
-  ğ: "g",
-  Ğ: "G",
-  ı: "i",
-  İ: "I",
-  ş: "s",
-  Ş: "S",
+  ğ: { expanded: "g", stripped: "g" },
+  Ğ: { expanded: "G", stripped: "G" },
+  ı: { expanded: "i", stripped: "i" },
+  İ: { expanded: "I", stripped: "I" },
+  ş: { expanded: "s", stripped: "s" },
+  Ş: { expanded: "S", stripped: "S" },
 };
 
 /**
  * Simple diacritic stripping map (just removes accents, no expansion)
  * Used for matching against databases that simply strip accents (e.g., Döring → Doring)
  */
-const DIACRITIC_STRIP: Record<string, string> = {
-  // German umlauts (simple strip)
-  ä: "a",
-  ö: "o",
-  ü: "u",
-  Ä: "A",
-  Ö: "O",
-  Ü: "U",
-  ß: "s", // Sometimes stripped to single s
-  // All accented vowels
-  é: "e",
-  è: "e",
-  ê: "e",
-  ë: "e",
-  É: "E",
-  È: "E",
-  Ê: "E",
-  Ë: "E",
-  á: "a",
-  à: "a",
-  â: "a",
-  ã: "a",
-  Á: "A",
-  À: "A",
-  Â: "A",
-  Ã: "A",
-  í: "i",
-  ì: "i",
-  î: "i",
-  ï: "i",
-  Í: "I",
-  Ì: "I",
-  Î: "I",
-  Ï: "I",
-  ó: "o",
-  ò: "o",
-  ô: "o",
-  õ: "o",
-  Ó: "O",
-  Ò: "O",
-  Ô: "O",
-  Õ: "O",
-  ú: "u",
-  ù: "u",
-  û: "u",
-  Ú: "U",
-  Ù: "U",
-  Û: "U",
-  ñ: "n",
-  Ñ: "N",
-  ç: "c",
-  Ç: "C",
-  // Nordic
-  å: "a",
-  Å: "A",
-  æ: "a",
-  Æ: "A", // Simple strip (vs ae expansion)
-  ø: "o",
-  Ø: "O",
-  // Polish/Czech/etc
-  ł: "l",
-  Ł: "L",
-  ś: "s",
-  Ś: "S",
-  ź: "z",
-  Ź: "Z",
-  ż: "z",
-  Ż: "Z",
-  ć: "c",
-  Ć: "C",
-  ń: "n",
-  Ń: "N",
-  ř: "r",
-  Ř: "R",
-  š: "s",
-  Š: "S",
-  ž: "z",
-  Ž: "Z",
-  č: "c",
-  Č: "C",
-  ě: "e",
-  Ě: "E",
-  ů: "u",
-  Ů: "U",
-  ý: "y",
-  Ý: "Y",
-  // Turkish
-  ğ: "g",
-  Ğ: "G",
-  ı: "i",
-  İ: "I",
-  ş: "s",
-  Ş: "S",
-};
-
-/**
- * Normalize a string by replacing diacritics with ASCII equivalents (German-style)
- */
 function normalizeDiacritics(str: string): string {
-  let result = str;
-  for (const [diacritic, replacement] of Object.entries(
-    DIACRITIC_EQUIVALENTS,
-  )) {
-    result = result.split(diacritic).join(replacement);
-  }
-  return result;
+  if (!str) return str;
+  return Array.from(str)
+    .map((c) => DIACRITIC_MAP[c]?.expanded ?? c)
+    .join("");
 }
 
-/**
- * Strip diacritics from a string (simple removal, no expansion)
- */
 function stripDiacritics(str: string): string {
-  let result = str;
-  for (const [diacritic, replacement] of Object.entries(DIACRITIC_STRIP)) {
-    result = result.split(diacritic).join(replacement);
-  }
-  return result;
+  if (!str) return str;
+  return Array.from(str)
+    .map((c) => DIACRITIC_MAP[c]?.stripped ?? c)
+    .join("");
 }
 
 /**
@@ -405,12 +307,9 @@ export function isDiacriticEquivalent(str1: string, str2: string): boolean {
  * Check if a name contains diacritics that should be preserved
  */
 function hasDiacritics(str: string): boolean {
-  for (const diacritic of Object.keys(DIACRITIC_EQUIVALENTS)) {
-    if (str.includes(diacritic)) {
-      return true;
-    }
-  }
-  return false;
+  return Object.keys(DIACRITIC_MAP).some((diacritic) =>
+    str.includes(diacritic),
+  );
 }
 
 /**
@@ -1504,6 +1403,11 @@ export function showUpdateNotification(
   notification.style.fontSize = "13px";
   notification.style.color = "#0369a1";
   notification.style.gap = "12px";
+  // FIX-PANEL-WIDTH-OVERFLOW: Constrain notification to container width
+  notification.style.width = "100%";
+  notification.style.maxWidth = "100%";
+  notification.style.boxSizing = "border-box";
+  notification.style.overflow = "hidden";
 
   // Left side: icon and text
   const leftSide = doc.createElement("div");

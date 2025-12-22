@@ -591,3 +591,45 @@ pdfMapping: 78.6% hit rate (11/14), size: 8/30
 recidLookup: 95.0% hit rate (190/200), size: 156/500
 [Overall]: 91.3% hit rate (341/368)
 ```
+
+---
+
+## 13. Abstract Rendering
+
+### 13.1 LaTeX Mode
+
+Two rendering modes for LaTeX formulas in abstracts:
+
+| Mode        | Description                                                      |
+| ----------- | ---------------------------------------------------------------- |
+| **KaTeX**   | Full KaTeX rendering for complex formulas (fractions, integrals, matrices) |
+| **Unicode** | Converts simple LaTeX to Unicode characters (lightweight)        |
+
+**Preferences**:
+
+| Preference             | Type   | Default | Description          |
+| ---------------------- | ------ | ------- | -------------------- |
+| `latex_render_mode`  | string | "katex" | "katex" or "unicode" |
+
+**KaTeX Features**:
+
+- Bundled KaTeX library (no external dependencies)
+- Custom macros for physics notation (GeV, TeV, etc.)
+- Graceful fallback on render errors
+- Supports display and inline math modes
+
+### 13.2 Abstract Copy Context Menu
+
+Right-click on abstract preview card shows context menu:
+
+| Option               | Description                              |
+| -------------------- | ---------------------------------------- |
+| **Copy**             | Copy full abstract as plain text         |
+| **Copy Selection**   | Copy selected text (if any)              |
+| **Copy as LaTeX**    | Copy original LaTeX source code          |
+
+**Implementation**:
+
+- Context menu appears on right-click over abstract content
+- LaTeX source preserved from INSPIRE API response
+- Selection-aware: shows "Copy Selection" only when text is selected

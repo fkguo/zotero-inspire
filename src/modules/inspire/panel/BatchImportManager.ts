@@ -11,6 +11,8 @@ import {
   findItemsByRecids,
   findItemsByArxivs,
   findItemsByDOIs,
+  createAbortController,
+  createMockSignal,
 } from "../index";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 
@@ -618,23 +620,8 @@ export class BatchImportManager {
     this.isImporting = true;
 
     // Setup cancellation
-    let AbortControllerClass =
-      typeof AbortController !== "undefined" ? AbortController : null;
-    if (!AbortControllerClass) {
-      const win = Zotero.getMainWindow();
-      if (win && (win as any).AbortController) {
-        AbortControllerClass = (win as any).AbortController;
-      }
-    }
-
-    this.importAbort = AbortControllerClass
-      ? new AbortControllerClass()
-      : undefined;
-    const signal = this.importAbort?.signal || {
-      aborted: false,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    };
+    this.importAbort = createAbortController();
+    const signal = this.importAbort?.signal || createMockSignal();
 
     // Escape key listener
     const escapeHandler = (e: KeyboardEvent) => {

@@ -3,6 +3,12 @@ import { inspireFetch } from "./rateLimiter";
 import { INSPIRE_API_BASE, AUTHOR_PROFILE_CACHE_TTL_MS } from "./constants";
 import { LRUCache } from "./utils";
 import type { AuthorSearchInfo, InspireAuthorProfile } from "./types";
+import type {
+  InspireAuthorsSearchResponse,
+  InspireAuthorDirectResponse,
+  InspireAuthorMetadata,
+} from "./apiTypes";
+
 const authorProfileCache = new LRUCache<
   string,
   { profile: InspireAuthorProfile; fetchedAt: number }
@@ -124,7 +130,7 @@ export async function fetchAuthorProfile(
         Zotero.debug(`[${config.addonName}] Author profile search failed: ${response?.status} for ${url}`);
         return null;
       }
-      const data = (await response.json()) as any;
+      const data = (await response.json()) as unknown as InspireAuthorsSearchResponse | null;
       const hit = data?.hits?.hits?.[0];
       if (!hit) {
         Zotero.debug(`[${config.addonName}] Author profile search: no results for query "${query}"`);
@@ -249,7 +255,7 @@ async function fetchAuthorByRecid(
       return null;
     }
 
-    const data = (await response.json()) as any;
+    const data = (await response.json()) as unknown as InspireAuthorDirectResponse | null;
     // Direct lookup response: { "id": "...", "metadata": { ... } }
     const record = data?.metadata;
     if (!record) {
@@ -269,7 +275,7 @@ async function fetchAuthorByRecid(
 }
 
 export function parseAuthorProfile(
-  metadata: any,
+  metadata: InspireAuthorMetadata | undefined,
   recid?: string | number,
 ): InspireAuthorProfile | null {
   if (!metadata?.name) {

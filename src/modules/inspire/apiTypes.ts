@@ -65,6 +65,7 @@ export interface InspireLiteratureMetadata {
   keywords?: InspireKeyword[];
   report_numbers?: InspireReportNumber[];
   external_system_identifiers?: InspireExternalID[];
+  preprint_date?: string;
 }
 
 /**
@@ -147,6 +148,7 @@ export interface InspireDOI {
 export interface InspireAbstract {
   value: string;
   source?: string;
+  language?: string;
 }
 
 /**
@@ -305,6 +307,55 @@ export interface CrossRefAuthor {
  */
 export interface CrossRefDate {
   "date-parts": number[][];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSPIRE Authors API Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * INSPIRE Authors API search response structure.
+ */
+export interface InspireAuthorsSearchResponse {
+  hits: {
+    hits: InspireAuthorsHit[];
+    total: number;
+  };
+}
+
+/**
+ * INSPIRE Authors API hit structure.
+ */
+export interface InspireAuthorsHit {
+  id: string;
+  metadata: InspireAuthorMetadata;
+}
+
+/**
+ * INSPIRE Author record metadata (from Authors API).
+ */
+export interface InspireAuthorMetadata {
+  control_number?: number;
+  name?: { value?: string; preferred_name?: string };
+  positions?: Array<{
+    institution?: string;
+    rank?: string;
+    current?: boolean;
+  }>;
+  ids?: Array<{ schema?: string; value?: string }>;
+  arxiv_categories?: string[];
+  urls?: Array<{ value?: string; description?: string }>;
+  email_addresses?: Array<{ value?: string; current?: boolean }>;
+  status?: string;
+  advisors?: Array<{ name?: string; degree_type?: string }>;
+}
+
+/**
+ * INSPIRE Author direct lookup response (single record).
+ */
+export interface InspireAuthorDirectResponse {
+  id: string;
+  metadata: InspireAuthorMetadata;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

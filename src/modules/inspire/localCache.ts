@@ -13,6 +13,9 @@ import type {
   LocalCacheType,
 } from "./types";
 
+// Toggle verbose performance logging for local cache (default off)
+const DEBUG_LOCAL_CACHE = false;
+
 // Cache directory name under Zotero data directory
 const CACHE_DIR_NAME = "zoteroinspire-cache";
 
@@ -302,9 +305,11 @@ class InspireLocalCache {
   private validateDataIntegrity<T>(data: T, filePath: string): boolean {
     const validateStart = performance.now();
     const validateLog = (msg: string) => {
-      Zotero.debug(
-        `[${config.addonName}] [PERF] validateDataIntegrity: ${msg} (+${(performance.now() - validateStart).toFixed(1)}ms)`,
-      );
+      if (DEBUG_LOCAL_CACHE) {
+        Zotero.debug(
+          `[${config.addonName}] [PERF] validateDataIntegrity: ${msg} (+${(performance.now() - validateStart).toFixed(1)}ms)`,
+        );
+      }
     };
 
     // Only validate array data (references, cited-by, author papers)
@@ -449,12 +454,14 @@ class InspireLocalCache {
     ageHours: number;
     total?: number;
     expired?: boolean;
-  } | null> {
+    } | null> {
     const getStart = performance.now();
     const getLog = (msg: string) => {
-      Zotero.debug(
-        `[${config.addonName}] [PERF] localCache.get: ${msg} (+${(performance.now() - getStart).toFixed(1)}ms)`,
-      );
+      if (DEBUG_LOCAL_CACHE) {
+        Zotero.debug(
+          `[${config.addonName}] [PERF] localCache.get: ${msg} (+${(performance.now() - getStart).toFixed(1)}ms)`,
+        );
+      }
     };
     getLog(`start (${type}/${key})`);
 

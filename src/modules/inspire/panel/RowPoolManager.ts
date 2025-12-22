@@ -22,6 +22,8 @@ export type StyleApplicator = (element: HTMLElement) => void;
 export interface RowPoolManagerOptions {
   /** Maximum size of the row pool */
   maxPoolSize?: number;
+  /** Callback to apply row styles (FIX-PANEL-WIDTH-OVERFLOW) */
+  applyRowStyle?: StyleApplicator;
   /** Callback to apply text container styles */
   applyTextContainerStyle?: StyleApplicator;
   /** Callback to apply marker styles */
@@ -197,6 +199,11 @@ export class RowPoolManager {
 
     const row = doc.createElement("div");
     row.classList.add("zinspire-ref-entry");
+
+    // FIX-PANEL-WIDTH-OVERFLOW: Apply row styles to constrain width
+    if (this.options.applyRowStyle) {
+      this.options.applyRowStyle(row);
+    }
 
     // Use innerHTML for static elements (Zotero XHTML removes input/button via innerHTML)
     row.innerHTML = `

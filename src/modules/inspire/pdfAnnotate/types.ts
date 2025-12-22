@@ -162,6 +162,8 @@ export interface ScanResult {
 export interface CitationLookupEvent {
   /** Parent item ID (the paper being read) */
   parentItemID: number;
+  /** FTR-MULTI-PDF-FIX: PDF attachment item ID (distinguishes multiple PDFs) */
+  attachmentItemID: number;
   /** Parsed citation from selection */
   citation: ParsedCitation;
   /** Reader tab ID */
@@ -175,6 +177,8 @@ export interface CitationLookupEvent {
 export interface CitationPreviewEvent {
   /** Parent item ID (the paper being read) */
   parentItemID: number;
+  /** FTR-MULTI-PDF-FIX: PDF attachment item ID (distinguishes multiple PDFs) */
+  attachmentItemID: number;
   /** Citation label for display (e.g., "65" for [65], "Guo et al. (2015)") */
   label: string;
   /** All labels from parsed citation for proper matching (required for consistent behavior) */

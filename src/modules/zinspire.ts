@@ -31,6 +31,8 @@ import {
   // FTR-CONSISTENT-UI: Unified button styling
   applyPillButtonStyle,
   applyPreviewCardAbstractStyle,
+  // Unified floating element positioning
+  positionFloatingElement,
 } from "./pickerUI";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -127,6 +129,7 @@ import {
   clearAllHistoryPrefs,
   // AbortController utilities (FTR-ABORT-CONTROLLER-FIX)
   createAbortController,
+  createMockSignal,
   // Rate limiter
   inspireFetch,
   getRateLimiterStatus,
@@ -215,6 +218,21 @@ import {
   showUpdateNotification,
   type SmartUpdateDiff,
   type FieldChange,
+  type InspireLiteratureSearchResponse,
+  renderMathContent,
+  containsLatexMath,
+  getRenderMode,
+  // EntryListRenderer (Phase 0.1 refactor)
+  EntryListRenderer,
+  type EntryRenderContext,
+  // SearchService (Phase 0.2 refactor)
+  fetchInspireSearch,
+  // HoverPreviewController (Phase 0.4 refactor)
+  HoverPreviewController,
+  type PreviewActionCallbacks,
+  // AuthorPreviewController (Phase 0.5 refactor)
+  AuthorPreviewController,
+  type AuthorPreviewCallbacks,
 } from "./inspire";
 
 // Re-export for external use
@@ -1148,6 +1166,62 @@ class InspireReferencePanelController {
   private static lastGlobalCitationEventKey?: string;
   private static lastGlobalCitationEventTs = 0;
   private static globalCitationInFlightKey?: string;
+  // Anchor search length for mapping selection back to LaTeX source
+  private static readonly ANCHOR_SEARCH_MAX_LENGTH = 30;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-MULTI-PDF-FIX-V3: Performance statistics for PDF cache monitoring
+  // ─────────────────────────────────────────────────────────────────────────────
+  private static perfStats = {
+    // PDF switching
+    pdfSwitchCount: 0,
+    // labelMatcher cache
+    labelMatcherCacheHits: 0,
+    labelMatcherCacheMisses: 0,
+    // Timestamps
+    startTime: Date.now(),
+    lastResetTime: Date.now(),
+  };
+
+  /**
+   * Log current PDF cache performance statistics to debug console.
+   */
+  static logPerfStats(): void {
+    const stats = InspireReferencePanelController.perfStats;
+    const totalLabelMatcherAccess =
+      stats.labelMatcherCacheHits + stats.labelMatcherCacheMisses;
+    const hitRate =
+      totalLabelMatcherAccess > 0
+        ? ((stats.labelMatcherCacheHits / totalLabelMatcherAccess) * 100).toFixed(1)
+        : "N/A";
+    const uptime = Math.round((Date.now() - stats.startTime) / 1000);
+
+    Zotero.debug(`
+[${config.addonName}] [PERF] PDF Cache Statistics:
+  ─────────────────────────────────────────
+  Uptime: ${uptime}s
+  PDF Switches: ${stats.pdfSwitchCount}
+  LabelMatcher Cache:
+    Hits: ${stats.labelMatcherCacheHits}
+    Misses: ${stats.labelMatcherCacheMisses}
+    Hit Rate: ${hitRate}%
+  ─────────────────────────────────────────
+`);
+  }
+
+  /**
+   * Reset PDF cache performance statistics.
+   */
+  static resetPerfStats(): void {
+    InspireReferencePanelController.perfStats = {
+      pdfSwitchCount: 0,
+      labelMatcherCacheHits: 0,
+      labelMatcherCacheMisses: 0,
+      startTime: Date.now(),
+      lastResetTime: Date.now(),
+    };
+    Zotero.debug(`[${config.addonName}] [PERF] Statistics reset`);
+  }
 
   /**
    * Get all active controller instances for external access.
@@ -1269,37 +1343,13 @@ class InspireReferencePanelController {
   private authorProfileCollapsedByKey = new Map<string, boolean>();
   private authorProfileAbort?: AbortController;
   private authorProfileKey?: string;
-  // Author hover preview state (FTR-AUTHOR-PROFILE-PREVIEW)
-  private authorPreviewCard?: HTMLDivElement;
-  private authorPreviewShowTimeout?: ReturnType<typeof setTimeout>;
-  private authorPreviewHideTimeout?: ReturnType<typeof setTimeout>;
-  private authorPreviewAbort?: AbortController;
-  private authorPreviewCurrentKey?: string;
-  private authorPreviewAnchor?: HTMLElement;
-  private readonly authorPreviewShowDelay = 300;
-  private readonly authorPreviewHideDelay = 120;
-  // FTR-HOVER-PREVIEW: Preview card state
-  private previewCard?: HTMLDivElement;
-  private previewShowTimeout?: ReturnType<typeof setTimeout>;
-  private previewHideTimeout?: ReturnType<typeof setTimeout>;
-  private previewCurrentEntryId?: string;
-  private previewAbortController?: AbortController;
+  // FTR-HOVER-PREVIEW: Preview timing (used by HoverPreviewController)
   private readonly previewShowDelay = 250; // ms before showing card
   private readonly previewHideDelay = 100; // ms before hiding card
-  // FTR-HOVER-PREVIEW-MULTI: Multi-entry pagination state
-  // Limit max entries to prevent memory issues with large result sets
+  // Flag to prevent tooltip from hiding while context menu is open
+  private abstractContextMenuOpen = false;
+  // FTR-HOVER-PREVIEW-MULTI: Limit max entries to prevent memory issues
   private static readonly MAX_PREVIEW_ENTRIES = 20;
-  private previewEntries: InspireReferenceEntry[] = [];
-  private previewCurrentIndex = 0;
-  private previewLabel?: string;
-  private previewButtonRect?: {
-    top: number;
-    left: number;
-    bottom: number;
-    right: number;
-  };
-  // FTR-AMBIGUOUS-AUTHOR-YEAR: Track citation type for ambiguous message
-  private previewCitationType?: "numeric" | "author-year" | "arxiv";
   // Frontend pagination state (for cited-by and author papers)
   private renderedCount = 0; // Number of entries currently rendered
   private loadMoreButton?: HTMLButtonElement;
@@ -1333,9 +1383,14 @@ class InspireReferencePanelController {
   private readonly filterDebounceDelay = FILTER_DEBOUNCE_MS;
   // Chart deferred rendering timer
   private chartRenderTimer?: ReturnType<typeof setTimeout>;
-  // Row element pool for recycling (reduces DOM creation and GC pressure)
-  private rowPool: HTMLDivElement[] = [];
+  // Row pool size for EntryListRenderer (Phase 0.1 refactor)
   private readonly maxRowPoolSize = ROW_POOL_MAX_SIZE;
+  // EntryListRenderer for row rendering (Phase 0.1 refactor)
+  private entryRenderer?: EntryListRenderer;
+  // HoverPreviewController for preview card (Phase 0.4 refactor)
+  private hoverPreview?: HoverPreviewController;
+  // AuthorPreviewController for author hover preview (Phase 0.5 refactor)
+  private authorPreview?: AuthorPreviewController;
   // Rate limiter status display
   private rateLimiterStatusEl?: HTMLSpanElement;
   private rateLimiterUnsubscribe?: () => void;
@@ -1408,10 +1463,17 @@ class InspireReferencePanelController {
   private batchImportAbort?: AbortController;
 
   // PDF Annotate (FTR-PDF-ANNOTATE)
-  private labelMatcher?: LabelMatcher;
+  // FTR-MULTI-PDF-FIX-V3: LRU cache for labelMatchers, keyed by attachmentItemID
+  // Supports multiple PDFs with independent matchers, avoiding rebuild on PDF switch
+  private static readonly LABEL_MATCHER_CACHE_SIZE = 5;
+  private labelMatcherCache = new LRUCache<number, LabelMatcher>(
+    InspireReferencePanelController.LABEL_MATCHER_CACHE_SIZE,
+  );
   private citationLookupHandler?: (event: CitationLookupEvent) => void;
-  /** Track if PDF parsing has been attempted for current item */
-  private pdfParseAttempted = false;
+  /** Track if PDF parsing has been attempted per attachment (keyed by attachmentItemID) */
+  private pdfParseAttemptedMap = new Map<number, boolean>();
+  /** FTR-MULTI-PDF-FIX-V2: Track current PDF attachment for quick access */
+  private currentAttachmentID?: number;
   /** Deduplicate bursty citationLookup events */
   private lastCitationEventKey?: string;
   private lastCitationEventTs = 0;
@@ -1425,6 +1487,7 @@ class InspireReferencePanelController {
     diff: SmartUpdateDiff;
     allowedChanges: FieldChange[];
     itemRecid: string;
+    itemId: number; // Track item ID to detect modifications from other sources
   };
   /** Map of itemID -> last check timestamp (for throttling, not permanent dedup) */
   private autoCheckLastCheckTime = new Map<number, number>();
@@ -1439,11 +1502,17 @@ class InspireReferencePanelController {
     this.body.classList.add("zinspire-ref-panel");
     // FTR-PANEL-WIDTH-FIX: Ensure panel respects container width at all sizes
     // Use width: 100% with overflow handling to prevent content from exceeding sidebar width
-    this.body.style.width = "100%";
-    this.body.style.maxWidth = "100%";
-    this.body.style.minWidth = "0"; // Allow shrinking below intrinsic minimum
-    this.body.style.overflow = "hidden";
-    this.body.style.boxSizing = "border-box";
+    // NOTE: Removed `contain: layout` as it breaks position:fixed for modal dialogs
+    this.body.style.cssText = `
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      box-sizing: border-box;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    `;
     this.enableTextSelection();
 
     // Initialize chart collapsed state from preferences
@@ -1465,7 +1534,8 @@ class InspireReferencePanelController {
     ) as HTMLDivElement;
     // Main toolbar container styles
     // FTR-PANEL-WIDTH-FIX: Add min-width handling for narrow sidebars
-    // FIX-POPUP-CLIP: Use overflow:visible so quick filters popup isn't clipped
+    // FIX-PANEL-WIDTH-OVERFLOW: Use overflow:hidden to prevent horizontal overflow
+    // Note: Quick filters popup uses position:fixed so it won't be clipped
     toolbar.style.cssText = `
       display: flex;
       flex-direction: column;
@@ -1477,18 +1547,24 @@ class InspireReferencePanelController {
       max-width: 100%;
       min-width: 0;
       box-sizing: border-box;
-      overflow: visible;
+      overflow: hidden;
     `;
 
     // ═══════════════════════════════════════════════════════════════════════
     // Row 1: Status (count display)
     // ═══════════════════════════════════════════════════════════════════════
     const row1 = body.ownerDocument.createElement("div");
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     row1.style.cssText = `
       display: flex;
       align-items: center;
       justify-content: space-between;
       min-height: 20px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      box-sizing: border-box;
     `;
     toolbar.appendChild(row1);
 
@@ -1500,35 +1576,47 @@ class InspireReferencePanelController {
       },
       row1,
     ) as HTMLSpanElement;
+    // FIX-PANEL-WIDTH-OVERFLOW: Add text overflow handling
     this.statusEl.style.cssText = `
       font-size: 13px;
       font-weight: 500;
       color: var(--fill-primary, #1e293b);
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     `;
 
     // ═══════════════════════════════════════════════════════════════════════
     // Row 2: Tab buttons (pill button style)
     // ═══════════════════════════════════════════════════════════════════════
     const row2 = body.ownerDocument.createElement("div");
-    // FTR-PANEL-WIDTH-FIX: Allow tab row to wrap on narrow sidebars
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     row2.style.cssText = `
       display: flex;
       align-items: center;
       gap: 6px;
       flex-wrap: wrap;
+      width: 100%;
+      max-width: 100%;
       min-width: 0;
+      overflow: hidden;
+      box-sizing: border-box;
     `;
     toolbar.appendChild(row2);
 
     const tabs = body.ownerDocument.createElement("div");
     tabs.className = "zinspire-ref-panel__tabs";
-    // FTR-PANEL-WIDTH-FIX: Allow tabs to wrap on narrow sidebars
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     tabs.style.cssText = `
       display: inline-flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 6px;
       min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
     `;
     row2.appendChild(tabs);
 
@@ -1544,18 +1632,22 @@ class InspireReferencePanelController {
     // Row 3: Filter (left) + Navigation (right)
     // ═══════════════════════════════════════════════════════════════════════
     const row3 = body.ownerDocument.createElement("div");
-    // FTR-PANEL-WIDTH-FIX: Allow filter row to wrap on narrow sidebars
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     row3.style.cssText = `
       display: flex;
       align-items: center;
       gap: 6px;
       flex-wrap: wrap;
+      width: 100%;
+      max-width: 100%;
       min-width: 0;
+      overflow: hidden;
+      box-sizing: border-box;
     `;
     toolbar.appendChild(row3);
 
     // Filter group (LEFT side)
-    // FTR-PANEL-WIDTH-FIX: Allow filter group to wrap on narrow sidebars
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     const filterGroup = ztoolkit.UI.appendElement(
       {
         tag: "div",
@@ -1567,6 +1659,9 @@ class InspireReferencePanelController {
           gap: "6px",
           flexWrap: "wrap",
           minWidth: "0",
+          maxWidth: "100%",
+          flex: "1",
+          overflow: "hidden",
         },
       },
       row3,
@@ -1741,10 +1836,16 @@ class InspireReferencePanelController {
     // Row 4: Sort dropdown (left) + Cache source indicator (right)
     // ═══════════════════════════════════════════════════════════════════════
     const row4 = body.ownerDocument.createElement("div");
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     row4.style.cssText = `
       display: flex;
       align-items: center;
       gap: 6px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      box-sizing: border-box;
     `;
     toolbar.appendChild(row4);
 
@@ -1791,6 +1892,7 @@ class InspireReferencePanelController {
       row4,
     ) as HTMLSpanElement;
     this.cacheSourceEl.hidden = true;
+    // FIX-PANEL-WIDTH-OVERFLOW: Add text overflow handling
     this.cacheSourceEl.style.cssText = `
       font-size: 10px;
       color: var(--fill-secondary, #64748b);
@@ -1799,6 +1901,10 @@ class InspireReferencePanelController {
       background: var(--material-mix-quinary, #f1f5f9);
       border-radius: 4px;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 50%;
+      flex-shrink: 1;
     `;
 
     // Create search input container (hidden by default, shown in search mode)
@@ -1832,6 +1938,32 @@ class InspireReferencePanelController {
     this.listEl.style.boxSizing = "border-box";
     this.listEl.style.overflowX = "hidden";
     this.listEl.style.overflowY = "auto";
+
+    // Phase 0.1 Refactor: Initialize EntryListRenderer for row rendering
+    this.entryRenderer = new EntryListRenderer({
+      document: this.listEl.ownerDocument,
+      maxPoolSize: this.maxRowPoolSize,
+    });
+
+    // Phase 0.4 Refactor: Initialize HoverPreviewController for preview card
+    const mainWindow = Zotero.getMainWindow();
+    const previewContainer =
+      mainWindow?.document.getElementById("browser") || this.body;
+    this.hoverPreview = new HoverPreviewController({
+      document: this.listEl.ownerDocument,
+      container: previewContainer as HTMLElement,
+      showDelay: this.previewShowDelay,
+      hideDelay: this.previewHideDelay,
+      maxEntries: InspireReferencePanelController.MAX_PREVIEW_ENTRIES,
+      callbacks: this.getPreviewCallbacks(),
+    });
+
+    // Phase 0.5 Refactor: Initialize AuthorPreviewController for author hover preview
+    this.authorPreview = new AuthorPreviewController({
+      document: this.listEl.ownerDocument,
+      container: previewContainer as HTMLElement,
+      callbacks: this.getAuthorPreviewCallbacks(),
+    });
 
     // FTR-BATCH-IMPORT: Create batch toolbar (hidden by default, shown when items selected)
     // Must be created AFTER listEl exists, so insertBefore(toolbar, listEl) works correctly
@@ -1944,8 +2076,9 @@ class InspireReferencePanelController {
 
     InspireReferencePanelController.previewHideHandler = () => {
       // Schedule hide on all controllers (with delay to allow moving cursor to card)
+      // Phase 0.4 Refactor: Use HoverPreviewController
       for (const ctrl of InspireReferencePanelController.instances) {
-        ctrl.schedulePreviewHide();
+        ctrl.hoverPreview?.scheduleHide();
       }
     };
     reader.on(
@@ -1957,6 +2090,48 @@ class InspireReferencePanelController {
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] Registered shared citationLookup and recid event listeners`,
     );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FTR-MULTI-PDF-FIX-V3: LabelMatcher cache management
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get or create a LabelMatcher for a specific PDF attachment.
+   * Uses LRU cache to avoid rebuilding matchers when switching between PDFs.
+   * @param attachmentItemID - The PDF attachment item ID
+   * @param entries - Reference entries to use for matching
+   * @returns Tuple of [LabelMatcher, isNewlyCreated]
+   */
+  private getOrCreateLabelMatcher(
+    attachmentItemID: number,
+    entries: InspireReferenceEntry[],
+  ): [LabelMatcher, boolean] {
+    let matcher = this.labelMatcherCache.get(attachmentItemID);
+    if (matcher) {
+      InspireReferencePanelController.perfStats.labelMatcherCacheHits++;
+      return [matcher, false];
+    }
+
+    // Cache miss - create new matcher
+    InspireReferencePanelController.perfStats.labelMatcherCacheMisses++;
+    matcher = new LabelMatcher(entries);
+    this.labelMatcherCache.set(attachmentItemID, matcher);
+    return [matcher, true];
+  }
+
+  /**
+   * Check if PDF parsing has been attempted for a specific attachment.
+   */
+  private hasPdfParseBeenAttempted(attachmentItemID: number): boolean {
+    return this.pdfParseAttemptedMap.get(attachmentItemID) ?? false;
+  }
+
+  /**
+   * Mark PDF parsing as attempted for a specific attachment.
+   */
+  private markPdfParseAttempted(attachmentItemID: number): void {
+    this.pdfParseAttemptedMap.set(attachmentItemID, true);
   }
 
   /**
@@ -1971,7 +2146,10 @@ class InspireReferencePanelController {
       `[${config.addonName}] [PDF-ANNOTATE] handleCitationLookup: parentItemID=${event.parentItemID}, currentItemID=${this.currentItemID}, labels=[${event.citation.labels.join(",")}]`,
     );
 
-    // Only handle events from the active reader tab to avoid cross-pane interference
+    // FTR-MULTI-PDF-FIX-V4: Relaxed readerTabID check
+    // Previously, we rejected events from tabs that weren't the "selected" one.
+    // But with multi-PDF caching by attachmentItemID, each PDF has its own labelMatcher,
+    // so there's no interference risk. Instead, update our tracking when tab changes.
     const activeReaderTabID =
       this.currentReaderTabID ?? ReaderTabHelper.getSelectedTabID();
     if (
@@ -1979,10 +2157,16 @@ class InspireReferencePanelController {
       activeReaderTabID &&
       event.readerTabID !== activeReaderTabID
     ) {
-      Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Skipping citationLookup from foreign readerTabID=${event.readerTabID}, active=${activeReaderTabID}`,
-      );
-      return;
+      // Different tab but same parent item - accept the event and update tracking
+      if (event.parentItemID === this.currentItemID) {
+        this.currentReaderTabID = event.readerTabID;
+      } else {
+        // Different parent item - skip to avoid cross-item interference
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] Skipping citationLookup from foreign readerTabID=${event.readerTabID}, active=${activeReaderTabID} (different parent)`,
+        );
+        return;
+      }
     }
 
     // Deduplicate bursty repeated events (same item + labels in short window)
@@ -2037,10 +2221,11 @@ class InspireReferencePanelController {
         }
 
         // Check for in-flight PDF parsing
-        const pdfParsePromise = reader.getPdfParsePromise(event.parentItemID);
+        // FTR-MULTI-PDF-FIX-V2: Use attachmentItemID for PDF-specific promise lookup
+        const pdfParsePromise = reader.getPdfParsePromise(event.attachmentItemID);
         if (pdfParsePromise) {
           Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] Awaiting in-flight PDF parsing for item ${event.parentItemID}`,
+            `[${config.addonName}] [PDF-ANNOTATE] Awaiting in-flight PDF parsing for attachment ${event.attachmentItemID}`,
           );
           await pdfParsePromise;
           Zotero.debug(
@@ -2060,89 +2245,138 @@ class InspireReferencePanelController {
         }
       }
 
-      // Ensure we have entries loaded
-      if (!this.allEntries?.length) {
+      // FTR-FIX-LOOKUP-TAB: Citation lookup must ALWAYS use References tab entries
+      // Get References entries from cache (regardless of current tab)
+      let referencesEntries: InspireReferenceEntry[] | null = null;
+      const wasOnReferencesTab = this.viewMode === "references";
+
+      if (wasOnReferencesTab) {
+        // Already on References tab - use allEntries directly
+        referencesEntries = this.allEntries?.length ? this.allEntries : null;
+      } else {
+        // Different tab - fetch References entries from cache
+        if (this.currentRecid) {
+          const sortOption = this.getSortOptionForMode("references");
+          const cacheKey = this.getCacheKey(
+            this.currentRecid,
+            "references",
+            sortOption,
+          );
+          const cached = this.referencesCache.get(cacheKey);
+          if (cached) {
+            referencesEntries = this.getSortedReferences(cached);
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] Got ${referencesEntries.length} References entries from cache (current tab: ${this.viewMode})`,
+            );
+          }
+        }
+      }
+
+      // If no References entries available, try switching to References tab to load them
+      if (!referencesEntries?.length) {
         Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] No entries loaded yet, showing loading message`,
+          `[${config.addonName}] [PDF-ANNOTATE] No References entries available, switching to References tab to load`,
+        );
+        // Switch to References tab and wait for entries to load
+        await this.activateViewMode("references");
+        // After switching, allEntries should now contain References data
+        referencesEntries = this.allEntries?.length ? this.allEntries : null;
+      }
+
+      if (!referencesEntries?.length) {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] No References entries loaded, showing loading message`,
         );
         this.showToast(getString("references-panel-status-loading"));
         return;
       }
 
       Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Processing lookup: viewMode=${this.viewMode}, entriesCount=${this.allEntries.length}`,
+        `[${config.addonName}] [PDF-ANNOTATE] Processing lookup: viewMode=${this.viewMode}, referencesEntriesCount=${referencesEntries.length}`,
       );
 
-      // Citation lookup only works on References tab (where the reference list matches PDF)
-      if (this.viewMode !== "references") {
+      // FTR-MULTI-PDF-FIX-V3: Track PDF switches for performance monitoring
+      if (this.currentAttachmentID !== event.attachmentItemID) {
+        InspireReferencePanelController.perfStats.pdfSwitchCount++;
         Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] Warning: viewMode is ${this.viewMode}, not "references" - match may fail`,
+          `[${config.addonName}] [PDF-ANNOTATE] PDF switched from ${this.currentAttachmentID ?? "none"} to ${event.attachmentItemID}`,
         );
+        this.currentAttachmentID = event.attachmentItemID;
       }
 
-      // Build label matcher if not exists or entries changed
-      if (!this.labelMatcher) {
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] Building new LabelMatcher for ${this.allEntries.length} entries`,
-        );
-        this.labelMatcher = new LabelMatcher(this.allEntries);
-        this.pdfParseAttempted = false; // Reset flag when labelMatcher is rebuilt
+      // FTR-MULTI-PDF-FIX-V3: Get or create LabelMatcher from cache
+      // Each PDF has its own cached matcher with PDF-specific mappings
+      const [labelMatcher, isNewMatcher] = this.getOrCreateLabelMatcher(
+        event.attachmentItemID,
+        referencesEntries,
+      );
 
-        // FTR-PDF-PARSE-PRELOAD: Check for preloaded PDF mapping from background parsing
-        const reader = getReaderIntegration();
+      // FTR-MULTI-PDF-FIX-V3: Apply mappings if new matcher OR if cached matcher is missing mappings
+      // This fixes the bug where a matcher was cached before background parsing completed,
+      // and subsequent cache hits never got the PDF-specific mappings applied.
+      // Note: 'reader' is already declared at the start of this function (line 2203)
+
+      // Apply PDF numeric mapping if new OR missing
+      if (isNewMatcher || !labelMatcher.hasPDFMapping?.()) {
         const preloadedMapping = reader.getPreloadedPDFMapping(
-          event.parentItemID,
+          event.attachmentItemID,
         );
-        const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(
-          event.parentItemID,
-        );
-
         if (preloadedMapping) {
-          this.labelMatcher.setPDFMapping(preloadedMapping);
-          this.pdfParseAttempted = true;
+          labelMatcher.setPDFMapping(preloadedMapping);
+          this.markPdfParseAttempted(event.attachmentItemID);
           Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] Applied preloaded PDF mapping (${preloadedMapping.totalLabels} labels)`,
+            `[${config.addonName}] [PDF-ANNOTATE] Applied preloaded PDF mapping (${preloadedMapping.totalLabels} labels, isNew=${isNewMatcher})`,
           );
         }
-        if (preloadedAuthorYear) {
-          this.labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] Applied preloaded author-year mapping (${preloadedAuthorYear.authorYearMap.size} entries)`,
-          );
-        }
+      }
 
-        // FTR-OVERLAY-REFS: Try to build/apply overlay mapping for numeric citations
-        // Overlay mapping provides the most accurate citation→reference links for [1], [2], etc.
-        // IMPORTANT: Only use for numeric citations; Author-Year uses matchAuthorYear() instead
-        if (
-          event.readerTabID &&
-          event.citation.type !== "author-year" &&
-          event.citation.type !== "arxiv"
-        ) {
-          const cachedOverlay = reader.getOverlayMapping(event.parentItemID);
-          if (cachedOverlay?.isReliable) {
-            this.labelMatcher.setOverlayMapping(cachedOverlay);
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] Applied cached overlay mapping (${cachedOverlay.totalMappedLabels} labels)`,
-            );
-          } else {
-            // Build overlay mapping lazily on first lookup
-            const currentReader = ReaderTabHelper.getReaderByTabID(
-              event.readerTabID,
-            );
-            if (currentReader) {
-              const overlayMapping =
-                await reader.buildMappingFromOverlays(currentReader);
-              if (overlayMapping?.isReliable) {
-                this.labelMatcher.setOverlayMapping(overlayMapping);
-                Zotero.debug(
-                  `[${config.addonName}] [PDF-ANNOTATE] Built and applied overlay mapping (${overlayMapping.totalMappedLabels} labels)`,
-                );
-              } else {
-                Zotero.debug(
-                  `[${config.addonName}] [PDF-ANNOTATE] Overlay mapping unavailable or unreliable (OCR PDF?)`,
-                );
-              }
+      // Apply author-year mapping if new OR missing
+      if (isNewMatcher || !labelMatcher.hasAuthorYearMapping?.()) {
+        const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(
+          event.attachmentItemID,
+        );
+        if (preloadedAuthorYear) {
+          labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] Applied preloaded author-year mapping (${preloadedAuthorYear.authorYearMap.size} entries, isNew=${isNewMatcher})`,
+          );
+        }
+      }
+
+      // FTR-OVERLAY-REFS: Apply overlay mapping for numeric citations if new OR missing
+      // Overlay mapping provides the most accurate citation→reference links for [1], [2], etc.
+      // IMPORTANT: Only use for numeric citations; Author-Year uses matchAuthorYear() instead
+      // FTR-MULTI-PDF-FIX-V2: Use attachmentItemID for PDF-specific overlay mapping
+      const hasExistingOverlay = labelMatcher.hasReliableOverlayMapping?.() ?? false;
+      if (
+        event.readerTabID &&
+        event.citation.type !== "author-year" &&
+        event.citation.type !== "arxiv" &&
+        (isNewMatcher || !hasExistingOverlay)
+      ) {
+        const cachedOverlay = reader.getOverlayMapping(event.attachmentItemID);
+        if (cachedOverlay?.isReliable) {
+          labelMatcher.setOverlayMapping(cachedOverlay);
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] Applied cached overlay mapping (${cachedOverlay.totalMappedLabels} labels, isNew=${isNewMatcher})`,
+          );
+        } else {
+          // Build overlay mapping lazily on first lookup
+          const currentReader = ReaderTabHelper.getReaderByTabID(
+            event.readerTabID,
+          );
+          if (currentReader) {
+            const overlayMapping =
+              await reader.buildMappingFromOverlays(currentReader);
+            if (overlayMapping?.isReliable) {
+              labelMatcher.setOverlayMapping(overlayMapping);
+              Zotero.debug(
+                `[${config.addonName}] [PDF-ANNOTATE] Built and applied overlay mapping (${overlayMapping.totalMappedLabels} labels, isNew=${isNewMatcher})`,
+              );
+            } else {
+              Zotero.debug(
+                `[${config.addonName}] [PDF-ANNOTATE] Overlay mapping unavailable or unreliable (OCR PDF?)`,
+              );
             }
           }
         }
@@ -2150,12 +2384,13 @@ class InspireReferencePanelController {
 
       // FTR-PDF-ANNOTATE-MULTI-LABEL: Check if PDF parsing is needed (even if labelMatcher exists)
       // This allows PDF parsing to be triggered if the preference was enabled after first lookup
-      const report = this.labelMatcher.diagnoseAlignment();
+      const report = labelMatcher.diagnoseAlignment();
       const pdfParseEnabled = getPref("pdf_parse_refs_list") === true;
-      const hasPDFMapping = this.labelMatcher.hasPDFMapping?.() ?? false;
+      const hasPDFMapping = labelMatcher.hasPDFMapping?.() ?? false;
+      const pdfParseAttempted = this.hasPdfParseBeenAttempted(event.attachmentItemID);
 
       Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] State: pdfParseEnabled=${pdfParseEnabled}, pdfParseAttempted=${this.pdfParseAttempted}, hasPDFMapping=${hasPDFMapping}, recommendation=${report.recommendation}`,
+        `[${config.addonName}] [PDF-ANNOTATE] State: pdfParseEnabled=${pdfParseEnabled}, pdfParseAttempted=${pdfParseAttempted}, hasPDFMapping=${hasPDFMapping}, recommendation=${report.recommendation}`,
       );
 
       // Try PDF parsing if: enabled + labels missing + no existing mapping
@@ -2171,11 +2406,11 @@ class InspireReferencePanelController {
         pdfParseEnabled &&
         !hasPDFMapping &&
         report.totalEntries > 0 &&
-        // 原逻辑：标签几乎缺失
+        // Original logic: labels are mostly missing
         (report.recommendation === "USE_INDEX_ONLY" ||
-          // 新增：标签对齐不足（需要参考 PDF）
+          // Additional case: labels are available but poorly aligned (need PDF reference)
           report.recommendation === "USE_INDEX_WITH_FALLBACK" ||
-          // 新增：强制偏好开启时，仅在标签未高对齐时尝试 PDF 解析
+          // Additional case: when strict preference is on, only parse PDF if labels are not well aligned
           (forcePDFStrict && !wellAlignedLabels));
 
       if (shouldAttemptPDFParse) {
@@ -2190,11 +2425,12 @@ class InspireReferencePanelController {
 
         // FTR-PDF-ANNOTATE-MULTI-LABEL: AWAIT PDF parsing before matching
         try {
+          // FTR-MULTI-PDF-FIX: Pass attachmentItemID for PDF-specific parsing
           const parseSuccess = await this.tryParsePDFReferences(
-            event.parentItemID,
+            event.attachmentItemID,
           );
           if (parseSuccess) {
-            this.pdfParseAttempted = true; // Only mark as attempted if successful
+            this.markPdfParseAttempted(event.attachmentItemID); // FTR-MULTI-PDF-FIX-V3: Use map-based tracking
             Zotero.debug(
               `[${config.addonName}] [PDF-ANNOTATE] PDF parsing completed successfully`,
             );
@@ -2222,9 +2458,9 @@ class InspireReferencePanelController {
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] ⚠️ WARNING: Label data mostly missing (${labelRateStr}% available). PDF parsing disabled. Using index-based fallback.`,
         );
-        // Only show toast once per session (first lookup)
-        if (!this.pdfParseAttempted) {
-          this.pdfParseAttempted = true;
+        // Only show toast once per attachment (first lookup)
+        if (!this.hasPdfParseBeenAttempted(event.attachmentItemID)) {
+          this.markPdfParseAttempted(event.attachmentItemID); // FTR-MULTI-PDF-FIX-V3
           this.showToast(
             getString("pdf-annotate-fallback-warning", {
               args: { rate: labelRateStr },
@@ -2243,10 +2479,10 @@ class InspireReferencePanelController {
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] Using author-year matching for labels [${citation.labels.join(",")}]`,
         );
-        allMatches = this.labelMatcher.matchAuthorYear(citation.labels);
+        allMatches = labelMatcher.matchAuthorYear(citation.labels);
       } else {
         // Numeric or other citation types: use standard matchAll
-        allMatches = this.labelMatcher.matchAll(citation.labels);
+        allMatches = labelMatcher.matchAll(citation.labels);
       }
 
       if (allMatches.length > 0) {
@@ -2281,7 +2517,8 @@ class InspireReferencePanelController {
             this.body || Zotero.getMainWindow()?.document.body;
           if (pickerContainer) {
             // FTR-HOVER-PREVIEW: Hide preview card before showing picker to avoid visual conflict
-            this.hidePreviewCard();
+            // Phase 0.4 Refactor: Use HoverPreviewController
+            this.hoverPreview?.hide();
 
             const selection = await showAmbiguousCitationPicker(
               citationText,
@@ -2318,6 +2555,15 @@ class InspireReferencePanelController {
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible result: ${paneActivated}`,
         );
+
+        // FTR-FIX-LOOKUP-TAB: Switch to References tab if we weren't on it
+        // This ensures the matched entries are visible to the user
+        if (!wasOnReferencesTab && this.viewMode !== "references") {
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] Switching to References tab to show matches`,
+          );
+          await this.activateViewMode("references");
+        }
 
         // Give the UI time to update if we just activated the pane
         // Then scroll to and highlight the matched entries
@@ -2364,8 +2610,8 @@ class InspireReferencePanelController {
                     args: { label: labelsStr, count: allMatches.length },
                   });
             // Append missing info (first missing author/year) if label had extra PDF refs not found
-            if (citation.labels.length === 1 && this.labelMatcher) {
-              const miss = this.labelMatcher.getMismatchForLabel(
+            if (citation.labels.length === 1) {
+              const miss = labelMatcher.getMismatchForLabel(
                 citation.labels[0],
               );
               if (miss?.missing?.length) {
@@ -2394,8 +2640,8 @@ class InspireReferencePanelController {
       let notFoundMsg = getString("pdf-annotate-not-found", {
         args: { label: labelsStr },
       });
-      if (citation.labels.length === 1 && this.labelMatcher) {
-        const miss = this.labelMatcher.getMismatchForLabel(citation.labels[0]);
+      if (citation.labels.length === 1) {
+        const miss = labelMatcher.getMismatchForLabel(citation.labels[0]);
         if (miss?.missing?.length) {
           const firstMissing = miss.missing[0];
           const missingStr =
@@ -2441,8 +2687,10 @@ class InspireReferencePanelController {
 
     // Switch to references view to keep mapping consistent
     this.viewMode = "references";
-    this.labelMatcher = undefined;
-    this.pdfParseAttempted = false;
+    // FTR-MULTI-PDF-FIX-V3: Clear labelMatcher cache on item switch (matchers are item-specific)
+    this.labelMatcherCache.clear();
+    this.pdfParseAttemptedMap.clear();
+    this.currentAttachmentID = undefined;
     this.currentItemID = itemID;
 
     const recid =
@@ -2562,72 +2810,123 @@ class InspireReferencePanelController {
     let labelMatcher: LabelMatcher | undefined;
 
     if (this.currentItemID === event.parentItemID) {
-      // Panel has matching item - use its entries
-      entries = this.allEntries;
+      // FTR-FIX-LOOKUP-TAB: Preview must also use References entries regardless of current tab
+      // Same as handleCitationLookup - citation matching only works with References list
+      if (this.viewMode === "references") {
+        // Already on References tab - use allEntries directly
+        entries = this.allEntries;
+      } else {
+        // Different tab - fetch References entries from cache
+        if (this.currentRecid) {
+          const sortOption = this.getSortOptionForMode("references");
+          const cacheKey = this.getCacheKey(
+            this.currentRecid,
+            "references",
+            sortOption,
+          );
+          const cached = this.referencesCache.get(cacheKey);
+          if (cached) {
+            entries = this.getSortedReferences(cached);
+            Zotero.debug(
+              `[${config.addonName}] [HOVER-PREVIEW] Got ${entries.length} References entries from cache (current tab: ${this.viewMode})`,
+            );
+          }
+        }
+        // If no cache available, fall back to allEntries (may not match correctly)
+        if (!entries) {
+          entries = this.allEntries;
+          Zotero.debug(
+            `[${config.addonName}] [HOVER-PREVIEW] Warning: Using allEntries from ${this.viewMode} tab (References not in cache)`,
+          );
+        }
+      }
 
-      // FTR-HOVER-PREVIEW-FIX: If labelMatcher doesn't exist yet (user hasn't clicked lookup),
-      // create and save it to this.labelMatcher so it's shared with click lookup
-      if (!this.labelMatcher && entries && entries.length > 0) {
+      // FTR-MULTI-PDF-FIX-V3: Track PDF switch for perfStats
+      if (this.currentAttachmentID !== event.attachmentItemID) {
+        InspireReferencePanelController.perfStats.pdfSwitchCount++;
         Zotero.debug(
-          `[${config.addonName}] [HOVER-PREVIEW] this.labelMatcher not available, creating and saving`,
+          `[${config.addonName}] [HOVER-PREVIEW] PDF switched from ${this.currentAttachmentID ?? "none"} to ${event.attachmentItemID}`,
         );
-        this.labelMatcher = new LabelMatcher(entries);
-        this.pdfParseAttempted = false; // Reset flag when labelMatcher is created
+        this.currentAttachmentID = event.attachmentItemID;
+      }
 
-        // Apply mappings just like handleCitationLookup does
-        const reader = getReaderIntegration();
+      // FTR-MULTI-PDF-FIX-V3: Use LRU cache for labelMatcher
+      // Get or create labelMatcher from cache, with mappings applied if new
+      const [cachedMatcher, isNewMatcher] = this.getOrCreateLabelMatcher(
+        event.attachmentItemID,
+        entries,
+      );
+      labelMatcher = cachedMatcher;
 
-        // Apply preloaded PDF mapping
+      // FTR-MULTI-PDF-FIX-V3: Apply mappings if new matcher OR if cached matcher is missing mappings
+      // This fixes the bug where a matcher was cached before background parsing completed,
+      // and subsequent cache hits never got the PDF-specific mappings applied.
+      if (isNewMatcher) {
+        Zotero.debug(
+          `[${config.addonName}] [HOVER-PREVIEW] Created new labelMatcher for attachment ${event.attachmentItemID}`,
+        );
+      }
+
+      // Apply mappings just like handleCitationLookup does
+      const reader = getReaderIntegration();
+
+      // Apply PDF numeric mapping if new OR missing
+      if (isNewMatcher || !labelMatcher.hasPDFMapping?.()) {
         const preloadedMapping = reader.getPreloadedPDFMapping(
-          event.parentItemID,
+          event.attachmentItemID,
         );
         if (preloadedMapping) {
-          this.labelMatcher.setPDFMapping(preloadedMapping);
-          this.pdfParseAttempted = true;
+          labelMatcher.setPDFMapping(preloadedMapping);
+          this.markPdfParseAttempted(event.attachmentItemID);
           Zotero.debug(
-            `[${config.addonName}] [HOVER-PREVIEW] Applied preloaded PDF mapping (${preloadedMapping.totalLabels} labels)`,
+            `[${config.addonName}] [HOVER-PREVIEW] Applied preloaded PDF mapping (${preloadedMapping.totalLabels} labels, isNew=${isNewMatcher})`,
           );
         }
+      }
 
-        // Apply author-year mapping
+      // Apply author-year mapping if new OR missing
+      if (isNewMatcher || !labelMatcher.hasAuthorYearMapping?.()) {
         const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(
-          event.parentItemID,
+          event.attachmentItemID,
         );
         if (preloadedAuthorYear) {
-          this.labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
+          labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
           Zotero.debug(
-            `[${config.addonName}] [HOVER-PREVIEW] Applied preloaded author-year mapping (${preloadedAuthorYear.authorYearMap.size} entries)`,
+            `[${config.addonName}] [HOVER-PREVIEW] Applied preloaded author-year mapping (${preloadedAuthorYear.authorYearMap.size} entries, isNew=${isNewMatcher})`,
           );
         }
+      }
 
-        // Apply overlay mapping for numeric citations (most accurate)
-        if (event.citationType === "numeric" && event.readerTabID) {
-          const cachedOverlay = reader.getOverlayMapping(event.parentItemID);
-          if (cachedOverlay?.isReliable) {
-            this.labelMatcher.setOverlayMapping(cachedOverlay);
-            Zotero.debug(
-              `[${config.addonName}] [HOVER-PREVIEW] Applied cached overlay mapping (${cachedOverlay.totalMappedLabels} labels)`,
-            );
-          } else {
-            // Try to build overlay mapping from current reader
-            const currentReader = ReaderTabHelper.getReaderByTabID(
-              event.readerTabID,
-            );
-            if (currentReader) {
-              const overlayMapping =
-                await reader.buildMappingFromOverlays(currentReader);
-              if (overlayMapping?.isReliable) {
-                this.labelMatcher.setOverlayMapping(overlayMapping);
-                Zotero.debug(
-                  `[${config.addonName}] [HOVER-PREVIEW] Built overlay mapping (${overlayMapping.totalMappedLabels} labels)`,
-                );
-              }
+      // Apply overlay mapping for numeric citations (most accurate) if new OR missing
+      // FTR-MULTI-PDF-FIX-V2: Use attachmentItemID for PDF-specific overlay mapping
+      if (
+        event.citationType === "numeric" &&
+        event.readerTabID &&
+        (isNewMatcher || !labelMatcher.hasReliableOverlayMapping?.())
+      ) {
+        const cachedOverlay = reader.getOverlayMapping(event.attachmentItemID);
+        if (cachedOverlay?.isReliable) {
+          labelMatcher.setOverlayMapping(cachedOverlay);
+          Zotero.debug(
+            `[${config.addonName}] [HOVER-PREVIEW] Applied cached overlay mapping (${cachedOverlay.totalMappedLabels} labels, isNew=${isNewMatcher})`,
+          );
+        } else {
+          // Try to build overlay mapping from current reader
+          const currentReader = ReaderTabHelper.getReaderByTabID(
+            event.readerTabID,
+          );
+          if (currentReader) {
+            const overlayMapping =
+              await reader.buildMappingFromOverlays(currentReader);
+            if (overlayMapping?.isReliable) {
+              labelMatcher.setOverlayMapping(overlayMapping);
+              Zotero.debug(
+                `[${config.addonName}] [HOVER-PREVIEW] Built overlay mapping (${overlayMapping.totalMappedLabels} labels, isNew=${isNewMatcher})`,
+              );
             }
           }
         }
       }
-
-      labelMatcher = this.labelMatcher;
     } else {
       // Panel shows different item - try to get entries from cache
       Zotero.debug(
@@ -2656,9 +2955,10 @@ class InspireReferencePanelController {
             // This enables multi-entry lookup (overlay) and author-year matching
             const reader = getReaderIntegration();
 
+            // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache lookup
             // Apply preloaded PDF mapping if available
             const preloadedMapping = reader.getPreloadedPDFMapping(
-              event.parentItemID,
+              event.attachmentItemID,
             );
             if (preloadedMapping) {
               labelMatcher.setPDFMapping(preloadedMapping);
@@ -2669,7 +2969,7 @@ class InspireReferencePanelController {
 
             // Apply author-year mapping for author-year citation support
             const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(
-              event.parentItemID,
+              event.attachmentItemID,
             );
             if (preloadedAuthorYear) {
               labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
@@ -2679,9 +2979,10 @@ class InspireReferencePanelController {
             }
 
             // Apply overlay mapping for multi-entry support (numeric citations)
+            // FTR-MULTI-PDF-FIX-V2: Use attachmentItemID for PDF-specific overlay mapping
             if (event.citationType === "numeric" && event.readerTabID) {
               const cachedOverlay = reader.getOverlayMapping(
-                event.parentItemID,
+                event.attachmentItemID,
               );
               if (cachedOverlay?.isReliable) {
                 labelMatcher.setOverlayMapping(cachedOverlay);
@@ -2829,12 +3130,12 @@ class InspireReferencePanelController {
     // Show preview card at button position with all matched entries
     // FTR-HOVER-PREVIEW-MULTI: Pass all entries for pagination
     // FTR-AMBIGUOUS-AUTHOR-YEAR: Pass citation type to show appropriate message
-    this.showPreviewCardAtRect(
-      matchedEntries,
-      event.buttonRect,
-      event.label,
-      event.citationType,
-    );
+    // Phase 0.4 Refactor: Use HoverPreviewController
+    this.hoverPreview?.scheduleShowMulti(matchedEntries, {
+      label: event.label,
+      citationType: event.citationType,
+      buttonRect: event.buttonRect,
+    });
   }
 
   /**
@@ -2953,43 +3254,54 @@ class InspireReferencePanelController {
    * Try to parse PDF reference list and apply mapping to LabelMatcher.
    * FTR-PDF-ANNOTATE-MULTI-LABEL: Scans PDF's References section to fix label alignment.
    * FTR-PDF-PARSE-PRELOAD: Checks preload cache first to avoid duplicate work.
-   * @param parentItemID - The Zotero item ID (parent of PDF)
+   * FTR-MULTI-PDF-FIX: Changed from parentItemID to attachmentItemID for multi-PDF support.
+   * @param attachmentItemID - The Zotero attachment item ID (the specific PDF file)
    * @returns true if mapping was successfully applied, false otherwise
    */
-  private async tryParsePDFReferences(parentItemID: number): Promise<boolean> {
+  private async tryParsePDFReferences(attachmentItemID: number): Promise<boolean> {
+    // FTR-MULTI-PDF-FIX-V3: Get labelMatcher from cache for this specific attachment
+    const labelMatcher = this.labelMatcherCache.get(attachmentItemID);
+    if (!labelMatcher) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] No labelMatcher in cache for attachment ${attachmentItemID}`,
+      );
+      return false;
+    }
+
     // FTR-PDF-PARSE-PRELOAD: Check preload cache first to avoid duplicate parsing
+    // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache lookup
     const reader = getReaderIntegration();
-    const preloadedMapping = reader.getPreloadedPDFMapping(parentItemID);
-    if (preloadedMapping && this.labelMatcher) {
-      this.labelMatcher.setPDFMapping(preloadedMapping);
+    const preloadedMapping = reader.getPreloadedPDFMapping(attachmentItemID);
+    if (preloadedMapping) {
+      labelMatcher.setPDFMapping(preloadedMapping);
       Zotero.debug(
         `[${config.addonName}] [PDF-PARSE] Using preloaded mapping (${preloadedMapping.totalLabels} labels)`,
       );
       // Also check for author-year mapping
       const preloadedAuthorYear =
-        reader.getPreloadedAuthorYearMapping(parentItemID);
+        reader.getPreloadedAuthorYearMapping(attachmentItemID);
       if (preloadedAuthorYear) {
-        this.labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
+        labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
       }
       return true;
     }
 
     // FTR-PDF-PARSE-PRELOAD: If preload is in progress, wait briefly then check again
-    if (reader.isPDFParsingInProgress(parentItemID)) {
+    if (reader.isPDFParsingInProgress(attachmentItemID)) {
       Zotero.debug(
         `[${config.addonName}] [PDF-PARSE] Preload in progress, waiting...`,
       );
       // Wait up to 2 seconds for preload to complete
       for (let i = 0; i < 20; i++) {
         await new Promise((resolve) => setTimeout(resolve, 100));
-        if (!reader.isPDFParsingInProgress(parentItemID)) {
-          const mapping = reader.getPreloadedPDFMapping(parentItemID);
-          if (mapping && this.labelMatcher) {
-            this.labelMatcher.setPDFMapping(mapping);
+        if (!reader.isPDFParsingInProgress(attachmentItemID)) {
+          const mapping = reader.getPreloadedPDFMapping(attachmentItemID);
+          if (mapping) {
+            labelMatcher.setPDFMapping(mapping);
             const authorYear =
-              reader.getPreloadedAuthorYearMapping(parentItemID);
+              reader.getPreloadedAuthorYearMapping(attachmentItemID);
             if (authorYear) {
-              this.labelMatcher.setAuthorYearMapping(authorYear);
+              labelMatcher.setAuthorYearMapping(authorYear);
             }
             Zotero.debug(
               `[${config.addonName}] [PDF-PARSE] Preload completed, using cached mapping`,
@@ -3004,49 +3316,41 @@ class InspireReferencePanelController {
     const { getPDFReferencesParser } =
       await import("./inspire/pdfAnnotate/pdfReferencesParser");
 
-    // Get the parent item and find its PDF attachment
-    const item = Zotero.Items.get(parentItemID);
-    if (!item) {
+    // FTR-MULTI-PDF-FIX: Get PDF directly from attachmentItemID instead of finding first PDF
+    const attachment = Zotero.Items.get(attachmentItemID);
+    if (!attachment) {
       Zotero.debug(
-        `[${config.addonName}] [PDF-PARSE] Item ${parentItemID} not found`,
+        `[${config.addonName}] [PDF-PARSE] Attachment ${attachmentItemID} not found`,
       );
       return false;
     }
 
-    // Find PDF attachment
-    const attachments = item.getAttachments();
-    let pdfPath: string | null = null;
-    let pdfAttachmentID: number | null = null;
-
-    for (const attachmentID of attachments) {
-      const attachment = Zotero.Items.get(attachmentID);
-      if (attachment?.attachmentContentType === "application/pdf") {
-        const filePath = await attachment.getFilePathAsync();
-        if (filePath) {
-          pdfPath = filePath;
-          pdfAttachmentID = attachmentID;
-        }
-        break;
-      }
+    if (attachment.attachmentContentType !== "application/pdf") {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Attachment ${attachmentItemID} is not a PDF`,
+      );
+      return false;
     }
 
-    if (!pdfPath || !pdfAttachmentID) {
+    const pdfPath = await attachment.getFilePathAsync();
+    if (!pdfPath) {
       Zotero.debug(
-        `[${config.addonName}] [PDF-PARSE] No PDF attachment found for item ${parentItemID}`,
+        `[${config.addonName}] [PDF-PARSE] No file path for attachment ${attachmentItemID}`,
       );
       return false;
     }
 
     Zotero.debug(
-      `[${config.addonName}] [PDF-PARSE] Found PDF: ${pdfPath} (attachment ${pdfAttachmentID})`,
+      `[${config.addonName}] [PDF-PARSE] Found PDF: ${pdfPath} (attachment ${attachmentItemID})`,
     );
 
     // Extract text from PDF (last few pages where References usually are)
     try {
       // Use Zotero's fulltext cache to extract text
+      // FTR-MULTI-PDF-FIX: Use attachmentItemID directly
       const pdfText = await this.extractPDFTextForReferences(
         pdfPath,
-        pdfAttachmentID,
+        attachmentItemID,
       );
       if (!pdfText) {
         Zotero.debug(
@@ -3059,20 +3363,21 @@ class InspireReferencePanelController {
       const parser = getPDFReferencesParser();
       const mapping = parser.parseReferencesSection(pdfText);
 
-      if (mapping && this.labelMatcher) {
-        this.labelMatcher.setPDFMapping(mapping);
+      if (mapping) {
+        labelMatcher.setPDFMapping(mapping);
 
         // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
-        getReaderIntegration().setPreloadedPDFMapping(parentItemID, mapping);
+        // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache
+        getReaderIntegration().setPreloadedPDFMapping(attachmentItemID, mapping);
 
         // FTR-PDF-MATCHING: Calculate and store max label for concatenated range detection
-        // Set for attachment ID since reader.itemID is the attachment
+        // FTR-MULTI-PDF-FIX: Use attachmentItemID directly
         const labelNums = Array.from(mapping.labelCounts.keys())
           .map((l) => parseInt(l, 10))
           .filter((n) => !isNaN(n));
-        if (labelNums.length > 0 && pdfAttachmentID) {
+        if (labelNums.length > 0) {
           const maxLabel = Math.max(...labelNums);
-          getReaderIntegration().setMaxKnownLabel(pdfAttachmentID, maxLabel);
+          getReaderIntegration().setMaxKnownLabel(attachmentItemID, maxLabel);
         }
 
         const multiCount = Array.from(mapping.labelCounts.values()).filter(
@@ -3095,28 +3400,27 @@ class InspireReferencePanelController {
       // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Always try author-year format parsing
       // This is needed for RMP-style papers that use author-year citations like "(Cho et al., 2011a)"
       // even if numeric parsing succeeded (the paper may have both numeric and author-year citations)
-      if (this.labelMatcher) {
-        Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE] Trying author-year format parsing (regardless of numeric result)...`,
-        );
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE] Trying author-year format parsing (regardless of numeric result)...`,
+      );
 
-        const authorYearMapping =
-          parser.parseAuthorYearReferencesSection(pdfText);
-        if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
-          this.labelMatcher.setAuthorYearMapping(authorYearMapping);
-          // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
-          getReaderIntegration().setPreloadedAuthorYearMapping(
-            parentItemID,
-            authorYearMapping,
-          );
-          Zotero.debug(
-            `[${config.addonName}] [PDF-PARSE] Successfully applied author-year mapping with ${authorYearMapping.authorYearMap.size} entries`,
-          );
-        } else {
-          Zotero.debug(
-            `[${config.addonName}] [PDF-PARSE] Author-year parsing found ${authorYearMapping?.authorYearMap.size ?? 0} entries (not enough)`,
-          );
-        }
+      const authorYearMapping =
+        parser.parseAuthorYearReferencesSection(pdfText);
+      if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
+        labelMatcher.setAuthorYearMapping(authorYearMapping);
+        // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
+        // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache
+        getReaderIntegration().setPreloadedAuthorYearMapping(
+          attachmentItemID,
+          authorYearMapping,
+        );
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Successfully applied author-year mapping with ${authorYearMapping.authorYearMap.size} entries`,
+        );
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] [PDF-PARSE] Author-year parsing found ${authorYearMapping?.authorYearMap.size ?? 0} entries (not enough)`,
+        );
       }
 
       // Return true if we got either numeric or author-year mapping
@@ -3365,7 +3669,7 @@ class InspireReferencePanelController {
           row.style.borderRadius = "";
         } else {
           // Re-apply focus style for the focused entry
-          this.applyFocusedEntryStyle(row, true);
+          this.entryRenderer?.updateFocusState(row as HTMLDivElement, true);
         }
       }
       Zotero.debug(
@@ -3394,7 +3698,7 @@ class InspireReferencePanelController {
         }
       }
       if (prevRow) {
-        this.applyFocusedEntryStyle(prevRow, false);
+        this.entryRenderer?.updateFocusState(prevRow as HTMLDivElement, false);
       }
     }
 
@@ -3423,7 +3727,7 @@ class InspireReferencePanelController {
       }
 
       if (row) {
-        this.applyFocusedEntryStyle(row, true);
+        this.entryRenderer?.updateFocusState(row as HTMLDivElement, true);
         // FTR-KEYBOARD-NAV-FULL: Focus the list container to keep DOM focus in panel
         // This ensures keyboard events are captured properly
         // Don't focus individual rows (tabIndex=-1 causes Tab to exit panel)
@@ -3440,34 +3744,6 @@ class InspireReferencePanelController {
   private clearFocusedEntry(): void {
     this.focusedEntryIndex = -1;
     this.setFocusedEntry(undefined);
-  }
-
-  /**
-   * Apply or remove focused entry inline styles on a row element.
-   * FTR-FOCUSED-SELECTION: Extracted to avoid code duplication between
-   * setFocusedEntry() and updateRowContent().
-   * Uses inline styles because CSS files may not load properly in Zotero.
-   * Uses box-shadow for left border to avoid layout shift (keeps buttons aligned).
-   *
-   * @param row - The row element to style
-   * @param isFocused - Whether to apply focus styles (true) or clear them (false)
-   */
-  private applyFocusedEntryStyle(row: HTMLElement, isFocused: boolean): void {
-    if (isFocused) {
-      row.classList.add("zinspire-entry-focused");
-      const dark = isDarkMode();
-      if (dark) {
-        row.style.backgroundColor = "rgba(0, 96, 223, 0.2)";
-        row.style.boxShadow = "inset 3px 0 0 #3584e4";
-      } else {
-        row.style.backgroundColor = "rgba(0, 96, 223, 0.12)";
-        row.style.boxShadow = "inset 3px 0 0 #0060df";
-      }
-    } else {
-      row.classList.remove("zinspire-entry-focused");
-      row.style.backgroundColor = "";
-      row.style.boxShadow = "";
-    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -3727,10 +4003,6 @@ class InspireReferencePanelController {
       this.body?.closest(".context-pane") !== null ||
       this.body?.closest("[class*='reader']") !== null ||
       this.currentReaderTabID != null;
-
-    Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible: isInReader=${isInReader}, currentReaderTabID=${this.currentReaderTabID}`,
-    );
 
     // If in reader, we need to ensure the context pane (right sidebar) is visible
     if (isInReader) {
@@ -4716,7 +4988,7 @@ class InspireReferencePanelController {
         const authorLink = target.closest(
           ".zinspire-ref-entry__author-link",
         ) as HTMLElement;
-        this.hideAuthorPreviewCard();
+        this.authorPreview?.hide();
         const authorIndex = parseInt(
           authorLink.dataset.authorIndex ?? "-1",
           10,
@@ -4761,9 +5033,11 @@ class InspireReferencePanelController {
       const entry = entryId ? this.findEntryById(entryId) : null;
 
       // Title link hover - show abstract tooltip
-      const titleLink = target.closest(".zinspire-ref-entry__title-link");
+      const titleLink = target.closest(
+        ".zinspire-ref-entry__title-link",
+      ) as HTMLElement | null;
       if (titleLink && entry) {
-        this.scheduleAbstractTooltip(entry, event);
+        this.scheduleAbstractTooltip(entry, titleLink);
         return;
       }
 
@@ -4776,7 +5050,7 @@ class InspireReferencePanelController {
           10,
         );
         if (authorIndex >= 0) {
-          this.scheduleAuthorPreview(entry, authorIndex, authorLink);
+          this.authorPreview?.scheduleShow(entry, authorIndex, authorLink);
         }
         return;
       }
@@ -4815,17 +5089,9 @@ class InspireReferencePanelController {
         ".zinspire-ref-entry__author-link",
       ) as HTMLElement | null;
       if (authorLink) {
-        const related = event.relatedTarget as Node | null;
-        if (
-          related &&
-          this.authorPreviewCard &&
-          (related === this.authorPreviewCard ||
-            this.authorPreviewCard.contains(related))
-        ) {
-          this.cancelAuthorPreviewHide();
-          return;
-        }
-        this.scheduleAuthorPreviewHide();
+        // The AuthorPreviewController handles mouseenter/mouseleave on its card
+        // which will cancelHide when entering. Just schedule hide here.
+        this.authorPreview?.scheduleHide();
         return;
       }
 
@@ -4857,9 +5123,11 @@ class InspireReferencePanelController {
       this.lastMouseMoveTime = now;
 
       const target = event.target as HTMLElement;
-      const titleLink = target.closest(".zinspire-ref-entry__title-link");
+      const titleLink = target.closest(
+        ".zinspire-ref-entry__title-link",
+      ) as HTMLElement | null;
       if (titleLink) {
-        this.updateTooltipPosition(event);
+        this.updateTooltipPosition(titleLink);
       }
     };
 
@@ -5365,6 +5633,7 @@ class InspireReferencePanelController {
     container.className = "zinspire-chart-container";
     // FTR-DARK-MODE-AUTO: Use CSS variables for automatic theme adaptation (like author card)
     // FIX-ZINDEX: Use position:relative and z-index:1 so quick filters popup (z-index:1000) stays on top
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width: 100% and min-width: 0 to allow shrinking
     container.style.cssText = `
       display: flex;
       flex-direction: column;
@@ -5376,7 +5645,9 @@ class InspireReferencePanelController {
       height: auto;
       min-height: auto;
       max-height: auto;
+      width: 100%;
       max-width: 100%;
+      min-width: 0;
       overflow: hidden;
       box-sizing: border-box;
       position: relative;
@@ -5384,6 +5655,7 @@ class InspireReferencePanelController {
     `;
 
     // Header with view buttons
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width: 100% and min-width: 0 to allow shrinking
     const header = doc.createElement("div");
     header.className = "zinspire-chart-header";
     header.style.cssText = `
@@ -5395,10 +5667,14 @@ class InspireReferencePanelController {
       font-size: 12px;
       margin-bottom: 4px;
       flex-shrink: 0;
+      width: 100%;
       max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
     `;
 
     // Sub-header for filters (second row)
+    // FIX-PANEL-WIDTH-OVERFLOW: Add min-width: 0 and overflow: hidden to allow shrinking
     const subHeader = doc.createElement("div");
     subHeader.className = "zinspire-chart-subheader";
     subHeader.style.cssText = `
@@ -5413,6 +5689,9 @@ class InspireReferencePanelController {
       margin-left: 0;
       padding-left: 0;
       width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
       flex-shrink: 0;
     `;
     this.chartSubHeader = subHeader;
@@ -5585,6 +5864,7 @@ class InspireReferencePanelController {
 
     // Stats display (two lines: header + subheader alignment)
     // FTR-DARK-MODE-AUTO: Use CSS variables for automatic theme adaptation
+    // FIX-PANEL-WIDTH-OVERFLOW: Add text overflow handling to prevent stats line expansion
     const statsTopLine = doc.createElement("span");
     statsTopLine.className = "zinspire-chart-stats zinspire-chart-stats-top";
     statsTopLine.style.cssText = `
@@ -5593,6 +5873,11 @@ class InspireReferencePanelController {
       font-weight: 500;
       text-align: left;
       line-height: 1.3;
+      flex-shrink: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     `;
     const statsBottomLine = doc.createElement("span");
     statsBottomLine.className =
@@ -5603,6 +5888,11 @@ class InspireReferencePanelController {
       font-weight: 500;
       text-align: left;
       line-height: 1.3;
+      flex-shrink: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     `;
 
     this.chartStatsTopLine = statsTopLine;
@@ -5627,6 +5917,7 @@ class InspireReferencePanelController {
     subHeader.appendChild(statsBottomLine);
 
     // SVG wrapper for the chart - initial visibility based on chartCollapsed preference
+    // FIX-PANEL-WIDTH-OVERFLOW: Add width: 100% and min-width: 0 to allow shrinking
     const svgWrapper = doc.createElement("div");
     svgWrapper.className = "zinspire-chart-svg-wrapper";
     svgWrapper.style.cssText = `
@@ -5635,7 +5926,9 @@ class InspireReferencePanelController {
       overflow: hidden;
       height: 130px;
       display: ${this.chartCollapsed ? "none" : "block"};
+      width: 100%;
       max-width: 100%;
+      min-width: 0;
       box-sizing: border-box;
     `;
     this.chartSvgWrapper = svgWrapper;
@@ -6053,7 +6346,10 @@ class InspireReferencePanelController {
     const PADDING = 16; // left + right padding
 
     // Get actual container width
-    const containerWidth = this.chartSvgWrapper.clientWidth || 400;
+    // FIX-PANEL-WIDTH-OVERFLOW: Cap width to body width to prevent overflow
+    const wrapperWidth = this.chartSvgWrapper.clientWidth || 0;
+    const bodyWidth = this.body.clientWidth || 400;
+    const containerWidth = wrapperWidth > 0 ? Math.min(wrapperWidth, bodyWidth) : bodyWidth;
 
     // Calculate how many bars can fit at max width
     // Formula: containerWidth = n * maxBarWidth + (n-1) * gap + padding
@@ -6128,8 +6424,15 @@ class InspireReferencePanelController {
     const svgHeight = chartHeight + padding.top + padding.bottom;
 
     // Use actual container width
+    // FIX-PANEL-WIDTH-OVERFLOW: Add style constraints to prevent SVG from expanding
     svg.setAttribute("width", "100%");
     svg.setAttribute("height", String(svgHeight));
+    svg.style.cssText = `
+      max-width: 100%;
+      width: 100%;
+      display: block;
+      overflow: visible;
+    `;
     // No viewBox - draw in actual pixels, SVG will naturally fill width
 
     const maxCount = Math.max(...stats.map((s) => s.count), 1);
@@ -6557,6 +6860,7 @@ class InspireReferencePanelController {
     this.entryCitedCache.clear();
     this.metadataCache.clear();
     this.rowCache.clear();
+    this.entryRenderer?.clearCache();
     // Clean up event delegation listeners (PERF-14)
     this.cleanupEventDelegation();
     // Clear filter debounce timer
@@ -6569,8 +6873,6 @@ class InspireReferencePanelController {
       clearTimeout(this.chartRenderTimer);
       this.chartRenderTimer = undefined;
     }
-    // Clear row pool
-    this.rowPool.length = 0;
     // Clear infinite scroll observer
     if (this.loadMoreObserver) {
       this.loadMoreObserver.disconnect();
@@ -6597,18 +6899,14 @@ class InspireReferencePanelController {
       this.rateLimiterUnsubscribe = undefined;
     }
     // FTR-HOVER-PREVIEW: Cleanup preview card
-    this.hidePreviewCard();
-    if (this.previewCard) {
-      this.previewCard.remove();
-      this.previewCard = undefined;
-    }
+    // Phase 0.4 Refactor: Use HoverPreviewController.dispose()
+    this.hoverPreview?.dispose();
+    this.hoverPreview = undefined;
     // FTR-AUTHOR-PROFILE: Cleanup author profile and hover preview
+    // Phase 0.5 Refactor: Use AuthorPreviewController.dispose()
     this.clearAuthorProfileState();
-    this.hideAuthorPreviewCard();
-    if (this.authorPreviewCard) {
-      this.authorPreviewCard.remove();
-      this.authorPreviewCard = undefined;
-    }
+    this.authorPreview?.dispose();
+    this.authorPreview = undefined;
     // Note: No outside click handler cleanup needed - popup only closes via button toggle
     // FTR-PDF-ANNOTATE: Cleanup shared citation lookup handler when last instance gone
     // FTR-RECID-AUTO-UPDATE: Also cleanup recid event handlers
@@ -6658,8 +6956,10 @@ class InspireReferencePanelController {
         `[${config.addonName}] [PDF-ANNOTATE] Unregistered shared event listeners`,
       );
     }
-    this.labelMatcher = undefined;
-    this.pdfParseAttempted = false;
+    // FTR-MULTI-PDF-FIX-V3: Clear labelMatcher cache on destroy
+    this.labelMatcherCache.clear();
+    this.pdfParseAttemptedMap.clear();
+    this.currentAttachmentID = undefined;
     InspireReferencePanelController.instances.delete(this);
     if (!InspireReferencePanelController.instances.size) {
       InspireReferencePanelController.navigationStack = [];
@@ -6771,6 +7071,8 @@ class InspireReferencePanelController {
           await this.handleItemAdded(ids as number[]);
         } else if (event === "delete") {
           await this.handleItemDeleted(ids as number[]);
+        } else if (event === "modify") {
+          this.handleItemModified(ids as number[]);
         }
       },
     };
@@ -6817,6 +7119,24 @@ class InspireReferencePanelController {
         entry.isRelated = false;
         this.updateRowStatus(entry);
       }
+    }
+  }
+
+  /**
+   * Handle item modifications - clear auto-check notification if the tracked item was modified
+   * This ensures the notification disappears when the item is updated from any source
+   * (e.g., popup dialog, right-click menu, etc.)
+   */
+  private handleItemModified(itemIDs: number[]) {
+    if (!this.autoCheckPendingDiff) return;
+
+    // Check if the modified item is the one we're tracking
+    if (itemIDs.includes(this.autoCheckPendingDiff.itemId)) {
+      Zotero.debug(
+        `[${config.addonName}] Auto-check: tracked item ${this.autoCheckPendingDiff.itemId} was modified, clearing notification`,
+      );
+      this.clearAutoCheckNotification();
+      this.autoCheckPendingDiff = undefined;
     }
   }
 
@@ -6879,6 +7199,7 @@ class InspireReferencePanelController {
     // Reset entries and UI
     this.allEntries = [];
     this.rowCache.clear();
+    this.entryRenderer?.clearCache();
     this.totalApiCount = null;
     this.chartSelectedBins.clear(); // Clear chart selection on refresh
     this.cachedChartStats = undefined; // Invalidate chart cache
@@ -7533,7 +7854,9 @@ class InspireReferencePanelController {
           const response = await inspireFetch(url, fetchOptions);
           if (!response.ok) continue;
 
-          const payload: any = await response.json();
+          const payload = (await response.json()) as unknown as
+            | InspireLiteratureSearchResponse
+            | null;
           const hits = payload?.hits?.hits ?? [];
           for (const hit of hits) {
             const recid = String(hit?.metadata?.control_number || hit?.id || "");
@@ -8050,8 +8373,10 @@ class InspireReferencePanelController {
       const itemChanged = previousItemID !== item.id;
       this.currentItemID = item.id;
       if (itemChanged) {
-        // FTR-PDF-ANNOTATE: Invalidate label matcher for new item
-        this.labelMatcher = undefined;
+        // FTR-MULTI-PDF-FIX-V3: Clear labelMatcher cache when item changes
+        this.labelMatcherCache.clear();
+        this.pdfParseAttemptedMap.clear();
+        this.currentAttachmentID = undefined;
         if (!InspireReferencePanelController.isNavigatingHistory) {
           InspireReferencePanelController.forwardStack = [];
           InspireReferencePanelController.syncBackButtonStates();
@@ -8773,13 +9098,8 @@ class InspireReferencePanelController {
             // Only run enrichLocalStatus to update local item status (may have changed since cache)
             const localCacheToken = `${mode}-${cacheKey}-local-${performance.now()}`;
             this.pendingToken = localCacheToken;
-            const localSupportsAbort =
-              typeof AbortController !== "undefined" &&
-              typeof AbortController === "function";
-            const localEnrichController = localSupportsAbort
-              ? new AbortController()
-              : null;
-            this.activeAbort = localEnrichController ?? undefined;
+            const localEnrichController = createAbortController();
+            this.activeAbort = localEnrichController;
             setTimeout(async () => {
               if (this.pendingToken !== localCacheToken) {
                 return;
@@ -8808,11 +9128,8 @@ class InspireReferencePanelController {
       }
     }
 
-    const supportsAbort =
-      typeof AbortController !== "undefined" &&
-      typeof AbortController === "function";
-    const controller = supportsAbort ? new AbortController() : null;
-    this.activeAbort = controller ?? undefined;
+    const controller = createAbortController();
+    this.activeAbort = controller;
     const token = `${mode}-${cacheKey}-${performance.now()}`;
     this.pendingToken = token;
 
@@ -9172,7 +9489,9 @@ class InspireReferencePanelController {
       if (!response || response.status === 404) {
         return [];
       }
-      const payload: any = await response.json();
+      const payload = (await response.json()) as unknown as
+        | InspireLiteratureSearchResponse
+        | null;
       return Array.isArray(payload?.hits?.hits) ? payload.hits.hits : [];
     };
 
@@ -9185,7 +9504,9 @@ class InspireReferencePanelController {
     if (!firstResponse || firstResponse.status === 404) {
       throw new Error("Cited-by list not found");
     }
-    const firstPayload: any = await firstResponse.json();
+    const firstPayload = (await firstResponse.json()) as unknown as
+      | InspireLiteratureSearchResponse
+      | null;
     const totalHits =
       typeof firstPayload?.hits?.total === "number"
         ? firstPayload.hits.total
@@ -9315,7 +9636,9 @@ class InspireReferencePanelController {
       if (!response || response.status === 404) {
         return [];
       }
-      const payload: any = await response.json();
+      const payload = (await response.json()) as unknown as
+        | InspireLiteratureSearchResponse
+        | null;
       return Array.isArray(payload?.hits?.hits) ? payload.hits.hits : [];
     };
 
@@ -9328,7 +9651,9 @@ class InspireReferencePanelController {
     if (!firstResponse || firstResponse.status === 404) {
       throw new Error("Author papers not found");
     }
-    const firstPayload: any = await firstResponse.json();
+    const firstPayload = (await firstResponse.json()) as unknown as
+      | InspireLiteratureSearchResponse
+      | null;
     const totalHits =
       typeof firstPayload?.hits?.total === "number"
         ? firstPayload.hits.total
@@ -10044,6 +10369,13 @@ class InspireReferencePanelController {
     // FTR-KEYBOARD-NAV-FULL: Make list focusable for keyboard navigation
     newListEl.tabIndex = -1;
     newListEl.style.outline = "none";
+    // FIX-PANEL-WIDTH-OVERFLOW: Copy all width constraint styles from constructor
+    newListEl.style.width = "100%";
+    newListEl.style.maxWidth = "100%";
+    newListEl.style.minWidth = "0";
+    newListEl.style.boxSizing = "border-box";
+    newListEl.style.overflowX = "hidden";
+    newListEl.style.overflowY = "auto";
     // Hide old container immediately
     oldListEl.style.display = "none";
     // Insert new container after old one
@@ -10055,6 +10387,8 @@ class InspireReferencePanelController {
       oldListEl.remove();
     }, 0);
     this.rowCache.clear();
+    // Phase 0.1 Refactor: Also clear EntryListRenderer's cache
+    this.entryRenderer?.clearCache();
     this.loadMoreButton = undefined;
 
     if (!this.allEntries.length) {
@@ -10598,7 +10932,7 @@ class InspireReferencePanelController {
     this.updateTabSelection();
     this.updateSearchUIVisibility();
     this.updateAuthorProfileCard();
-    this.hideAuthorPreviewCard();
+    this.authorPreview?.hide();
 
     // For search mode, use current search query
     if (mode === "search") {
@@ -10856,6 +11190,11 @@ class InspireReferencePanelController {
         return;
       }
       this.referenceSort = rawValue;
+      // FTR-MULTI-PDF-FIX-V3: Clear labelMatcher cache when sort changes
+      // Cached matchers store entry indices based on OLD array order;
+      // getSortedReferences() creates NEW array with different order.
+      // Without clearing, entries[match.entryIndex] returns wrong entry.
+      this.labelMatcherCache.clear();
       const cached = this.referencesCache.get(this.currentRecid);
       if (cached) {
         this.allEntries = this.getSortedReferences(cached);
@@ -11538,9 +11877,8 @@ class InspireReferencePanelController {
       `[${config.addonName}] loadSearchResults: no cache hit, fetching from API`,
     );
 
-    const supportsAbort = typeof AbortController !== "undefined";
-    const controller = supportsAbort ? new AbortController() : null;
-    this.activeAbort = controller ?? undefined;
+    const controller = createAbortController();
+    this.activeAbort = controller;
     const token = `search-${cacheKey}-${performance.now()}`;
     this.pendingToken = token;
 
@@ -11581,12 +11919,12 @@ class InspireReferencePanelController {
         }
       };
 
-      const entries = await this.fetchInspireSearch(
+      const entries = await fetchInspireSearch({
         query,
-        this.searchSort,
-        controller?.signal,
+        sort: this.searchSort,
+        signal: controller?.signal,
         onProgress,
-      );
+      });
 
       this.searchCache.set(cacheKey, entries);
 
@@ -11624,202 +11962,6 @@ class InspireReferencePanelController {
         this.activeAbort = undefined;
       }
     }
-  }
-
-  /**
-   * Fetch search results from INSPIRE API.
-   */
-  private async fetchInspireSearch(
-    query: string,
-    sort: InspireSortOption,
-    signal?: AbortSignal,
-    onProgress?: (
-      entries: InspireReferenceEntry[],
-      total: number | null,
-    ) => void,
-  ): Promise<InspireReferenceEntry[]> {
-    const entries: InspireReferenceEntry[] = [];
-    const encodedQuery = encodeURIComponent(query);
-    const sortParam = `&sort=${sort}`;
-    // FTR-API-FIELD-OPTIMIZATION: Use centralized field configuration
-    const fieldsParam = buildFieldsParam(API_FIELDS_LIST_DISPLAY);
-
-    // Fetch first page to get total count
-    const firstUrl = `${INSPIRE_API_BASE}/literature?q=${encodedQuery}&size=${CITED_BY_PAGE_SIZE}&page=1${sortParam}${fieldsParam}`;
-    const firstResponse = await inspireFetch(
-      firstUrl,
-      signal ? { signal } : undefined,
-    ).catch((err) => {
-      Zotero.debug(
-        `[${config.addonName}] fetchInspireSearch: first page fetch failed: ${err}`,
-      );
-      return null;
-    });
-    if (!firstResponse || firstResponse.status === 404) {
-      throw new Error("Search failed");
-    }
-
-    const firstPayload: any = await firstResponse.json();
-    const totalHits = firstPayload?.hits?.total ?? 0;
-    const firstHits = Array.isArray(firstPayload?.hits?.hits)
-      ? firstPayload.hits.hits
-      : [];
-
-    if (totalHits === 0) {
-      return [];
-    }
-
-    // Process first page
-    const strings = getCachedStrings();
-    for (let i = 0; i < firstHits.length; i++) {
-      if (signal?.aborted) break;
-      entries.push(this.buildEntryFromSearchHit(firstHits[i], i, strings));
-    }
-
-    // PERF-16: Pass array reference directly instead of cloning
-    if (onProgress) {
-      onProgress(entries, totalHits);
-    }
-
-    // If there are more pages, fetch them in parallel batches
-    const totalPages = Math.ceil(
-      Math.min(totalHits, CITED_BY_MAX_RESULTS) / CITED_BY_PAGE_SIZE,
-    );
-    if (totalPages <= 1) {
-      return entries;
-    }
-
-    // Fetch remaining pages in parallel batches
-    for (
-      let batchStart = 2;
-      batchStart <= totalPages;
-      batchStart += CITED_BY_PARALLEL_BATCH_SIZE
-    ) {
-      if (signal?.aborted) break;
-
-      const batchPages: number[] = [];
-      for (
-        let p = batchStart;
-        p < batchStart + CITED_BY_PARALLEL_BATCH_SIZE && p <= totalPages;
-        p++
-      ) {
-        batchPages.push(p);
-      }
-
-      const batchResults = await Promise.all(
-        batchPages.map(async (pageNum) => {
-          const url = `${INSPIRE_API_BASE}/literature?q=${encodedQuery}&size=${CITED_BY_PAGE_SIZE}&page=${pageNum}${sortParam}${fieldsParam}`;
-          const response = await inspireFetch(
-            url,
-            signal ? { signal } : undefined,
-          ).catch(() => null);
-          if (!response || !response.ok) return [];
-          const payload: any = await response.json();
-          return Array.isArray(payload?.hits?.hits) ? payload.hits.hits : [];
-        }),
-      );
-
-      // Process batch results
-      for (const pageHits of batchResults) {
-        for (const hit of pageHits) {
-          if (signal?.aborted) break;
-          entries.push(
-            this.buildEntryFromSearchHit(hit, entries.length, strings),
-          );
-        }
-      }
-
-      // PERF-16: Pass array reference directly instead of cloning
-      if (onProgress && !signal?.aborted) {
-        onProgress(entries, totalHits);
-      }
-    }
-
-    return entries;
-  }
-
-  /**
-   * Build an entry from a search hit result.
-   */
-  private buildEntryFromSearchHit(
-    hit: any,
-    index: number,
-    strings: ReturnType<typeof getCachedStrings>,
-  ): InspireReferenceEntry {
-    const meta = hit?.metadata || hit;
-    const recid = String(meta?.control_number ?? "");
-    const rawTitle = meta?.titles?.[0]?.title ?? strings.noTitle;
-    const title = cleanMathTitle(rawTitle);
-    const authors = meta?.authors ?? [];
-    const { primary: publicationInfo, errata } = splitPublicationInfo(
-      meta?.publication_info,
-    );
-    const arxivDetails = extractArxivFromMetadata(meta);
-    const earliestDate = meta?.earliest_date ?? "";
-    const year = earliestDate
-      ? earliestDate.slice(0, 4)
-      : (publicationInfo?.year ?? "");
-    const citationCount =
-      typeof meta?.citation_count === "number" ? meta.citation_count : null;
-    const citationCountWithoutSelf =
-      typeof meta?.citation_count_without_self_citations === "number"
-        ? meta.citation_count_without_self_citations
-        : typeof meta?.citation_count_wo_self_citations === "number"
-          ? meta.citation_count_wo_self_citations
-          : null;
-
-    const { names: authorNames, total: totalAuthors } =
-      extractAuthorNamesLimited(authors, 3);
-    const authorText = formatAuthors(authorNames, totalAuthors);
-    const fallbackYear = year || undefined;
-    const summary = buildPublicationSummary(
-      publicationInfo,
-      arxivDetails,
-      fallbackYear,
-      errata,
-    );
-
-    const inspireUrl = recid ? `${INSPIRE_LITERATURE_URL}/${recid}` : "";
-    const fallbackUrl = buildFallbackUrlFromMetadata(meta, arxivDetails);
-
-    // Extract primary DOI from metadata
-    const doi =
-      Array.isArray(meta?.dois) && meta.dois.length
-        ? typeof meta.dois[0] === "string"
-          ? meta.dois[0]
-          : meta.dois[0]?.value
-        : undefined;
-
-    const entry: InspireReferenceEntry = {
-      id: `search-${index}-${recid || Date.now()}`,
-      recid,
-      title,
-      authors: authorNames,
-      totalAuthors,
-      authorSearchInfos: extractAuthorSearchInfos(authors, 3),
-      authorText,
-      displayText: "",
-      year: year || strings.yearUnknown,
-      summary,
-      citationCount,
-      citationCountWithoutSelf: citationCountWithoutSelf ?? undefined,
-      inspireUrl,
-      fallbackUrl,
-      searchText: "",
-      localItemID: undefined,
-      isRelated: false,
-      publicationInfo,
-      publicationInfoErrata: errata,
-      arxivDetails,
-      doi,
-    };
-
-    // Build displayText for proper filtering (matches behavior in buildEntry and buildEntryFromSearch)
-    entry.displayText = buildDisplayText(entry);
-    // Defer searchText calculation to first filter for better initial load performance
-    entry.searchText = "";
-
-    return entry;
   }
 
   private getSortOptionForMode(mode: InspireViewMode) {
@@ -11993,336 +12135,140 @@ class InspireReferencePanelController {
   }
 
   /**
-   * Create a row template with all sub-elements pre-created (PERF-13).
-   * This template is reused when pooling rows - only content is updated, not structure.
-   */
-  private createRowTemplate(): HTMLDivElement {
-    const doc = this.listEl.ownerDocument;
-    const row = doc.createElement("div");
-    row.classList.add("zinspire-ref-entry");
-    // FTR-KEYBOARD-NAV-FULL: Make rows focusable for keyboard navigation
-    // tabindex="-1" means focusable via JavaScript but not in tab order
-    row.tabIndex = -1;
-    // Remove browser's focus outline since we have our own visual indicator
-    row.style.outline = "none";
-
-    // Use innerHTML for static elements only (Zotero XHTML removes input/button via innerHTML)
-    row.innerHTML = `
-      <div class="zinspire-ref-entry__text">
-        <div class="zinspire-ref-entry__controls">
-          <span class="zinspire-ref-entry__dot is-clickable"></span>
-        </div>
-        <div class="zinspire-ref-entry__content">
-          <div class="zinspire-ref-entry__title">
-            <span class="zinspire-ref-entry__label"></span>
-            <span class="zinspire-ref-entry__authors"></span><span class="zinspire-ref-entry__separator">: </span>
-            <a class="zinspire-ref-entry__title-link" href="#"></a>
-          </div>
-          <div class="zinspire-ref-entry__meta"></div>
-        </div>
-      </div>
-    `;
-
-    const textContainer = row.querySelector(
-      ".zinspire-ref-entry__text",
-    ) as HTMLElement;
-    const controls = row.querySelector(
-      ".zinspire-ref-entry__controls",
-    ) as HTMLElement;
-    const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
-    const content = row.querySelector(
-      ".zinspire-ref-entry__content",
-    ) as HTMLElement;
-
-    if (textContainer) applyRefEntryTextContainerStyle(textContainer);
-    if (marker) {
-      applyRefEntryMarkerStyle(marker);
-      marker.style.cursor = "pointer";
-    }
-    if (content) applyRefEntryContentStyle(content);
-
-    // FTR-BATCH-IMPORT: Create checkbox via createElement (required for Zotero XHTML security)
-    // Input elements cannot be created via innerHTML in Zotero's XHTML environment
-    const checkbox = doc.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.classList.add("zinspire-ref-entry__checkbox");
-    // Apply inline styles since CSS class may not be enough
-    checkbox.style.width = "14px";
-    checkbox.style.height = "14px";
-    checkbox.style.margin = "0";
-    checkbox.style.cursor = "pointer";
-    checkbox.style.flexShrink = "0";
-
-    // Create buttons via createElement (required for Zotero XHTML security)
-    const linkButton = doc.createElement("button");
-    linkButton.type = "button";
-    linkButton.classList.add("zinspire-ref-entry__link");
-    applyRefEntryLinkButtonStyle(linkButton);
-
-    const bibtexButton = doc.createElement("button");
-    bibtexButton.type = "button";
-    bibtexButton.classList.add("zinspire-ref-entry__bibtex");
-    applyBibTeXButtonStyle(bibtexButton);
-
-    const texkeyButton = doc.createElement("button");
-    texkeyButton.type = "button";
-    texkeyButton.classList.add("zinspire-ref-entry__texkey");
-    applyBibTeXButtonStyle(texkeyButton);
-
-    const statsButton = doc.createElement("button");
-    statsButton.type = "button";
-    statsButton.classList.add(
-      "zinspire-ref-entry__stats",
-      "zinspire-ref-entry__stats-button",
-    );
-
-    // Insert elements at correct positions
-    if (controls && marker && content) {
-      // FTR-BATCH-IMPORT: Insert checkbox before marker (leftmost position)
-      controls.insertBefore(checkbox, marker);
-      // Insert link, texkey, and bibtex buttons after marker
-      controls.appendChild(linkButton);
-      controls.appendChild(texkeyButton);
-      controls.appendChild(bibtexButton);
-      content.appendChild(statsButton);
-    }
-
-    return row;
-  }
-
-  /**
-   * Get a row element from the pool or create a new one (PERF-13).
-   * Pooled elements retain their structure - only content needs updating.
-   */
-  private getRowFromPool(): HTMLDivElement {
-    const pooled = this.rowPool.pop();
-    if (pooled) {
-      // PERF-13: Don't clear content, structure is preserved for reuse
-      return pooled;
-    }
-    // Create new template if pool is empty
-    return this.createRowTemplate();
-  }
-
-  /**
-   * Return a row element to the pool for later reuse (PERF-13).
-   * Structure is preserved - no need to clear content.
-   */
-  private returnRowToPool(row: HTMLDivElement) {
-    if (this.rowPool.length < this.maxRowPoolSize) {
-      // PERF-13: Keep structure intact, just reset data attributes
-      delete row.dataset.entryId;
-      // FTR-FOCUSED-SELECTION: Clear inline focus styles before pooling
-      row.classList.remove(
-        "zinspire-entry-focused",
-        "zinspire-entry-highlight",
-      );
-      row.style.backgroundColor = "";
-      row.style.boxShadow = "";
-      this.rowPool.push(row);
-    }
-    // If pool is full, just let the element be garbage collected
-  }
-
-  /**
    * Recycle rows from the list to the pool before clearing.
    * PERF FIX: Only recycle up to maxRowPoolSize elements, since we can't use more anyway.
    * This avoids iterating through 10000+ elements when only 150 can be pooled.
    */
   private recycleRowsToPool() {
-    // Skip if pool is already full
-    const slotsAvailable = this.maxRowPoolSize - this.rowPool.length;
-    if (slotsAvailable <= 0) return;
-
-    // Only query and process the number of elements we can actually pool
-    const rows = this.listEl.querySelectorAll(".zinspire-ref-entry");
-    const limit = Math.min(rows.length, slotsAvailable);
-    for (let i = 0; i < limit; i++) {
-      this.returnRowToPool(rows[i] as HTMLDivElement);
-    }
+    // Phase 0.1 Refactor: Delegate to EntryListRenderer
+    this.entryRenderer!.recycleRowsFromContainer(this.listEl);
   }
 
   /**
-   * Update row content with entry data (PERF-13).
-   * Called after getting a row from pool - only updates text/attributes, not structure.
+   * Get the render context for EntryListRenderer.
+   * Contains all state and callbacks needed for rendering entry rows.
    */
-  private updateRowContent(row: HTMLDivElement, entry: InspireReferenceEntry) {
-    const strings = getCachedStrings();
+  private getRenderContext(): EntryRenderContext {
+    return {
+      selectedEntryIDs: this.selectedEntryIDs,
+      focusedEntryID: this.focusedEntryID,
+      viewMode: this.viewMode,
+      maxAuthors: (getPref("max_authors") as number) || 3,
+      getCitationValue: (entry) => this.getCitationValue(entry),
+    };
+  }
 
-    // Store entry ID for event delegation (PERF-14)
-    row.dataset.entryId = entry.id;
-
-    // FTR-BATCH-IMPORT: Update checkbox state
-    const checkbox = row.querySelector(
-      ".zinspire-ref-entry__checkbox",
-    ) as HTMLInputElement;
-    if (checkbox) {
-      checkbox.checked = this.selectedEntryIDs.has(entry.id);
-      checkbox.dataset.entryId = entry.id;
-    } else {
-      Zotero.debug(
-        `[${config.addonName}] updateRowContent: checkbox NOT found in row for entry ${entry.id}`,
-      );
-    }
-
-    // Update marker
-    const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
-    if (marker) {
-      marker.textContent = entry.localItemID ? "●" : "⊕";
-      marker.dataset.state = entry.localItemID ? "local" : "missing";
-      applyRefEntryMarkerColor(marker, Boolean(entry.localItemID));
-      marker.setAttribute(
-        "title",
-        entry.localItemID ? strings.dotLocal : strings.dotAdd,
-      );
-    }
-
-    // Update link button
-    const linkButton = row.querySelector(
-      ".zinspire-ref-entry__link",
-    ) as HTMLButtonElement;
-    if (linkButton) {
-      linkButton.setAttribute(
-        "title",
-        entry.isRelated ? strings.linkExisting : strings.linkMissing,
-      );
-      this.renderLinkButton(linkButton, Boolean(entry.isRelated));
-    }
-
-    // Update bibtex button
-    const bibtexButton = row.querySelector(
-      ".zinspire-ref-entry__bibtex",
-    ) as HTMLButtonElement;
-    if (bibtexButton) {
-      bibtexButton.textContent = "📋";
-      bibtexButton.setAttribute("title", strings.copyBibtex);
-      if (entry.recid) {
-        bibtexButton.disabled = false;
-        bibtexButton.style.opacity = "1";
-        bibtexButton.style.cursor = "pointer";
-      } else {
-        bibtexButton.disabled = true;
-        bibtexButton.style.opacity = "0.3";
-        bibtexButton.style.cursor = "not-allowed";
-      }
-    }
-
-    // Update texkey button
-    const texkeyButton = row.querySelector(
-      ".zinspire-ref-entry__texkey",
-    ) as HTMLButtonElement;
-    if (texkeyButton) {
-      texkeyButton.textContent = "T";
-      texkeyButton.setAttribute("title", strings.copyTexkey);
-      if (entry.texkey || entry.recid) {
-        texkeyButton.disabled = false;
-        texkeyButton.style.opacity = "1";
-        texkeyButton.style.cursor = "pointer";
-      } else {
-        texkeyButton.disabled = true;
-        texkeyButton.style.opacity = "0.3";
-        texkeyButton.style.cursor = "not-allowed";
-      }
-    }
-
-    // Update label (show/hide)
-    const labelSpan = row.querySelector(
-      ".zinspire-ref-entry__label",
-    ) as HTMLElement;
-    if (labelSpan) {
-      if (entry.label) {
-        labelSpan.textContent = `[${entry.label}] `;
-        labelSpan.style.display = "";
-      } else {
-        labelSpan.textContent = "";
-        labelSpan.style.display = "none";
-      }
-    }
-
-    // Update authors container
-    const authorsContainer = row.querySelector(
-      ".zinspire-ref-entry__authors",
-    ) as HTMLElement;
-    if (authorsContainer) {
-      // Clear and rebuild author links (variable count)
-      // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
-      authorsContainer.replaceChildren();
-      this.appendAuthorLinks(authorsContainer, entry, strings);
-    }
-
-    // Update title link
-    const titleLink = row.querySelector(
-      ".zinspire-ref-entry__title-link",
-    ) as HTMLAnchorElement;
-    if (titleLink) {
-      titleLink.textContent = entry.title + ";";
-      titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
-    }
-
-    // Update meta with clickable links (DOI/arXiv)
-    const meta = row.querySelector(".zinspire-ref-entry__meta") as HTMLElement;
-    if (meta) {
-      const hasMeta = entry.publicationInfo || entry.arxivDetails || entry.doi;
-      if (hasMeta) {
-        this.buildMetaContent(meta, entry);
-        meta.style.display = "";
-      } else {
-        // PERF-FIX-15: Use replaceChildren() instead of innerHTML
-        meta.replaceChildren();
-        meta.style.display = "none";
-      }
-    }
-
-    // Update stats button (show/hide and content)
-    const statsButton = row.querySelector(
-      ".zinspire-ref-entry__stats-button",
-    ) as HTMLButtonElement;
-    if (statsButton) {
-      const displayCitationCount = this.getCitationValue(entry);
-      const hasCitationCount =
-        displayCitationCount > 0 ||
-        typeof entry.citationCount === "number" ||
-        typeof entry.citationCountWithoutSelf === "number";
-      const isReferencesMode = this.viewMode === "references";
-      const canShowEntryCitedTab =
-        Boolean(entry.recid) && (hasCitationCount || !isReferencesMode);
-
-      if (canShowEntryCitedTab || hasCitationCount) {
-        const label = hasCitationCount
-          ? getString("references-panel-citation-count", {
-              args: { count: displayCitationCount },
-            })
-          : strings.citationUnknown;
-        statsButton.textContent = label;
-        statsButton.style.display = "";
-        // Make it clickable only if we can show entry cited tab
-        if (canShowEntryCitedTab) {
-          statsButton.style.cursor = "pointer";
-          statsButton.disabled = false;
-        } else {
-          statsButton.style.cursor = "default";
-          statsButton.disabled = true;
+  /**
+   * Get the callbacks for HoverPreviewController.
+   * Phase 0.4 Refactor: Provides action handlers for preview card interactions.
+   */
+  private getPreviewCallbacks(): PreviewActionCallbacks {
+    return {
+      onAdd: async (entry) => {
+        await this.handleAddAction(entry, this.body);
+        // handleAddAction already calls renderReferenceList internally
+        // Use targeted update for the row if still visible
+        const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
+        if (row && entry.localItemID) {
+          this.entryRenderer?.updateLocalState(row, true);
         }
-      } else {
-        statsButton.textContent = "";
-        statsButton.style.display = "none";
-      }
-    }
+      },
+      onLink: async (entry) => {
+        const wasRelated = entry.isRelated;
+        await this.handleLinkAction(entry, undefined, { skipRerender: true });
+        // Use targeted row update instead of full list re-render
+        const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
+        if (row) {
+          this.entryRenderer?.updateLinkState(row, entry.isRelated ?? false);
+        }
+      },
+      onUnlink: async (entry) => {
+        if (entry.localItemID) {
+          await this.unlinkReference(entry.localItemID);
+          entry.isRelated = false;
+          // Use targeted row update instead of full list re-render
+          const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
+          if (row) {
+            this.entryRenderer?.updateLinkState(row, false);
+          }
+        }
+      },
+      onOpenPdf: async (entry) => {
+        if (entry.localItemID) {
+          // Push current state to navigation history
+          this.rememberCurrentItemForNavigation();
+          InspireReferencePanelController.forwardStack = [];
+          await this.openPdfForLocalItem(entry.localItemID);
+          InspireReferencePanelController.syncBackButtonStates();
+        }
+      },
+      onSelectInLibrary: (entry) => {
+        if (entry.localItemID) {
+          // Push current state to navigation history
+          this.rememberCurrentItemForNavigation();
+          InspireReferencePanelController.forwardStack = [];
+          const pane = Zotero.getActiveZoteroPane();
+          pane?.selectItems([entry.localItemID]);
+          this.showToast(getString("references-panel-toast-selected"));
+          InspireReferencePanelController.syncBackButtonStates();
+        }
+      },
+      hasPdf: (entry) => {
+        if (!entry.localItemID) return false;
+        return this.getFirstPdfAttachmentID(entry.localItemID) !== null;
+      },
+      onCopyBibtex: async (entry) => {
+        if (entry.recid) {
+          const bibtex = await fetchBibTeX(entry.recid);
+          if (bibtex) {
+            await copyToClipboard(bibtex);
+            this.showToast(getString("references-panel-bibtex-copied"));
+          }
+        }
+      },
+      onCopyTexkey: async (entry) => {
+        if (entry.texkey) {
+          await copyToClipboard(entry.texkey);
+          this.showToast(getString("references-panel-texkey-copied"));
+        }
+      },
+      onAbstractContextMenu: (e, el, entry) => {
+        this.showAbstractContextMenu(e, el);
+      },
+      onShow: (_entry) => {
+        // Can be used for analytics or tracking
+      },
+      onHide: () => {
+        // Called when preview is hidden
+      },
+    };
+  }
 
-    // FTR-FOCUSED-SELECTION: Restore focus state if this entry is focused
-    this.applyFocusedEntryStyle(row, this.focusedEntryID === entry.id);
+  /**
+   * Get callbacks for author preview controller (Phase 0.5 refactor).
+   */
+  private getAuthorPreviewCallbacks(): AuthorPreviewCallbacks {
+    return {
+      onViewPapers: async (authorInfo: AuthorSearchInfo) => {
+        this.authorPreview?.hide();
+        await this.showAuthorPapersTab(authorInfo);
+      },
+      onShow: (_authorInfo: AuthorSearchInfo) => {
+        // Can be used for analytics or tracking
+      },
+      onHide: () => {
+        // Called when author preview is hidden
+      },
+    };
   }
 
   /**
    * Create a reference row element for an entry (PERF-13).
-   * Uses pooled row templates and only updates content, not structure.
+   * Phase 0.1 Refactor: Delegates to EntryListRenderer.
    */
   private createReferenceRow(entry: InspireReferenceEntry) {
-    // Get row from pool (with pre-created structure) or create new template
-    const row = this.getRowFromPool();
-    // Update row content with entry data
-    this.updateRowContent(row, entry);
-    // Cache the row for later updates (e.g., citation count, status)
+    const row = this.entryRenderer!.createRow(entry, this.getRenderContext());
+    // Also cache in controller's rowCache for compatibility with existing code
     this.rowCache.set(entry.id, row);
     return row;
   }
@@ -12685,9 +12631,190 @@ class InspireReferencePanelController {
     this.showToast(getString("references-panel-copy-failed"));
   }
 
+  private getCleanKatexText(element: HTMLElement, doc: Document): string {
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll(".katex-mathml").forEach((node) => node.remove());
+    return (clone.textContent || "").trim();
+  }
+
+  /**
+   * Show context menu for abstract with copy options.
+   * Provides "Copy" (rendered text) and "Copy as LaTeX" (original source) options.
+   */
+  private showAbstractContextMenu(event: MouseEvent, container: HTMLElement): void {
+    const mainWindow = Zotero.getMainWindow();
+    const doc = mainWindow?.document || container.ownerDocument;
+
+    // Get selection from container's document context (important for tooltips/popups)
+    const containerWindow = container.ownerDocument.defaultView;
+    const selection =
+      containerWindow?.getSelection?.() || mainWindow?.getSelection?.();
+
+    // Get clean selected text by removing KaTeX's hidden MathML content
+    // KaTeX duplicates content (MathML + visible HTML), so selection.toString() has duplicates
+    let selectedText = "";
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const fragment = range.cloneContents();
+      // Create a temporary container to clean the selection
+      const tempDiv = doc.createElement("div");
+      tempDiv.appendChild(fragment);
+      selectedText = this.getCleanKatexText(tempDiv, doc);
+    }
+
+    const latexSource = container.dataset.latexSource || container.textContent || "";
+    const hasLatex = containsLatexMath(latexSource);
+    const renderMode = getRenderMode();
+
+    // Remove existing popup if any
+    const popupId = "zinspire-abstract-context-popup";
+    const existingPopup = doc.getElementById(popupId);
+    if (existingPopup) {
+      existingPopup.remove();
+    }
+
+    // Create XUL menupopup
+    const popup = (doc as any).createXULElement("menupopup") as XUL.MenuPopup;
+    popup.id = popupId;
+
+    // Copy option (copies selected or all rendered text)
+    const copyItem = (doc as any).createXULElement("menuitem");
+    const copyLabel = selectedText
+      ? getString("references-panel-abstract-copy-selection")
+      : getString("references-panel-abstract-copy");
+    copyItem.setAttribute("label", copyLabel);
+    copyItem.addEventListener("command", async () => {
+      const textToCopy = selectedText || container.textContent || "";
+      await copyToClipboard(textToCopy);
+      this.showToast(getString("references-panel-abstract-copied"));
+    });
+    popup.appendChild(copyItem);
+
+    // Copy as LaTeX option (only shown if LaTeX is present and in KaTeX mode)
+    if (hasLatex && renderMode === "katex") {
+      const copyLatexItem = (doc as any).createXULElement("menuitem");
+      copyLatexItem.setAttribute(
+        "label",
+        getString("references-panel-abstract-copy-latex"),
+      );
+      copyLatexItem.addEventListener("command", async () => {
+        let textToCopy = latexSource; // Default to full source
+
+        if (selectedText) {
+          // Try exact match first (works for non-math selections)
+          if (latexSource.includes(selectedText)) {
+            textToCopy = selectedText;
+          } else {
+            // Selection likely contains rendered math - try to locate region using anchors
+            // KaTeX includes both visible HTML and hidden MathML in the DOM.
+            // textContent includes BOTH, but selection only captures visible text.
+            // We need to get only the visible text content.
+            const fullText = this.getCleanKatexText(container, doc);
+
+            const selectionStart = fullText.indexOf(selectedText);
+
+            if (selectionStart !== -1) {
+              const beforeSel = fullText.substring(0, selectionStart);
+              const afterSel = fullText.substring(
+                selectionStart + selectedText.length,
+              );
+
+              // Find anchor text before selection that exists in source
+              let anchorBefore = "";
+              const maxAnchor =
+                InspireReferencePanelController.ANCHOR_SEARCH_MAX_LENGTH;
+              for (
+                let len = Math.min(maxAnchor, beforeSel.length);
+                len > 0;
+                len--
+              ) {
+                const candidate = beforeSel.slice(-len);
+                if (latexSource.includes(candidate)) {
+                  anchorBefore = candidate;
+                  break;
+                }
+              }
+
+              // Find anchor text after selection that exists in source
+              let anchorAfter = "";
+              for (
+                let len = Math.min(maxAnchor, afterSel.length);
+                len > 0;
+                len--
+              ) {
+                const candidate = afterSel.slice(0, len);
+                const searchStart = anchorBefore
+                  ? latexSource.indexOf(anchorBefore) + anchorBefore.length
+                  : 0;
+                if (latexSource.indexOf(candidate, searchStart) !== -1) {
+                  anchorAfter = candidate;
+                  break;
+                }
+              }
+
+              // Extract text between anchors in source
+              const startAnchorPos = anchorBefore
+                ? latexSource.indexOf(anchorBefore)
+                : -1;
+              const sourceStart =
+                startAnchorPos !== -1
+                  ? startAnchorPos + anchorBefore.length
+                  : 0;
+
+              const endAnchorPos = anchorAfter
+                ? latexSource.indexOf(anchorAfter, sourceStart)
+                : -1;
+              const sourceEnd =
+                endAnchorPos !== -1 ? endAnchorPos : latexSource.length;
+
+              if (sourceStart < sourceEnd) {
+                textToCopy = latexSource.substring(sourceStart, sourceEnd);
+              } else if (!anchorBefore && !anchorAfter) {
+                Zotero.debug(
+                  `[${config.addonName}] Abstract anchor matching failed, copying full source`,
+                );
+              }
+            }
+          }
+        }
+
+        await copyToClipboard(textToCopy);
+        this.showToast(getString("references-panel-abstract-latex-copied"));
+      });
+      popup.appendChild(copyLatexItem);
+    }
+
+    // Add popup to document and open at mouse position
+    // Set flag to prevent preview/tooltip from hiding while menu is open
+    this.abstractContextMenuOpen = true;
+    // Phase 0.4 Refactor: Use HoverPreviewController
+    this.hoverPreview?.setContextMenuOpen(true);
+    if (this.abstractHideTimeout) {
+      clearTimeout(this.abstractHideTimeout);
+      this.abstractHideTimeout = undefined;
+    }
+
+    doc.documentElement.appendChild(popup);
+    popup.addEventListener(
+      "popuphidden",
+      () => {
+        popup.remove();
+        // Clear flag and schedule hide after menu closes
+        this.abstractContextMenuOpen = false;
+        // Phase 0.4 Refactor: HoverPreviewController schedules hide when context menu closes
+        this.hoverPreview?.setContextMenuOpen(false);
+        // Legacy: also schedule old tooltip hide
+        this.scheduleTooltipHide();
+      },
+      { once: true },
+    );
+    popup.openPopupAtScreen(event.screenX, event.screenY, true);
+  }
+
   private async handleLinkAction(
     entry: InspireReferenceEntry,
     anchor?: HTMLElement,
+    options?: { skipRerender?: boolean },
   ) {
     if (!this.currentItemID) {
       return;
@@ -12701,12 +12828,16 @@ class InspireReferencePanelController {
     if (entry.isRelated) {
       await this.unlinkReference(entry.localItemID);
       entry.isRelated = false;
-      this.renderReferenceList();
+      if (!options?.skipRerender) {
+        this.renderReferenceList();
+      }
       return;
     }
     await this.linkExistingReference(entry.localItemID);
     entry.isRelated = true;
-    this.renderReferenceList();
+    if (!options?.skipRerender) {
+      this.renderReferenceList();
+    }
   }
 
   private async handleAddAndLinkAction(
@@ -12922,10 +13053,7 @@ class InspireReferencePanelController {
   }
 
   private startAuthorProfileFetch(authorInfo: AuthorSearchInfo) {
-    const supportsAbort =
-      typeof AbortController !== "undefined" &&
-      typeof AbortController === "function";
-    this.authorProfileAbort = supportsAbort ? new AbortController() : undefined;
+    this.authorProfileAbort = createAbortController();
     const signal = this.authorProfileAbort?.signal;
     const key = this.getAuthorProfileKey(authorInfo);
     fetchAuthorProfile(authorInfo, signal)
@@ -13250,7 +13378,7 @@ class InspireReferencePanelController {
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
-    this.hideAuthorPreviewCard();
+    this.authorPreview?.hide();
     // Generate cache key: priority recid > BAI > name
     let authorQuery: string;
     if (authorInfo.recid) {
@@ -13502,6 +13630,13 @@ class InspireReferencePanelController {
     // FTR-KEYBOARD-NAV-FULL: Make list focusable for keyboard navigation
     newListEl.tabIndex = -1;
     newListEl.style.outline = "none";
+    // FIX-PANEL-WIDTH-OVERFLOW: Copy all width constraint styles from constructor
+    newListEl.style.width = "100%";
+    newListEl.style.maxWidth = "100%";
+    newListEl.style.minWidth = "0";
+    newListEl.style.boxSizing = "border-box";
+    newListEl.style.overflowX = "hidden";
+    newListEl.style.overflowY = "auto";
     // Hide old container immediately (no reflow)
     oldListEl.style.display = "none";
     // Insert new container after old one
@@ -13689,7 +13824,7 @@ class InspireReferencePanelController {
 
   private scheduleAbstractTooltip(
     entry: InspireReferenceEntry,
-    event: MouseEvent,
+    anchorEl: HTMLElement,
   ) {
     // Clear any existing timeout
     if (this.abstractHoverTimeout) {
@@ -13701,13 +13836,13 @@ class InspireReferencePanelController {
 
     // Delay before showing tooltip
     this.abstractHoverTimeout = setTimeout(() => {
-      this.showAbstractTooltip(entry, event);
+      this.showAbstractTooltip(entry, anchorEl);
     }, this.tooltipShowDelay);
   }
 
   private async showAbstractTooltip(
     entry: InspireReferenceEntry,
-    event: MouseEvent,
+    anchorEl: HTMLElement,
   ) {
     // Use the main Zotero window document for reliable tooltip placement
     const mainWindow = Zotero.getMainWindow();
@@ -13734,13 +13869,38 @@ class InspireReferencePanelController {
       this.abstractTooltip.addEventListener("mouseleave", () => {
         this.scheduleTooltipHide();
       });
+      // Handle Ctrl+C / Cmd+C for copying selected text
+      // Use document-level listener since XUL elements may not receive keyboard events reliably
+      const handleCopyShortcut = async (e: KeyboardEvent) => {
+        // Only handle if tooltip is visible and has selected text
+        if (!this.abstractTooltip || this.abstractTooltip.style.display === "none") {
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+          const selection = mainWindow?.getSelection?.();
+          const selectedText = selection?.toString();
+          if (selectedText) {
+            e.preventDefault();
+            e.stopPropagation();
+            await copyToClipboard(selectedText);
+          }
+        }
+      };
+      doc.addEventListener("keydown", handleCopyShortcut, true);
+
+      // Right-click context menu for copy options (Copy / Copy as LaTeX)
+      this.abstractTooltip.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showAbstractContextMenu(e, this.abstractTooltip!);
+      });
     }
 
     // Get cached strings for performance
     const s = getCachedStrings();
 
     // Position the tooltip
-    this.positionTooltip(event);
+    this.positionTooltip(anchorEl);
     this.abstractTooltip.style.display = "block";
 
     // Check if we already have the abstract cached
@@ -13749,7 +13909,7 @@ class InspireReferencePanelController {
         entry.abstract && entry.abstract.trim().length
           ? entry.abstract
           : s.noAbstract;
-      this.renderAbstractContent(cached);
+      await this.renderAbstractContent(cached);
       return;
     }
 
@@ -13765,7 +13925,7 @@ class InspireReferencePanelController {
         if (localAbstract?.trim()) {
           entry.abstract = localAbstract.trim();
           if (this.abstractTooltip) {
-            this.renderAbstractContent(entry.abstract);
+            await this.renderAbstractContent(entry.abstract);
           }
           return;
         }
@@ -13775,11 +13935,8 @@ class InspireReferencePanelController {
     // Fetch from INSPIRE API if not in library or no abstract locally
     if (entry.recid) {
       entry.abstractLoading = true;
-      const supportsAbort =
-        typeof AbortController !== "undefined" &&
-        typeof AbortController === "function";
-      const controller = supportsAbort ? new AbortController() : null;
-      this.abstractAbort = controller ?? undefined;
+      const controller = createAbortController();
+      this.abstractAbort = controller;
       try {
         const abstract = await fetchInspireAbstract(
           entry.recid,
@@ -13791,7 +13948,7 @@ class InspireReferencePanelController {
           this.abstractTooltip &&
           this.abstractTooltip.style.display !== "none"
         ) {
-          this.renderAbstractContent(entry.abstract || s.noAbstract);
+          await this.renderAbstractContent(entry.abstract || s.noAbstract);
         }
       } catch (_err) {
         entry.abstractLoading = false;
@@ -13811,22 +13968,14 @@ class InspireReferencePanelController {
   }
 
   /**
-   * Render abstract content with LaTeX math converted to Unicode
-   * Uses ^ and _ for superscripts/subscripts instead of HTML tags
+   * Render abstract content with LaTeX handling (Unicode fallback)
+   * Stores original text in data attribute for "Copy as LaTeX" feature
    */
-  private renderAbstractContent(abstract: string) {
+  private async renderAbstractContent(abstract: string) {
     if (!this.abstractTooltip) return;
-
-    // Process LaTeX math in the abstract
-    let processed = cleanMathTitle(abstract);
-
-    // Convert HTML sup/sub tags to ^ and _ notation
-    processed = processed
-      .replace(/<sup>([^<]+)<\/sup>/g, "^$1")
-      .replace(/<sub>([^<]+)<\/sub>/g, "_$1");
-
-    // Use textContent for safety (no HTML injection)
-    this.abstractTooltip.textContent = processed;
+    // Store original text for "Copy as LaTeX" context menu option
+    this.abstractTooltip.dataset.latexSource = abstract;
+    await renderMathContent(abstract, this.abstractTooltip);
   }
 
   /**
@@ -13915,6 +14064,10 @@ class InspireReferencePanelController {
   }
 
   private scheduleTooltipHide() {
+    // Don't schedule hide if context menu is open
+    if (this.abstractContextMenuOpen) {
+      return;
+    }
     // Clear any existing hide timeout
     this.cancelTooltipHide();
     // Schedule hide after a short delay (allows user to move mouse to tooltip)
@@ -14020,303 +14173,6 @@ class InspireReferencePanelController {
     }, 1500);
   }
 
-  private getAuthorPreviewCard(): HTMLDivElement {
-    if (!this.authorPreviewCard) {
-      const mainWindow = Zotero.getMainWindow();
-      const doc = mainWindow?.document || this.body.ownerDocument;
-      const card = doc.createElement("div");
-      card.classList.add("zinspire-author-preview-card");
-      applyAuthorPreviewCardStyle(card);
-      card.style.display = "none";
-      card.addEventListener("mouseenter", () => {
-        this.cancelAuthorPreviewHide();
-      });
-      card.addEventListener("mouseleave", () => {
-        this.scheduleAuthorPreviewHide();
-      });
-      const container =
-        doc.getElementById("browser") || doc.documentElement || doc.body;
-      container?.appendChild(card);
-      this.authorPreviewCard = card;
-    }
-    return this.authorPreviewCard;
-  }
-
-  private scheduleAuthorPreview(
-    entry: InspireReferenceEntry,
-    authorIndex: number,
-    anchor: HTMLElement,
-  ) {
-    this.cancelAuthorPreviewShow();
-    this.cancelAuthorPreviewHide();
-    this.authorPreviewAnchor = anchor;
-    this.authorPreviewShowTimeout = setTimeout(() => {
-      this.showAuthorPreview(entry, authorIndex, anchor);
-    }, this.authorPreviewShowDelay);
-  }
-
-  private cancelAuthorPreviewShow() {
-    if (this.authorPreviewShowTimeout) {
-      clearTimeout(this.authorPreviewShowTimeout);
-      this.authorPreviewShowTimeout = undefined;
-    }
-  }
-
-  private scheduleAuthorPreviewHide() {
-    this.cancelAuthorPreviewHide();
-    this.authorPreviewHideTimeout = setTimeout(() => {
-      this.hideAuthorPreviewCard();
-    }, this.authorPreviewHideDelay);
-  }
-
-  private cancelAuthorPreviewHide() {
-    if (this.authorPreviewHideTimeout) {
-      clearTimeout(this.authorPreviewHideTimeout);
-      this.authorPreviewHideTimeout = undefined;
-    }
-  }
-
-  private buildAuthorInfoFromEntry(
-    entry: InspireReferenceEntry,
-    authorIndex: number,
-  ): AuthorSearchInfo | null {
-    const fullName = entry.authors[authorIndex];
-    if (!fullName) {
-      return null;
-    }
-    const searchInfo = entry.authorSearchInfos?.[authorIndex];
-    return {
-      fullName,
-      bai: searchInfo?.bai,
-      recid: searchInfo?.recid,
-    };
-  }
-
-  private showAuthorPreview(
-    entry: InspireReferenceEntry,
-    authorIndex: number,
-    anchor: HTMLElement,
-  ) {
-    const authorInfo = this.buildAuthorInfoFromEntry(entry, authorIndex);
-    if (!authorInfo) {
-      return;
-    }
-    const key = this.getAuthorProfileKey(authorInfo);
-    const card = this.getAuthorPreviewCard();
-    this.authorPreviewCurrentKey = key;
-    this.renderAuthorPreviewCard(card, authorInfo, undefined);
-    this.positionAuthorPreviewCard(card, anchor);
-
-    this.authorPreviewAbort?.abort();
-    const supportsAbort =
-      typeof AbortController !== "undefined" &&
-      typeof AbortController === "function";
-    this.authorPreviewAbort = supportsAbort ? new AbortController() : undefined;
-    const signal = this.authorPreviewAbort?.signal;
-    fetchAuthorProfile(authorInfo, signal)
-      .then((profile) => {
-        if (this.authorPreviewCurrentKey !== key) {
-          return;
-        }
-        this.renderAuthorPreviewCard(card, authorInfo, profile);
-        this.positionAuthorPreviewCard(card, anchor);
-      })
-      .catch((err) => {
-        if ((err as Error).name === "AbortError") {
-          return;
-        }
-        if (this.authorPreviewCurrentKey === key) {
-          this.renderAuthorPreviewCard(card, authorInfo, null);
-        }
-      });
-  }
-
-  private renderAuthorPreviewCard(
-    card: HTMLDivElement,
-    authorInfo: AuthorSearchInfo,
-    profile: InspireAuthorProfile | null | undefined,
-  ) {
-    const doc = card.ownerDocument;
-    card.replaceChildren();
-    const copiedText = getString("references-panel-author-copied");
-    const dark = isDarkMode();
-
-    // Title with name and BAI in parentheses (no copy interaction)
-    const title = doc.createElement("div");
-    title.style.fontWeight = "600";
-    title.style.marginBottom = "4px";
-    const displayName = profile?.name || authorInfo.fullName;
-    const bai = profile?.bai || authorInfo.bai;
-    if (bai) {
-      title.textContent = `${displayName} (${bai})`;
-    } else {
-      title.textContent = displayName;
-    }
-    card.appendChild(title);
-
-    if (profile === null) {
-      const empty = doc.createElement("div");
-      empty.style.color = "var(--fill-secondary, #64748b)";
-      empty.textContent = getString("references-panel-author-profile-unavailable");
-      card.appendChild(empty);
-    } else if (!profile) {
-      const loading = doc.createElement("div");
-      loading.style.color = "var(--fill-secondary, #64748b)";
-      loading.textContent = getString("references-panel-author-profile-loading");
-      card.appendChild(loading);
-    }
-
-    if (profile?.currentPosition?.institution) {
-      const inst = doc.createElement("div");
-      inst.style.color = "var(--fill-secondary, #64748b)";
-      inst.textContent = profile.currentPosition.institution;
-      card.appendChild(inst);
-    }
-
-    if (profile?.arxivCategories?.length) {
-      const cats = doc.createElement("div");
-      cats.style.color = "var(--fill-secondary, #64748b)";
-      cats.textContent = `🔬 ${profile.arxivCategories.join(", ")}`;
-      card.appendChild(cats);
-    }
-
-    if (profile?.advisors?.length) {
-      const advisorNames = profile.advisors
-        .map((advisor) => advisor.name)
-        .filter(Boolean)
-        .slice(0, 2)
-        .join(", ");
-      if (advisorNames) {
-        const advisors = doc.createElement("div");
-        advisors.style.color = "var(--fill-secondary, #64748b)";
-        advisors.textContent = `${getString("references-panel-author-advisors")}: ${advisorNames}`;
-        card.appendChild(advisors);
-      }
-    }
-
-    const actions = doc.createElement("div");
-    actions.style.display = "flex";
-    actions.style.flexWrap = "wrap";
-    actions.style.gap = "8px";
-    actions.style.marginTop = "6px";
-
-    // Email link - first in the row, with right-click copy
-    if (profile?.emails?.length) {
-      const email = profile.emails[0];
-      const emailLink = doc.createElement("a");
-      applyMetaLinkStyle(emailLink, dark);
-      emailLink.href = `mailto:${encodeURIComponent(email)}`;
-      emailLink.textContent = `📧 Email`;
-      emailLink.title = email; // Show full email on hover
-      emailLink.addEventListener("click", (event) => {
-        event.preventDefault();
-        Zotero.launchURL(emailLink.href);
-      });
-      attachCopyableValue(emailLink, email, copiedText);
-      actions.appendChild(emailLink);
-    }
-
-    // ORCID link with right-click copy
-    if (profile?.orcid) {
-      const orcid = profile.orcid;
-      const orcidLink = doc.createElement("a");
-      applyMetaLinkStyle(orcidLink, dark);
-      orcidLink.href = `https://orcid.org/${encodeURIComponent(orcid)}`;
-      orcidLink.textContent = "ORCID";
-      orcidLink.addEventListener("click", (event) => {
-        event.preventDefault();
-        Zotero.launchURL(orcidLink.href);
-      });
-      attachCopyableValue(orcidLink, orcid, copiedText);
-      actions.appendChild(orcidLink);
-    }
-
-    // INSPIRE link (no right-click copy)
-    if (profile?.recid) {
-      const inspireLink = doc.createElement("a");
-      applyMetaLinkStyle(inspireLink, dark);
-      inspireLink.href = `https://inspirehep.net/authors/${encodeURIComponent(profile.recid)}`;
-      inspireLink.textContent = "INSPIRE";
-      inspireLink.title = getString("references-panel-author-inspire-tooltip");
-      inspireLink.addEventListener("click", (event) => {
-        event.preventDefault();
-        Zotero.launchURL(inspireLink.href);
-      });
-      actions.appendChild(inspireLink);
-    }
-
-    // Homepage link
-    if (profile?.homepageUrl) {
-      const homepageLink = doc.createElement("a");
-      applyMetaLinkStyle(homepageLink, dark);
-      homepageLink.href = profile.homepageUrl;
-      homepageLink.title = getString("references-panel-author-homepage-tooltip");
-      homepageLink.textContent = "Home";
-      homepageLink.addEventListener("click", (event) => {
-        event.preventDefault();
-        Zotero.launchURL(homepageLink.href);
-      });
-      actions.appendChild(homepageLink);
-    }
-
-    const viewLink = doc.createElement("a");
-    applyMetaLinkStyle(viewLink, dark);
-    viewLink.href = "#";
-    viewLink.textContent = getString("references-panel-author-preview-view-papers");
-    viewLink.addEventListener("click", (event) => {
-      event.preventDefault();
-      this.hideAuthorPreviewCard();
-      this.showAuthorPapersTab(authorInfo).catch(() => void 0);
-    });
-    actions.appendChild(viewLink);
-
-    if (actions.children.length) {
-      card.appendChild(actions);
-    }
-
-    card.style.display = "block";
-  }
-
-  private positionAuthorPreviewCard(card: HTMLDivElement, anchor: HTMLElement) {
-    const win = this.body.ownerDocument.defaultView || Zotero.getMainWindow();
-    const rect = anchor.getBoundingClientRect();
-    const spacing = 8;
-    const cardWidth = card.offsetWidth || 220;
-    const cardHeight = card.offsetHeight || 120;
-
-    let left = rect.right + spacing;
-    if (left + cardWidth > win.innerWidth - spacing) {
-      left = rect.left - cardWidth - spacing;
-    }
-    if (left < spacing) {
-      left = spacing;
-    }
-
-    let top = rect.top;
-    if (top + cardHeight > win.innerHeight - spacing) {
-      top = rect.bottom - cardHeight;
-    }
-    if (top < spacing) {
-      top = spacing;
-    }
-
-    card.style.left = `${Math.round(left)}px`;
-    card.style.top = `${Math.round(top)}px`;
-  }
-
-  private hideAuthorPreviewCard() {
-    this.cancelAuthorPreviewShow();
-    this.cancelAuthorPreviewHide();
-    this.authorPreviewAbort?.abort();
-    this.authorPreviewAbort = undefined;
-    this.authorPreviewCurrentKey = undefined;
-    this.authorPreviewAnchor = undefined;
-    if (this.authorPreviewCard) {
-      this.authorPreviewCard.style.display = "none";
-      this.authorPreviewCard.replaceChildren();
-    }
-  }
-
   private doHideTooltip() {
     // Clear show timeout
     if (this.abstractHoverTimeout) {
@@ -14342,7 +14198,7 @@ class InspireReferencePanelController {
     }
   }
 
-  private updateTooltipPosition(event: MouseEvent) {
+  private updateTooltipPosition(anchorEl: HTMLElement) {
     // Throttle tooltip position updates using requestAnimationFrame
     // This prevents excessive DOM updates during fast mouse movement
     if (this.tooltipRAF) {
@@ -14358,1041 +14214,21 @@ class InspireReferencePanelController {
         this.abstractTooltip &&
         this.abstractTooltip.style.display !== "none"
       ) {
-        this.positionTooltip(event);
+        this.positionTooltip(anchorEl);
       }
     });
   }
 
-  private positionTooltip(event: MouseEvent) {
+  private positionTooltip(anchorEl: HTMLElement) {
     if (!this.abstractTooltip) return;
-
-    // Use screen coordinates for more reliable positioning across different contexts
-    const mainWindow = Zotero.getMainWindow();
-    const doc = mainWindow?.document || this.body.ownerDocument;
-    const viewportWidth = doc.documentElement?.clientWidth || 800;
-    const viewportHeight = doc.documentElement?.clientHeight || 600;
-
-    // Use clientX/clientY which are relative to the viewport
-    let left = event.clientX + 15;
-    let top = event.clientY + 15;
-
-    // Get tooltip dimensions (estimate if not yet rendered)
-    const tooltipWidth = this.abstractTooltip.offsetWidth || 400;
-    const tooltipHeight = this.abstractTooltip.offsetHeight || 150;
-
-    // Adjust if tooltip would go off screen
-    if (left + tooltipWidth > viewportWidth - 10) {
-      left = Math.max(10, event.clientX - tooltipWidth - 15);
-    }
-    if (top + tooltipHeight > viewportHeight - 10) {
-      top = Math.max(10, event.clientY - tooltipHeight - 15);
-    }
-
-    // Ensure minimum position
-    left = Math.max(10, left);
-    top = Math.max(10, top);
-
-    this.abstractTooltip.style.left = `${left}px`;
-    this.abstractTooltip.style.top = `${top}px`;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Hover Preview Card Methods (FTR-HOVER-PREVIEW)
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Create and initialize the preview card element (FTR-HOVER-PREVIEW)
-   */
-  private createPreviewCard(): HTMLDivElement {
-    const mainWindow = Zotero.getMainWindow();
-    const doc = mainWindow?.document || this.body.ownerDocument;
-
-    const card = doc.createElement("div");
-    card.classList.add("zinspire-preview-card");
-    applyPreviewCardStyle(card);
-
-    // Find suitable container
-    const container =
-      doc.getElementById("browser") || doc.documentElement || doc.body;
-    if (container) {
-      container.appendChild(card);
-    }
-
-    // Keep card visible when mouse enters it
-    card.addEventListener("mouseenter", () => {
-      this.cancelPreviewHide();
+    positionFloatingElement(this.abstractTooltip, anchorEl, {
+      spacing: 12,
+      edgeMargin: 10,
+      fallbackWidth: 400,
+      fallbackHeight: 150,
     });
-
-    // Schedule hide when mouse leaves card
-    card.addEventListener("mouseleave", () => {
-      this.schedulePreviewHide();
-    });
-
-    return card;
   }
 
-  /**
-   * Get or create the preview card element
-   */
-  private getPreviewCard(): HTMLDivElement {
-    if (!this.previewCard) {
-      this.previewCard = this.createPreviewCard();
-    }
-    return this.previewCard;
-  }
-
-  /**
-   * Schedule preview card to show after delay
-   */
-  private schedulePreviewShow(entry: InspireReferenceEntry, row: HTMLElement) {
-    this.cancelPreviewShow();
-    this.cancelPreviewHide();
-
-    this.previewShowTimeout = setTimeout(() => {
-      this.showPreviewCard(entry, row);
-    }, this.previewShowDelay);
-  }
-
-  /**
-   * Cancel scheduled preview show
-   */
-  private cancelPreviewShow() {
-    if (this.previewShowTimeout) {
-      clearTimeout(this.previewShowTimeout);
-      this.previewShowTimeout = undefined;
-    }
-  }
-
-  /**
-   * Schedule preview card to hide after delay
-   */
-  private schedulePreviewHide() {
-    this.cancelPreviewHide();
-    this.previewHideTimeout = setTimeout(() => {
-      this.hidePreviewCard();
-    }, this.previewHideDelay);
-  }
-
-  /**
-   * Cancel scheduled preview hide
-   */
-  private cancelPreviewHide() {
-    if (this.previewHideTimeout) {
-      clearTimeout(this.previewHideTimeout);
-      this.previewHideTimeout = undefined;
-    }
-  }
-
-  /**
-   * Immediately hide the preview card
-   */
-  private hidePreviewCard() {
-    this.cancelPreviewShow();
-    this.cancelPreviewHide();
-
-    // Cancel any pending abstract fetch
-    this.previewAbortController?.abort();
-    this.previewAbortController = undefined;
-
-    this.previewCurrentEntryId = undefined;
-    // FTR-HOVER-PREVIEW-MULTI: Clear pagination state
-    this.previewEntries = [];
-    this.previewCurrentIndex = 0;
-    this.previewLabel = undefined;
-    this.previewButtonRect = undefined;
-
-    if (this.previewCard) {
-      this.previewCard.style.display = "none";
-      // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
-      this.previewCard.replaceChildren();
-    }
-  }
-
-  /**
-   * Show the preview card with entry details (FTR-HOVER-PREVIEW)
-   */
-  private showPreviewCard(entry: InspireReferenceEntry, row: HTMLElement) {
-    // Skip if already showing this entry
-    if (this.previewCurrentEntryId === entry.id) {
-      return;
-    }
-
-    // Hide any existing abstract tooltip to avoid visual conflict
-    this.hideAbstractTooltipImmediate();
-
-    this.previewCurrentEntryId = entry.id;
-    const card = this.getPreviewCard();
-    const doc = card.ownerDocument;
-
-    // Clear previous content
-    // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
-    card.replaceChildren();
-
-    // Build card content
-    this.buildPreviewCardContent(card, entry, doc);
-
-    // Position the card relative to the row
-    this.positionPreviewCard(card, row);
-
-    // Show the card
-    card.style.display = "block";
-
-    // Fetch abstract if not already cached
-    this.fetchPreviewAbstract(entry, card);
-  }
-
-  /**
-   * Build the preview card content (FTR-HOVER-PREVIEW)
-   */
-  private buildPreviewCardContent(
-    card: HTMLDivElement,
-    entry: InspireReferenceEntry,
-    doc: Document,
-  ) {
-    const s = getCachedStrings();
-    const dark = isDarkMode();
-
-    // Title
-    const titleEl = doc.createElement("div");
-    titleEl.classList.add("zinspire-preview-card__title");
-    applyPreviewCardTitleStyle(titleEl);
-    // Process LaTeX in title
-    const cleanedTitle = cleanMathTitle(entry.title || "");
-    // Use innerHTML to render <sup>/<sub> tags from cleanMathTitle
-    titleEl.innerHTML = cleanedTitle || s.noTitle;
-    card.appendChild(titleEl);
-
-    // Authors - use formatAuthors() which respects max_authors setting
-    // This handles large collaborations (>50 authors) properly
-    if (entry.authors?.length) {
-      const authorsEl = doc.createElement("div");
-      authorsEl.classList.add("zinspire-preview-card__authors");
-      applyPreviewCardSectionStyle(authorsEl);
-      // formatAuthors already respects getPref("max_authors") and LARGE_COLLABORATION_THRESHOLD
-      authorsEl.textContent = formatAuthors(entry.authors, entry.totalAuthors);
-      card.appendChild(authorsEl);
-    }
-
-    // Publication info
-    const pubInfo = formatPublicationInfo(entry.publicationInfo, entry.year);
-    if (pubInfo) {
-      const pubEl = doc.createElement("div");
-      pubEl.classList.add("zinspire-preview-card__publication");
-      applyPreviewCardSectionStyle(pubEl);
-      pubEl.textContent = pubInfo;
-      card.appendChild(pubEl);
-    }
-
-    // Identifiers row (arXiv, DOI)
-    const arxivDetails = formatArxivDetails(entry.arxivDetails);
-    const hasArxiv = Boolean(arxivDetails?.id);
-    const hasDoi = Boolean(entry.doi);
-
-    if (hasArxiv || hasDoi) {
-      const idsEl = doc.createElement("div");
-      idsEl.classList.add("zinspire-preview-card__identifiers");
-      applyPreviewCardIdentifiersStyle(idsEl);
-
-      // arXiv link
-      if (hasArxiv && arxivDetails?.id) {
-        const arxivLink = doc.createElement("a");
-        arxivLink.href = `${ARXIV_ABS_URL}/${arxivDetails.id}`;
-        arxivLink.textContent = `arXiv:${arxivDetails.id}`;
-        applyMetaLinkStyle(arxivLink, dark);
-        arxivLink.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          Zotero.launchURL(arxivLink.href);
-        });
-        idsEl.appendChild(arxivLink);
-      }
-
-      // DOI link
-      if (hasDoi) {
-        if (hasArxiv) {
-          const sep = doc.createElement("span");
-          sep.textContent = " • ";
-          sep.style.color = "var(--fill-tertiary, #a0aec0)";
-          idsEl.appendChild(sep);
-        }
-        const doiLink = doc.createElement("a");
-        doiLink.href = `${DOI_ORG_URL}/${entry.doi}`;
-        doiLink.textContent = `DOI:${entry.doi}`;
-        applyMetaLinkStyle(doiLink, dark);
-        doiLink.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          Zotero.launchURL(doiLink.href);
-        });
-        idsEl.appendChild(doiLink);
-      }
-
-      card.appendChild(idsEl);
-    }
-
-    // Citation count
-    const citationCount = entry.citationCount ?? entry.citationCountWithoutSelf;
-    if (typeof citationCount === "number") {
-      const citesEl = doc.createElement("div");
-      citesEl.classList.add("zinspire-preview-card__citations");
-      applyPreviewCardSectionStyle(citesEl);
-      citesEl.textContent = getString("references-panel-citation-count", {
-        args: { count: citationCount },
-      });
-      card.appendChild(citesEl);
-    }
-
-    // Abstract placeholder (will be filled by fetchPreviewAbstract)
-    const abstractEl = doc.createElement("div");
-    abstractEl.classList.add("zinspire-preview-card__abstract");
-    applyPreviewCardAbstractStyle(abstractEl);
-    // FIX: Use same loading text as References panel abstract tooltip for consistency
-    abstractEl.textContent = getString("references-panel-loading-abstract");
-    card.appendChild(abstractEl);
-
-    // Action row (local status + add/link/unlink buttons)
-    this.buildPreviewCardActionRow(card, entry, doc);
-  }
-
-  /**
-   * FTR-HOVER-PREVIEW: Build the action row for preview card.
-   * Shows local status indicator and action buttons (Add/Link/Unlink).
-   * Layout: [Buttons] --- [Status Indicator] (buttons closer to mouse for quick access)
-   */
-  private buildPreviewCardActionRow(
-    card: HTMLDivElement,
-    entry: InspireReferenceEntry,
-    doc: Document,
-  ) {
-    const s = getCachedStrings();
-    const isLocal = Boolean(entry.localItemID);
-
-    const actionRow = doc.createElement("div");
-    actionRow.classList.add("zinspire-preview-card__actions");
-    Object.assign(actionRow.style, {
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
-      marginTop: "8px",
-      paddingTop: "8px",
-      borderTop: "1px solid var(--fill-quinary, #e2e8f0)",
-    });
-
-    // Action button(s) - placed first (left side) for quick mouse access
-    if (!isLocal) {
-      // Not in library - show Add button
-      if (entry.recid) {
-        const addButton = this.createPreviewActionButton(
-          doc,
-          getString("references-panel-button-add"),
-          "add",
-        );
-        addButton.addEventListener("click", async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          await this.handleAddAction(entry, card);
-          // Update the action row after adding
-          this.updatePreviewCardActionRow(card, entry);
-        });
-        actionRow.appendChild(addButton);
-      }
-    } else {
-      // In library - show Open PDF, Select, then Link/Unlink (most used first)
-
-      // Add "Open PDF" button if item has PDF attachment
-      const pdfAttachmentID = this.getFirstPdfAttachmentID(entry.localItemID!);
-      if (pdfAttachmentID) {
-        const pdfButton = this.createPreviewActionButton(
-          doc,
-          getString("references-panel-button-open-pdf"),
-          "pdf",
-        );
-        pdfButton.addEventListener("click", async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          // FTR-HOVER-PREVIEW-NAV: Push current state to navigation history
-          this.rememberCurrentItemForNavigation();
-          InspireReferencePanelController.forwardStack = [];
-          await this.openPdfForLocalItem(entry.localItemID!);
-          InspireReferencePanelController.syncBackButtonStates();
-        });
-        actionRow.appendChild(pdfButton);
-      }
-
-      // "Select in Library" button
-      const selectButton = this.createPreviewActionButton(
-        doc,
-        getString("references-panel-button-select"),
-        "select",
-      );
-      selectButton.addEventListener("click", async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (entry.localItemID) {
-          // FTR-HOVER-PREVIEW-NAV: Push current state to navigation history
-          // so user can use Back button to return to current view
-          this.rememberCurrentItemForNavigation();
-          // Clear forward stack since we're starting a new navigation path
-          InspireReferencePanelController.forwardStack = [];
-
-          const pane = Zotero.getActiveZoteroPane();
-          pane?.selectItems([entry.localItemID]);
-          this.showToast(getString("references-panel-toast-selected"));
-
-          // Update back button states
-          InspireReferencePanelController.syncBackButtonStates();
-        }
-      });
-      actionRow.appendChild(selectButton);
-
-      // Link/Unlink button
-      const isLinked = Boolean(entry.isRelated);
-      const linkButton = this.createPreviewActionButton(
-        doc,
-        isLinked
-          ? getString("references-panel-button-unlink")
-          : getString("references-panel-button-link"),
-        isLinked ? "unlink" : "link",
-      );
-      linkButton.addEventListener("click", async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        await this.handleLinkAction(entry, card);
-        // Update the action row after linking/unlinking
-        this.updatePreviewCardActionRow(card, entry);
-      });
-      actionRow.appendChild(linkButton);
-    }
-
-    // Spacer
-    const spacer = doc.createElement("span");
-    spacer.style.flex = "1";
-    actionRow.appendChild(spacer);
-
-    // Status indicator - placed last (right side)
-    const statusEl = doc.createElement("span");
-    statusEl.classList.add("zinspire-preview-card__status");
-    Object.assign(statusEl.style, {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "4px",
-      fontSize: "12px",
-      color: isLocal
-        ? "var(--accent-green, #10b981)"
-        : "var(--fill-secondary, #6b7280)",
-    });
-
-    const statusIcon = doc.createElement("span");
-    statusIcon.textContent = isLocal ? "●" : "○";
-    statusIcon.style.fontSize = "10px";
-    statusEl.appendChild(statusIcon);
-
-    const statusText = doc.createElement("span");
-    statusText.textContent = isLocal
-      ? getString("references-panel-status-local")
-      : getString("references-panel-status-online");
-    statusEl.appendChild(statusText);
-
-    actionRow.appendChild(statusEl);
-
-    card.appendChild(actionRow);
-  }
-
-  /**
-   * Create a styled action button for preview card.
-   */
-  private createPreviewActionButton(
-    doc: Document,
-    label: string,
-    type: "add" | "link" | "unlink" | "select" | "pdf",
-  ): HTMLButtonElement {
-    const button = doc.createElement("button");
-    button.type = "button";
-    button.textContent = label;
-
-    const isDestructive = type === "unlink";
-    const isPrimary = type === "add" || type === "link";
-
-    Object.assign(button.style, {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "4px",
-      padding: "4px 10px",
-      fontSize: "11px",
-      fontWeight: "500",
-      borderRadius: "4px",
-      border: "1px solid",
-      borderColor: isDestructive
-        ? "var(--accent-red, #ef4444)"
-        : isPrimary
-          ? "var(--accent-color, #3b82f6)"
-          : "var(--fill-quinary, #d1d5db)",
-      background: isPrimary
-        ? "var(--accent-color, #3b82f6)"
-        : "var(--material-background, #ffffff)",
-      color: isPrimary
-        ? "#ffffff"
-        : isDestructive
-          ? "var(--accent-red, #ef4444)"
-          : "var(--fill-primary, #374151)",
-      cursor: "pointer",
-      transition: "all 100ms ease-in-out",
-    });
-
-    button.addEventListener("mouseenter", () => {
-      if (isPrimary) {
-        button.style.opacity = "0.9";
-      } else {
-        button.style.background = "var(--fill-quinary, #f3f4f6)";
-      }
-    });
-
-    button.addEventListener("mouseleave", () => {
-      if (isPrimary) {
-        button.style.opacity = "1";
-      } else {
-        button.style.background = "var(--material-background, #ffffff)";
-      }
-    });
-
-    return button;
-  }
-
-  /**
-   * Update the action row in preview card after state change.
-   */
-  private updatePreviewCardActionRow(
-    card: HTMLDivElement,
-    entry: InspireReferenceEntry,
-  ) {
-    const existingActionRow = card.querySelector(
-      ".zinspire-preview-card__actions",
-    );
-    if (existingActionRow) {
-      existingActionRow.remove();
-    }
-    const doc = card.ownerDocument;
-    this.buildPreviewCardActionRow(card, entry, doc);
-  }
-
-  /**
-   * Position the preview card relative to the row (FTR-HOVER-PREVIEW)
-   * Prefers right side of row, falls back to below if no space
-   */
-  private positionPreviewCard(card: HTMLDivElement, row: HTMLElement) {
-    const mainWindow = Zotero.getMainWindow();
-    const doc = mainWindow?.document || this.body.ownerDocument;
-    const viewportWidth = doc.documentElement?.clientWidth || 800;
-    const viewportHeight = doc.documentElement?.clientHeight || 600;
-
-    // Get row position
-    const rowRect = row.getBoundingClientRect();
-    const cardWidth = 420; // max-width from style
-    const cardHeight = 400; // max-height from style
-    const gap = 8; // gap between row and card
-
-    let left: number;
-    let top: number;
-
-    // Try to position on the right side of the row
-    const rightSpace = viewportWidth - rowRect.right - gap;
-    if (rightSpace >= cardWidth) {
-      // Enough space on the right
-      left = rowRect.right + gap;
-      top = rowRect.top;
-    } else {
-      // Not enough space on right, try left side
-      const leftSpace = rowRect.left - gap;
-      if (leftSpace >= cardWidth) {
-        left = rowRect.left - cardWidth - gap;
-        top = rowRect.top;
-      } else {
-        // Position below the row
-        left = Math.max(
-          gap,
-          Math.min(rowRect.left, viewportWidth - cardWidth - gap),
-        );
-        top = rowRect.bottom + gap;
-      }
-    }
-
-    // Ensure card doesn't go below viewport
-    if (top + cardHeight > viewportHeight - gap) {
-      top = Math.max(gap, viewportHeight - cardHeight - gap);
-    }
-
-    // Ensure card doesn't go above viewport
-    if (top < gap) {
-      top = gap;
-    }
-
-    card.style.left = `${left}px`;
-    card.style.top = `${top}px`;
-  }
-
-  /**
-   * FTR-HOVER-PREVIEW: Show preview card at a specific rect position.
-   * Used for PDF reader lookup button hover preview.
-   * FTR-HOVER-PREVIEW-MULTI: Now supports multiple entries with pagination.
-   * FTR-AMBIGUOUS-AUTHOR-YEAR: Shows message when author-year matching returns multiple results.
-   */
-  private showPreviewCardAtRect(
-    entries: InspireReferenceEntry | InspireReferenceEntry[],
-    buttonRect: { top: number; left: number; bottom: number; right: number },
-    label?: string,
-    citationType?: "numeric" | "author-year" | "arxiv",
-  ) {
-    // Normalize to array
-    const entryArray = Array.isArray(entries) ? entries : [entries];
-    if (entryArray.length === 0) return;
-
-    const entry = entryArray[0];
-    Zotero.debug(
-      `[${config.addonName}] [HOVER-PREVIEW] showPreviewCardAtRect: entry=${entry.id}, totalEntries=${entryArray.length}, rect=(${buttonRect.top.toFixed(0)},${buttonRect.left.toFixed(0)})`,
-    );
-
-    // Skip if already showing the same set of entries
-    // Note: Only compare entries keys - if entries match, first entry ID also matches
-    const newEntriesKey = entryArray.map((e) => e.id).join(",");
-    const currentEntriesKey = this.previewEntries.map((e) => e.id).join(",");
-    if (newEntriesKey === currentEntriesKey) {
-      Zotero.debug(
-        `[${config.addonName}] [HOVER-PREVIEW] Skipping: already showing these entries`,
-      );
-      return;
-    }
-
-    // Hide any existing abstract tooltip to avoid visual conflict
-    this.hideAbstractTooltipImmediate();
-
-    // Store pagination state (cap entries to prevent memory issues)
-    this.previewEntries = entryArray.slice(
-      0,
-      InspireReferencePanelController.MAX_PREVIEW_ENTRIES,
-    );
-    this.previewCurrentIndex = 0;
-    this.previewCurrentEntryId = entry.id;
-    this.previewLabel = label;
-    this.previewButtonRect = buttonRect;
-    // FTR-AMBIGUOUS-AUTHOR-YEAR: Store citation type for message display
-    this.previewCitationType = citationType;
-
-    const card = this.getPreviewCard();
-    const doc = card.ownerDocument;
-
-    Zotero.debug(
-      `[${config.addonName}] [HOVER-PREVIEW] Got preview card, connected=${card.isConnected}`,
-    );
-
-    // Clear previous content
-    // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
-    card.replaceChildren();
-
-    // Build card content for current entry
-    this.buildPreviewCardContent(card, entry, doc);
-
-    // Add pagination controls if multiple entries
-    if (entryArray.length > 1) {
-      this.buildPreviewPagination(card, doc);
-    }
-
-    // Position the card relative to the button rect
-    this.positionPreviewCardAtRect(card, buttonRect);
-
-    // Show the card
-    card.style.display = "block";
-
-    Zotero.debug(
-      `[${config.addonName}] [HOVER-PREVIEW] Card displayed at (${card.style.top}, ${card.style.left})`,
-    );
-
-    // Fetch abstract if not already cached
-    this.fetchPreviewAbstract(entry, card);
-  }
-
-  /**
-   * FTR-HOVER-PREVIEW-MULTI: Build pagination controls for multi-entry preview.
-   */
-  private buildPreviewPagination(card: HTMLDivElement, doc: Document): void {
-    const total = this.previewEntries.length;
-    const current = this.previewCurrentIndex + 1;
-    const label = this.previewLabel || "";
-
-    const paginationRow = doc.createElement("div");
-    paginationRow.className = "zinspire-preview-pagination";
-    Object.assign(paginationRow.style, {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "12px",
-      padding: "6px 10px",
-      borderTop: "1px solid var(--fill-quinary, #e0e0e0)",
-      backgroundColor: "var(--material-background50, #fafafa)",
-      borderRadius: "0 0 8px 8px",
-      fontSize: "12px",
-    });
-
-    // Prev button
-    const prevBtn = doc.createElement("button");
-    prevBtn.textContent = "‹";
-    prevBtn.title = getString("references-panel-back");
-    prevBtn.disabled = current <= 1;
-    Object.assign(prevBtn.style, {
-      width: "24px",
-      height: "24px",
-      border: "1px solid var(--fill-quinary, #d1d1d5)",
-      borderRadius: "4px",
-      backgroundColor:
-        current <= 1
-          ? "var(--fill-quinary, #e0e0e0)"
-          : "var(--material-background, #fff)",
-      cursor: current <= 1 ? "default" : "pointer",
-      fontSize: "14px",
-      fontWeight: "bold",
-      opacity: current <= 1 ? "0.5" : "1",
-    });
-    prevBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.navigatePreview(-1);
-    });
-
-    // Page indicator: "1 / 3 for [65]"
-    const indicator = doc.createElement("span");
-    indicator.className = "zinspire-preview-indicator";
-    const labelStr = label ? ` [${label}]` : "";
-    indicator.textContent = `${current} / ${total}${labelStr}`;
-    Object.assign(indicator.style, {
-      color: "var(--fill-secondary, #666)",
-      fontWeight: "500",
-    });
-
-    // Next button
-    const nextBtn = doc.createElement("button");
-    nextBtn.textContent = "›";
-    nextBtn.title = getString("references-panel-forward");
-    nextBtn.disabled = current >= total;
-    Object.assign(nextBtn.style, {
-      width: "24px",
-      height: "24px",
-      border: "1px solid var(--fill-quinary, #d1d1d5)",
-      borderRadius: "4px",
-      backgroundColor:
-        current >= total
-          ? "var(--fill-quinary, #e0e0e0)"
-          : "var(--material-background, #fff)",
-      cursor: current >= total ? "default" : "pointer",
-      fontSize: "14px",
-      fontWeight: "bold",
-      opacity: current >= total ? "0.5" : "1",
-    });
-    nextBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.navigatePreview(1);
-    });
-
-    paginationRow.appendChild(prevBtn);
-    paginationRow.appendChild(indicator);
-    paginationRow.appendChild(nextBtn);
-
-    card.appendChild(paginationRow);
-
-    // FTR-AMBIGUOUS-AUTHOR-YEAR: Add hint message for author-year with multiple matches
-    if (this.previewCitationType === "author-year" && total > 1) {
-      const hintRow = doc.createElement("div");
-      hintRow.className = "zinspire-preview-hint";
-      Object.assign(hintRow.style, {
-        padding: "4px 10px 6px",
-        textAlign: "center",
-        fontSize: "11px",
-        color: "var(--fill-tertiary, #888)",
-        fontStyle: "italic",
-        backgroundColor: "var(--material-background50, #fafafa)",
-        borderRadius: "0 0 8px 8px",
-      });
-      hintRow.textContent = getString("pdf-annotate-ambiguous-preview-hint");
-      card.appendChild(hintRow);
-    }
-  }
-
-  /**
-   * FTR-HOVER-PREVIEW-MULTI: Navigate preview pagination.
-   * @param delta - Direction: -1 for prev, +1 for next
-   */
-  private navigatePreview(delta: number): void {
-    const newIndex = this.previewCurrentIndex + delta;
-    if (newIndex < 0 || newIndex >= this.previewEntries.length) return;
-
-    // FIX: Cancel any scheduled hide to prevent flash when content changes
-    // When card.innerHTML is cleared, mouseleave might fire briefly
-    this.cancelPreviewHide();
-
-    this.previewCurrentIndex = newIndex;
-    const entry = this.previewEntries[newIndex];
-    this.previewCurrentEntryId = entry.id;
-
-    const card = this.previewCard;
-    if (!card) return;
-
-    const doc = card.ownerDocument;
-
-    // Clear and rebuild content
-    // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
-    card.replaceChildren();
-    this.buildPreviewCardContent(card, entry, doc);
-
-    // Rebuild pagination
-    if (this.previewEntries.length > 1) {
-      this.buildPreviewPagination(card, doc);
-    }
-
-    // Re-position (in case content size changed)
-    if (this.previewButtonRect) {
-      this.positionPreviewCardAtRect(card, this.previewButtonRect);
-    }
-
-    // Fetch abstract for new entry
-    this.fetchPreviewAbstract(entry, card);
-
-    Zotero.debug(
-      `[${config.addonName}] [HOVER-PREVIEW] Navigated to entry ${newIndex + 1}/${this.previewEntries.length}: ${entry.title?.substring(0, 50)}...`,
-    );
-  }
-
-  /**
-   * FTR-HOVER-PREVIEW: Position preview card relative to a rect.
-   * Uses BOTTOM positioning so the card anchors at bottom and expands upward.
-   * This keeps pagination buttons near the Lookup button when content changes.
-   */
-  private positionPreviewCardAtRect(
-    card: HTMLDivElement,
-    rect: { top: number; left: number; bottom: number; right: number },
-  ) {
-    const mainWindow = Zotero.getMainWindow();
-    const doc = mainWindow?.document || this.body.ownerDocument;
-    const viewportWidth = doc.documentElement?.clientWidth || 800;
-    const viewportHeight = doc.documentElement?.clientHeight || 600;
-
-    const cardWidth = 420; // max-width from style
-    const cardMaxHeight = 400; // max-height from style
-    const gap = 8;
-
-    // Calculate horizontal position
-    const left = Math.max(
-      gap,
-      Math.min(rect.left, viewportWidth - cardWidth - gap),
-    );
-
-    // Use BOTTOM positioning - card anchors at bottom, expands upward
-    // This keeps pagination buttons (at card bottom) near the Lookup button
-    // when abstract loads and card grows
-
-    const spaceAbove = rect.top - gap;
-    const spaceBelow = viewportHeight - rect.bottom - gap;
-
-    let bottom: number;
-
-    if (spaceAbove >= cardMaxHeight || spaceAbove >= spaceBelow) {
-      // Position above the button: card's bottom edge near button's top
-      // bottom CSS value = distance from viewport bottom
-      bottom = viewportHeight - rect.top + gap;
-    } else {
-      // Position below the button: card's bottom edge at a fixed distance
-      // Calculate so the top of the card starts just below the button
-      // Card bottom = viewportHeight - (rect.bottom + gap + cardMaxHeight)
-      // But we want the bottom to be stable, so:
-      bottom = Math.max(
-        gap,
-        viewportHeight - rect.bottom - cardMaxHeight - gap,
-      );
-    }
-
-    // Ensure card stays within viewport (top doesn't go off screen)
-    // When using bottom positioning, we need to ensure there's room at top
-    // bottom value should not be so large that card extends above viewport
-    const maxBottom = viewportHeight - cardMaxHeight - gap;
-    if (bottom > maxBottom) {
-      bottom = Math.max(gap, maxBottom);
-    }
-
-    // Clear top positioning, use bottom instead
-    card.style.top = "auto";
-    card.style.bottom = `${bottom}px`;
-    card.style.left = `${left}px`;
-  }
-
-  /**
-   * Fetch and display abstract in the preview card (FTR-HOVER-PREVIEW)
-   * Reuses existing abstract caching logic from entry.abstract
-   * FIX: Added timeout fallback and more robust error handling
-   */
-  private async fetchPreviewAbstract(
-    entry: InspireReferenceEntry,
-    card: HTMLDivElement,
-  ) {
-    const abstractEl = card.querySelector(
-      ".zinspire-preview-card__abstract",
-    ) as HTMLElement;
-
-    Zotero.debug(
-      `[${config.addonName}] [HOVER-PREVIEW] fetchPreviewAbstract: entry=${entry.id}, abstractEl=${!!abstractEl}, entry.abstract=${entry.abstract !== undefined ? `"${entry.abstract?.substring(0, 30)}..."` : "undefined"}, localItemID=${entry.localItemID}, recid=${entry.recid}`,
-    );
-
-    if (!abstractEl) {
-      Zotero.debug(
-        `[${config.addonName}] [HOVER-PREVIEW] fetchPreviewAbstract: abstractEl not found, returning`,
-      );
-      return;
-    }
-
-    const s = getCachedStrings();
-    const maxAbstractLength = 500;
-
-    // Check if abstract is already cached
-    if (entry.abstract !== undefined) {
-      const text = entry.abstract?.trim() || s.noAbstract;
-      Zotero.debug(
-        `[${config.addonName}] [HOVER-PREVIEW] Using cached abstract: "${text.substring(0, 50)}..."`,
-      );
-      this.renderPreviewAbstract(abstractEl, text, maxAbstractLength);
-      return;
-    }
-
-    // FIX: Also check if this entry exists in the local library by recid
-    // This handles the case where enrichLocalStatus hasn't completed yet
-    if (!entry.localItemID && entry.recid) {
-      try {
-        const fieldID = Zotero.ItemFields.getID("archiveLocation");
-        if (fieldID) {
-          const sql = `SELECT itemID FROM itemData JOIN itemDataValues USING(valueID) WHERE fieldID = ? AND value = ? LIMIT 1`;
-          const rows = await Zotero.DB.queryAsync(sql, [fieldID, entry.recid]);
-          if (rows && rows.length > 0) {
-            entry.localItemID = Number(rows[0].itemID);
-            Zotero.debug(
-              `[${config.addonName}] [HOVER-PREVIEW] Found localItemID=${entry.localItemID} via direct DB lookup`,
-            );
-          }
-        }
-      } catch (e) {
-        Zotero.debug(
-          `[${config.addonName}] [HOVER-PREVIEW] Error looking up localItemID: ${e}`,
-        );
-      }
-    }
-
-    // Try to get from local library first
-    if (entry.localItemID) {
-      const localItem = Zotero.Items.get(entry.localItemID);
-      Zotero.debug(
-        `[${config.addonName}] [HOVER-PREVIEW] Trying local library: localItemID=${entry.localItemID}, localItem=${!!localItem}`,
-      );
-      if (localItem) {
-        const localAbstract = localItem.getField("abstractNote") as string;
-        if (localAbstract?.trim()) {
-          entry.abstract = localAbstract.trim();
-          Zotero.debug(
-            `[${config.addonName}] [HOVER-PREVIEW] Got abstract from local library: "${entry.abstract.substring(0, 50)}..."`,
-          );
-          this.renderPreviewAbstract(
-            abstractEl,
-            entry.abstract,
-            maxAbstractLength,
-          );
-          return;
-        }
-      }
-    }
-
-    // Fetch from INSPIRE if we have a recid
-    if (entry.recid) {
-      Zotero.debug(
-        `[${config.addonName}] [HOVER-PREVIEW] Fetching abstract from INSPIRE API for recid=${entry.recid}`,
-      );
-      // FIX: Check if AbortController is available (not available in all Zotero environments)
-      const supportsAbort =
-        typeof AbortController !== "undefined" &&
-        typeof AbortController === "function";
-      // Cancel any existing fetch
-      this.previewAbortController?.abort();
-      this.previewAbortController = supportsAbort
-        ? new AbortController()
-        : undefined;
-
-      // FIX: Store the entry ID before async operation to handle race conditions
-      const fetchEntryId = entry.id;
-
-      try {
-        const abstract = await fetchInspireAbstract(
-          entry.recid,
-          this.previewAbortController?.signal,
-        );
-        entry.abstract = abstract || "";
-
-        Zotero.debug(
-          `[${config.addonName}] [HOVER-PREVIEW] Got abstract from INSPIRE: "${entry.abstract.substring(0, 50)}..."`,
-        );
-
-        // Only update if this entry is still being shown
-        // FIX: Use the stored fetchEntryId to handle race conditions
-        if (
-          this.previewCurrentEntryId === fetchEntryId &&
-          card.style.display !== "none"
-        ) {
-          this.renderPreviewAbstract(
-            abstractEl,
-            entry.abstract || s.noAbstract,
-            maxAbstractLength,
-          );
-        } else {
-          Zotero.debug(
-            `[${config.addonName}] [HOVER-PREVIEW] Entry no longer shown (expected=${fetchEntryId}, current=${this.previewCurrentEntryId}), skipping render`,
-          );
-        }
-      } catch (_err) {
-        Zotero.debug(
-          `[${config.addonName}] [HOVER-PREVIEW] Error fetching abstract: ${_err}`,
-        );
-        // Only show error if this entry is still being shown
-        if (
-          this.previewCurrentEntryId === fetchEntryId &&
-          card.style.display !== "none"
-        ) {
-          abstractEl.textContent = s.noAbstract;
-        }
-      }
-    } else {
-      Zotero.debug(
-        `[${config.addonName}] [HOVER-PREVIEW] No recid, showing no abstract`,
-      );
-      abstractEl.textContent = s.noAbstract;
-    }
-  }
-
-  /**
-   * Render abstract text in preview card, truncating if needed
-   */
-  private renderPreviewAbstract(
-    el: HTMLElement,
-    text: string,
-    maxLength: number,
-  ) {
-    // Process LaTeX math
-    let processed = cleanMathTitle(text);
-
-    // Convert HTML sup/sub to Unicode-like notation
-    processed = processed
-      .replace(/<sup>([^<]+)<\/sup>/g, "^$1")
-      .replace(/<sub>([^<]+)<\/sub>/g, "_$1");
-
-    // Truncate if too long
-    if (processed.length > maxLength) {
-      processed =
-        processed.slice(0, maxLength).trim() +
-        "... " +
-        getString("references-panel-preview-abstract-truncated");
-    }
-
-    el.textContent = processed;
-  }
 
   /**
    * Immediately hide the abstract tooltip without delay (FTR-HOVER-PREVIEW)
@@ -16012,23 +14848,8 @@ class InspireReferencePanelController {
     let failed = 0;
 
     // Setup cancellation
-    let AbortControllerClass =
-      typeof AbortController !== "undefined" ? AbortController : null;
-    if (!AbortControllerClass) {
-      const win = Zotero.getMainWindow();
-      if (win && (win as any).AbortController) {
-        AbortControllerClass = (win as any).AbortController;
-      }
-    }
-
-    this.batchImportAbort = AbortControllerClass
-      ? new AbortControllerClass()
-      : undefined;
-    const signal = this.batchImportAbort?.signal || {
-      aborted: false,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }; // Mock signal if not supported
+    this.batchImportAbort = createAbortController();
+    const signal = this.batchImportAbort?.signal || createMockSignal();
 
     // Escape key listener for cancellation
     const escapeHandler = (e: KeyboardEvent) => {
@@ -16172,17 +14993,7 @@ class InspireReferencePanelController {
     this.autoCheckAbort?.abort();
 
     // Setup AbortController (available in Zotero's main window)
-    let AbortControllerClass =
-      typeof AbortController !== "undefined" ? AbortController : null;
-    if (!AbortControllerClass) {
-      const win = Zotero.getMainWindow();
-      if (win && (win as any).AbortController) {
-        AbortControllerClass = (win as any).AbortController;
-      }
-    }
-    this.autoCheckAbort = AbortControllerClass
-      ? new AbortControllerClass()
-      : undefined;
+    this.autoCheckAbort = createAbortController();
     const signal = this.autoCheckAbort?.signal;
 
     // Clear existing notification
@@ -16264,8 +15075,8 @@ class InspireReferencePanelController {
         `[${config.addonName}] Auto-check: ${allowedChanges.length} allowed changes for item ${itemId}`,
       );
 
-      // Store pending diff for later use (includes recid for verification during apply)
-      this.autoCheckPendingDiff = { diff, allowedChanges, itemRecid };
+      // Store pending diff for later use (includes recid and itemId for verification)
+      this.autoCheckPendingDiff = { diff, allowedChanges, itemRecid, itemId };
 
       // Show notification (even if user has switched to another item)
       // The notification will update the correct item when user clicks "View Changes"
@@ -16288,14 +15099,14 @@ class InspireReferencePanelController {
     diff: SmartUpdateDiff,
     allowedChanges: FieldChange[],
   ) {
-    if (!this.statusEl?.parentElement) return;
+    // FIX-PANEL-WIDTH-OVERFLOW: Insert notification into body (column flex), not row1 (row flex)
+    if (!this.body) return;
 
     // Clear existing notification first
     this.clearAutoCheckNotification();
 
-    const container = this.statusEl.parentElement;
     const notification = showUpdateNotification(
-      container,
+      this.body,
       diff,
       allowedChanges,
       // onViewChanges
@@ -16355,7 +15166,7 @@ class InspireReferencePanelController {
     );
 
     // Insert notification at the top of the panel body
-    container.insertBefore(notification, container.firstChild);
+    this.body.insertBefore(notification, this.body.firstChild);
     this.autoCheckNotification = notification;
   }
 

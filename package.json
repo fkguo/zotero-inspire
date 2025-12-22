@@ -1,6 +1,6 @@
 {
   "name": "zotero-inspire",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Bridge between Zotero and INSPIRE for high energy physics and related fields",
   "config": {
     "addonName": "zotero-inspire",
@@ -34,11 +34,14 @@
     "update-deps": "npm update --save"
   },
   "dependencies": {
+    "eta": "^4.5.0",
+    "js-yaml": "^4.1.1",
     "pako": "^2.1.0",
     "zotero-plugin-toolkit": "5.1.0-beta.13"
   },
   "devDependencies": {
     "@eslint/js": "^9.14.0",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
     "@types/pako": "^2.0.4",
     "@vitest/coverage-v8": "^4.0.15",

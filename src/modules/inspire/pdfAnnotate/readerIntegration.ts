@@ -234,12 +234,17 @@ export class ReaderIntegration {
     string,
     { data: ZoteroPageData; timestamp: number }
   >(50);
-  /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF numeric mapping per parent item */
+  /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF numeric mapping per ATTACHMENT (not parent)
+   *  FTR-MULTI-PDF-FIX: Changed from parentItemID to attachmentItemID to support
+   *  items with multiple PDF attachments, each with different reference lists.
+   */
   private static readonly PDF_MAPPING_CACHE_SIZE = 30;
   private pdfMappingCache = new LRUCache<number, PDFReferenceMapping>(
     ReaderIntegration.PDF_MAPPING_CACHE_SIZE,
   );
-  /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF author-year mapping per parent item */
+  /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF author-year mapping per ATTACHMENT (not parent)
+   *  FTR-MULTI-PDF-FIX: Changed from parentItemID to attachmentItemID.
+   */
   private pdfAuthorYearMappingCache = new LRUCache<
     number,
     AuthorYearReferenceMapping
@@ -1101,25 +1106,28 @@ export class ReaderIntegration {
 
   /**
    * Look up citation and emit event to controller
+   * FTR-MULTI-PDF-FIX: Now includes attachmentItemID for proper PDF-specific cache lookup
    */
   private lookupCitation(reader: any, citation: ParsedCitation): void {
     try {
-      // Get parent item ID from reader
-      const itemID = reader.itemID;
-      if (!itemID) {
+      // Get attachment item ID from reader (the PDF being viewed)
+      const attachmentItemID = reader.itemID;
+      if (!attachmentItemID) {
         Zotero.debug(
           `[${config.addonName}] Cannot lookup citation: no itemID on reader`,
         );
         return;
       }
 
-      // Reader shows attachment, we need parent item
-      const item = Zotero.Items.get(itemID);
-      const parentItemID = item?.parentItemID || itemID;
+      // Reader shows attachment, we need parent item for INSPIRE lookup
+      const item = Zotero.Items.get(attachmentItemID);
+      const parentItemID = item?.parentItemID || attachmentItemID;
 
-      // Emit lookup event
+      // Emit lookup event with both IDs
+      // FTR-MULTI-PDF-FIX: Include attachmentItemID for PDF-specific cache lookup
       const event: CitationLookupEvent = {
         parentItemID,
+        attachmentItemID,
         citation,
         readerTabID: reader.tabID,
       };
@@ -1130,7 +1138,7 @@ export class ReaderIntegration {
       this.emit("citationLookup", event);
 
       Zotero.debug(
-        `[${config.addonName}] Citation lookup: labels=[${citation.labels.join(",")}] parentItemID=${parentItemID}`,
+        `[${config.addonName}] Citation lookup: labels=[${citation.labels.join(",")}] parentItemID=${parentItemID} attachmentItemID=${attachmentItemID}`,
       );
     } catch (err) {
       Zotero.debug(`[${config.addonName}] Failed to lookup citation: ${err}`);
@@ -1248,6 +1256,7 @@ export class ReaderIntegration {
    * Emit preview request event with button position.
    * FTR-HOVER-PREVIEW: Converts iframe-relative coordinates to main window coordinates.
    * FTR-FIX: Now accepts labels array for proper author-year matching.
+   * FTR-MULTI-PDF-FIX: Includes attachmentItemID for PDF-specific cache lookup.
    */
   private emitPreviewRequest(
     button: HTMLElement,
@@ -1257,9 +1266,10 @@ export class ReaderIntegration {
     labels?: string[],
   ): void {
     try {
-      const itemID = reader.itemID;
-      const item = Zotero.Items.get(itemID);
-      const parentItemID = item?.parentItemID || itemID;
+      // Get attachment item ID from reader (the PDF being viewed)
+      const attachmentItemID = reader.itemID;
+      const item = Zotero.Items.get(attachmentItemID);
+      const parentItemID = item?.parentItemID || attachmentItemID;
 
       // Get button position in its document's viewport coordinates
       const rect = button.getBoundingClientRect();
@@ -1313,8 +1323,10 @@ export class ReaderIntegration {
         }
       }
 
+      // FTR-MULTI-PDF-FIX: Include attachmentItemID for PDF-specific cache lookup
       const event: CitationPreviewEvent = {
         parentItemID,
+        attachmentItemID,
         label,
         labels: labels ?? [label], // Default to [label] if not provided
         citationType,
@@ -1513,7 +1525,8 @@ export class ReaderIntegration {
 
   /**
    * Start PDF parsing and track the promise.
-   * FTR-PRELOAD-AWAIT: Separated from preloadPDFParsing to track promises by parentItemID.
+   * FTR-PRELOAD-AWAIT: Separated from preloadPDFParsing to track promises by attachmentItemID.
+   * FTR-MULTI-PDF-FIX: Changed from parentItemID to attachmentItemID for cache keys.
    */
   private startPdfParsing(attachmentItemID: number): void {
     const attachment = Zotero.Items.get(attachmentItemID);
@@ -1522,18 +1535,19 @@ export class ReaderIntegration {
     const parentItemID = attachment.parentItemID;
     if (!parentItemID) return;
 
-    // Skip if already parsing or cached
-    if (this.transientState.pdfParsingItems.has(parentItemID)) return;
-    if (this.pdfMappingCache.has(parentItemID)) return;
+    // Skip if already parsing or cached - use attachmentItemID as key
+    // FTR-MULTI-PDF-FIX: Each PDF attachment has its own cache entry
+    if (this.transientState.pdfParsingItems.has(attachmentItemID)) return;
+    if (this.pdfMappingCache.has(attachmentItemID)) return;
 
-    // Create and track the parsing promise
+    // Create and track the parsing promise - use attachmentItemID as key
     const parsePromise = this.preloadPDFParsing(attachmentItemID);
-    this.transientState.pdfParsingPromises.set(parentItemID, parsePromise);
+    this.transientState.pdfParsingPromises.set(attachmentItemID, parsePromise);
 
     // Clean up promise map when done
     parsePromise
       .finally(() => {
-        this.transientState.pdfParsingPromises.delete(parentItemID);
+        this.transientState.pdfParsingPromises.delete(attachmentItemID);
       })
       .catch((err) => {
         Zotero.debug(
@@ -1549,6 +1563,7 @@ export class ReaderIntegration {
   /**
    * Preload PDF parsing results in background.
    * Parses the PDF's reference section and caches the mapping for later use.
+   * FTR-MULTI-PDF-FIX: Uses attachmentItemID as cache key instead of parentItemID.
    * @param attachmentItemID - The PDF attachment item ID
    */
   private async preloadPDFParsing(attachmentItemID: number): Promise<void> {
@@ -1559,16 +1574,17 @@ export class ReaderIntegration {
     const parentItemID = attachment.parentItemID;
     if (!parentItemID) return;
 
-    // Skip if already parsing or cached
-    if (this.transientState.pdfParsingItems.has(parentItemID)) return;
-    if (this.pdfMappingCache.has(parentItemID)) {
+    // Skip if already parsing or cached - use attachmentItemID as key
+    // FTR-MULTI-PDF-FIX: Each PDF attachment has its own cache entry
+    if (this.transientState.pdfParsingItems.has(attachmentItemID)) return;
+    if (this.pdfMappingCache.has(attachmentItemID)) {
       Zotero.debug(
-        `[${config.addonName}] [PRELOAD-PDF] Already cached for item ${parentItemID}`,
+        `[${config.addonName}] [PRELOAD-PDF] Already cached for attachment ${attachmentItemID} (parent=${parentItemID})`,
       );
       return;
     }
 
-    this.transientState.pdfParsingItems.add(parentItemID);
+    this.transientState.pdfParsingItems.add(attachmentItemID);
 
     try {
       // Get PDF file path
@@ -1594,7 +1610,8 @@ export class ReaderIntegration {
       const mapping = parser.parseReferencesSection(pdfText);
 
       if (mapping && mapping.totalLabels > 0) {
-        this.pdfMappingCache.set(parentItemID, mapping);
+        // FTR-MULTI-PDF-FIX: Cache under attachmentItemID, not parentItemID
+        this.pdfMappingCache.set(attachmentItemID, mapping);
 
         // Update maxKnownLabel from PDF parsing result
         const labelNums = Array.from(mapping.labelCounts.keys())
@@ -1606,7 +1623,7 @@ export class ReaderIntegration {
         }
 
         Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] Cached numeric mapping (${mapping.totalLabels} labels) for item ${parentItemID}`,
+          `[${config.addonName}] [PRELOAD-PDF] Cached numeric mapping (${mapping.totalLabels} labels) for attachment ${attachmentItemID} (parent=${parentItemID})`,
         );
       }
 
@@ -1614,17 +1631,18 @@ export class ReaderIntegration {
       const authorYearMapping =
         parser.parseAuthorYearReferencesSection(pdfText);
       if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
-        this.pdfAuthorYearMappingCache.set(parentItemID, authorYearMapping);
+        // FTR-MULTI-PDF-FIX: Cache under attachmentItemID, not parentItemID
+        this.pdfAuthorYearMappingCache.set(attachmentItemID, authorYearMapping);
         Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] Cached author-year mapping (${authorYearMapping.authorYearMap.size} entries) for item ${parentItemID}`,
+          `[${config.addonName}] [PRELOAD-PDF] Cached author-year mapping (${authorYearMapping.authorYearMap.size} entries) for attachment ${attachmentItemID} (parent=${parentItemID})`,
         );
       }
     } catch (err) {
       Zotero.debug(
-        `[${config.addonName}] [PRELOAD-PDF] Error parsing PDF for ${parentItemID}: ${err}`,
+        `[${config.addonName}] [PRELOAD-PDF] Error parsing PDF for attachment ${attachmentItemID}: ${err}`,
       );
     } finally {
-      this.transientState.pdfParsingItems.delete(parentItemID);
+      this.transientState.pdfParsingItems.delete(attachmentItemID);
     }
   }
 
@@ -1656,55 +1674,60 @@ export class ReaderIntegration {
   }
 
   /**
-   * Get preloaded PDF numeric mapping for an item.
-   * @param parentItemID - The parent item ID (not attachment)
+   * Get preloaded PDF numeric mapping for a specific PDF attachment.
+   * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
+   * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    */
   getPreloadedPDFMapping(
-    parentItemID: number,
+    attachmentItemID: number,
   ): PDFReferenceMapping | undefined {
-    return this.pdfMappingCache.get(parentItemID);
+    return this.pdfMappingCache.get(attachmentItemID);
   }
 
   /**
-   * Get preloaded PDF author-year mapping for an item.
-   * @param parentItemID - The parent item ID (not attachment)
+   * Get preloaded PDF author-year mapping for a specific PDF attachment.
+   * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
+   * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    */
   getPreloadedAuthorYearMapping(
-    parentItemID: number,
+    attachmentItemID: number,
   ): AuthorYearReferenceMapping | undefined {
-    return this.pdfAuthorYearMappingCache.get(parentItemID);
+    return this.pdfAuthorYearMappingCache.get(attachmentItemID);
   }
 
   /**
-   * Check if PDF parsing is in progress for an item.
-   * @param parentItemID - The parent item ID
+   * Check if PDF parsing is in progress for a specific PDF attachment.
+   * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
+   * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    */
-  isPDFParsingInProgress(parentItemID: number): boolean {
-    return this.transientState.pdfParsingItems.has(parentItemID);
+  isPDFParsingInProgress(attachmentItemID: number): boolean {
+    return this.transientState.pdfParsingItems.has(attachmentItemID);
   }
 
   /**
    * Set preloaded PDF mapping (for external callers to cache results).
-   * @param parentItemID - The parent item ID
+   * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
+   * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    * @param mapping - The PDF reference mapping
    */
   setPreloadedPDFMapping(
-    parentItemID: number,
+    attachmentItemID: number,
     mapping: PDFReferenceMapping,
   ): void {
-    this.pdfMappingCache.set(parentItemID, mapping);
+    this.pdfMappingCache.set(attachmentItemID, mapping);
   }
 
   /**
    * Set preloaded author-year mapping (for external callers to cache results).
-   * @param parentItemID - The parent item ID
+   * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
+   * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    * @param mapping - The author-year mapping
    */
   setPreloadedAuthorYearMapping(
-    parentItemID: number,
+    attachmentItemID: number,
     mapping: AuthorYearReferenceMapping,
   ): void {
-    this.pdfAuthorYearMappingCache.set(parentItemID, mapping);
+    this.pdfAuthorYearMappingCache.set(attachmentItemID, mapping);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1731,20 +1754,17 @@ export class ReaderIntegration {
   ): Promise<OverlayReferenceMapping | null> {
     try {
       // Check cache first
+      // FTR-MULTI-PDF-FIX-V2: itemID is the attachment ID, use it as cache key
       const itemID = reader?.itemID;
       if (!itemID) return null;
 
       const item = Zotero.Items.get(itemID);
       if (!item) return null;
 
-      const parentItemID = item.parentItemID || itemID;
-
+      // FTR-MULTI-PDF-FIX-V2: Use attachmentItemID directly for cache lookup
       // Check if already cached
-      const cached = this.overlayMappingCache.get(parentItemID);
+      const cached = this.overlayMappingCache.get(itemID);
       if (cached) {
-        debugLog(
-          `[${config.addonName}] [OVERLAY-REFS] Using cached overlay mapping for item ${parentItemID}`,
-        );
         return cached;
       }
 
@@ -1833,11 +1853,11 @@ export class ReaderIntegration {
         isReliable: labelToReference.size >= 3,
       };
 
-      // Cache the result
-      this.overlayMappingCache.set(parentItemID, mapping);
+      // FTR-MULTI-PDF-FIX-V2: Cache the result using attachmentItemID
+      this.overlayMappingCache.set(itemID, mapping);
 
       Zotero.debug(
-        `[${config.addonName}] [OVERLAY-REFS] Built overlay mapping for item ${parentItemID}: ` +
+        `[${config.addonName}] [OVERLAY-REFS] Built overlay mapping for attachment ${itemID}: ` +
           `${mapping.totalMappedLabels} labels, ${mapping.totalReferences} total references from ${mapping.totalCitationOverlays} citation overlays ` +
           `(reliable: ${mapping.isReliable})`,
       );
@@ -1852,36 +1872,39 @@ export class ReaderIntegration {
   }
 
   /**
-   * Get cached overlay reference mapping for an item.
-   * @param parentItemID - The parent item ID (not attachment)
+   * Get cached overlay reference mapping for an attachment.
+   * FTR-MULTI-PDF-FIX-V2: Changed from parentItemID to attachmentItemID.
+   * @param attachmentItemID - The attachment item ID (the PDF file)
    * @returns Cached mapping or undefined
    */
-  getOverlayMapping(parentItemID: number): OverlayReferenceMapping | undefined {
-    return this.overlayMappingCache.get(parentItemID);
+  getOverlayMapping(attachmentItemID: number): OverlayReferenceMapping | undefined {
+    return this.overlayMappingCache.get(attachmentItemID);
   }
 
   /**
-   * Check if overlay mapping exists and is reliable for an item.
-   * @param parentItemID - The parent item ID
+   * Check if overlay mapping exists and is reliable for an attachment.
+   * FTR-MULTI-PDF-FIX-V2: Changed from parentItemID to attachmentItemID.
+   * @param attachmentItemID - The attachment item ID (the PDF file)
    * @returns true if reliable overlay mapping exists
    */
-  hasReliableOverlayMapping(parentItemID: number): boolean {
-    const mapping = this.overlayMappingCache.get(parentItemID);
+  hasReliableOverlayMapping(attachmentItemID: number): boolean {
+    const mapping = this.overlayMappingCache.get(attachmentItemID);
     return mapping?.isReliable === true;
   }
 
   /**
    * Get reference text from overlay mapping for a numeric label.
    * FTR-OVERLAY-MULTI-REF: Now returns all reference texts joined by newlines.
-   * @param parentItemID - The parent item ID
+   * FTR-MULTI-PDF-FIX-V2: Changed from parentItemID to attachmentItemID.
+   * @param attachmentItemID - The attachment item ID (the PDF file)
    * @param label - Numeric label string (e.g., "1", "2")
    * @returns Reference texts joined by newlines, or undefined if not found
    */
   getReferenceTextFromOverlay(
-    parentItemID: number,
+    attachmentItemID: number,
     label: string,
   ): string | undefined {
-    const mapping = this.overlayMappingCache.get(parentItemID);
+    const mapping = this.overlayMappingCache.get(attachmentItemID);
     const refs = mapping?.labelToReference.get(label);
     if (!refs || refs.length === 0) return undefined;
     return refs.map((r) => r.text).join("\n");
@@ -1919,13 +1942,14 @@ export class ReaderIntegration {
   }
 
   /**
-   * Get the in-flight PDF parsing promise for a parent item.
+   * Get the in-flight PDF parsing promise for a specific PDF attachment.
    * If parsing is in progress, returns the promise to await.
    * If parsing is completed or not started, returns undefined.
-   * @param parentItemID - The parent item ID (not attachment)
+   * FTR-MULTI-PDF-FIX-V2: Changed from parentItemID to attachmentItemID.
+   * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    */
-  getPdfParsePromise(parentItemID: number): Promise<void> | undefined {
-    return this.transientState.pdfParsingPromises.get(parentItemID);
+  getPdfParsePromise(attachmentItemID: number): Promise<void> | undefined {
+    return this.transientState.pdfParsingPromises.get(attachmentItemID);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

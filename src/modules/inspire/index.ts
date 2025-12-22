@@ -166,6 +166,18 @@ export {
   showSmartUpdatePreviewDialog,
 } from "./smartUpdate";
 
+// Re-export math renderer (FTR-LATEX-MARKDOWN)
+export {
+  containsLatexMath,
+  getRenderMode,
+  renderMathContent,
+  renderLatexToString,
+  renderMarkdownMath,
+  resetKatexState,
+  onRenderModeChange,
+  type RenderMode,
+} from "./mathRenderer";
+
 // Re-export preprint watch service (FTR-PREPRINT-WATCH)
 export {
   // Constants
@@ -359,4 +371,27 @@ export {
   type PoolStats,
   type ListRenderContext,
   type ListRenderOptions,
+  // EntryListRenderer (Phase 0.1 refactor)
+  EntryListRenderer,
+  type EntryRenderContext,
+  type EntryListRendererOptions,
+  // HoverPreviewRenderer (Phase 0.3 refactor)
+  HoverPreviewRenderer,
+  type PreviewRenderContext,
+  type HoverPreviewRendererOptions,
+  type PositionRect,
+  // HoverPreviewController (Phase 0.4 refactor)
+  HoverPreviewController,
+  type PreviewActionCallbacks,
+  type HoverPreviewControllerOptions,
+  type PreviewCitationType,
+  // AuthorPreviewController (Phase 0.5 refactor)
+  AuthorPreviewController,
+  type AuthorPreviewCallbacks,
+  type AuthorPreviewControllerOptions,
+  // SearchService (Phase 0.2 refactor)
+  fetchInspireSearch,
+  buildEntryFromSearchHit,
+  type SearchProgressCallback,
+  type SearchFetchOptions,
 } from "./panel";

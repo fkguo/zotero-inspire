@@ -320,6 +320,7 @@ export function cleanMathTitle(title?: string | null): string {
     9: "⁹",
     "+": "⁺",
     "-": "⁻",
+    "−": "⁻", // Unicode MINUS SIGN (U+2212)
     "=": "⁼",
     "(": "⁽",
     ")": "⁾",
@@ -437,6 +438,12 @@ export function cleanMathTitle(title?: string | null): string {
         }
       }
     }
+    // Try to convert multi-char subscript character by character
+    const chars = cleaned.split("");
+    const allMappable = chars.every((c) => subscriptMap[c] !== undefined);
+    if (allMappable) {
+      return chars.map((c) => subscriptMap[c]).join("");
+    }
     return `<sub>${cleaned}</sub>`;
   });
 
@@ -533,16 +540,116 @@ export function cleanMathTitle(title?: string | null): string {
     .replace(/-{2,}>/g, "→") // ---> or --> to →
     .replace(/->/g, "→");
 
+  // Remove space before $ when it follows an UPPERCASE letter (e.g., "D $_{s}$" → "D$_{s}$")
+  // Only uppercase letters are matched because particle symbols (D, K, B, etc.) are capitalized.
+  // Lowercase letters should keep the space (e.g., "the $D_{s1}$" → "the Dₛ₁", not "theDₛ₁")
+  text = text.replace(/([A-ZΑ-Ω]) \$/g, "$1$");
+
   text = text.replace(/\$([^$]+)\$/g, (_match, content) => {
     let inner = (content as string)
       .replace(/\\\{/g, ESCAPED_LBRACE)
       .replace(/\\\}/g, ESCAPED_RBRACE)
       .replace(/\s+/g, "");
+
+    // Handle superscripts: ^{+}, ^+, ^{-}, ^-, ^{−}, ^−  (both ASCII - and Unicode −)
     inner = inner
-      .replace(/\^\{?\+?\}?/g, "⁺")
-      .replace(/\^\{?-?\}?/g, "⁻")
+      .replace(/\^\{?\+\}?/g, "⁺")
+      .replace(/\^\{?[-−]\}?/g, "⁻") // Handle both ASCII hyphen and Unicode minus
+      .replace(/\^\{?(\d)\}?/g, (_m, d) => {
+        const sup: Record<string, string> = {
+          "0": "⁰",
+          "1": "¹",
+          "2": "²",
+          "3": "³",
+          "4": "⁴",
+          "5": "⁵",
+          "6": "⁶",
+          "7": "⁷",
+          "8": "⁸",
+          "9": "⁹",
+        };
+        return sup[d] || d;
+      })
       .replace(/e\^/g, "e")
       .replace(/\\/g, "");
+
+    // Handle subscripts: _{s}, _{s1}, _s, etc.
+    inner = inner.replace(/_\{([^}]+)\}/g, (_m, sub) => {
+      const subscriptMap: Record<string, string> = {
+        "0": "₀",
+        "1": "₁",
+        "2": "₂",
+        "3": "₃",
+        "4": "₄",
+        "5": "₅",
+        "6": "₆",
+        "7": "₇",
+        "8": "₈",
+        "9": "₉",
+        "+": "₊",
+        "-": "₋",
+        "=": "₌",
+        "(": "₍",
+        ")": "₎",
+        a: "ₐ",
+        e: "ₑ",
+        h: "ₕ",
+        i: "ᵢ",
+        j: "ⱼ",
+        k: "ₖ",
+        l: "ₗ",
+        m: "ₘ",
+        n: "ₙ",
+        o: "ₒ",
+        p: "ₚ",
+        r: "ᵣ",
+        s: "ₛ",
+        t: "ₜ",
+        u: "ᵤ",
+        v: "ᵥ",
+        x: "ₓ",
+      };
+      // Convert each character in the subscript
+      return sub
+        .split("")
+        .map((c: string) => subscriptMap[c] || c)
+        .join("");
+    });
+
+    // Handle single-char subscript without braces: _s, _1, etc.
+    inner = inner.replace(/_([0-9a-z])/gi, (_m, c) => {
+      const subscriptMap: Record<string, string> = {
+        "0": "₀",
+        "1": "₁",
+        "2": "₂",
+        "3": "₃",
+        "4": "₄",
+        "5": "₅",
+        "6": "₆",
+        "7": "₇",
+        "8": "₈",
+        "9": "₉",
+        a: "ₐ",
+        e: "ₑ",
+        h: "ₕ",
+        i: "ᵢ",
+        j: "ⱼ",
+        k: "ₖ",
+        l: "ₗ",
+        m: "ₘ",
+        n: "ₙ",
+        o: "ₒ",
+        p: "ₚ",
+        r: "ᵣ",
+        s: "ₛ",
+        t: "ₜ",
+        u: "ᵤ",
+        v: "ᵥ",
+        x: "ₓ",
+      };
+      return subscriptMap[c.toLowerCase()] || `<sub>${c}</sub>`;
+    });
+
     inner = inner.replace(/[{}]/g, "");
     inner = inner
       .replace(new RegExp(ESCAPED_LBRACE, "g"), "{")

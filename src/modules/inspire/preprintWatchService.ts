@@ -23,6 +23,7 @@ import { localCache } from "./localCache";
 import { LRUCache } from "./utils";
 import { fetchInspireMetaByRecid } from "./metadataService";
 import type { jsobject } from "./types";
+import type { InspireLiteratureSearchResponse } from "./apiTypes";
 import type {
   PublicationInfo,
   PreprintCheckResult,
@@ -596,8 +597,8 @@ async function checkPublicationStatus(
   const response = await inspireFetch(url, { signal });
   if (!response.ok) return null;
 
-  const data: any = await response.json();
-  const hits = data.hits?.hits;
+  const data = (await response.json()) as unknown as InspireLiteratureSearchResponse | null;
+  const hits = data?.hits?.hits;
   if (!hits?.length) return null;
 
   const metadata = hits[0].metadata;
@@ -608,7 +609,7 @@ async function checkPublicationStatus(
   const pubInfo = metadata.publication_info;
   if (pubInfo?.length) {
     const primary = pubInfo.find(
-      (p: any) => p.journal_title && p.material !== "erratum",
+      (p) => p.journal_title && p.material !== "erratum",
     );
     if (primary?.journal_title) {
       // Found journal publication!

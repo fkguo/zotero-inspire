@@ -14,6 +14,8 @@ import {
   updateLastCheckTime,
   trackPreprintCandidates,
   cleanupLegacyPreprintFiles,
+  createAbortController,
+  onRenderModeChange,
 } from "./modules/inspire";
 import {
   ENRICH_BATCH_RANGE,
@@ -89,9 +91,7 @@ function exposeConsoleCommands(): void {
 async function runBackgroundPreprintCheck(): Promise<void> {
   // Abort previous background check if still running
   preprintCheckController?.abort();
-  preprintCheckController = typeof AbortController !== "undefined"
-    ? new AbortController()
-    : undefined;
+  preprintCheckController = createAbortController();
   const signal = preprintCheckController?.signal;
 
   try {
@@ -182,6 +182,9 @@ function onShutdown(): void {
   }
   preprintCheckController?.abort();
   preprintCheckController = undefined;
+
+  // PERF-FIX-2: Stop MemoryMonitor interval if running
+  MemoryMonitor.getInstance().stop();
 
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
@@ -477,6 +480,36 @@ function updateCollabTagControls(doc: Document, syncCheckbox = true) {
 }
 
 /**
+ * Update LaTeX sub-option visibility based on meta preference.
+ * LaTeX rendering is only meaningful when fetching abstracts ("full").
+ */
+function updateLatexOptionsVisibility(doc: Document) {
+  const latexContainer = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-latex_options",
+  ) as HTMLElement | null;
+  const metaRadiogroup = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-meta",
+  ) as any;
+
+  if (!latexContainer) return;
+
+  // Get current meta preference value
+  const metaValue = metaRadiogroup?.value ?? getPref("meta");
+  const showLatex = metaValue === "full";
+
+  // Show/hide the LaTeX options container
+  latexContainer.style.display = showLatex ? "" : "none";
+
+  // Also disable the menulist when hidden to prevent accidental changes
+  const latexMenulist = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-latex_render_mode",
+  ) as HTMLSelectElement | null;
+  if (latexMenulist) {
+    latexMenulist.disabled = !showLatex;
+  }
+}
+
+/**
  * Update Preprint Watch controls.
  * - preprint_watch_enabled: main toggle (must be on for sub-options to work)
  * - on_startup checkbox: whether to check on startup (once per day)
@@ -542,6 +575,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         updateSmartUpdateControls(doc);
         updatePreprintWatchControls(doc);
         updateCollabTagControls(doc);
+        updateLatexOptionsVisibility(doc);
         const enableCheckbox = doc.getElementById(
           "zotero-prefpane-zoteroinspire-local_cache_enable",
         ) as HTMLInputElement | null;
@@ -554,6 +588,19 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         ) as HTMLInputElement | null;
         parseCheckbox?.addEventListener("command", () => {
           updatePDFParseControls(doc, false);
+        });
+        // Meta radiogroup listener - update LaTeX options visibility
+        const metaRadiogroup = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-meta",
+        );
+        metaRadiogroup?.addEventListener("command", () => {
+          updateLatexOptionsVisibility(doc);
+        });
+        const latexModeRadio = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-latex_render_mode",
+        );
+        latexModeRadio?.addEventListener("command", () => {
+          onRenderModeChange();
         });
         const forceCheckbox = doc.getElementById(
           "zotero-prefpane-zoteroinspire-pdf_force_mapping_on_mismatch",

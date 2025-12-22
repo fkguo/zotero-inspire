@@ -1,5 +1,6 @@
 import { getString } from "../utils/locale";
 import type { AmbiguousCandidate } from "./inspire/pdfAnnotate/types";
+import { isDarkMode, getPickerColors } from "./inspire/styles";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Style helper functions for reference panel UI elements
@@ -60,13 +61,31 @@ export function applyPillButtonStyle(
 }
 
 /**
+ * Apply inline styles to the reference entry row element.
+ * FIX-PANEL-WIDTH-OVERFLOW: Ensure row respects container width.
+ */
+export function applyRefEntryRowStyle(el: HTMLElement): void {
+  el.style.width = "100%";
+  el.style.maxWidth = "100%";
+  el.style.boxSizing = "border-box";
+  el.style.overflow = "hidden";
+  el.style.padding = "4px 0";
+}
+
+/**
  * Apply inline styles to the reference entry text container (horizontal layout)
+ * FIX-PANEL-WIDTH-OVERFLOW: Add width constraints and overflow handling
  */
 export function applyRefEntryTextContainerStyle(el: HTMLElement): void {
   el.style.display = "flex";
   el.style.flexDirection = "row";
   el.style.alignItems = "flex-start";
   el.style.gap = "6px";
+  // FIX-PANEL-WIDTH-OVERFLOW: Constrain width and handle overflow
+  el.style.width = "100%";
+  el.style.maxWidth = "100%";
+  el.style.minWidth = "0";
+  el.style.overflow = "hidden";
 
   const controls = el.querySelector(
     ".zinspire-ref-entry__controls",
@@ -98,13 +117,18 @@ export function applyRefEntryMarkerStyle(el: HTMLElement): void {
 }
 
 /**
- * Apply color to the marker based on local item presence
+ * Apply color to the marker based on local item presence.
+ * Uses brighter colors in dark mode for better visibility.
  */
 export function applyRefEntryMarkerColor(
   el: HTMLElement,
   hasLocalItem: boolean,
 ): void {
-  el.style.color = hasLocalItem ? "#1a8f4d" : "#d93025";
+  const dark = isDarkMode();
+  // Green for local items, red for not local - brighter in dark mode
+  const localColor = dark ? "#22c55e" : "#1a8f4d";
+  const notLocalColor = dark ? "#ef4444" : "#d93025";
+  el.style.color = hasLocalItem ? localColor : notLocalColor;
   el.style.opacity = "1";
 }
 
@@ -128,8 +152,42 @@ export function applyRefEntryLinkButtonStyle(el: HTMLElement): void {
  * Apply inline styles to the reference entry content container
  */
 export function applyRefEntryContentStyle(el: HTMLElement): void {
-  el.style.flex = "1";
-  el.style.minWidth = "0";
+  // FIX-PANEL-WIDTH-OVERFLOW: Ensure content doesn't exceed container with explicit constraints
+  el.style.cssText = `
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  `;
+
+  // FIX-PANEL-WIDTH-OVERFLOW: Style title and meta for proper text wrapping
+  const title = el.querySelector(
+    ".zinspire-ref-entry__title",
+  ) as HTMLElement | null;
+  if (title) {
+    title.style.cssText = `
+      overflow: hidden;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      max-width: 100%;
+    `;
+  }
+
+  const meta = el.querySelector(
+    ".zinspire-ref-entry__meta",
+  ) as HTMLElement | null;
+  if (meta) {
+    meta.style.cssText = `
+      overflow: hidden;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      max-width: 100%;
+    `;
+  }
 }
 
 /**
@@ -181,11 +239,11 @@ export function applyTabButtonStyle(el: HTMLElement, isActive: boolean): void {
   el.style.whiteSpace = "nowrap";
 
   if (isActive) {
-    // Active tab: primary color pill
-    el.style.backgroundColor = "#0066cc";
+    // Active tab: primary color pill - use CSS variable for accent color
+    el.style.backgroundColor = "var(--accent-color, #0066cc)";
     el.style.color = "#fff";
     el.style.fontWeight = "500";
-    el.style.border = "1px solid #0066cc";
+    el.style.border = "1px solid var(--accent-color, #0066cc)";
     el.style.boxShadow = "none";
   } else {
     // Inactive tab: outlined pill (clearly looks like a button)
@@ -212,7 +270,7 @@ export function applyBibTeXButtonStyle(el: HTMLElement): void {
   el.style.padding = "0";
   el.style.cursor = "pointer";
   el.style.fontSize = "11px";
-  el.style.color = "#666";
+  el.style.color = "var(--fill-secondary, #666)";
   el.style.opacity = "0.7";
   el.style.transition = "opacity 0.15s ease";
 }
@@ -284,7 +342,7 @@ export function attachCopyableValue(
       const originalTitle = el.title;
       const originalText = el.textContent;
       el.textContent = `✓ ${copiedText}`;
-      el.style.color = "#1a8f4d";
+      el.style.color = isDarkMode() ? "#22c55e" : "#1a8f4d"; // Green - brighter in dark mode
       setTimeout(() => {
         el.textContent = originalText;
         el.style.color = "";
@@ -309,10 +367,10 @@ export function applyAbstractTooltipStyle(el: HTMLElement): void {
   el.style.scrollbarGutter = "stable both-edges";
   el.style.padding = "12px 14px";
   el.style.paddingRight = "18px";
-  // Soft blue-gray background - easy on the eyes, professional look
-  el.style.backgroundColor = "#f0f4f8";
-  el.style.color = "#1a2a3a";
-  el.style.border = "1px solid #c8d4e0";
+  // Use CSS variables for dark mode compatibility
+  el.style.backgroundColor = "var(--material-background, #f0f4f8)";
+  el.style.color = "var(--fill-primary, #1a2a3a)";
+  el.style.border = "1px solid var(--fill-quinary, #c8d4e0)";
   el.style.borderRadius = "8px";
   el.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.15)";
   el.style.fontSize = "13px";
@@ -324,6 +382,94 @@ export function applyAbstractTooltipStyle(el: HTMLElement): void {
   el.style.display = "none";
   // Smooth scrollbar styling
   el.style.scrollbarWidth = "thin";
+  // Enable text selection for copy (tooltip is anchored, not following cursor)
+  el.style.userSelect = "text";
+  el.style.cursor = "text";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Floating Element Positioning Helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Options for positioning a floating element relative to an anchor.
+ */
+export interface FloatingPositionOptions {
+  /** Spacing between anchor and floating element (default: 8) */
+  spacing?: number;
+  /** Minimum edge margin from viewport (default: 10) */
+  edgeMargin?: number;
+  /** Fallback width if element not yet rendered */
+  fallbackWidth?: number;
+  /** Fallback height if element not yet rendered */
+  fallbackHeight?: number;
+}
+
+/**
+ * Position a floating element (tooltip, card, etc.) relative to an anchor element.
+ * Automatically handles viewport boundary detection and flips position when needed.
+ *
+ * Positioning logic:
+ * - Default: right of anchor, aligned to anchor top
+ * - If right overflow: flip to left of anchor
+ * - If bottom overflow: align to anchor bottom instead of top
+ * - Ensures minimum edge margin from viewport
+ *
+ * @param floating - The floating element to position
+ * @param anchor - The anchor element to position relative to
+ * @param options - Positioning options
+ */
+export function positionFloatingElement(
+  floating: HTMLElement,
+  anchor: HTMLElement,
+  options: FloatingPositionOptions = {},
+): void {
+  const {
+    spacing = 8,
+    edgeMargin = 10,
+    fallbackWidth = 300,
+    fallbackHeight = 150,
+  } = options;
+
+  // Get viewport dimensions from the floating element's window context
+  const win = floating.ownerDocument.defaultView || window;
+  const viewportWidth = win.innerWidth || 800;
+  const viewportHeight = win.innerHeight || 600;
+
+  // Get anchor bounding rect
+  const rect = anchor.getBoundingClientRect();
+
+  // Get floating element dimensions (use fallback if not yet rendered)
+  const floatingWidth = floating.offsetWidth || fallbackWidth;
+  const floatingHeight = floating.offsetHeight || fallbackHeight;
+
+  // Calculate initial position: right of anchor, aligned to top
+  let left = rect.right + spacing;
+  let top = rect.top;
+
+  // Flip to left if right overflow
+  if (left + floatingWidth > viewportWidth - edgeMargin) {
+    left = rect.left - floatingWidth - spacing;
+  }
+
+  // Ensure minimum left margin
+  if (left < edgeMargin) {
+    left = edgeMargin;
+  }
+
+  // Align to bottom if vertical overflow
+  if (top + floatingHeight > viewportHeight - edgeMargin) {
+    top = rect.bottom - floatingHeight;
+  }
+
+  // Ensure minimum top margin
+  if (top < edgeMargin) {
+    top = edgeMargin;
+  }
+
+  // Apply position
+  floating.style.left = `${Math.round(left)}px`;
+  floating.style.top = `${Math.round(top)}px`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -402,6 +548,10 @@ export function applyPreviewCardAbstractStyle(el: HTMLElement): void {
   el.style.paddingTop = "8px";
   el.style.borderTop = "1px solid var(--fill-quinary, #e2e8f0)";
   el.style.fontStyle = "italic";
+  // Enable text selection for copy
+  el.style.userSelect = "text";
+  (el.style as any).webkitUserSelect = "text";
+  el.style.cursor = "text";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,7 +586,13 @@ export function showTargetPickerUI(
   listEl: HTMLElement,
 ): Promise<SaveTargetSelection | null> {
   return new Promise((resolve) => {
-    const doc = body.ownerDocument;
+    // FIX: Use main Zotero window to escape CSS containment context
+    // The panel body has `contain: layout` which breaks position:fixed
+    const mainWindow = Zotero.getMainWindow();
+    const doc = mainWindow?.document || body.ownerDocument;
+    const appendTarget = mainWindow?.document?.body || body;
+    // Use shared color config for dark mode consistency
+    const colors = getPickerColors();
 
     const previousScrollTop = listEl.scrollTop;
     const previousScrollLeft = listEl.scrollLeft;
@@ -527,9 +683,10 @@ export function showTargetPickerUI(
     panel.style.maxHeight = "400px";
     panel.style.minHeight = "200px";
     panel.style.overflowY = "hidden"; // Handle scroll inside list
-    panel.style.backgroundColor = "var(--material-background, #fff)";
-    panel.style.color = "var(--material-color, #000)";
-    panel.style.border = "1px solid var(--material-border, #ccc)";
+    // Use shared picker colors for dark mode consistency
+    panel.style.backgroundColor = colors.panelBg;
+    panel.style.color = colors.textPrimary;
+    panel.style.border = `1px solid ${colors.inputBorder}`;
     panel.style.borderRadius = "6px";
     panel.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.25)";
     panel.style.display = "flex";
@@ -669,7 +826,8 @@ export function showTargetPickerUI(
       panel.style.left = `${left}px`;
     }
 
-    body.appendChild(overlay);
+    // Append to main window body to escape CSS containment context
+    appendTarget.appendChild(overlay);
 
     // Add resize handles after appending panel to DOM
     addResizeHandle("w-resize", "w");
@@ -683,8 +841,8 @@ export function showTargetPickerUI(
     header.textContent = getString("references-panel-picker-title");
     header.style.padding = "8px 12px";
     header.style.fontWeight = "600";
-    header.style.borderBottom = "1px solid var(--material-border, #eee)";
-    header.style.backgroundColor = "var(--material-side-background, #f5f5f5)";
+    header.style.borderBottom = `1px solid ${colors.borderColor}`;
+    header.style.backgroundColor = colors.headerBg;
     header.style.borderRadius = "6px 6px 0 0";
     header.style.cursor = "move"; // Indicate draggable
     panel.appendChild(header);
@@ -738,6 +896,12 @@ export function showTargetPickerUI(
     filterInput.placeholder = getString("references-panel-picker-filter");
     filterInput.style.margin = "8px 12px";
     filterInput.style.padding = "4px 8px";
+    filterInput.style.backgroundColor = colors.inputBg;
+    filterInput.style.color = colors.textPrimary;
+    filterInput.style.border = `1px solid ${colors.inputBorder}`;
+    filterInput.style.borderRadius = "4px";
+    filterInput.style.width = "calc(100% - 24px)";
+    filterInput.style.boxSizing = "border-box";
     panel.appendChild(filterInput);
 
     const list = doc.createElement("div");
@@ -745,8 +909,8 @@ export function showTargetPickerUI(
     list.style.flex = "1";
     list.style.overflowY = "auto";
     list.style.minHeight = "100px";
-    list.style.borderTop = "1px solid var(--material-border, #eee)";
-    list.style.borderBottom = "1px solid var(--material-border, #eee)";
+    list.style.borderTop = `1px solid ${colors.borderColor}`;
+    list.style.borderBottom = `1px solid ${colors.borderColor}`;
 
     // Flex layout for compact items
     list.style.display = "flex";
@@ -760,8 +924,8 @@ export function showTargetPickerUI(
     const options = doc.createElement("div");
     options.classList.add("zinspire-collection-picker__options");
     options.style.padding = "8px 12px";
-    options.style.borderTop = "1px solid var(--material-border, #eee)";
-    options.style.backgroundColor = "var(--material-side-background, #f5f5f5)";
+    options.style.borderTop = `1px solid ${colors.borderColor}`;
+    options.style.backgroundColor = colors.sectionBg;
     options.style.display = "flex";
     options.style.flexDirection = "column";
     options.style.gap = "8px";
@@ -780,6 +944,10 @@ export function showTargetPickerUI(
     tagsInput.style.padding = "4px 8px";
     tagsInput.style.fontSize = "13px";
     tagsInput.style.boxSizing = "border-box";
+    tagsInput.style.backgroundColor = colors.inputBg;
+    tagsInput.style.color = colors.textPrimary;
+    tagsInput.style.border = `1px solid ${colors.inputBorder}`;
+    tagsInput.style.borderRadius = "4px";
     tagsInput.setAttribute("list", "zinspire-tags-datalist");
     tagsWrapper.appendChild(tagsInput);
 
@@ -791,9 +959,9 @@ export function showTargetPickerUI(
     tagsSuggestionPanel.style.left = "0";
     tagsSuggestionPanel.style.right = "0";
     tagsSuggestionPanel.style.top = "calc(100% + 2px)";
-    tagsSuggestionPanel.style.backgroundColor =
-      "var(--material-background, #fff)";
-    tagsSuggestionPanel.style.border = "1px solid var(--material-border, #ccc)";
+    tagsSuggestionPanel.style.backgroundColor = colors.sectionBg;
+    tagsSuggestionPanel.style.color = colors.textPrimary;
+    tagsSuggestionPanel.style.border = `1px solid ${colors.inputBorder}`;
     tagsSuggestionPanel.style.borderRadius = "4px";
     tagsSuggestionPanel.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
     tagsSuggestionPanel.style.display = "none";
@@ -1103,6 +1271,10 @@ export function showTargetPickerUI(
     noteInput.style.fontFamily = "inherit";
     noteInput.style.minHeight = "60px";
     noteInput.style.lineHeight = "1.4";
+    noteInput.style.backgroundColor = colors.inputBg;
+    noteInput.style.color = colors.textPrimary;
+    noteInput.style.border = `1px solid ${colors.inputBorder}`;
+    noteInput.style.borderRadius = "4px";
 
     options.appendChild(tagsWrapper);
     options.appendChild(noteInput);
@@ -1114,7 +1286,7 @@ export function showTargetPickerUI(
     actions.style.display = "flex";
     actions.style.justifyContent = "flex-end";
     actions.style.gap = "8px";
-    actions.style.backgroundColor = "var(--material-side-background, #f5f5f5)";
+    actions.style.backgroundColor = colors.sectionBg;
     actions.style.borderRadius = "0 0 6px 6px";
 
     const cancelBtn = doc.createElement("button");
@@ -1122,6 +1294,11 @@ export function showTargetPickerUI(
     cancelBtn.textContent = getString("references-panel-picker-cancel");
     cancelBtn.style.padding = "4px 12px";
     cancelBtn.style.minWidth = "60px";
+    cancelBtn.style.backgroundColor = colors.inputBg;
+    cancelBtn.style.color = colors.textPrimary;
+    cancelBtn.style.border = `1px solid ${colors.inputBorder}`;
+    cancelBtn.style.borderRadius = "4px";
+    cancelBtn.style.cursor = "pointer";
 
     const okBtn = doc.createElement("button");
     okBtn.classList.add(
@@ -1131,6 +1308,11 @@ export function showTargetPickerUI(
     okBtn.textContent = getString("references-panel-picker-confirm");
     okBtn.style.padding = "4px 12px";
     okBtn.style.minWidth = "60px";
+    okBtn.style.backgroundColor = colors.accentBlue;
+    okBtn.style.color = "#fff";
+    okBtn.style.border = `1px solid ${colors.accentBlue}`;
+    okBtn.style.borderRadius = "4px";
+    okBtn.style.cursor = "pointer";
 
     actions.append(cancelBtn, okBtn);
     panel.appendChild(actions);
@@ -1152,9 +1334,10 @@ export function showTargetPickerUI(
         align-items: center;
         max-width: 100%;
         padding: 4px 8px;
-        border: 1px solid var(--material-border, #ccc);
+        border: 1px solid ${colors.chipBorder};
         border-radius: 12px;
-        background: var(--material-background, #fff);
+        background: ${colors.chipBg};
+        color: ${colors.chipColor};
         cursor: pointer;
         white-space: nowrap;
         overflow: hidden;
@@ -1240,8 +1423,8 @@ export function showTargetPickerUI(
       checked: boolean,
     ) => {
       if (checked) {
-        button.style.backgroundColor = "#e6f2ff";
-        button.style.color = "#0b2d66";
+        button.style.backgroundColor = colors.selectBg;
+        button.style.color = colors.selectColor;
         button.style.fontWeight = "600";
       } else {
         button.style.backgroundColor = "";
@@ -1259,8 +1442,8 @@ export function showTargetPickerUI(
             id === selectedLibraryRowID,
           );
           if (id === selectedLibraryRowID) {
-            button.style.backgroundColor = "#e6f2ff";
-            button.style.color = "#0b2d66";
+            button.style.backgroundColor = colors.selectBg;
+            button.style.color = colors.selectColor;
             button.style.fontWeight = "600";
           } else if (id !== focusedID) {
             // Reset styles for non-selected library rows (unless focused)
@@ -1568,7 +1751,12 @@ export function showAmbiguousCitationPicker(
   body: HTMLElement,
 ): Promise<AmbiguousCitationSelection | null> {
   return new Promise((resolve) => {
-    const doc = body.ownerDocument;
+    // FIX: Use main Zotero window to escape CSS containment context
+    const mainWindow = Zotero.getMainWindow();
+    const doc = mainWindow?.document || body.ownerDocument;
+    const appendTarget = mainWindow?.document?.body || body;
+    // Use shared color config for dark mode consistency
+    const colors = getPickerColors();
 
     // Create overlay
     const overlay = doc.createElement("div");
@@ -1588,9 +1776,9 @@ export function showAmbiguousCitationPicker(
     // Create panel
     const panel = doc.createElement("div");
     panel.classList.add("zinspire-ambiguous-picker");
-    panel.style.backgroundColor = "var(--material-background, #fff)";
-    panel.style.color = "var(--material-color, #000)";
-    panel.style.border = "1px solid var(--material-border, #ccc)";
+    panel.style.backgroundColor = colors.panelBg;
+    panel.style.color = colors.textPrimary;
+    panel.style.border = `1px solid ${colors.inputBorder}`;
     panel.style.borderRadius = "8px";
     panel.style.boxShadow = "0 4px 24px rgba(0, 0, 0, 0.25)";
     panel.style.display = "flex";
@@ -1609,8 +1797,8 @@ export function showAmbiguousCitationPicker(
     header.style.padding = "12px 16px";
     header.style.fontWeight = "600";
     header.style.fontSize = "15px";
-    header.style.borderBottom = "1px solid var(--material-border, #eee)";
-    header.style.backgroundColor = "var(--material-side-background, #f5f5f5)";
+    header.style.borderBottom = `1px solid ${colors.borderColor}`;
+    header.style.backgroundColor = colors.headerBg;
     header.style.borderRadius = "8px 8px 0 0";
     header.textContent = getString("pdf-annotate-ambiguous-title", {
       args: { citation: citationText },
@@ -1622,7 +1810,7 @@ export function showAmbiguousCitationPicker(
     message.classList.add("zinspire-ambiguous-picker__message");
     message.style.padding = "12px 16px";
     message.style.fontSize = "13px";
-    message.style.color = "var(--fill-secondary, #666)";
+    message.style.color = colors.textSecondary;
     message.textContent = getString("pdf-annotate-ambiguous-message");
     panel.appendChild(message);
 
@@ -1648,15 +1836,15 @@ export function showAmbiguousCitationPicker(
           | undefined;
         const innerDot = (btn as any)._innerDot as HTMLElement | undefined;
         if (idx === focusedIndex) {
-          btn.style.backgroundColor = "#e6f2ff";
-          btn.style.borderColor = "#0066cc";
-          if (radioIndicator) radioIndicator.style.borderColor = "#0066cc";
+          btn.style.backgroundColor = colors.selectBg;
+          btn.style.borderColor = colors.accentBlue;
+          if (radioIndicator) radioIndicator.style.borderColor = colors.accentBlue;
           if (innerDot) innerDot.style.opacity = "1";
         } else {
-          btn.style.backgroundColor = "var(--material-background, #fff)";
-          btn.style.borderColor = "var(--material-border, #ccc)";
+          btn.style.backgroundColor = colors.panelBg;
+          btn.style.borderColor = colors.inputBorder;
           if (radioIndicator)
-            radioIndicator.style.borderColor = "var(--material-border, #ccc)";
+            radioIndicator.style.borderColor = colors.inputBorder;
           if (innerDot) innerDot.style.opacity = "0";
         }
       });
@@ -1676,9 +1864,10 @@ export function showAmbiguousCitationPicker(
         align-items: center;
         width: 100%;
         padding: 10px 12px;
-        border: 1px solid var(--material-border, #ccc);
+        border: 1px solid ${colors.inputBorder};
         border-radius: 6px;
-        background-color: var(--material-background, #fff);
+        background-color: ${colors.panelBg};
+        color: ${colors.textPrimary};
         cursor: pointer;
         text-align: left;
         transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1692,7 +1881,7 @@ export function showAmbiguousCitationPicker(
         width: 18px;
         height: 18px;
         border-radius: 50%;
-        border: 2px solid var(--material-border, #ccc);
+        border: 2px solid ${colors.inputBorder};
         flex-shrink: 0;
         display: flex;
         align-items: center;
@@ -1708,7 +1897,7 @@ export function showAmbiguousCitationPicker(
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background-color: #0066cc;
+        background-color: ${colors.accentBlue};
         opacity: 0;
         transition: opacity 0.15s ease;
       `;
@@ -1742,7 +1931,7 @@ export function showAmbiguousCitationPicker(
         journalSpan.style.cssText = `
           font-weight: 600;
           font-size: 14px;
-          color: var(--fill-primary, #333);
+          color: ${colors.textPrimary};
         `;
         journalSpan.textContent = candidate.journal;
         mainLine.appendChild(journalSpan);
@@ -1830,8 +2019,8 @@ export function showAmbiguousCitationPicker(
     actions.style.display = "flex";
     actions.style.justifyContent = "flex-end";
     actions.style.gap = "8px";
-    actions.style.borderTop = "1px solid var(--material-border, #eee)";
-    actions.style.backgroundColor = "var(--material-side-background, #f5f5f5)";
+    actions.style.borderTop = `1px solid ${colors.borderColor}`;
+    actions.style.backgroundColor = colors.sectionBg;
     actions.style.borderRadius = "0 0 8px 8px";
 
     const cancelBtn = doc.createElement("button");
@@ -1839,15 +2028,17 @@ export function showAmbiguousCitationPicker(
     cancelBtn.textContent = getString("pdf-annotate-ambiguous-cancel");
     cancelBtn.style.padding = "6px 16px";
     cancelBtn.style.minWidth = "70px";
-    cancelBtn.style.border = "1px solid var(--material-border, #ccc)";
+    cancelBtn.style.border = `1px solid ${colors.inputBorder}`;
     cancelBtn.style.borderRadius = "4px";
-    cancelBtn.style.backgroundColor = "var(--material-background, #fff)";
+    cancelBtn.style.backgroundColor = colors.inputBg;
+    cancelBtn.style.color = colors.textPrimary;
     cancelBtn.style.cursor = "pointer";
 
     actions.appendChild(cancelBtn);
     panel.appendChild(actions);
 
-    body.appendChild(overlay);
+    // Append to main window body to escape CSS containment context
+    appendTarget.appendChild(overlay);
     updateFocus();
 
     let isFinished = false;

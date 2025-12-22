@@ -5,6 +5,12 @@ pref-arxiv-tag = arXiv Primary Category Tag
 pref-refs-panel = References Panel
 pref-reader-history = Reader View Navigation
 pref-nofound = INSPIRE Record Not Found
+pref-latex-label = Abstract LaTeX:
+pref-latex-mode-unicode = Unicode
+    .tooltiptext = Use Unicode characters for simple formulas. Lightweight rendering.
+pref-latex-mode-katex = KaTeX (default)
+    .tooltiptext = Use KaTeX to render complex LaTeX formulas with high fidelity.
+pref-latex-mode-description = KaTeX renders complex equations (fractions, integrals, matrices). Only applies when fetching abstracts.
 
 pref-enable =
     .label = Enable

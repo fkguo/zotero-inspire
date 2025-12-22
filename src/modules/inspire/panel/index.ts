@@ -71,3 +71,41 @@ export {
   type ListRenderContext,
   type ListRenderOptions,
 } from "./RowPoolManager";
+
+// Re-export EntryListRenderer (Phase 0.1 refactor)
+export {
+  EntryListRenderer,
+  type EntryRenderContext,
+  type EntryListRendererOptions,
+} from "./EntryListRenderer";
+
+// Re-export HoverPreviewRenderer (Phase 0.3 refactor)
+export {
+  HoverPreviewRenderer,
+  type PreviewRenderContext,
+  type HoverPreviewRendererOptions,
+  type PositionRect,
+} from "./HoverPreviewRenderer";
+
+// Re-export HoverPreviewController (Phase 0.4 refactor)
+export {
+  HoverPreviewController,
+  type PreviewActionCallbacks,
+  type HoverPreviewControllerOptions,
+  type PreviewCitationType,
+} from "./HoverPreviewController";
+
+// Re-export SearchService (Phase 0.2 refactor)
+export {
+  fetchInspireSearch,
+  buildEntryFromSearchHit,
+  type SearchProgressCallback,
+  type SearchFetchOptions,
+} from "./SearchService";
+
+// Re-export AuthorPreviewController (Phase 0.5 refactor)
+export {
+  AuthorPreviewController,
+  type AuthorPreviewCallbacks,
+  type AuthorPreviewControllerOptions,
+} from "./AuthorPreviewController";

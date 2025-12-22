@@ -374,7 +374,7 @@ export class LabelMatcher {
   setOverlayMapping(mapping: OverlayReferenceMapping): void {
     this.overlayMapping = mapping;
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] LabelMatcher: applied overlay mapping with ${mapping.totalMappedLabels} labels, reliable=${mapping.isReliable}`,
+      `[${config.addonName}] [PDF-ANNOTATE] LabelMatcher.setOverlayMapping: ${mapping.totalMappedLabels} labels, reliable=${mapping.isReliable}`,
     );
   }
 
@@ -1127,7 +1127,6 @@ export class LabelMatcher {
         // FTR-OVERLAY-MULTI-REF: Returns all matched papers under this label
         return overlayMatches;
       }
-      // No overlay match - continue with other strategies
     }
 
     const preferPdfMapping =
@@ -2066,21 +2065,61 @@ export class LabelMatcher {
     }
 
     // When labels are duplicated and we prefer PDF mapping, allow downstream strategies instead of early-returning
+    // FTR-DUPLICATE-LABEL-FIX: Use PDF paper info to select best candidate instead of blindly using first entry
     if (preferPdfMapping && this.hasDuplicateLabels) {
       const labelMatchesDup = this.labelMap.get(normalizedLabel);
       if (labelMatchesDup && labelMatchesDup.length > 0) {
-        const idx = labelMatchesDup[0];
-        const entry = this.entries[idx];
-        results.push({
-          pdfLabel,
-          entryIndex: idx,
-          entryId: entry.id,
-          confidence: "medium",
-          matchMethod: "inferred",
-        });
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] Duplicate INSPIRE labels; using first entry as last resort for [${pdfLabel}] -> idx=${idx}, totalDup=${labelMatchesDup.length}`,
-        );
+        // If we have PDF paper info, use it to select the best matching entry
+        if (paperInfos && paperInfos.length > 0) {
+          let bestIdx = -1;
+          let bestScore = -1;
+          const scoreDetails: string[] = [];
+          for (const idx of labelMatchesDup) {
+            const entry = this.entries[idx];
+            // Calculate score against first PDF paper (primary reference)
+            const score = this.calculateMatchScore(paperInfos[0], entry);
+            scoreDetails.push(
+              `idx=${idx}(${entry.authors?.[0] || "?"} ${entry.year || "?"} ${entry.publicationInfo?.journal_title || entry.publicationInfo?.journal_volume || ""}):score=${score}`,
+            );
+            if (score > bestScore) {
+              bestScore = score;
+              bestIdx = idx;
+            }
+          }
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] [DUPLICATE-FIX] PDF paper: author="${paperInfos[0].firstAuthorLastName || "?"}", year=${paperInfos[0].year || "?"}, journal="${paperInfos[0].journalAbbrev || "?"}", vol=${paperInfos[0].volume || "?"}, arXiv=${paperInfos[0].arxivId || "?"}`,
+          );
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] [DUPLICATE-FIX] Candidate scores: ${scoreDetails.join("; ")}`,
+          );
+          if (bestIdx >= 0) {
+            const entry = this.entries[bestIdx];
+            results.push({
+              pdfLabel,
+              entryIndex: bestIdx,
+              entryId: entry.id,
+              confidence: bestScore >= SCORE.VALIDATION_ACCEPT ? "high" : "medium",
+              matchMethod: "inferred",
+            });
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] Duplicate INSPIRE labels; selected best match for [${pdfLabel}] -> idx=${bestIdx}, score=${bestScore}, candidates=${labelMatchesDup.length}`,
+            );
+          }
+        } else {
+          // No PDF paper info - fall back to first entry
+          const idx = labelMatchesDup[0];
+          const entry = this.entries[idx];
+          results.push({
+            pdfLabel,
+            entryIndex: idx,
+            entryId: entry.id,
+            confidence: "medium",
+            matchMethod: "inferred",
+          });
+          Zotero.debug(
+            `[${config.addonName}] [PDF-ANNOTATE] Duplicate INSPIRE labels; using first entry as last resort for [${pdfLabel}] -> idx=${idx}, totalDup=${labelMatchesDup.length}`,
+          );
+        }
       }
       const numLabel = parseInt(normalizedLabel, 10);
       if (!isNaN(numLabel) && this.indexMap.has(numLabel)) {
@@ -2559,9 +2598,55 @@ export class LabelMatcher {
             .map((a) => finalList[a.eIdx]?.entryIndex)
             .filter((x) => x !== undefined),
         );
-        const filteredFinalList = finalList.filter((r) =>
+        let filteredFinalList = finalList.filter((r) =>
           verifiedEntryIndices.has(r.entryIndex),
         );
+
+        // FTR-MULTI-PDF-FIX-V5: When no entries pass reconciliation, check if fallback is reliable
+        // Only keep fallback candidates if:
+        // 1. PDF paper info has SOME usable identifiers (can potentially verify the match)
+        // 2. Or this is NOT a duplicate label situation (index fallback might be okay)
+        //
+        // If PDF paper info is empty/wrong (e.g., extracted "Flatt" when it should be "R. Aaij"),
+        // the index fallback will give wrong results when PDF numbering differs from INSPIRE.
+        if (filteredFinalList.length === 0 && finalList.length > 0) {
+          // Check if any paper info has usable identifiers for potential matching
+          const hasAnyUsableInfo = paperInfos.some(
+            (p) =>
+              (p.year && p.year !== "?") ||
+              (p.journalAbbrev && p.journalAbbrev !== "?") ||
+              p.arxivId ||
+              p.doi,
+          );
+
+          if (hasAnyUsableInfo) {
+            // PDF has some info but reconciliation still failed - keep fallback
+            // This handles format differences or incomplete INSPIRE metadata
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Reconciliation failed but PDF has identifiers; ` +
+                `keeping ${finalList.length} fallback candidate(s)`,
+            );
+            filteredFinalList = finalList;
+          } else if (!this.hasDuplicateLabels) {
+            // No identifiers but also no duplicate labels - index fallback might be okay
+            // (PDF numbering likely matches INSPIRE)
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] No identifiers but no duplicate labels; ` +
+                `keeping ${finalList.length} fallback candidate(s)`,
+            );
+            filteredFinalList = finalList;
+          } else {
+            // FTR-MULTI-PDF-FIX-V5: No usable identifiers AND duplicate labels detected
+            // Index fallback is unreliable - return empty to avoid wrong match
+            // This prevents matching PDF-B[45] to INSPIRE[44] when they're different papers
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Reconciliation failed with no usable identifiers; ` +
+                `NOT keeping fallback to avoid wrong match (hasDuplicateLabels=${this.hasDuplicateLabels})`,
+            );
+            // filteredFinalList remains empty
+          }
+        }
+
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] [MISSING-FINAL] Filtered: ${finalList.length} -> ${filteredFinalList.length} verified entries`,
         );

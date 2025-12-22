@@ -85,13 +85,13 @@ export const TEXT_STYLES = {
     fontSize: "12px",
   } as CSSProperties,
   muted: {
-    color: "#666",
+    color: "var(--fill-secondary, #666)",
     fontSize: "12px",
   } as CSSProperties,
   link: {
     cursor: "pointer",
     textDecoration: "none",
-    color: "#0066cc",
+    color: "var(--accent-color, #0066cc)",
   } as CSSProperties,
 } as const;
 
@@ -114,7 +114,7 @@ export const CHART_STYLES = {
     alignItems: "center",
     justifyContent: "center",
     height: "100%",
-    color: "#9ca3af",
+    color: "var(--fill-tertiary, #9ca3af)",
     fontSize: "12px",
   } as CSSProperties,
   noDataItalic: {
@@ -122,7 +122,7 @@ export const CHART_STYLES = {
     alignItems: "center",
     justifyContent: "center",
     height: "100%",
-    color: "#9ca3af",
+    color: "var(--fill-tertiary, #9ca3af)",
     fontSize: "12px",
     fontStyle: "italic",
   } as CSSProperties,
@@ -274,7 +274,7 @@ export function isDarkMode(): boolean {
 // Color Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Status indicator colors */
+/** Status indicator colors (semantic - use getStatusColors() for dark mode) */
 export const STATUS_COLORS = {
   local: "#1a8f4d", // Green - item exists locally
   notLocal: "#d93025", // Red - item not in local library
@@ -283,8 +283,104 @@ export const STATUS_COLORS = {
   chartNoData: "#9ca3af", // Light gray - chart placeholder
 } as const;
 
-/** Tab button colors */
+/**
+ * Get dark mode aware status colors.
+ * Semantic colors adjusted for visibility in both light and dark modes.
+ */
+export function getStatusColors(): {
+  local: string;
+  notLocal: string;
+  link: string;
+  muted: string;
+  chartNoData: string;
+} {
+  const dark = isDarkMode();
+  return {
+    local: dark ? "#22c55e" : "#1a8f4d", // Green - brighter in dark mode
+    notLocal: dark ? "#ef4444" : "#d93025", // Red - brighter in dark mode
+    link: dark ? "#60a5fa" : "#0066cc", // Blue - brighter in dark mode
+    muted: dark ? "#9ca3af" : "#666", // Gray - lighter in dark mode
+    chartNoData: dark ? "#6b7280" : "#9ca3af", // Gray
+  };
+}
+
+/** Tab button colors (use getTabColors() for dark mode) */
 export const TAB_COLORS = {
   activeBackground: "#e6f2ff",
   activeText: "#0b2d66",
 } as const;
+
+/**
+ * Get dark mode aware tab colors.
+ */
+export function getTabColors(): {
+  activeBackground: string;
+  activeText: string;
+} {
+  const dark = isDarkMode();
+  return {
+    activeBackground: dark ? "rgba(96, 165, 250, 0.2)" : "#e6f2ff",
+    activeText: dark ? "#93c5fd" : "#0b2d66",
+  };
+}
+
+/**
+ * Picker dialog color configuration for consistent styling.
+ * Used by collection picker, ambiguous citation picker, etc.
+ */
+export interface PickerColors {
+  // Panel/container backgrounds
+  panelBg: string;
+  headerBg: string;
+  sectionBg: string;
+  // Text colors
+  textPrimary: string;
+  textSecondary: string;
+  // Input/control backgrounds
+  inputBg: string;
+  // Borders
+  borderColor: string;
+  inputBorder: string;
+  // Selection/highlight states (matches tab colors)
+  selectBg: string;
+  selectColor: string;
+  // Chips/buttons
+  chipBg: string;
+  chipBorder: string;
+  chipColor: string;
+  // Accent
+  accentBlue: string;
+}
+
+/**
+ * Get dark mode aware colors for picker dialogs.
+ * Centralizes color definitions for consistent styling across picker UIs.
+ */
+export function getPickerColors(): PickerColors {
+  const dark = isDarkMode();
+  // Use consistent selection colors with tabs
+  const tabColors = getTabColors();
+  return {
+    // Panel/container backgrounds
+    panelBg: dark ? "#1e1e1e" : "#fff",
+    headerBg: dark ? "#2b2b2b" : "#f5f5f5",
+    sectionBg: dark ? "#2b2b2b" : "#f5f5f5",
+    // Text colors
+    textPrimary: dark ? "#e0e0e0" : "#000",
+    textSecondary: dark ? "#999" : "#666",
+    // Input/control backgrounds
+    inputBg: dark ? "#3c3c3c" : "#fff",
+    // Borders
+    borderColor: dark ? "#444" : "#eee",
+    inputBorder: dark ? "#555" : "#ccc",
+    // Selection/highlight states - use tab colors for consistency
+    selectBg: tabColors.activeBackground,
+    selectColor: tabColors.activeText,
+    // Chips/buttons
+    chipBg: dark ? "#3c3c3c" : "#fff",
+    chipBorder: dark ? "#555" : "#ccc",
+    chipColor: dark ? "#e0e0e0" : "#000",
+    // Accent
+    accentBlue: dark ? "#60a5fa" : "#0066cc",
+  };
+}
