@@ -11,6 +11,11 @@
     type="string"
   />
   <preference
+    id="pref-latex_render_mode"
+    name="__prefsPrefix__.latex_render_mode"
+    type="string"
+  />
+  <preference
     id="pref-arxiv_tag_enable"
     name="__prefsPrefix__.arxiv_tag_enable"
     type="bool"
@@ -194,6 +199,7 @@
     #94a3b8); text-align: center; padding: 8px; border-top: 1px solid
     var(--fill-quinary, #e2e8f0); margin-top: 8px; } .zinspire-pref-hbox {
     display: flex; gap: 16px; } .zinspire-pref-hbox-item { flex: 1; }
+    .zinspire-pref-section radio { appearance: auto; -moz-appearance: radio; }
   </html:style>
 
   <!-- Metadata Fetching -->
@@ -209,6 +215,23 @@
       <radio data-l10n-id="meta-citations" value="citations" />
       <radio data-l10n-id="meta-no" value="no" />
     </radiogroup>
+    <!-- LaTeX sub-option: only meaningful when "With abstracts" is selected -->
+    <vbox id="zotero-prefpane-__addonRef__-latex_options" style="margin-top: 10px; margin-left: 20px; padding: 8px; background: var(--material-sidepane, rgba(0,0,0,0.03)); border-radius: 4px;">
+      <hbox align="center">
+        <label data-l10n-id="pref-latex-label" style="font-weight: 500; margin-right: 8px;" />
+        <menulist
+          id="zotero-prefpane-__addonRef__-latex_render_mode"
+          preference="extensions.zotero.inspiremeta.latex_render_mode"
+          style="min-width: 150px;"
+        >
+          <menupopup>
+            <menuitem value="unicode" label="Unicode (default)" />
+            <menuitem value="katex" label="KaTeX" />
+          </menupopup>
+        </menulist>
+      </hbox>
+      <html:p class="zinspire-pref-desc" style="margin-left: 0;" data-l10n-id="pref-latex-mode-description"></html:p>
+    </vbox>
   </vbox>
 
   <!-- Citekey and Extra Field Order -->

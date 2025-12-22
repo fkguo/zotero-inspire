@@ -177,6 +177,13 @@ references-panel-open-link = Open in browser
 references-panel-link-copied = Link copied to clipboard
 references-panel-copy-failed = Failed to copy to clipboard
 
+# Abstract Copy Context Menu
+references-panel-abstract-copy = Copy
+references-panel-abstract-copy-selection = Copy Selection
+references-panel-abstract-copy-latex = Copy as LaTeX
+references-panel-abstract-copied = Abstract copied to clipboard
+references-panel-abstract-latex-copied = LaTeX source copied to clipboard
+
 # Preview Card Action Buttons (FTR-HOVER-PREVIEW)
 references-panel-status-local = In Library
 references-panel-status-online = Online

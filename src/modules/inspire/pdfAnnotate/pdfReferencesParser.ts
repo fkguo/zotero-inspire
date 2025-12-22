@@ -577,6 +577,19 @@ export class PDFReferencesParser {
         if (idx < firstRefIndex - 10) continue; // stay within reference region
         if (num > 500 || (num >= 1900 && num <= 2099)) continue;
         if (seenLabels.has(label)) continue;
+
+        // FTR-PDF-ANNOTATE-FIX: Filter out inline citations by checking what follows the bracket
+        // Inline citations: "[51]. Therefore" or "[51]," - followed by punctuation
+        // Reference entries: "[51] P. del Amo" or "[51]Author" - NOT followed by punctuation
+        const afterBracket = text.slice(
+          idx + match[0].length,
+          idx + match[0].length + 5,
+        );
+        const isLikelyInlineCitation = /^[.,;:\])–—-]/.test(afterBracket);
+        if (isLikelyInlineCitation) {
+          continue;
+        }
+
         seenLabels.add(label);
         positions.push({ label, index: idx });
       }
@@ -601,6 +614,19 @@ export class PDFReferencesParser {
         if (seenLabels.has(label)) continue;
         // Allow slight jumps but avoid wildly out-of-order numbers
         if (positions.length > 0 && num < lastNum - 5) continue;
+
+        // FTR-PDF-ANNOTATE-FIX: Filter out inline citations by checking what follows the bracket
+        // Inline citations: "[51]. Therefore" or "[51]," - followed by punctuation
+        // Reference entries: "[51] P. del Amo" or "[51]Author" - NOT followed by punctuation
+        const afterBracket = text.slice(
+          match.index + match[0].length,
+          match.index + match[0].length + 5,
+        );
+        const isLikelyInlineCitation = /^[.,;:\])–—-]/.test(afterBracket);
+        if (isLikelyInlineCitation) {
+          continue;
+        }
+
         seenLabels.add(label);
         positions.push({ label, index: match.index });
         lastNum = num;
@@ -747,6 +773,19 @@ export class PDFReferencesParser {
       const num = parseInt(label, 10);
       if (num > 500 || (num >= 1900 && num <= 2099)) continue;
       if (seenLabels.has(label)) continue;
+
+      // FTR-PDF-ANNOTATE-FIX: Filter out inline citations by checking what follows the bracket
+      // Inline citations: "[51]. Therefore" or "[51]," - followed by punctuation
+      // Reference entries: "[51] P. del Amo" or "[51]Author" - NOT followed by punctuation
+      const afterBracket = text.slice(
+        match.index + match[0].length,
+        match.index + match[0].length + 5,
+      );
+      const isLikelyInlineCitation = /^[.,;:\])–—-]/.test(afterBracket);
+      if (isLikelyInlineCitation) {
+        continue;
+      }
+
       seenLabels.add(label);
       positions.push({ label, index: match.index });
     }

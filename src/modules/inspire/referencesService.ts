@@ -23,6 +23,10 @@ import {
   buildFieldsParam,
 } from "./constants";
 import type { InspireReferenceEntry } from "./types";
+import type {
+  InspireLiteratureSearchResponse,
+  InspireReference,
+} from "./apiTypes";
 import { inspireFetch } from "./rateLimiter";
 import { LRUCache } from "./utils";
 
@@ -76,8 +80,10 @@ export async function fetchReferencesEntries(
   if (!response || response.status === 404) {
     throw new Error("Reference list not found");
   }
-  const payload: any = await response.json();
-  const references = payload?.metadata?.references ?? [];
+  const payload = (await response.json()) as {
+    metadata?: { references?: InspireReference[] };
+  };
+  const references = payload.metadata?.references ?? [];
   const totalCount = references.length;
 
   const entries: InspireReferenceEntry[] = [];
@@ -327,7 +333,9 @@ async function fetchAndApplyBatchMetadata(
       return [];
     }
 
-    const payload: any = await response.json();
+    const payload = (await response.json()) as unknown as
+      | InspireLiteratureSearchResponse
+      | null;
     const hits = payload?.hits?.hits ?? [];
     const processedRecids: string[] = [];
 

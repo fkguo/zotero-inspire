@@ -11,6 +11,10 @@ import {
   buildFieldsParam,
 } from "./constants";
 import type { jsobject } from "./types";
+import type {
+  InspireAbstract,
+  InspireLiteratureMetadata,
+} from "./apiTypes";
 import { recidLookupCache } from "./apiUtils";
 import { inspireFetch } from "./rateLimiter";
 import { crossrefFetch } from "./crossrefService";
@@ -273,8 +277,10 @@ export async function fetchInspireMetaByRecid(
   if (!response || response.status === 404) {
     return -1;
   }
-  const payload: any = await response.json();
-  const meta = payload?.metadata;
+  const payload = (await response.json()) as {
+    metadata?: InspireLiteratureMetadata & { recid?: string | number };
+  };
+  const meta = payload.metadata;
   if (!meta) {
     return -1;
   }
@@ -308,8 +314,10 @@ async function fetchAbstractDirect(
     if (!response || !response.ok) {
       return null;
     }
-    const payload: any = await response.json();
-    const abstracts = payload?.metadata?.abstracts;
+    const payload = (await response.json()) as {
+      metadata?: { abstracts?: InspireAbstract[] };
+    };
+    const abstracts = payload.metadata?.abstracts;
     if (Array.isArray(abstracts) && abstracts.length) {
       const preferred =
         abstracts.find((a) => (a?.language || "").toLowerCase() === "en") ||
@@ -358,8 +366,10 @@ export async function fetchInspireTexkey(
     if (!response || !response.ok) {
       return null;
     }
-    const payload: any = await response.json();
-    const texkeys = payload?.metadata?.texkeys;
+    const payload = (await response.json()) as {
+      metadata?: { texkeys?: string[] };
+    };
+    const texkeys = payload.metadata?.texkeys;
     if (Array.isArray(texkeys) && texkeys.length) {
       return typeof texkeys[0] === "string" ? texkeys[0] : null;
     }

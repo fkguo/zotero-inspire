@@ -55,6 +55,7 @@ import {
   addCollabTagsToItem,
   batchAddCollabTags,
 } from "./collabTagService";
+import { createAbortController } from "./utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -331,9 +332,7 @@ export class ZInspire {
     this.isCancelled = false;
     // Abort any previous update run
     this.updateController?.abort();
-    this.updateController = typeof AbortController !== "undefined"
-      ? new AbortController()
-      : null;
+    this.updateController = createAbortController() ?? null;
 
     const filteredItems = items.filter((item) => item.isRegularItem());
     this.itemsToUpdate = filteredItems;
@@ -1294,19 +1293,7 @@ export class ZInspire {
       `[${config.addonName}] checkPreprintsWithProgressAndDialog: starting with ${preprints.length} preprints`,
     );
 
-    // Get AbortController from main window (may not be available in all contexts)
-    let AbortControllerClass =
-      typeof AbortController !== "undefined" ? AbortController : null;
-    if (!AbortControllerClass) {
-      const win = Zotero.getMainWindow();
-      if (win && (win as any).AbortController) {
-        AbortControllerClass = (win as any).AbortController;
-      }
-    }
-
-    const abortController = AbortControllerClass
-      ? new AbortControllerClass()
-      : null;
+    const abortController = createAbortController() ?? null;
 
     this.isCancelled = false;
     this.setupEscapeListener();

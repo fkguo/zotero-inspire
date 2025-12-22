@@ -172,6 +172,13 @@ references-panel-bibtex-failed = 获取 BibTeX 失败
 references-panel-texkey-copied = TeX Key 已复制到剪贴板
 references-panel-texkey-failed = 获取 TeX Key 失败
 
+# 摘要复制右键菜单
+references-panel-abstract-copy = 复制
+references-panel-abstract-copy-selection = 复制所选内容
+references-panel-abstract-copy-latex = 复制为 LaTeX
+references-panel-abstract-copied = 摘要已复制到剪贴板
+references-panel-abstract-latex-copied = LaTeX 源码已复制到剪贴板
+
 # 预览卡片操作按钮 (FTR-HOVER-PREVIEW)
 references-panel-status-local = 本地库中
 references-panel-status-online = 在线

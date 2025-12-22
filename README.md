@@ -212,6 +212,7 @@ Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences
 | **Smart Update**             | Preserve manual edits during updates           |
 | **Preprint Watch**           | Monitor unpublished preprints                  |
 | **Fuzzy citation detection** | For PDFs with broken text layers               |
+| **Abstract LaTeX mode**      | KaTeX (full rendering, default) or Unicode     |
 
 ---
 

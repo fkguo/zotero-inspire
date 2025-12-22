@@ -5,6 +5,12 @@ pref-arxiv-tag = arXiv 主分类标签
 pref-refs-panel = 引用面板
 pref-reader-history = 阅读器视图导航
 pref-nofound = 未找到 INSPIRE 记录
+pref-latex-label = 摘要 LaTeX：
+pref-latex-mode-unicode = Unicode
+    .tooltiptext = 使用 Unicode 字符显示简单公式，轻量渲染
+pref-latex-mode-katex = KaTeX（默认）
+    .tooltiptext = 使用 KaTeX 高保真渲染复杂 LaTeX 公式
+pref-latex-mode-description = KaTeX 可渲染分数、积分、矩阵等复杂公式。仅在获取摘要时有效。
 
 pref-enable =
     .label = 启用

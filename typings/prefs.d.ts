@@ -17,6 +17,7 @@ declare namespace _ZoteroTypes {
       "reader_auto_reopen": boolean;
       "chart_enable": boolean;
       "chart_default_collapsed": boolean;
+      "latex_render_mode": string;
       "search_history_days": number;
       "pdf_fuzzy_citation": boolean;
       "pdf_parse_refs_list": boolean;
