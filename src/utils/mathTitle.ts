@@ -29,7 +29,8 @@ function convertMathML(html: string): string {
     "=": "⁼",
     "(": "⁽",
     ")": "⁾",
-    "*": "*",
+    "*": "<sup>*</sup>", // No Unicode superscript asterisk, use HTML
+    "⁎": "<sup>*</sup>", // U+2217 ASTERISK OPERATOR → HTML superscript
     a: "ᵃ",
     b: "ᵇ",
     c: "ᶜ",
@@ -239,8 +240,8 @@ function convertMathML(html: string): string {
     // Remove the outer <math> tags
     result = result.replace(/<\/?math[^>]*>/gi, "");
 
-    // Clean up any remaining tags
-    result = result.replace(/<[^>]+>/g, "");
+    // Clean up any remaining tags (but preserve <sup>, </sup>, <sub>, </sub>)
+    result = result.replace(/<(?!\/?su[bp]>)[^>]+>/g, "");
 
     // Normalize Unicode operators
     result = result
@@ -324,7 +325,8 @@ export function cleanMathTitle(title?: string | null): string {
     "=": "⁼",
     "(": "⁽",
     ")": "⁾",
-    "*": "*",
+    "*": "<sup>*</sup>", // No Unicode superscript asterisk, use HTML
+    "⁎": "<sup>*</sup>", // U+2217 ASTERISK OPERATOR → HTML superscript
     a: "ᵃ",
     b: "ᵇ",
     c: "ᶜ",

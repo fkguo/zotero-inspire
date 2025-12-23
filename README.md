@@ -51,6 +51,7 @@ The plugin automatically fetches metadata when you add new items (configurable i
 - **`Copy INSPIRE link`** — Copy the INSPIRE literature URL
 - **`Copy INSPIRE link (markdown)`** — Copy the INSPIRE literature URL in format of `[texkey](link)`
 - **`Copy Zotero link`** — Copy Zotero select link
+- **`Copy Funding Info`** — Extract and copy funding information from PDF acknowledgments
 
 ### Browse References Panel
 
@@ -83,12 +84,15 @@ inspire: j Phys.Rev.D       → Search by journal
 
 ### Status Indicators
 
-| Icon       | Meaning                     |
-| ---------- | --------------------------- |
-| ● (green) | Item exists in your library |
-| ⊕ (red)   | Item can be imported        |
-| 🔗 (green) | Linked as related item      |
-| 🔗 (gray)  | Not linked                  |
+| Icon        | Meaning                       |
+| ----------- | ----------------------------- |
+| ● (green)  | Item exists in your library   |
+| ⊕ (red)    | Item can be imported          |
+| 🔗 (green)  | Linked as related item        |
+| 🔗 (gray)   | Not linked                    |
+| 📄 (green)  | PDF available - click to open |
+| ⬇️ (blue) | Find Full Text available      |
+| 📄 (gray)   | No PDF / Not in library       |
 
 ### Interactions
 
@@ -98,6 +102,8 @@ inspire: j Phys.Rev.D       → Search by journal
 | Double-click ●      | Open PDF directly        |
 | Click ⊕             | Open import dialog       |
 | Click 🔗             | Toggle related item link |
+| Click 📄 (green)     | Open PDF attachment      |
+| Click ⬇️ (blue)    | Trigger Find Full Text   |
 | Click title          | Open in INSPIRE          |
 | Hover title          | Show abstract            |
 | Click author         | View author's papers     |
@@ -164,6 +170,21 @@ When reading a PDF in Zotero:
 ---
 
 ## Tips & Tricks
+
+### Funding Information Extraction
+
+Extract grant numbers from PDF acknowledgment sections for reporting:
+
+1. Select one or more items with PDF attachments
+2. Right-click → `INSPIRE` → `Copy Funding Info`
+3. Paste into your funding report
+
+**Output format** (single item): `NSFC: 12345678; DOE: SC0012345`
+**Output format** (multiple items): Tab-separated table with Title, arXiv, Funding columns
+
+**Supported funders** include: NSFC, MoST, CAS, DOE, NSF (US), ERC, DFG, JSPS, and many more.
+
+> **Note**: Extraction results may be incomplete due to PDF text quality, non-standard acknowledgment formats, or unrecognized funder patterns. Please verify manually for critical use cases.
 
 ### Offline Usage
 

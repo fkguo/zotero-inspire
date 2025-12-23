@@ -33,6 +33,9 @@ import {
   applyPreviewCardAbstractStyle,
   // Unified floating element positioning
   positionFloatingElement,
+  // PDF button rendering (shared with EntryListRenderer)
+  renderPdfButtonIcon,
+  PdfButtonState,
 } from "./pickerUI";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4530,11 +4533,12 @@ class InspireReferencePanelController {
       align-items: center;
       justify-content: center;
     `;
-    button.addEventListener("click", (event) => {
+    button.onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
+      Zotero.debug(`[${config.addonName}] Quick filter button clicked, popup visible: ${this.quickFiltersPopupVisible}`);
       this.toggleQuickFiltersPopup();
-    });
+    };
 
     const badge = doc.createElement("span");
     badge.className = "zinspire-quick-filter-badge";
@@ -4545,30 +4549,29 @@ class InspireReferencePanelController {
     this.quickFiltersButton = button as HTMLButtonElement;
     this.quickFiltersBadge = badge as HTMLSpanElement;
 
-    // Create popup as absolute positioned dropdown overlay
+    // Create popup as fixed positioned dropdown overlay
+    // FIX-OVERFLOW-CLIP: Append to this.body to avoid clipping from parent overflow:hidden
     const popup = doc.createElement("div");
     popup.className = "zinspire-quick-filter-popup";
     popup.hidden = true;
-    // Absolute positioned dropdown overlay - single column
-    // Use left: 0 to align with button's left edge (prevents cutoff on narrow panels)
+    // Fixed positioned dropdown overlay - single column
+    // Position will be calculated dynamically in openQuickFiltersPopup
     // FIX-DARK-MODE: Use solid background for better visibility
     popup.style.cssText = `
       display: none;
       flex-direction: column;
-      position: absolute;
-      top: 100%;
-      left: 0;
-      z-index: 1000;
+      position: fixed;
+      z-index: 10000;
       background: var(--material-background, #fff);
       border: 1px solid var(--fill-quinary, #d1d5db);
       border-radius: 6px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
       padding: 6px 4px;
-      margin-top: 4px;
       gap: 2px;
       min-width: 160px;
     `;
-    wrapper.appendChild(popup);
+    // FIX-OVERFLOW-CLIP: Append to body instead of wrapper to avoid clipping
+    this.body.appendChild(popup);
     this.quickFiltersPopup = popup as HTMLDivElement;
 
     this.renderQuickFilterItems(popup as HTMLDivElement);
@@ -4655,9 +4658,19 @@ class InspireReferencePanelController {
   }
 
   private openQuickFiltersPopup(): void {
+    Zotero.debug(`[${config.addonName}] openQuickFiltersPopup called, popup exists: ${!!this.quickFiltersPopup}`);
     if (!this.quickFiltersPopup) {
+      Zotero.debug(`[${config.addonName}] quickFiltersPopup is null/undefined, returning early`);
       return;
     }
+
+    // FIX-OVERFLOW-CLIP: Calculate fixed position based on button's bounding rect
+    if (this.quickFiltersButton) {
+      const buttonRect = this.quickFiltersButton.getBoundingClientRect();
+      this.quickFiltersPopup.style.top = `${buttonRect.bottom + 4}px`;
+      this.quickFiltersPopup.style.left = `${buttonRect.left}px`;
+    }
+
     this.quickFiltersPopup.hidden = false;
     this.quickFiltersPopup.style.display = "flex";
     this.quickFiltersPopupVisible = true;
@@ -4981,6 +4994,19 @@ class InspireReferencePanelController {
         return;
       }
 
+      // PDF button click (open PDF or find full text)
+      if (target.closest(".zinspire-ref-entry__pdf")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const pdfButton = target.closest(
+          ".zinspire-ref-entry__pdf",
+        ) as HTMLButtonElement;
+        if (!pdfButton.disabled) {
+          this.handlePdfAction(entry, pdfButton).catch(() => void 0);
+        }
+        return;
+      }
+
       // Author link click (show author papers)
       if (target.closest(".zinspire-ref-entry__author-link")) {
         event.preventDefault();
@@ -5012,7 +5038,8 @@ class InspireReferencePanelController {
       const isInteractiveElement = target.closest(
         "button, a, input, .zinspire-ref-entry__dot, .zinspire-ref-entry__link, " +
           ".zinspire-ref-entry__author-link, .zinspire-ref-entry__stats-button, " +
-          ".zinspire-ref-entry__bibtex, .zinspire-ref-entry__texkey, .zinspire-ref-entry__checkbox",
+          ".zinspire-ref-entry__bibtex, .zinspire-ref-entry__texkey, .zinspire-ref-entry__pdf, " +
+          ".zinspire-ref-entry__checkbox",
       );
       if (!isInteractiveElement) {
         // Sync focusedEntryIndex with current filtered list
@@ -9928,6 +9955,24 @@ class InspireReferencePanelController {
       );
       this.renderLinkButton(linkButton, Boolean(entry.isRelated));
     }
+
+    // FIX: Also update PDF button when local status changes
+    const pdfButton = row.querySelector(
+      ".zinspire-ref-entry__pdf",
+    ) as HTMLButtonElement;
+    if (pdfButton) {
+      const doc = this.body.ownerDocument;
+      const pdfStrings = {
+        pdfOpen: getString("references-panel-pdf-open" as FluentMessageId),
+        pdfFind: getString("references-panel-pdf-find" as FluentMessageId),
+      };
+      if (entry.localItemID) {
+        const hasPdf = this.getFirstPdfAttachmentID(entry.localItemID) !== null;
+        renderPdfButtonIcon(doc, pdfButton, hasPdf ? PdfButtonState.HAS_PDF : PdfButtonState.FIND_PDF, pdfStrings);
+      } else {
+        renderPdfButtonIcon(doc, pdfButton, PdfButtonState.DISABLED);
+      }
+    }
   }
 
   /**
@@ -10041,9 +10086,12 @@ class InspireReferencePanelController {
     icon.style.padding = "0";
     icon.style.display = "block";
     if (isLinked) {
-      // Bright green color filter for linked state (high contrast with gray)
-      icon.style.filter =
-        "brightness(0) saturate(100%) invert(55%) sepia(95%) saturate(500%) hue-rotate(85deg) brightness(95%) contrast(95%)";
+      // Green color filter matching local status marker (#22c55e dark / #1a8f4d light)
+      const dark = isDarkMode();
+      // CSS filter to produce bright green matching other indicators
+      icon.style.filter = dark
+        ? "brightness(0) saturate(100%) invert(64%) sepia(44%) saturate(616%) hue-rotate(93deg) brightness(103%) contrast(93%)"
+        : "brightness(0) saturate(100%) invert(45%) sepia(14%) saturate(1952%) hue-rotate(106deg) brightness(100%) contrast(87%)";
     } else {
       // Light gray color filter for unlinked state
       icon.style.filter =
@@ -12155,6 +12203,10 @@ class InspireReferencePanelController {
       viewMode: this.viewMode,
       maxAuthors: (getPref("max_authors") as number) || 3,
       getCitationValue: (entry) => this.getCitationValue(entry),
+      hasPdf: (entry) => {
+        if (!entry.localItemID) return false;
+        return this.getFirstPdfAttachmentID(entry.localItemID) !== null;
+      },
     };
   }
 
@@ -12171,6 +12223,9 @@ class InspireReferencePanelController {
         const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
         if (row && entry.localItemID) {
           this.entryRenderer?.updateLocalState(row, true);
+          // FIX: Also update PDF button state (disabled → find-pdf)
+          const hasPdf = this.getFirstPdfAttachmentID(entry.localItemID) !== null;
+          this.entryRenderer?.updatePdfState(row, hasPdf ? "has-pdf" : "find-pdf");
         }
       },
       onLink: async (entry) => {
@@ -13899,8 +13954,10 @@ class InspireReferencePanelController {
     // Get cached strings for performance
     const s = getCachedStrings();
 
-    // Position the tooltip
-    this.positionTooltip(anchorEl);
+    // Position the tooltip - if positioning fails (anchor not visible), don't show
+    if (!this.positionTooltip(anchorEl)) {
+      return;
+    }
     this.abstractTooltip.style.display = "block";
 
     // Check if we already have the abstract cached
@@ -14173,6 +14230,71 @@ class InspireReferencePanelController {
     }, 1500);
   }
 
+  /**
+   * Handle PDF button click - open PDF or trigger Find Full Text.
+   * @param entry - The reference entry
+   * @param button - The PDF button element
+   */
+  private async handlePdfAction(
+    entry: InspireReferenceEntry,
+    button: HTMLButtonElement,
+  ) {
+    if (!entry.localItemID) {
+      return;
+    }
+
+    const state = button.dataset.state;
+    const originalText = button.textContent;
+
+    if (state === "has-pdf") {
+      // Push current state to navigation history BEFORE opening PDF
+      this.rememberCurrentItemForNavigation();
+      InspireReferencePanelController.forwardStack = [];
+      // Open PDF in reader
+      await this.openPdfForLocalItem(entry.localItemID);
+      InspireReferencePanelController.syncBackButtonStates();
+    } else if (state === "find-pdf") {
+      // Find Full Text - use Zotero's built-in PDF finder
+      // Show loading state
+      button.replaceChildren();
+      const loadingSpan = this.body.ownerDocument.createElement("span");
+      loadingSpan.textContent = "⏳";
+      loadingSpan.style.fontSize = "12px";
+      button.appendChild(loadingSpan);
+      button.disabled = true;
+
+      const doc = this.body.ownerDocument;
+      const pdfStrings = {
+        pdfOpen: getString("references-panel-pdf-open" as FluentMessageId),
+        pdfFind: getString("references-panel-pdf-find" as FluentMessageId),
+      };
+
+      try {
+        const item = Zotero.Items.get(entry.localItemID);
+        if (item && Zotero.Attachments?.addAvailableFiles) {
+          // addAvailableFiles takes an array of items and shows a progress dialog
+          await Zotero.Attachments.addAvailableFiles([item]);
+          // Check if PDF was found after the operation completes
+          const pdfID = this.getFirstPdfAttachmentID(entry.localItemID);
+          if (pdfID) {
+            // Success - render PDF icon
+            renderPdfButtonIcon(doc, button, PdfButtonState.HAS_PDF, pdfStrings);
+          } else {
+            // Not found - restore original state
+            renderPdfButtonIcon(doc, button, PdfButtonState.FIND_PDF, pdfStrings);
+          }
+        } else {
+          renderPdfButtonIcon(doc, button, PdfButtonState.FIND_PDF, pdfStrings);
+        }
+      } catch (err) {
+        Zotero.debug(`[${config.addonName}] Find Full Text failed: ${err}`);
+        renderPdfButtonIcon(doc, button, PdfButtonState.FIND_PDF, pdfStrings);
+      }
+
+      button.disabled = false;
+    }
+  }
+
   private doHideTooltip() {
     // Clear show timeout
     if (this.abstractHoverTimeout) {
@@ -14214,19 +14336,27 @@ class InspireReferencePanelController {
         this.abstractTooltip &&
         this.abstractTooltip.style.display !== "none"
       ) {
-        this.positionTooltip(anchorEl);
+        // Hide tooltip if positioning fails (anchor scrolled out of view)
+        if (!this.positionTooltip(anchorEl)) {
+          this.doHideTooltip();
+        }
       }
     });
   }
 
-  private positionTooltip(anchorEl: HTMLElement) {
-    if (!this.abstractTooltip) return;
-    positionFloatingElement(this.abstractTooltip, anchorEl, {
+  private positionTooltip(anchorEl: HTMLElement): boolean {
+    if (!this.abstractTooltip) return false;
+    const success = positionFloatingElement(this.abstractTooltip, anchorEl, {
       spacing: 12,
       edgeMargin: 10,
       fallbackWidth: 400,
       fallbackHeight: 150,
     });
+    // If positioning failed (anchor not visible), hide tooltip
+    if (!success) {
+      this.abstractTooltip.style.display = "none";
+    }
+    return success;
   }
 
 

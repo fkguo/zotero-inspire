@@ -41,3 +41,5 @@ pref("__prefsPrefix__.preprint_watch_notify", true); // Show notification when p
 pref("__prefsPrefix__.collab_tag_enable", false); // Enable collaboration tagging
 pref("__prefsPrefix__.collab_tag_auto", false); // Auto-add tags when updating/importing
 pref("__prefsPrefix__.collab_tag_template", "{name}"); // Tag format template ({name} = collaboration name)
+// Funding extraction settings (FTR-FUNDING-EXTRACTION)
+pref("__prefsPrefix__.funding_china_only", true); // Only extract Chinese funding agencies (NSFC, CAS, MoST, etc.)

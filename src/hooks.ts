@@ -16,6 +16,8 @@ import {
   cleanupLegacyPreprintFiles,
   createAbortController,
   onRenderModeChange,
+  deriveRecidFromItem,
+  clearFundingCache,
 } from "./modules/inspire";
 import {
   ENRICH_BATCH_RANGE,
@@ -40,6 +42,11 @@ async function onStartup() {
 
   ZInsUtils.registerPrefs();
   ZInsUtils.registerNotifier();
+
+  // Initialize new preference defaults for existing installations (FTR-FUNDING-EXTRACTION)
+  if (getPref("funding_china_only") === undefined) {
+    setPref("funding_china_only", true);
+  }
 
   await onMainWindowLoad(Zotero.getMainWindow());
 
@@ -230,18 +237,38 @@ async function onNotify(
       );
     });
 
+    // FIX-DUPLICATE-NOTE: Skip items that already have an INSPIRE recid
+    // These were just imported from INSPIRE panel and don't need auto-update
+    // This prevents duplicate note creation due to race condition between
+    // panel import and onNotify auto-update
+    const itemsNeedingUpdate = regularItems.filter(
+      (item: Zotero.Item) => !deriveRecidFromItem(item),
+    );
+    if (itemsNeedingUpdate.length === 0) {
+      return;
+    }
+
     switch (getPref("meta")) {
       case "full":
-        _globalThis.inspire.updateItems(regularItems, "full");
+        _globalThis.inspire.updateItems(itemsNeedingUpdate, "full");
         break;
       case "noabstract":
-        _globalThis.inspire.updateItems(regularItems, "noabstract");
+        _globalThis.inspire.updateItems(itemsNeedingUpdate, "noabstract");
         break;
       case "citations":
-        _globalThis.inspire.updateItems(regularItems, "citations");
+        _globalThis.inspire.updateItems(itemsNeedingUpdate, "citations");
         break;
       default:
         break;
+    }
+  }
+
+  // Clear funding cache when items are deleted to prevent memory leaks
+  if (event === "delete") {
+    for (const id of ids) {
+      if (typeof id === "number") {
+        clearFundingCache(id);
+      }
     }
   }
   return;

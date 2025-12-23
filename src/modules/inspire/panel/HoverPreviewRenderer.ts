@@ -39,6 +39,9 @@ import {
   applyMetaLinkStyle,
 } from "../../pickerUI";
 
+// XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -439,7 +442,7 @@ export class HoverPreviewRenderer {
     });
 
     // Prev button
-    const prevBtn = this.doc.createElement("button");
+    const prevBtn = this.doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     prevBtn.textContent = "‹";
     prevBtn.title = getString("references-panel-back");
     prevBtn.disabled = current <= 1;
@@ -462,7 +465,7 @@ export class HoverPreviewRenderer {
     });
 
     // Next button
-    const nextBtn = this.doc.createElement("button");
+    const nextBtn = this.doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     nextBtn.textContent = "›";
     nextBtn.title = getString("references-panel-forward");
     nextBtn.disabled = current >= total;
@@ -504,7 +507,7 @@ export class HoverPreviewRenderer {
     label: string,
     type: "add" | "link" | "unlink" | "copy" | "lookup" | "pdf" | "select",
   ): HTMLButtonElement {
-    const button = this.doc.createElement("button");
+    const button = this.doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     button.textContent = label;
     button.title = label;
 

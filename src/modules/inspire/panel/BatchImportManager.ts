@@ -16,6 +16,9 @@ import {
 } from "../index";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 
+// XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -464,7 +467,7 @@ export class BatchImportManager {
           fontSize: "12px",
         });
 
-        const checkbox = doc.createElement("input");
+        const checkbox = doc.createElementNS(XHTML_NS, "input") as HTMLInputElement;
         checkbox.type = "checkbox";
         Object.assign(checkbox.style, { marginTop: "2px", flexShrink: "0" });
         checkbox.checked = false;
@@ -511,7 +514,7 @@ export class BatchImportManager {
       });
 
       const createBtn = (text: string, primary = false) => {
-        const btn = doc.createElement("button");
+        const btn = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
         Object.assign(btn.style, {
           border: "1px solid var(--zotero-gray-4, #d1d1d5)",
           borderRadius: "4px",

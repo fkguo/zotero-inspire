@@ -34,6 +34,8 @@ export interface RowPoolManagerOptions {
   applyLinkButtonStyle?: StyleApplicator;
   /** Callback to apply BibTeX button styles */
   applyBibTeXButtonStyle?: StyleApplicator;
+  /** Callback to apply PDF button styles */
+  applyPdfButtonStyle?: StyleApplicator;
 }
 
 /**
@@ -247,8 +249,11 @@ export class RowPoolManager {
       this.options.applyContentStyle(content);
     }
 
-    // Create checkbox via createElement (required for Zotero XHTML security)
-    const checkbox = doc.createElement("input");
+    // XHTML namespace for proper element creation in Zotero
+    const XHTML_NS = "http://www.w3.org/1999/xhtml";
+
+    // Create checkbox via createElementNS (required for Zotero XHTML)
+    const checkbox = doc.createElementNS(XHTML_NS, "input") as HTMLInputElement;
     checkbox.type = "checkbox";
     checkbox.classList.add("zinspire-ref-entry__checkbox");
     checkbox.style.width = "14px";
@@ -257,29 +262,37 @@ export class RowPoolManager {
     checkbox.style.cursor = "pointer";
     checkbox.style.flexShrink = "0";
 
-    // Create buttons via createElement (required for Zotero XHTML security)
-    const linkButton = doc.createElement("button");
+    // Create buttons via createElementNS (required for Zotero XHTML)
+    const linkButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     linkButton.type = "button";
     linkButton.classList.add("zinspire-ref-entry__link");
     if (this.options.applyLinkButtonStyle) {
       this.options.applyLinkButtonStyle(linkButton);
     }
 
-    const bibtexButton = doc.createElement("button");
+    const bibtexButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     bibtexButton.type = "button";
     bibtexButton.classList.add("zinspire-ref-entry__bibtex");
     if (this.options.applyBibTeXButtonStyle) {
       this.options.applyBibTeXButtonStyle(bibtexButton);
     }
 
-    const texkeyButton = doc.createElement("button");
+    const texkeyButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     texkeyButton.type = "button";
     texkeyButton.classList.add("zinspire-ref-entry__texkey");
     if (this.options.applyBibTeXButtonStyle) {
       this.options.applyBibTeXButtonStyle(texkeyButton);
     }
 
-    const statsButton = doc.createElement("button");
+    // PDF button - shows PDF status and allows opening/finding PDF
+    const pdfButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+    pdfButton.type = "button";
+    pdfButton.classList.add("zinspire-ref-entry__pdf");
+    if (this.options.applyPdfButtonStyle) {
+      this.options.applyPdfButtonStyle(pdfButton);
+    }
+
+    const statsButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     statsButton.type = "button";
     statsButton.classList.add(
       "zinspire-ref-entry__stats",
@@ -290,10 +303,12 @@ export class RowPoolManager {
     if (controls && marker && content) {
       // Insert checkbox before marker (leftmost position)
       controls.insertBefore(checkbox, marker);
-      // Insert link, texkey, and bibtex buttons after marker
+      // Row 1: checkbox, marker (dot), link
+      // Row 2: texkey, bibtex, pdf
       controls.appendChild(linkButton);
       controls.appendChild(texkeyButton);
       controls.appendChild(bibtexButton);
+      controls.appendChild(pdfButton);
       content.appendChild(statsButton);
     }
 

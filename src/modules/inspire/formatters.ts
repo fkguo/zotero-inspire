@@ -40,6 +40,8 @@ export function getCachedStrings(): Record<string, string> {
       unknownAuthor: getString("references-panel-unknown-author"),
       copyBibtex: getString("references-panel-copy-bibtex"),
       copyTexkey: getString("references-panel-copy-texkey"),
+      pdfOpen: getString("references-panel-pdf-open" as any),
+      pdfFind: getString("references-panel-pdf-find" as any),
       noTitle: getString("references-panel-no-title"),
       // Abstract tooltip strings
       noAbstract: getString("references-panel-no-abstract"),

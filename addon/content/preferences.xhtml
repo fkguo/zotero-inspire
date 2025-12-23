@@ -177,6 +177,12 @@
     name="__prefsPrefix__.collab_tag_template"
     type="string"
   />
+  <!-- Funding Extraction Settings (FTR-FUNDING-EXTRACTION) -->
+  <preference
+    id="pref-funding_china_only"
+    name="__prefsPrefix__.funding_china_only"
+    type="bool"
+  />
 </preferences>
 <groupbox
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
@@ -760,6 +766,25 @@
       <html:p
         class="zinspire-pref-desc"
         data-l10n-id="pref-collab-tag-template-desc"
+      ></html:p>
+    </vbox>
+  </vbox>
+
+  <!-- Funding Extraction Settings (FTR-FUNDING-EXTRACTION) -->
+  <vbox class="zinspire-pref-section">
+    <html:h3
+      class="zinspire-pref-title"
+      data-l10n-id="pref-funding-extraction"
+    ></html:h3>
+    <vbox class="zinspire-pref-row">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-funding_china_only"
+        preference="extensions.zotero.inspiremeta.funding_china_only"
+        data-l10n-id="pref-funding-china-only"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-funding-china-only-desc"
       ></html:p>
     </vbox>
   </vbox>

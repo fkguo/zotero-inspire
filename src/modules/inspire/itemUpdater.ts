@@ -56,6 +56,7 @@ import {
   batchAddCollabTags,
 } from "./collabTagService";
 import { createAbortController } from "./utils";
+import { copyFundingInfo } from "./funding";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -853,6 +854,21 @@ export class ZInspire {
   }
 
   /**
+   * Get selected items for funding extraction (regular items or PDF attachments).
+   * Shows an error if no valid items are selected.
+   */
+  private getSelectedItemsForFunding(): Zotero.Item[] {
+    const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
+    const validItems = items.filter(
+      (item) => item?.isRegularItem() || item?.isPDFAttachment(),
+    );
+    if (!validItems.length) {
+      this.showCopyNotification(getString("funding-no-selection"), "fail");
+    }
+    return validItems;
+  }
+
+  /**
    * Show a brief notification for copy actions.
    */
   private showCopyNotification(
@@ -1058,6 +1074,16 @@ export class ZInspire {
         "fail",
       );
     }
+  }
+
+  /**
+   * Copy funding info from PDF acknowledgments.
+   * Supports both regular items and PDF attachments directly.
+   */
+  async copyFundingInfo() {
+    const items = this.getSelectedItemsForFunding();
+    if (!items.length) return;
+    await copyFundingInfo(items);
   }
 
   /**

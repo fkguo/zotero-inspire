@@ -44,6 +44,7 @@ references-panel-status-empty = 选择一条条目以加载 INSPIRE 数据
 references-panel-reader-mode = 阅读器视图中不支持 INSPIRE 数据
 references-panel-select-item = 请选择单个常规条目以查看 INSPIRE 数据
 references-panel-no-recid = 未找到此条目的 INSPIRE 记录
+references-panel-recid-found = INSPIRE 记录发现！正在加载引用...
 references-panel-status-loading = 正在加载引用...
 references-panel-status-loading-cited = 正在加载被引记录...
 references-panel-status-loading-entry = 正在加载所选引用的被引记录...
@@ -167,6 +168,10 @@ references-panel-author-bai-label = BAI
 references-panel-author-recid-label = INSPIRE ID
 references-panel-copy-bibtex = 复制 BibTeX
 references-panel-copy-texkey = 复制 TeX Key
+references-panel-pdf-open = 打开 PDF
+references-panel-pdf-find = 查找全文
+references-panel-pdf-finding = 正在查找全文...
+references-panel-pdf-not-found = 未找到全文
 references-panel-bibtex-copied = BibTeX 已复制到剪贴板
 references-panel-bibtex-failed = 获取 BibTeX 失败
 references-panel-texkey-copied = TeX Key 已复制到剪贴板
@@ -435,3 +440,23 @@ collab-tag-result =
   }
 collab-tag-no-selection = 请至少选择一个条目以添加合作组标签
 collab-tag-disabled = 请在 首选项 → INSPIRE 中启用合作组标签功能
+
+# 基金信息提取 - 主窗口菜单
+menuitem-copy-funding = 复制基金信息
+
+# 基金信息提取 - 进度消息
+funding-extraction-progress = 正在从 PDF 提取基金信息...
+funding-extraction-complete = 找到 { $count } 个基金号，来自 { $funders } 个资助机构
+funding-extraction-none = 未找到基金信息
+funding-no-selection = 未选择条目
+funding-no-entries = 没有可导出的条目
+funding-no-pdf = 未找到 PDF 附件
+funding-no-linked-items = 没有条目链接到 Zotero 库
+funding-some-unlinked = { $count } 个条目未链接（已跳过）
+
+# 基金信息提取 - 引用面板导出菜单
+references-panel-export-funding-header = — 基金信息 —
+references-panel-export-funding-copy = 复制基金表格
+references-panel-export-funding-csv = 导出基金信息 (CSV)
+references-panel-export-funding-saved = 已保存基金表格（{ $count } 条）
+references-panel-export-funding-copied = 已复制基金表格（{ $count } 条）

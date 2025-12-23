@@ -39,6 +39,10 @@ import {
   applyAuthorLinkStyle,
   applyMetaLinkStyle,
   applyBibTeXButtonStyle,
+  applyPdfButtonStyle,
+  // PDF button rendering (shared with zinspire.ts)
+  renderPdfButtonIcon,
+  PdfButtonState,
 } from "../../pickerUI";
 import { RowPoolManager, type RowPoolManagerOptions } from "./RowPoolManager";
 
@@ -61,6 +65,8 @@ export interface EntryRenderContext {
   maxAuthors: number;
   /** Callback to get citation value for an entry (depends on viewMode and prefs) */
   getCitationValue: (entry: InspireReferenceEntry) => number;
+  /** Callback to check if entry has PDF attachment (for PDF button state) */
+  hasPdf?: (entry: InspireReferenceEntry) => boolean;
   /** Cached dark mode value (computed once per render batch for performance) */
   darkMode?: boolean;
 }
@@ -104,6 +110,7 @@ export class EntryListRenderer {
       applyContentStyle: applyRefEntryContentStyle,
       applyLinkButtonStyle: applyRefEntryLinkButtonStyle,
       applyBibTeXButtonStyle: applyBibTeXButtonStyle,
+      applyPdfButtonStyle: applyPdfButtonStyle,
     };
     this.poolManager = new RowPoolManager(poolOptions);
   }
@@ -215,6 +222,24 @@ export class EntryListRenderer {
         "title",
         hasLocalItem ? this.strings.dotLocal : this.strings.dotAdd,
       );
+    }
+  }
+
+  /**
+   * Update only the PDF button state.
+   * @param row The row element to update
+   * @param state PdfButtonState enum value
+   */
+  updatePdfState(
+    row: HTMLDivElement,
+    state: PdfButtonState,
+  ): void {
+    const pdfButton = row.querySelector(
+      ".zinspire-ref-entry__pdf",
+    ) as HTMLButtonElement | null;
+    if (pdfButton) {
+      const pdfStrings = { pdfOpen: this.strings.pdfOpen, pdfFind: this.strings.pdfFind };
+      renderPdfButtonIcon(this.doc, pdfButton, state, pdfStrings);
     }
   }
 
@@ -352,6 +377,25 @@ export class EntryListRenderer {
         texkeyButton.disabled = true;
         texkeyButton.style.opacity = "0.3";
         texkeyButton.style.cursor = "not-allowed";
+      }
+    }
+
+    // Update PDF button - shows PDF status and allows opening/finding PDF
+    const pdfButton = row.querySelector(
+      ".zinspire-ref-entry__pdf",
+    ) as HTMLButtonElement | null;
+
+    if (pdfButton) {
+      const hasLocalItem = Boolean(entry.localItemID);
+      const hasPdf = ctx.hasPdf ? ctx.hasPdf(entry) : false;
+      const pdfStrings = { pdfOpen: this.strings.pdfOpen, pdfFind: this.strings.pdfFind };
+
+      if (hasLocalItem && hasPdf) {
+        renderPdfButtonIcon(this.doc, pdfButton, PdfButtonState.HAS_PDF, pdfStrings, dark);
+      } else if (hasLocalItem && !hasPdf) {
+        renderPdfButtonIcon(this.doc, pdfButton, PdfButtonState.FIND_PDF, pdfStrings, dark);
+      } else {
+        renderPdfButtonIcon(this.doc, pdfButton, PdfButtonState.DISABLED, undefined, dark);
       }
     }
 
@@ -656,7 +700,8 @@ export class EntryListRenderer {
     button.style.opacity = "1";
     button.style.cursor = "pointer";
 
-    const icon = this.doc.createElement("img");
+    // Use createElementNS for XHTML compatibility
+    const icon = this.doc.createElementNS("http://www.w3.org/1999/xhtml", "img") as HTMLImageElement;
     icon.src = "chrome://zotero/skin/itempane/16/related.svg";
     icon.width = 14;
     icon.height = 14;

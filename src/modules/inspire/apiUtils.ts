@@ -190,6 +190,33 @@ export function extractArxivFromMetadata(
   return undefined;
 }
 
+/**
+ * Extract arXiv ID from item (Extra field, URL, or Archive Location)
+ */
+export function extractArxivIdFromItem(item: Zotero.Item): string | undefined {
+  // Try Extra field
+  const extra = item.getField("extra") as string;
+  if (extra) {
+    const match = extra.match(/arXiv:\s*([0-9.]+|[a-z-]+\/[0-9]+)/i);
+    if (match) return match[1];
+  }
+
+  // Try URL field
+  const url = item.getField("url") as string;
+  if (url) {
+    const match = url.match(/arxiv\.org\/abs\/([0-9.]+|[a-z-]+\/[0-9]+)/i);
+    if (match) return match[1];
+  }
+
+  // Try Archive Location (sometimes used for arXiv ID)
+  const archiveLoc = item.getField("archiveLocation") as string;
+  if (archiveLoc && /^[0-9.]+|[a-z-]+\/[0-9]+$/.test(archiveLoc)) {
+    return archiveLoc;
+  }
+
+  return undefined;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Database Query Helpers
 // ─────────────────────────────────────────────────────────────────────────────
