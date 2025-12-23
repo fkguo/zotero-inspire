@@ -151,4 +151,9 @@ pref-collab-tag-auto-desc = Automatically add collaboration tags when items are 
 pref-collab-tag-template-label = Tag format:
 pref-collab-tag-template-desc = Use {"{name}"} for collaboration name. Examples: {"{name}"}, #collab/{"{name}"}, collab:{"{name}"}
 
+pref-funding-extraction = Funding Extraction
+pref-funding-china-only =
+    .label = Extract only Chinese funding agencies
+pref-funding-china-only-desc = When enabled, only extract funding info from Chinese agencies (NSFC, CAS, MoST, etc.). Disable to extract all funders including DOE, NSF, ERC, etc.
+
 pref-help = { $name } Build { $version } { $time }

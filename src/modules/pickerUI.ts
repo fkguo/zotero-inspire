@@ -91,13 +91,17 @@ export function applyRefEntryTextContainerStyle(el: HTMLElement): void {
     ".zinspire-ref-entry__controls",
   ) as HTMLElement | null;
   if (controls) {
-    controls.style.display = "flex";
-    controls.style.flexWrap = "wrap";
-    controls.style.alignItems = "center";
-    controls.style.alignContent = "flex-start";
-    controls.style.justifyContent = "flex-end";
-    controls.style.gap = "4px";
-    controls.style.width = "56px";
+    // FIX-LAYOUT: Use CSS Grid for perfect vertical alignment of 2 rows × 3 columns
+    // Row 1: checkbox, marker, link
+    // Row 2: pdf, texkey, bibtex
+    controls.style.display = "grid";
+    // Use 16px columns for better centering (items are 14px, extra 2px for padding)
+    controls.style.gridTemplateColumns = "repeat(3, 16px)";
+    controls.style.gap = "2px";
+    // Use place-items to center all items both horizontally and vertically in their cells
+    controls.style.placeItems = "center";
+    // Width: 3 columns × 16px + 2 gaps × 2px = 52px
+    controls.style.width = "52px";
     controls.style.flexShrink = "0";
   }
 }
@@ -239,11 +243,13 @@ export function applyTabButtonStyle(el: HTMLElement, isActive: boolean): void {
   el.style.whiteSpace = "nowrap";
 
   if (isActive) {
-    // Active tab: primary color pill - use CSS variable for accent color
-    el.style.backgroundColor = "var(--accent-color, #0066cc)";
+    // Active tab: blue pill to stand out from chart toggles
+    // FIX-WINDOWS-TAB-COLOR: Use hardcoded color for cross-platform consistency
+    const activeBlue = "#0060df"; // Zotero's primary blue
+    el.style.backgroundColor = activeBlue;
     el.style.color = "#fff";
     el.style.fontWeight = "500";
-    el.style.border = "1px solid var(--accent-color, #0066cc)";
+    el.style.border = `1px solid ${activeBlue}`;
     el.style.boxShadow = "none";
   } else {
     // Inactive tab: outlined pill (clearly looks like a button)
@@ -263,16 +269,208 @@ export function applyBibTeXButtonStyle(el: HTMLElement): void {
   el.style.display = "inline-flex";
   el.style.alignItems = "center";
   el.style.justifyContent = "center";
-  el.style.width = "16px";
-  el.style.height = "16px";
+  // FIX-LAYOUT: Use 14px to match other control buttons for consistent flex wrapping
+  el.style.width = "14px";
+  el.style.height = "14px";
   el.style.border = "none";
   el.style.background = "transparent";
   el.style.padding = "0";
   el.style.cursor = "pointer";
-  el.style.fontSize = "11px";
+  el.style.fontSize = "13px";
   el.style.color = "var(--fill-secondary, #666)";
   el.style.opacity = "0.7";
   el.style.transition = "opacity 0.15s ease";
+}
+
+/**
+ * Apply inline styles to the PDF button in entry rows.
+ * Shows PDF status: has PDF (green), no PDF but can find (gray), not in library (hidden).
+ */
+export function applyPdfButtonStyle(el: HTMLElement): void {
+  // Match link button style exactly for consistent rendering
+  el.style.flexShrink = "0";
+  el.style.display = "inline-flex";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  el.style.width = "14px";
+  el.style.height = "14px";
+  el.style.border = "none";
+  el.style.background = "transparent";
+  el.style.padding = "0";
+  el.style.cursor = "pointer";
+  el.style.fontSize = "13px";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PDF Button State and Rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * PDF button state enum.
+ * - has-pdf: Item has PDF attachment (green document icon)
+ * - find-pdf: Item in library but no PDF (blue download icon)
+ * - disabled: Item not in library (gray document icon)
+ */
+export const PdfButtonState = {
+  HAS_PDF: "has-pdf",
+  FIND_PDF: "find-pdf",
+  DISABLED: "disabled",
+} as const;
+
+export type PdfButtonState = (typeof PdfButtonState)[keyof typeof PdfButtonState];
+
+/** Color constants for PDF button states */
+const PDF_BUTTON_COLORS = {
+  greenDark: "#22c55e",
+  greenLight: "#1a8f4d",
+  blue: "#3b82f6",
+  grayDark: "#6b7280",
+  grayLight: "#9ca3af",
+} as const;
+
+/**
+ * Render PDF button with appropriate icon based on state.
+ * This is the shared rendering function used by both zinspire.ts and EntryListRenderer.ts.
+ *
+ * @param doc - Document to create elements in
+ * @param button - The button element to render into
+ * @param state - One of: "has-pdf", "find-pdf", "disabled"
+ * @param strings - Optional localized strings for tooltips { pdfOpen, pdfFind }
+ * @param dark - Optional dark mode flag (defaults to isDarkMode())
+ */
+export function renderPdfButtonIcon(
+  doc: Document,
+  button: HTMLButtonElement,
+  state: PdfButtonState,
+  strings?: { pdfOpen?: string; pdfFind?: string },
+  dark?: boolean,
+): void {
+  button.replaceChildren();
+  button.dataset.state = state;
+
+  const isDark = dark ?? isDarkMode();
+  const greenColor = isDark ? PDF_BUTTON_COLORS.greenDark : PDF_BUTTON_COLORS.greenLight;
+  const grayColor = isDark ? PDF_BUTTON_COLORS.grayDark : PDF_BUTTON_COLORS.grayLight;
+
+  if (state === PdfButtonState.HAS_PDF) {
+    // Has PDF - green document icon, clickable
+    const svg = createDocumentSvg(doc, greenColor);
+    button.appendChild(svg);
+    button.setAttribute("title", strings?.pdfOpen ?? "Open PDF");
+    button.style.opacity = "1";
+    button.style.cursor = "pointer";
+    button.disabled = false;
+  } else if (state === PdfButtonState.FIND_PDF) {
+    // Can find PDF - blue download icon, clickable
+    const svg = createDownloadSvg(doc, PDF_BUTTON_COLORS.blue);
+    button.appendChild(svg);
+    button.setAttribute("title", strings?.pdfFind ?? "Find Full Text");
+    button.style.opacity = "1";
+    button.style.cursor = "pointer";
+    button.disabled = false;
+  } else {
+    // Disabled - gray document icon, not clickable
+    const svg = createDocumentSvg(doc, grayColor);
+    button.appendChild(svg);
+    button.removeAttribute("title");
+    button.style.opacity = "0.4";
+    button.style.cursor = "default";
+    button.disabled = true;
+  }
+}
+
+/**
+ * Create an inline SVG document icon for PDF button.
+ * Uses createElementNS for XHTML compatibility in Zotero.
+ * @param doc - Document to create elements in
+ * @param fillColor - Fill color for the icon
+ * @param size - Icon size in pixels (default: 12)
+ */
+export function createDocumentSvg(
+  doc: Document,
+  fillColor: string,
+  size = 12,
+): SVGElement {
+  const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.style.display = "block";
+
+  const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+  // Document icon with folded corner + horizontal lines (represents text/PDF)
+  path.setAttribute(
+    "d",
+    "M4 0C2.9 0 2 .9 2 2v12c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V5l-5-5H4zm5 1.5L12.5 5H9V1.5zM5 8h6v1H5V8zm0 2h4v1H5v-1z",
+  );
+  path.setAttribute("fill", fillColor);
+  svg.appendChild(path);
+
+  return svg;
+}
+
+/**
+ * Create an inline SVG download icon for "find PDF" button.
+ * Arrow pointing down into a tray - classic download symbol.
+ * @param doc - Document to create elements in
+ * @param fillColor - Fill color for the icon
+ * @param size - Icon size in pixels (default: 12)
+ */
+export function createDownloadSvg(
+  doc: Document,
+  fillColor: string,
+  size = 12,
+): SVGElement {
+  const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.style.display = "block";
+
+  const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+  // Download icon: arrow pointing down + horizontal tray at bottom
+  path.setAttribute(
+    "d",
+    "M8 1v8M8 9L4.5 5.5M8 9l3.5-3.5M2 12v2h12v-2",
+  );
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", fillColor);
+  path.setAttribute("stroke-width", "1.8");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(path);
+
+  return svg;
+}
+
+/**
+ * Create an inline SVG link/related icon for the related item button.
+ * Two interlocking chain links - represents related/linked items.
+ * @param doc - Document to create elements in
+ * @param fillColor - Fill color for the icon
+ * @param size - Icon size in pixels (default: 14)
+ */
+export function createRelatedSvg(
+  doc: Document,
+  fillColor: string,
+  size = 14,
+): SVGElement {
+  const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.style.display = "block";
+
+  const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+  // Chain link icon: two interlocking links rotated 45 degrees
+  path.setAttribute(
+    "d",
+    "M6.354 5.354l-2 2a2.5 2.5 0 1 0 3.536 3.536l.707-.707-1.414-1.414-.707.707a.5.5 0 1 1-.707-.707l2-2a.5.5 0 0 1 .707.707l1.414-1.414a2.5 2.5 0 0 0-3.536-3.536l-2 2a2.5 2.5 0 0 0 0 3.536l.707-.708zm3.292 5.292l2-2a2.5 2.5 0 0 0-3.536-3.536l-.707.707 1.414 1.414.707-.707a.5.5 0 1 1 .707.707l-2 2a.5.5 0 0 1-.707-.707l-1.414 1.414a2.5 2.5 0 0 0 3.536 3.536l2-2a2.5 2.5 0 0 0 0-3.536l-.707.708z",
+  );
+  path.setAttribute("fill", fillColor);
+  svg.appendChild(path);
+
+  return svg;
 }
 
 /**
@@ -423,7 +621,7 @@ export function positionFloatingElement(
   floating: HTMLElement,
   anchor: HTMLElement,
   options: FloatingPositionOptions = {},
-): void {
+): boolean {
   const {
     spacing = 8,
     edgeMargin = 10,
@@ -438,6 +636,22 @@ export function positionFloatingElement(
 
   // Get anchor bounding rect
   const rect = anchor.getBoundingClientRect();
+
+  // Validate rect - if anchor is not visible or has zero dimensions, don't position
+  // This prevents tooltip appearing at top-left corner when anchor is hidden/invalid
+  if (rect.width === 0 && rect.height === 0) {
+    return false;
+  }
+
+  // Also check if rect is completely outside viewport (anchor may be scrolled out)
+  if (
+    rect.right < 0 ||
+    rect.bottom < 0 ||
+    rect.left > viewportWidth ||
+    rect.top > viewportHeight
+  ) {
+    return false;
+  }
 
   // Get floating element dimensions (use fallback if not yet rendered)
   const floatingWidth = floating.offsetWidth || fallbackWidth;
@@ -470,6 +684,8 @@ export function positionFloatingElement(
   // Apply position
   floating.style.left = `${Math.round(left)}px`;
   floating.style.top = `${Math.round(top)}px`;
+
+  return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

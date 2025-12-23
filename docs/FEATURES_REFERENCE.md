@@ -68,6 +68,10 @@ A statistics visualization chart is displayed at the top of the panel for Refere
 - Citation count button → view citing papers
 - Local status indicator: ● (in library), ⊕ (missing)
 - Related item indicator: link icon
+- **PDF status indicator**:
+  - 📄 (green): PDF available, click to open
+  - ⬇️ (blue): Item in library but no PDF, click to trigger Find Full Text
+  - 📄 (gray): Item not in library (disabled)
 - BibTeX copy button
 - TeX key copy button
 - Abstract tooltip on hover
@@ -80,6 +84,8 @@ A statistics visualization chart is displayed at the top of the panel for Refere
 | Click local status (●/⊕)     | Open existing item in library, or add missing item |
 | Double-click local status (●) | Open PDF directly if available                     |
 | Click link icon                | Add/remove related item relationship               |
+| Click PDF icon (green)         | Open PDF attachment in reader                      |
+| Click PDF icon (blue)          | Trigger Find Full Text for the item                |
 | Click author name              | View all papers by that author                     |
 | Click title                    | Open in INSPIRE (or arXiv/DOI fallback)            |
 | Click citation count           | View papers citing this entry                      |
@@ -169,33 +175,33 @@ A dedicated `localCache` service stores References/Cited By/Author Papers JSON f
 
 ### 3.1 Item Menu
 
-| Category                  | Operation                    | Description                                                    |
-| ------------------------- | ---------------------------- | -------------------------------------------------------------- |
-| **Update Metadata** | With abstracts               | Full metadata update including abstract                        |
-|                           | Without abstracts            | Metadata update excluding abstract                             |
-|                           | Citation counts only         | Only update citation counts (falls back to CrossRef if needed) |
-| **Cache**           | Download references cache    | Prefetch INSPIRE references into local cache                   |
-| **Copy**            | Copy BibTeX                  | Fetch and copy BibTeX from INSPIRE                             |
-|                           | Copy citation key            | Copy item's citation key                                       |
-|                           | Copy INSPIRE link            | Copy INSPIRE literature URL                                    |
-|                           | Copy INSPIRE link (Markdown) | Copy as markdown link with title                               |
-|                           | Copy Zotero link             | Copy Zotero select link                                        |
-| **Collaboration Tags** | Add Collaboration Tags    | Add collaboration name as tag for large collaboration papers   |
-| **Preprint**        | Check Preprint Status        | Check if arXiv preprints have been published                   |
-| **Actions**         | Cancel update                | Cancel any ongoing update operation                            |
+| Category                     | Operation                    | Description                                                    |
+| ---------------------------- | ---------------------------- | -------------------------------------------------------------- |
+| **Update Metadata**    | With abstracts               | Full metadata update including abstract                        |
+|                              | Without abstracts            | Metadata update excluding abstract                             |
+|                              | Citation counts only         | Only update citation counts (falls back to CrossRef if needed) |
+| **Cache**              | Download references cache    | Prefetch INSPIRE references into local cache                   |
+| **Copy**               | Copy BibTeX                  | Fetch and copy BibTeX from INSPIRE                             |
+|                              | Copy citation key            | Copy item's citation key                                       |
+|                              | Copy INSPIRE link            | Copy INSPIRE literature URL                                    |
+|                              | Copy INSPIRE link (Markdown) | Copy as markdown link with title                               |
+|                              | Copy Zotero link             | Copy Zotero select link                                        |
+| **Collaboration Tags** | Add Collaboration Tags       | Add collaboration name as tag for large collaboration papers   |
+| **Preprint**           | Check Preprint Status        | Check if arXiv preprints have been published                   |
+| **Actions**            | Cancel update                | Cancel any ongoing update operation                            |
 
 ### 3.2 Collection Menu
 
-| Category                  | Operation                      | Description                                       |
-| ------------------------- | ------------------------------ | ------------------------------------------------- |
-| **Update Metadata** | With abstracts                 | Update all items in collection with full metadata |
-|                           | Without abstracts              | Update all items excluding abstracts              |
-|                           | Citation counts only           | Update citation counts for all items              |
-| **Cache**           | Download references cache      | Prefetch references for all items                 |
-| **Collaboration Tags** | Reapply Collaboration Tags  | Reapply collaboration tags to items in collection |
-| **Preprint**        | Check Preprints in Collection  | Check preprints in this collection                |
-|                           | Check All Preprints in Library | Check all preprints in entire library             |
-| **Actions**         | Cancel update                  | Cancel any ongoing update operation               |
+| Category                     | Operation                      | Description                                       |
+| ---------------------------- | ------------------------------ | ------------------------------------------------- |
+| **Update Metadata**    | With abstracts                 | Update all items in collection with full metadata |
+|                              | Without abstracts              | Update all items excluding abstracts              |
+|                              | Citation counts only           | Update citation counts for all items              |
+| **Cache**              | Download references cache      | Prefetch references for all items                 |
+| **Collaboration Tags** | Reapply Collaboration Tags     | Reapply collaboration tags to items in collection |
+| **Preprint**           | Check Preprints in Collection  | Check preprints in this collection                |
+|                              | Check All Preprints in Library | Check all preprints in entire library             |
+| **Actions**            | Cancel update                  | Cancel any ongoing update operation               |
 
 ---
 
@@ -248,14 +254,14 @@ When selecting text containing citation markers in the Zotero PDF Reader, the ad
 
 ### 5.2 Supported Citation Formats
 
-| Format             | Examples                                     |
-| ------------------ | -------------------------------------------- |
-| Single number      | `[1]`, `[42]`                            |
-| Multiple numbers   | `[1,2,3]`, `[1, 2, 3]`                   |
-| Number range       | `[1-5]`, `[1–5]`                        |
-| Mixed format       | `[1,3-5,7]`                                |
-| Author-year        | `[Smith 2024]`, `[WGR17]`                |
-| Superscript digits | ¹²³⁴⁵⁶⁷⁸⁹⁰                         |
+| Format             | Examples                      |
+| ------------------ | ----------------------------- |
+| Single number      | `[1]`, `[42]`             |
+| Multiple numbers   | `[1,2,3]`, `[1, 2, 3]`    |
+| Number range       | `[1-5]`, `[1–5]`         |
+| Mixed format       | `[1,3-5,7]`                 |
+| Author-year        | `[Smith 2024]`, `[WGR17]` |
+| Superscript digits | ¹²³⁴⁵⁶⁷⁸⁹⁰          |
 
 ### 5.3 Hover Preview
 
@@ -445,12 +451,12 @@ A Zotero item is identified as an unpublished preprint if:
 
 ### 8.2 Entry Points
 
-| Entry                   | Action                                       |
-| ----------------------- | -------------------------------------------- |
-| Item context menu       | Check Preprint Status for selected items     |
-| Collection context menu | Check Preprints in Collection                |
-| Collection context menu | Check All Preprints in Library (whole lib)   |
-| Background (startup)    | Auto-check on first startup (once per day)   |
+| Entry                   | Action                                     |
+| ----------------------- | ------------------------------------------ |
+| Item context menu       | Check Preprint Status for selected items   |
+| Collection context menu | Check Preprints in Collection              |
+| Collection context menu | Check All Preprints in Library (whole lib) |
+| Background (startup)    | Auto-check on first startup (once per day) |
 
 ### 8.3 Update Process
 
@@ -471,7 +477,77 @@ When publications are found:
 
 ---
 
-## 9. Constants Reference
+## 9. Funding Information Extraction
+
+Extracts funding acknowledgment information from PDF files.
+
+### 9.1 Overview
+
+The funding extraction feature parses PDF acknowledgment sections to identify funding agencies and grant numbers. This is useful for generating funding reports.
+
+> **Note**: Extraction results may be incomplete due to PDF text quality, non-standard acknowledgment formats, or unrecognized funder patterns. Please verify manually for critical use cases.
+
+### 9.2 Extraction Process
+
+1. **PDF Selection**: Supports both regular items (uses best PDF attachment) and PDF attachments directly
+2. **Text Extraction**: Reads PDF full text from Zotero's fulltext cache (or falls back to PDFWorker with 15s timeout)
+3. **Acknowledgment Detection**: Locates acknowledgment/funding section using pattern matching
+4. **Funder Identification**: Matches text against known funder patterns with regex
+
+### 9.3 Supported Funders
+
+| Category                | Examples                                                          |
+| ----------------------- | ----------------------------------------------------------------- |
+| **China**         | NSFC, MoST (National Key R&D Program), CAS, CPSF, provincial NSFs |
+| **USA**           | DOE, NSF (US), NIH, Fermilab, SLAC, BNL                           |
+| **Europe**        | ERC, DFG, BMBF, STFC, INFN, ANR, SNSF, VolkswagenStiftung         |
+| **Asia**          | JSPS, JST, NRF-KR, MOST-TW, KEK, RIKEN                            |
+| **International** | CERN, NSERC (Canada), ARC (Australia)                             |
+
+### 9.4 Output Formats
+
+**Single Item** (compact):
+
+```
+NSFC: 12345678; DOE: SC0012345; DFG: TRR110
+```
+
+**Multiple Items** (table):
+
+```
+Title	arXiv	Funding
+Paper Title 1	2301.12345	NSFC: 12345678
+Paper Title 2	2302.07890	DOE: SC0012345; ERC: 123456789
+```
+
+### 9.5 Implementation Details
+
+| Component                      | Description                                   |
+| ------------------------------ | --------------------------------------------- |
+| `fundingPatterns.ts`         | Regex patterns for 50+ funding agencies       |
+| `acknowledgmentExtractor.ts` | Locates acknowledgment section in PDF text    |
+| `fundingExtractor.ts`        | Extracts grant numbers using pattern matching |
+| `fundingService.ts`          | Main service with LRU caching (100 items)     |
+| `copyFunding.ts`             | Formats output and copies to clipboard        |
+
+### 9.6 Pattern Matching
+
+Each funder pattern includes:
+
+- **Primary patterns**: Regex to match funder name + grant number
+- **Next pattern**: Regex to capture additional grant numbers in a list (e.g., "12345678, 87654321")
+- **Priority**: Higher priority patterns are matched first
+- **Category**: Region classification (china/us/eu/asia/intl)
+
+### 9.7 Preferences
+
+| Preference             | Type    | Default | Description                  |
+| ---------------------- | ------- | ------- | ---------------------------- |
+| `funding_china_only` | boolean | false   | Only extract Chinese funders |
+
+---
+
+## 10. Constants Reference
 
 ```typescript
 // API pagination
@@ -513,7 +589,7 @@ metadataCache.maxSize = 500
 
 ---
 
-## 10. Data Flow
+## 11. Data Flow
 
 ```
 User selects item
@@ -535,9 +611,9 @@ updateRowStatus() / updateRowCitationCount()
 
 ---
 
-## 11. Performance Optimizations
+## 12. Performance Optimizations
 
-### 11.1 Rendering
+### 12.1 Rendering
 
 - **Frontend pagination**: Only renders first 100 entries, with infinite scroll for rest
 - **Non-blocking enrichment**: Local status and citation counts fetched after initial render
@@ -546,7 +622,7 @@ updateRowStatus() / updateRowCitationCount()
 - **Row element pooling**: Pool of up to 150 row elements for reuse
 - **Chart lazy calculation**: Uses `setTimeout(0)` / `requestIdleCallback`
 
-### 11.2 Data Fetching
+### 12.2 Data Fetching
 
 - **Batch API queries**: Citation counts fetched in batches of 50 recids
 - **Citation count parallel fetching**: 3 batches fetched in parallel per round
@@ -554,7 +630,7 @@ updateRowStatus() / updateRowCitationCount()
 - **Search text caching**: WeakMap caches `buildEntrySearchText()` results
 - **Infinite scroll**: IntersectionObserver auto-loads more entries
 
-### 11.3 Memory Management
+### 12.3 Memory Management
 
 - **LRU caches**: Bounded caches prevent memory leaks
 - **Chart statistics caching**: Cached per view mode to avoid recomputation
@@ -562,7 +638,7 @@ updateRowStatus() / updateRowCitationCount()
 
 ---
 
-## 12. Debug Commands
+## 13. Debug Commands
 
 Available in Zotero Error Console (`Tools` → `Developer` → `Error Console`):
 
@@ -594,22 +670,22 @@ recidLookup: 95.0% hit rate (190/200), size: 156/500
 
 ---
 
-## 13. Abstract Rendering
+## 14. Abstract Rendering
 
-### 13.1 LaTeX Mode
+### 14.1 LaTeX Mode
 
 Two rendering modes for LaTeX formulas in abstracts:
 
-| Mode        | Description                                                      |
-| ----------- | ---------------------------------------------------------------- |
+| Mode              | Description                                                                |
+| ----------------- | -------------------------------------------------------------------------- |
 | **KaTeX**   | Full KaTeX rendering for complex formulas (fractions, integrals, matrices) |
-| **Unicode** | Converts simple LaTeX to Unicode characters (lightweight)        |
+| **Unicode** | Converts simple LaTeX to Unicode characters (lightweight)                  |
 
 **Preferences**:
 
-| Preference             | Type   | Default | Description          |
-| ---------------------- | ------ | ------- | -------------------- |
-| `latex_render_mode`  | string | "katex" | "katex" or "unicode" |
+| Preference            | Type   | Default | Description          |
+| --------------------- | ------ | ------- | -------------------- |
+| `latex_render_mode` | string | "katex" | "katex" or "unicode" |
 
 **KaTeX Features**:
 
@@ -618,15 +694,15 @@ Two rendering modes for LaTeX formulas in abstracts:
 - Graceful fallback on render errors
 - Supports display and inline math modes
 
-### 13.2 Abstract Copy Context Menu
+### 14.2 Abstract Copy Context Menu
 
 Right-click on abstract preview card shows context menu:
 
-| Option               | Description                              |
-| -------------------- | ---------------------------------------- |
-| **Copy**             | Copy full abstract as plain text         |
-| **Copy Selection**   | Copy selected text (if any)              |
-| **Copy as LaTeX**    | Copy original LaTeX source code          |
+| Option                   | Description                      |
+| ------------------------ | -------------------------------- |
+| **Copy**           | Copy full abstract as plain text |
+| **Copy Selection** | Copy selected text (if any)      |
+| **Copy as LaTeX**  | Copy original LaTeX source code  |
 
 **Implementation**:
 

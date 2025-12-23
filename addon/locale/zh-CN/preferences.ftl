@@ -151,4 +151,9 @@ pref-collab-tag-auto-desc = 从 INSPIRE 更新条目或导入时自动添加合�
 pref-collab-tag-template-label = 标签格式：
 pref-collab-tag-template-desc = 使用 {"{name}"} 作为合作组名称占位符。示例：{"{name}"}、#collab/{"{name}"}、collab:{"{name}"}
 
+pref-funding-extraction = 基金提取
+pref-funding-china-only =
+    .label = 仅提取中国资助机构
+pref-funding-china-only-desc = 启用后仅提取中国资助机构的基金信息（国自然、中科院、科技部等）。禁用则提取所有资助者（包括 DOE、NSF、ERC 等）。
+
 pref-help = { $name } 版本 { $version } { $time }

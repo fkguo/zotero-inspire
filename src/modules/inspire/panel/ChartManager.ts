@@ -14,6 +14,9 @@ import {
 } from "../index";
 import { CHART_STYLES, toStyleString } from "../styles";
 
+// XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
+
 // Local citation ranges for chart (array format for iteration)
 const CITATION_RANGES_ARRAY: Array<{
   label: string;
@@ -360,7 +363,7 @@ export class ChartManager {
   }
 
   private createCollapseButton(doc: Document): HTMLButtonElement {
-    const btn = doc.createElement("button");
+    const btn = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     btn.className = "zinspire-chart-collapse-btn";
     btn.type = "button";
     btn.textContent = this.collapsed ? "▶" : "▼";
@@ -388,7 +391,7 @@ export class ChartManager {
     mode: ChartViewMode,
     active: boolean,
   ): HTMLButtonElement {
-    const btn = doc.createElement("button");
+    const btn = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     btn.className = `zinspire-chart-toggle-btn${active ? " active" : ""}`;
     btn.type = "button";
     btn.textContent = getString(
@@ -413,7 +416,7 @@ export class ChartManager {
   }
 
   private createClearButton(doc: Document): HTMLButtonElement {
-    const btn = doc.createElement("button");
+    const btn = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     btn.className = "zinspire-chart-clear-btn";
     btn.type = "button";
     btn.textContent = "✕";

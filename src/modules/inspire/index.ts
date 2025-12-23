@@ -395,3 +395,18 @@ export {
   type SearchProgressCallback,
   type SearchFetchOptions,
 } from "./panel";
+
+// Re-export funding module (FTR-FUNDING-EXTRACTION)
+export {
+  type FunderPattern,
+  type AcknowledgmentSection,
+  type FundingInfo,
+  type FundingResult,
+  type CandidateMatch,
+  FUNDER_PATTERNS,
+  extractAcknowledgmentSection,
+  extractFundingInfo,
+  getFundingForItem,
+  clearFundingCache,
+  copyFundingInfo,
+} from "./funding";

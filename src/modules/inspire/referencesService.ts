@@ -393,9 +393,16 @@ function applyMetadataToEntry(
   // Title update
   // FIX: Also update title if current title appears truncated (ends with space or is very short)
   // INSPIRE's references API truncates titles at LaTeX $ characters
+  // Detect truncation by checking:
+  // - Title ends with space (common truncation artifact)
+  // - Title ends with dash/hyphen (e.g., "high-" before "$p_T$")
+  // - Title is very short (< 20 chars)
   const currentTitleTruncated = entry.title &&
     entry.title !== strings.noTitle &&
-    (entry.title.endsWith(" ") || entry.title.length < 20);
+    (entry.title.endsWith(" ") ||
+     entry.title.endsWith("-") ||
+     entry.title.endsWith("—") ||
+     entry.title.length < 20);
   const shouldUpdateTitle = !entry.title ||
     entry.title === strings.noTitle ||
     currentTitleTruncated;

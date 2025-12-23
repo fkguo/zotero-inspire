@@ -168,6 +168,10 @@ references-panel-author-bai-label = BAI
 references-panel-author-recid-label = INSPIRE ID
 references-panel-copy-bibtex = Copy BibTeX
 references-panel-copy-texkey = Copy TeX key
+references-panel-pdf-open = Open PDF
+references-panel-pdf-find = Find Full Text
+references-panel-pdf-finding = Finding full text...
+references-panel-pdf-not-found = No full text found
 references-panel-bibtex-copied = BibTeX copied to clipboard
 references-panel-bibtex-failed = Failed to fetch BibTeX
 references-panel-texkey-copied = TeX key copied to clipboard
@@ -441,3 +445,23 @@ collab-tag-result =
   }
 collab-tag-no-selection = Select at least one item to add collaboration tags
 collab-tag-disabled = Enable collaboration tags in Preferences → INSPIRE to use this feature
+
+# Funding extraction - Main window menu
+menuitem-copy-funding = Copy Funding Info
+
+# Funding extraction - Progress messages
+funding-extraction-progress = Extracting funding info from PDF...
+funding-extraction-complete = Found { $count } grant(s) from { $funders } funder(s)
+funding-extraction-none = No funding information found
+funding-no-selection = No items selected
+funding-no-entries = No entries to export
+funding-no-pdf = No PDF attachment found
+funding-no-linked-items = No items are linked to Zotero library
+funding-some-unlinked = { $count } entries are not linked (skipped)
+
+# Funding extraction - References panel export menu
+references-panel-export-funding-header = — Funding Info —
+references-panel-export-funding-copy = Copy Funding Table
+references-panel-export-funding-csv = Export Funding (CSV)
+references-panel-export-funding-saved = Funding table saved ({ $count } entries)
+references-panel-export-funding-copied = Funding table copied ({ $count } entries)

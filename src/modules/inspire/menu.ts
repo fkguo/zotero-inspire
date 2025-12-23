@@ -104,6 +104,13 @@ export class ZInsMenu {
             _globalThis.inspire.copyZoteroLink();
           },
         },
+        {
+          tag: "menuitem",
+          label: getString("menuitem-copy-funding"),
+          commandListener: () => {
+            _globalThis.inspire.copyFundingInfo();
+          },
+        },
         // Collaboration tags for selected items (FTR-COLLAB-TAGS)
         { tag: "menuseparator" },
         {
