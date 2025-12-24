@@ -539,6 +539,8 @@ export function cleanMathTitle(title?: string | null): string {
     .replace(/\\bullet/g, "•")
     .replace(/\\circ/g, "∘")
     .replace(/\\bar\{([^}]+)\}/g, "$1\u0304")
+    // Handle \bar without braces: \bar c → c̄ (space or no space before single letter)
+    .replace(/\\bar\s*([a-zA-Z])/g, "$1\u0304")
     .replace(/-{2,}>/g, "→") // ---> or --> to →
     .replace(/->/g, "→");
 
