@@ -1640,7 +1640,6 @@ class InspireReferencePanelController {
       display: flex;
       align-items: center;
       gap: 6px;
-      flex-wrap: wrap;
       width: 100%;
       max-width: 100%;
       min-width: 0;
@@ -1660,7 +1659,6 @@ class InspireReferencePanelController {
           flexDirection: "row",
           alignItems: "center",
           gap: "6px",
-          flexWrap: "wrap",
           minWidth: "0",
           maxWidth: "100%",
           flex: "1",
@@ -1678,7 +1676,7 @@ class InspireReferencePanelController {
     const filterInputWrapper = filterDoc.createElement("div");
     filterInputWrapper.className = "zinspire-filter-input-wrapper";
     filterInputWrapper.style.cssText =
-      INLINE_HINT_WRAPPER_STYLE + `min-width: 120px;`;
+      INLINE_HINT_WRAPPER_STYLE + `min-width: 120px; flex: 1;`;
 
     // Create filter input using native DOM
     this.filterInput = filterDoc.createElement("input");
@@ -1748,6 +1746,7 @@ class InspireReferencePanelController {
       display: flex;
       align-items: center;
       gap: 2px;
+      flex-shrink: 0;
     `;
     row3.appendChild(navGroup);
 
