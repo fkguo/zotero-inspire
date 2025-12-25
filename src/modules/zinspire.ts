@@ -1834,8 +1834,23 @@ class InspireReferencePanelController {
       this.updateRateLimiterStatus(status);
     });
 
+    // Create search input container (hidden by default, shown in search mode)
+    this.createSearchInputContainer(toolbar);
+
+    // Load search & filter history from preferences
+    this.loadSearchHistory();
+    this.loadFilterHistory();
+
+    // Create chart container (between toolbar and list)
+    const chartContainer = this.createChartContainer();
+    this.body.appendChild(chartContainer);
+    this.observeChartResize(chartContainer);
+    // FTR-DARK-MODE-AUTO: Listen for theme changes to re-render chart SVG
+    this.setupThemeChangeListener();
+
     // ═══════════════════════════════════════════════════════════════════════
     // Row 4: Sort dropdown (left) + Cache source indicator (right)
+    // Positioned below chart container for better visual hierarchy
     // ═══════════════════════════════════════════════════════════════════════
     const row4 = body.ownerDocument.createElement("div");
     // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
@@ -1849,7 +1864,7 @@ class InspireReferencePanelController {
       overflow: hidden;
       box-sizing: border-box;
     `;
-    toolbar.appendChild(row4);
+    this.body.appendChild(row4);
 
     // Sort dropdown (left side of row4)
     this.sortSelect = ztoolkit.UI.appendElement(
@@ -1908,20 +1923,6 @@ class InspireReferencePanelController {
       max-width: 50%;
       flex-shrink: 1;
     `;
-
-    // Create search input container (hidden by default, shown in search mode)
-    this.createSearchInputContainer(toolbar);
-
-    // Load search & filter history from preferences
-    this.loadSearchHistory();
-    this.loadFilterHistory();
-
-    // Create chart container (between toolbar and list)
-    const chartContainer = this.createChartContainer();
-    this.body.appendChild(chartContainer);
-    this.observeChartResize(chartContainer);
-    // FTR-DARK-MODE-AUTO: Listen for theme changes to re-render chart SVG
-    this.setupThemeChangeListener();
 
     this.listEl = ztoolkit.UI.appendElement(
       {
@@ -11515,29 +11516,28 @@ class InspireReferencePanelController {
     });
 
     // Create history dropdown container
+    // FIX-ZINDEX: Use fixed positioning like quickFiltersPopup to avoid being clipped
     this.searchHistoryDropdown = doc.createElement("div");
     this.searchHistoryDropdown.className = "zinspire-search-history-dropdown";
     this.searchHistoryDropdown.style.cssText = `
       display: none;
-      position: absolute;
-      top: 100%;
-      left: 0;
-      right: 0;
+      position: fixed;
       max-height: 200px;
       overflow-y: auto;
-      background: var(--zotero-gray-1, #ffffff);
-      border: 1px solid var(--zotero-gray-4, #d1d1d5);
-      border-radius: 4px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-      z-index: 1000;
-      margin-top: 2px;
+      background: var(--material-background, #fff);
+      border: 1px solid var(--fill-quinary, #d1d5db);
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+      z-index: 10000;
+      min-width: 200px;
     `;
 
     // Close dropdown when clicking outside
     doc.addEventListener("click", (event) => {
       if (
         this.searchHistoryDropdown &&
-        !this.searchInputContainer?.contains(event.target as Node)
+        !this.searchInputContainer?.contains(event.target as Node) &&
+        !this.searchHistoryDropdown.contains(event.target as Node)
       ) {
         this.hideSearchHistoryDropdown();
       }
@@ -11546,7 +11546,8 @@ class InspireReferencePanelController {
     this.searchInputContainer.appendChild(inputWrapper);
     this.searchInputContainer.appendChild(searchButton);
     this.searchInputContainer.appendChild(historyButton);
-    this.searchInputContainer.appendChild(this.searchHistoryDropdown);
+    // FIX-ZINDEX: Append to body instead of container to avoid clipping
+    this.body.appendChild(this.searchHistoryDropdown);
     toolbar.appendChild(this.searchInputContainer);
     Zotero.debug(
       `[${config.addonName}] createSearchInputContainer: completed, container added to toolbar`,
@@ -11596,10 +11597,10 @@ class InspireReferencePanelController {
         padding: 6px 10px;
         cursor: pointer;
         font-size: 12px;
-        border-bottom: 1px solid var(--zotero-gray-3, #e6e6e6);
+        border-bottom: 1px solid var(--fill-quinary, #d1d5db);
       `;
       item.addEventListener("mouseenter", () => {
-        item.style.backgroundColor = "var(--zotero-gray-2, #f0f0f0)";
+        item.style.backgroundColor = "var(--fill-senary, #f0f0f0)";
       });
       item.addEventListener("mouseleave", () => {
         item.style.backgroundColor = "";
@@ -11622,12 +11623,12 @@ class InspireReferencePanelController {
       padding: 6px 10px;
       cursor: pointer;
       font-size: 11px;
-      color: var(--zotero-gray-6, #666666);
+      color: var(--fill-secondary, #666666);
       text-align: center;
       font-style: italic;
     `;
     clearItem.addEventListener("mouseenter", () => {
-      clearItem.style.backgroundColor = "var(--zotero-gray-2, #f0f0f0)";
+      clearItem.style.backgroundColor = "var(--fill-senary, #f0f0f0)";
     });
     clearItem.addEventListener("mouseleave", () => {
       clearItem.style.backgroundColor = "";
@@ -11637,6 +11638,14 @@ class InspireReferencePanelController {
       this.hideSearchHistoryDropdown();
     });
     this.searchHistoryDropdown.appendChild(clearItem);
+
+    // FIX-ZINDEX: Calculate fixed position based on searchInputContainer's bounding rect
+    if (this.searchInputContainer) {
+      const containerRect = this.searchInputContainer.getBoundingClientRect();
+      this.searchHistoryDropdown.style.top = `${containerRect.bottom + 4}px`;
+      this.searchHistoryDropdown.style.left = `${containerRect.left}px`;
+      this.searchHistoryDropdown.style.width = `${containerRect.width}px`;
+    }
 
     this.searchHistoryDropdown.style.display = "block";
   }
