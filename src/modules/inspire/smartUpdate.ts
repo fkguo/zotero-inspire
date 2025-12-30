@@ -512,15 +512,17 @@ function normalizeNameForComparison(name: string): string {
 /**
  * Check if two name strings are equivalent considering hyphen/space variations.
  * "Ulf-G." and "Ulf G." should be considered equivalent.
+ * Also handles trailing dots: "Ulf-G." ≈ "Ulf-G"
  */
 function areNamesEquivalent(name1: string, name2: string): boolean {
   if (name1.toLowerCase() === name2.toLowerCase()) return true;
 
-  // Normalize hyphens and spaces to a common form for comparison
+  // Normalize hyphens, spaces, and trailing dots to a common form for comparison
   const normalize = (s: string) =>
     s
       .toLowerCase()
       .replace(/[-\s]+/g, " ") // Replace hyphens and spaces with single space
+      .replace(/\.+$/, "") // Remove trailing dots (e.g., "Ulf-G." → "Ulf-G")
       .trim();
 
   return normalize(name1) === normalize(name2);

@@ -235,6 +235,12 @@ export function applyMetaLinkStyle(el: HTMLAnchorElement, isDark?: boolean): voi
  */
 export function applyTabButtonStyle(el: HTMLElement, isActive: boolean): void {
   // Base styles applied to all tab buttons
+  // FIX-WINDOWS-APPEARANCE: Disable OS theme to allow custom background-color on Windows
+  (el.style as any).appearance = "none";
+  (el.style as any).MozAppearance = "none";
+  (el.style as any).webkitAppearance = "none";
+  // FIX-WINDOWS-BACKGROUND: Clear background-image which Windows uses for form elements
+  el.style.backgroundImage = "none";
   el.style.padding = "4px 12px";
   el.style.fontSize = "12px";
   el.style.borderRadius = "12px";
@@ -246,14 +252,14 @@ export function applyTabButtonStyle(el: HTMLElement, isActive: boolean): void {
     // Active tab: blue pill to stand out from chart toggles
     // FIX-WINDOWS-TAB-COLOR: Use hardcoded color for cross-platform consistency
     const activeBlue = "#0060df"; // Zotero's primary blue
-    el.style.backgroundColor = activeBlue;
+    el.style.background = activeBlue;
     el.style.color = "#fff";
     el.style.fontWeight = "500";
     el.style.border = `1px solid ${activeBlue}`;
     el.style.boxShadow = "none";
   } else {
     // Inactive tab: outlined pill (clearly looks like a button)
-    el.style.backgroundColor = "var(--material-background, #fff)";
+    el.style.background = "var(--material-background, #fff)";
     el.style.color = "var(--fill-secondary, #64748b)";
     el.style.fontWeight = "400";
     el.style.border = "1px solid var(--fill-quinary, #d1d5db)";

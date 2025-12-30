@@ -1,6 +1,6 @@
 {
   "name": "zotero-inspire",
-  "version": "2.3.2",
+  "version": "2.3.3",
   "description": "Bridge between Zotero and INSPIRE for high energy physics and related fields",
   "config": {
     "addonName": "zotero-inspire",
