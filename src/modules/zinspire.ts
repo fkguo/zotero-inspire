@@ -530,8 +530,9 @@ export class ZInspireReferencePane {
       },
       sectionButtons: [
         {
-          type: "refresh",
-          icon: "chrome://zotero/skin/16/universal/refresh.svg",
+          // FIX-WINDOWS-REFRESH-BUTTON: Use custom type and local icon
+          type: "zinspire-refresh",
+          icon: `chrome://${config.addonRef}/content/icons/refresh.svg`,
           l10nID: "zoteroinspire-refresh-button",
           onClick: ({ body }: { body: HTMLDivElement }) => {
             try {
@@ -543,7 +544,7 @@ export class ZInspireReferencePane {
           },
         },
         {
-          type: "custom",
+          type: "zinspire-export",
           icon: `chrome://${config.addonRef}/content/icons/clipboard.svg`,
           l10nID: "zoteroinspire-copy-all-button",
           onClick: ({
@@ -8904,7 +8905,8 @@ class InspireReferencePanelController {
    * Swaps the icon to Zotero's built-in loading.svg (with animation) during loading.
    */
   private setRefreshButtonLoading(loading: boolean) {
-    const REFRESH_ICON = "chrome://zotero/skin/16/universal/refresh.svg";
+    // FIX-WINDOWS-REFRESH-ICON: Use local icon instead of Zotero built-in
+    const REFRESH_ICON = `chrome://${config.addonRef}/content/icons/refresh.svg`;
     const LOADING_ICON = "chrome://global/skin/icons/loading.svg";
 
     Zotero.debug(
@@ -8933,9 +8935,9 @@ class InspireReferencePanelController {
         return;
       }
 
-      // Find the refresh button by class name (class="refresh section-custom-button")
+      // Find the refresh button by class name (class="zinspire-refresh section-custom-button")
       const refreshBtn = section.querySelector(
-        "toolbarbutton.refresh, .refresh.section-custom-button",
+        "toolbarbutton.zinspire-refresh, .zinspire-refresh.section-custom-button",
       ) as Element | null;
 
       if (!refreshBtn) {
@@ -10924,14 +10926,20 @@ class InspireReferencePanelController {
     ) as HTMLButtonElement;
 
     // Apply initial inline styles for pill button tabs
+    // FIX-WINDOWS-APPEARANCE: Add appearance: none to disable OS theme on Windows
+    // FIX-WINDOWS-BACKGROUND: Use background (not background-color) to override Windows gradient
     button.style.cssText = `
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      background: var(--material-background, #fff);
+      background-image: none;
       padding: 4px 12px;
       font-size: 12px;
       border-radius: 12px;
       cursor: pointer;
       transition: all 0.15s ease;
       white-space: nowrap;
-      background-color: var(--material-background, #fff);
       color: var(--fill-secondary, #64748b);
       font-weight: 400;
       border: 1px solid var(--fill-quinary, #d1d5db);
