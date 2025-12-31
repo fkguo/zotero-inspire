@@ -43,3 +43,7 @@ pref("__prefsPrefix__.collab_tag_auto", false); // Auto-add tags when updating/i
 pref("__prefsPrefix__.collab_tag_template", "{name}"); // Tag format template ({name} = collaboration name)
 // Funding extraction settings (FTR-FUNDING-EXTRACTION)
 pref("__prefsPrefix__.funding_china_only", true); // Only extract Chinese funding agencies (NSFC, CAS, MoST, etc.)
+// Favorite authors (FTR-FAVORITE-AUTHORS)
+pref("__prefsPrefix__.favorite_authors", "[]"); // JSON array of FavoriteAuthor objects
+// Favorite papers (FTR-FAVORITE-PAPERS)
+pref("__prefsPrefix__.favorite_papers", "[]"); // JSON array of FavoritePaper objects

@@ -306,8 +306,13 @@ export class EntryListRenderer {
     // Cache dark mode value for this render (avoid multiple isDarkMode() calls)
     const dark = ctx.darkMode ?? isDarkMode();
 
-    // Store entry ID for event delegation
+    // Store entry ID and recid for event delegation
     row.dataset.entryId = entry.id;
+    if (entry.recid) {
+      row.dataset.recid = entry.recid;
+    } else {
+      delete row.dataset.recid;
+    }
 
     // Update checkbox state
     const checkbox = row.querySelector(

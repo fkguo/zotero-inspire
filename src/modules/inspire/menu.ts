@@ -115,8 +115,7 @@ export class ZInsMenu {
         { tag: "menuseparator" },
         {
           tag: "menuitem",
-          // Cast to any to handle type generation timing
-          label: getString("collab-tag-menu-add" as any),
+          label: getString("collab-tag-menu-add"),
           commandListener: () => {
             _globalThis.inspire.addCollabTagsToSelection?.();
           },
@@ -125,10 +124,17 @@ export class ZInsMenu {
         { tag: "menuseparator" },
         {
           tag: "menuitem",
-          // Cast to any to handle type generation timing - these strings are defined in addon.ftl
-          label: getString("preprint-check-menu" as any),
+          label: getString("preprint-check-menu"),
           commandListener: () => {
             _globalThis.inspire.checkSelectedItemsPreprints?.();
+          },
+        },
+        // Favorite paper (FTR-FAVORITE-PAPERS)
+        {
+          tag: "menuitem",
+          label: getString("menuitem-favorite-paper"),
+          commandListener: () => {
+            _globalThis.inspire.toggleFavoritePaperFromMenu?.();
           },
         },
       );
@@ -138,8 +144,7 @@ export class ZInsMenu {
         { tag: "menuseparator" },
         {
           tag: "menuitem",
-          // Cast to any to handle type generation timing
-          label: getString("preprint-check-collection-menu" as any),
+          label: getString("preprint-check-collection-menu"),
           commandListener: async () => {
             Zotero.debug(
               "[zotero-inspire] Menu: checkPreprintsInCollection clicked",
@@ -155,8 +160,7 @@ export class ZInsMenu {
         },
         {
           tag: "menuitem",
-          // Cast to any to handle type generation timing
-          label: getString("preprint-check-all-menu" as any),
+          label: getString("preprint-check-all-menu"),
           commandListener: async () => {
             Zotero.debug(
               "[zotero-inspire] Menu: checkAllPreprintsInLibrary clicked",
@@ -174,8 +178,7 @@ export class ZInsMenu {
         { tag: "menuseparator" },
         {
           tag: "menuitem",
-          // Cast to any to handle type generation timing
-          label: getString("collab-tag-menu-reapply" as any),
+          label: getString("collab-tag-menu-reapply"),
           commandListener: () => {
             _globalThis.inspire.reapplyCollabTagsToCollection?.();
           },

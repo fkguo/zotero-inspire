@@ -2,6 +2,7 @@ import { config } from "../../../package.json";
 import { inspireFetch } from "./rateLimiter";
 import { INSPIRE_API_BASE, AUTHOR_PROFILE_CACHE_TTL_MS } from "./constants";
 import { LRUCache } from "./utils";
+import { localCache } from "./localCache";
 import type { AuthorSearchInfo, InspireAuthorProfile } from "./types";
 import type {
   InspireAuthorsSearchResponse,
@@ -44,9 +45,32 @@ function getCachedProfile(key: string): InspireAuthorProfile | null {
 }
 
 /**
+ * Get author profile from local persistent cache.
+ * Used for offline fallback when network is unavailable.
+ */
+async function getLocalCachedProfile(key: string): Promise<InspireAuthorProfile | null> {
+  try {
+    const result = await localCache.get<InspireAuthorProfile>(
+      "author_profile",
+      key,
+      undefined,
+      { ignoreTTL: true }, // Allow expired cache for offline use
+    );
+    if (result?.data) {
+      Zotero.debug(`[${config.addonName}] Author profile from local cache: ${key}`);
+      return result.data;
+    }
+  } catch (e) {
+    Zotero.debug(`[${config.addonName}] Failed to get author profile from local cache: ${e}`);
+  }
+  return null;
+}
+
+/**
  * Store profile in cache with multiple keys for cross-reference.
  * When a profile is fetched, cache it under all available identifiers
  * so subsequent lookups via any identifier hit the cache.
+ * Also saves to local persistent cache for offline support.
  */
 function cacheProfile(
   primaryKey: string,
@@ -73,6 +97,19 @@ function cacheProfile(
       authorProfileCache.set(baiKey, entry);
     }
   }
+
+  // Save to local persistent cache for offline support
+  // Use recid as primary key for local cache (most stable identifier)
+  const localCacheKey = profile.recid || primaryKey;
+  localCache.set<InspireAuthorProfile>(
+    "author_profile",
+    localCacheKey,
+    profile,
+    undefined,
+    undefined,
+  ).catch((e) => {
+    Zotero.debug(`[${config.addonName}] Failed to save author profile to local cache: ${e}`);
+  });
 }
 
 /**
@@ -92,6 +129,8 @@ export async function fetchAuthorProfile(
   signal?: AbortSignal,
 ): Promise<InspireAuthorProfile | null> {
   const cacheKey = getAuthorCacheKey(authorInfo);
+
+  // Priority 1: Check in-memory cache (fastest)
   const cached = getCachedProfile(cacheKey);
   if (cached) {
     return cached;
@@ -100,6 +139,16 @@ export async function fetchAuthorProfile(
   // Validate: need at least one identifier
   if (!authorInfo.recid && !authorInfo.bai && !authorInfo.fullName?.trim()) {
     return null;
+  }
+
+  // Priority 2: Check local persistent cache (for offline support)
+  // Use recid if available, as it's the primary key for local cache
+  const localCacheKey = authorInfo.recid || cacheKey;
+  const localCached = await getLocalCachedProfile(localCacheKey);
+  if (localCached) {
+    // Also populate memory cache for faster subsequent access
+    cacheProfile(cacheKey, localCached);
+    return localCached;
   }
 
   try {
@@ -337,10 +386,22 @@ export function parseAuthorProfile(
 
   if (Array.isArray(metadata.advisors)) {
     profile.advisors = metadata.advisors
-      .map((advisor: any) => ({
-        name: advisor?.name || "",
-        degreeType: advisor?.degree_type,
-      }))
+      .map((advisor: any) => {
+        // Extract recid from record.$ref (e.g., "https://inspirehep.net/api/authors/1011904")
+        let recid: string | undefined;
+        const ref = advisor?.record?.$ref;
+        if (typeof ref === "string") {
+          const match = ref.match(/\/authors\/(\d+)$/);
+          if (match) {
+            recid = match[1];
+          }
+        }
+        return {
+          name: advisor?.name || "",
+          degreeType: advisor?.degree_type,
+          recid,
+        };
+      })
       .filter((advisor: any) => advisor.name);
   }
 

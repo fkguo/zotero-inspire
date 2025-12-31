@@ -22,6 +22,7 @@ const CACHE_DIR_NAME = "zoteroinspire-cache";
 // Default TTL values (in hours)
 const DEFAULT_TTL_REFS = -1; // Permanent (references don't change)
 const DEFAULT_TTL_CITED = 24; // 24 hours for cited-by and author papers
+const DEFAULT_TTL_AUTHOR_PROFILE = 2; // 2 hours for author profiles (with offline fallback)
 
 // Cache version for format migrations
 // v2: Added DOI field to reference entries for journal links
@@ -549,10 +550,14 @@ class InspireLocalCache {
     await this.init();
 
     // Determine TTL based on type
-    const ttl =
-      type === "refs" || type === "preprintCandidates"
-        ? DEFAULT_TTL_REFS // keep indefinitely for refs and candidate list
-        : this.getTTLHours();
+    let ttl: number;
+    if (type === "refs" || type === "preprintCandidates") {
+      ttl = DEFAULT_TTL_REFS; // keep indefinitely for refs and candidate list
+    } else if (type === "author_profile") {
+      ttl = DEFAULT_TTL_AUTHOR_PROFILE; // 2 hours for author profiles (offline fallback)
+    } else {
+      ttl = this.getTTLHours();
+    }
 
     const cacheData: LocalCacheFile<T> = {
       v: CACHE_VERSION,

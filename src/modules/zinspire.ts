@@ -108,6 +108,8 @@ import {
   type AuthorSearchInfo,
   type InspireAuthorProfile,
   type AuthorStats,
+  type FavoriteAuthor,
+  type FavoritePaper,
   type InspireReferenceEntry,
   type InspireArxivDetails,
   type ScrollSnapshot,
@@ -1291,7 +1293,11 @@ class InspireReferencePanelController {
   private filterInlineHint?: InlineHintHelper;
   private filterHistory: SearchHistoryItem[] = [];
   private sortSelect!: HTMLSelectElement;
+  private filterRow?: HTMLElement; // Row 3: filter + navigation
+  private sortRow?: HTMLElement; // Row 4: sort + cache indicator
   private tabButtons!: Record<InspireViewMode, HTMLButtonElement>;
+  private favoritesTabButton?: HTMLButtonElement;
+  private isFavoritesViewActive = false; // Track if favorites view is active
   private filterText = "";
   private viewMode: InspireViewMode = "references";
   private referenceSort: ReferenceSortOption = DEFAULT_REFERENCE_SORT;
@@ -1300,6 +1306,7 @@ class InspireReferencePanelController {
   private currentItemID?: number;
   private currentRecid?: string;
   private entryCitedSource?: EntryCitedSource;
+  private authorNavigationStack: EntryCitedSource[] = []; // Stack for author navigation history
   private entryCitedPreviousMode: Exclude<InspireViewMode, "entryCited"> =
     "references";
   private entryCitedReturnScroll?: ScrollState;
@@ -1504,13 +1511,11 @@ class InspireReferencePanelController {
   constructor(body: HTMLDivElement) {
     this.body = body;
     this.body.classList.add("zinspire-ref-panel");
-    // FTR-PANEL-WIDTH-FIX: Ensure panel respects container width at all sizes
-    // Use width: 100% with overflow handling to prevent content from exceeding sidebar width
     // NOTE: Removed `contain: layout` as it breaks position:fixed for modal dialogs
     this.body.style.cssText = `
       width: 100%;
-      max-width: 100%;
       min-width: 0;
+      max-width: 100%;
       overflow: hidden;
       box-sizing: border-box;
       position: relative;
@@ -1612,15 +1617,17 @@ class InspireReferencePanelController {
 
     const tabs = body.ownerDocument.createElement("div");
     tabs.className = "zinspire-ref-panel__tabs";
-    // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
+    // FIX-PANEL-WIDTH-OVERFLOW: Use flex instead of inline-flex to properly constrain width
     tabs.style.cssText = `
-      display: inline-flex;
+      display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 6px;
       min-width: 0;
       max-width: 100%;
+      width: 100%;
       overflow: hidden;
+      box-sizing: border-box;
     `;
     row2.appendChild(tabs);
 
@@ -1630,12 +1637,17 @@ class InspireReferencePanelController {
       entryCited: this.createTabButton(tabs, "entryCited"),
       search: this.createTabButton(tabs, "search"),
     };
+
+    // Favorites tab (★)
+    this.favoritesTabButton = this.createFavoritesTabButton(tabs);
+
     this.updateTabSelection();
 
     // ═══════════════════════════════════════════════════════════════════════
     // Row 3: Filter (left) + Navigation (right)
     // ═══════════════════════════════════════════════════════════════════════
     const row3 = body.ownerDocument.createElement("div");
+    this.filterRow = row3; // Save reference for favorites view toggle
     // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     row3.style.cssText = `
       display: flex;
@@ -1817,7 +1829,10 @@ class InspireReferencePanelController {
     ) as HTMLButtonElement;
     this.entryViewBackButton.hidden = true;
     this.applyNavButtonStyle(this.entryViewBackButton, true);
-    this.entryViewBackButton.style.display = "none";
+    // FIX-CITING-TAB-JUMP: Use visibility:hidden instead of display:none for initial state
+    // This ensures the button always occupies space, preventing layout reflow when it appears
+    this.entryViewBackButton.style.display = "inline-flex";
+    this.entryViewBackButton.style.visibility = "hidden";
 
     // Rate limiter status indicator
     this.rateLimiterStatusEl = ztoolkit.UI.appendElement(
@@ -1854,6 +1869,7 @@ class InspireReferencePanelController {
     // Positioned below chart container for better visual hierarchy
     // ═══════════════════════════════════════════════════════════════════════
     const row4 = body.ownerDocument.createElement("div");
+    this.sortRow = row4; // Save reference for favorites view toggle
     // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     row4.style.cssText = `
       display: flex;
@@ -4488,8 +4504,13 @@ class InspireReferencePanelController {
       clearTimeout(this.filterDebounceTimer);
     }
     this.filterDebounceTimer = setTimeout(() => {
-      this.renderChart();
-      this.renderReferenceList();
+      // In favorites view, re-render favorites list instead of reference list
+      if (this.isFavoritesViewActive) {
+        this.renderFavoriteAuthorsList();
+      } else {
+        this.renderChart();
+        this.renderReferenceList();
+      }
     }, this.filterDebounceDelay);
   }
 
@@ -5425,10 +5446,21 @@ class InspireReferencePanelController {
       }
     };
 
-    // FTR-COPY-LINK: Right-click to copy link URL
+    // FTR-COPY-LINK: Right-click to copy link URL or favorite paper
     this.boundHandleListContextMenu = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target) return;
+
+      // Check if right-clicked on an entry row
+      const entryRow = target.closest("[data-recid]") as HTMLElement | null;
+      if (entryRow) {
+        const recid = entryRow.getAttribute("data-recid");
+        if (recid) {
+          event.preventDefault();
+          this.showEntryContextMenu(recid, event);
+          return;
+        }
+      }
 
       // Check if right-clicked on a link (anchor element)
       const anchor = target.closest("a") as HTMLAnchorElement | null;
@@ -6459,7 +6491,7 @@ class InspireReferencePanelController {
       max-width: 100%;
       width: 100%;
       display: block;
-      overflow: visible;
+      overflow: hidden;
     `;
     // No viewBox - draw in actual pixels, SVG will naturally fill width
 
@@ -7206,9 +7238,17 @@ class InspireReferencePanelController {
             .catch(() => {});
         } else if (this.entryCitedSource?.authorSearchInfo) {
           // Author papers mode: clear cache using author query as key
-          const authorKey =
-            this.entryCitedSource.authorSearchInfo.bai ||
-            this.entryCitedSource.authorSearchInfo.fullName;
+          // FIX-CACHE-KEY: Use same key format as showAuthorPapersTab/loadEntries
+          // The key format is "bai:{bai}" or "recid:{recid}" or "{fullName}"
+          const authorInfo = this.entryCitedSource.authorSearchInfo;
+          let authorKey: string;
+          if (authorInfo.recid) {
+            authorKey = `recid:${authorInfo.recid}`;
+          } else if (authorInfo.bai) {
+            authorKey = `bai:${authorInfo.bai}`;
+          } else {
+            authorKey = authorInfo.fullName;
+          }
           if (authorKey) {
             this.entryCitedCache.delete(authorKey);
             // Delete both unsorted and sorted cache
@@ -8421,6 +8461,11 @@ class InspireReferencePanelController {
         this.clearAutoCheckNotification();
         this.autoCheckPendingDiff = undefined;
 
+        // FTR-FAVORITE-PAPERS: Exit favorites view when item changes
+        if (this.isFavoritesViewActive) {
+          this.updateFavoritesTabStyle(false);
+        }
+
         // In search mode, don't clear entries - preserve search results
         if (this.viewMode !== "search") {
           this.clearEntryCitedContext();
@@ -9042,8 +9087,9 @@ class InspireReferencePanelController {
 
     // Step 2: Check local file cache (if enabled)
     // Smart caching strategy:
-    // - References: always store without sort (client-side sorting)
+    // - References: always store without sort (client-side sorting), permanent cache
     // - Cited By/Author: if total <= CITED_BY_MAX_RESULTS, store without sort; otherwise by sort
+    // - Author Papers: show cached data immediately, refresh in background if expired (> 12h)
     if (!options.force) {
       const localCacheType = this.getLocalCacheType(mode);
       if (localCacheType) {
@@ -9052,8 +9098,15 @@ class InspireReferencePanelController {
           fromCache: true;
           ageHours: number;
           total?: number;
+          expired?: boolean;
         } | null = null;
         let usedClientSideSort = false;
+
+        // For author papers mode, use ignoreTTL to get cached data even if expired
+        // This enables offline support and faster initial display
+        const isAuthorMode =
+          mode === "entryCited" && this.entryCitedSource?.authorSearchInfo;
+        const shouldIgnoreTTL = isAuthorMode; // Allow expired cache for author papers
 
         if (mode === "references") {
           // References: always read without sort (client-side sorting)
@@ -9067,6 +9120,8 @@ class InspireReferencePanelController {
           const unsortedResult = await localCache.get<InspireReferenceEntry[]>(
             localCacheType,
             recid,
+            undefined,
+            shouldIgnoreTTL ? { ignoreTTL: true } : undefined,
           );
           if (
             unsortedResult &&
@@ -9082,6 +9137,7 @@ class InspireReferencePanelController {
               localCacheType,
               recid,
               sortOption,
+              shouldIgnoreTTL ? { ignoreTTL: true } : undefined,
             );
           }
         }
@@ -9106,7 +9162,7 @@ class InspireReferencePanelController {
             // Update cache source indicator (ageHours returned from get() to avoid re-reading file)
             this.cacheSource = "local";
             this.cacheSourceAge = localResult.ageHours;
-            this.cacheSourceExpired = false;
+            this.cacheSourceExpired = localResult.expired ?? false;
             this.updateCacheSourceDisplay();
             this.renderChart();
             this.renderReferenceList({ preserveScroll: !shouldReset });
@@ -9123,34 +9179,56 @@ class InspireReferencePanelController {
             }
             this.setRefreshButtonLoading(false);
 
-            // Local cache data is already enriched (complete with titles, authors, etc.)
-            // Only run enrichLocalStatus to update local item status (may have changed since cache)
-            const localCacheToken = `${mode}-${cacheKey}-local-${performance.now()}`;
-            this.pendingToken = localCacheToken;
-            const localEnrichController = createAbortController();
-            this.activeAbort = localEnrichController;
-            setTimeout(async () => {
-              if (this.pendingToken !== localCacheToken) {
-                return;
-              }
-              try {
-                await this.enrichLocalStatus(
-                  localResult.data,
-                  localEnrichController?.signal,
-                );
-              } catch (err) {
-                // Silently ignore errors
-                if ((err as any)?.name !== "AbortError") {
-                  Zotero.debug(
-                    `[${config.addonName}] Local status enrichment error: ${err}`,
+            // For author papers: if cache is expired (> 12h), trigger background refresh
+            // This updates the cache for next time while showing current data immediately
+            const AUTHOR_PAPERS_REFRESH_THRESHOLD_HOURS = 12;
+            if (
+              isAuthorMode &&
+              localResult.ageHours >= AUTHOR_PAPERS_REFRESH_THRESHOLD_HOURS
+            ) {
+              Zotero.debug(
+                `[${config.addonName}] Author papers cache expired (${localResult.ageHours}h), triggering background refresh`,
+              );
+              // Background refresh - don't await, don't block UI
+              this.refreshAuthorPapersInBackground(recid, mode, sortOption).catch(
+                (err) => {
+                  if ((err as any)?.name !== "AbortError") {
+                    Zotero.debug(
+                      `[${config.addonName}] Background refresh failed: ${err}`,
+                    );
+                  }
+                },
+              );
+            } else {
+              // Local cache data is already enriched (complete with titles, authors, etc.)
+              // Only run enrichLocalStatus to update local item status (may have changed since cache)
+              const localCacheToken = `${mode}-${cacheKey}-local-${performance.now()}`;
+              this.pendingToken = localCacheToken;
+              const localEnrichController = createAbortController();
+              this.activeAbort = localEnrichController;
+              setTimeout(async () => {
+                if (this.pendingToken !== localCacheToken) {
+                  return;
+                }
+                try {
+                  await this.enrichLocalStatus(
+                    localResult.data,
+                    localEnrichController?.signal,
                   );
+                } catch (err) {
+                  // Silently ignore errors
+                  if ((err as any)?.name !== "AbortError") {
+                    Zotero.debug(
+                      `[${config.addonName}] Local status enrichment error: ${err}`,
+                    );
+                  }
+                } finally {
+                  if (this.activeAbort === localEnrichController) {
+                    this.activeAbort = undefined;
+                  }
                 }
-              } finally {
-                if (this.activeAbort === localEnrichController) {
-                  this.activeAbort = undefined;
-                }
-              }
-            }, 0);
+              }, 0);
+            }
           }
           return;
         }
@@ -9799,6 +9877,70 @@ class InspireReferencePanelController {
   }
 
   /**
+   * Refresh author papers in the background.
+   * Fetches fresh data from API and updates both memory and local cache.
+   * Does not update UI - the data will be used on next load.
+   */
+  private async refreshAuthorPapersInBackground(
+    authorQuery: string,
+    mode: InspireViewMode,
+    sortOption: string,
+  ): Promise<void> {
+    if (!this.entryCitedSource?.authorSearchInfo) {
+      return;
+    }
+
+    const controller = createAbortController();
+    const authorInfo = this.entryCitedSource.authorSearchInfo;
+
+    try {
+      Zotero.debug(
+        `[${config.addonName}] Background refresh: fetching papers for ${authorInfo.fullName}`,
+      );
+
+      // Fetch fresh data from API
+      const entries = await this.fetchAuthorPapers(
+        authorInfo,
+        sortOption as InspireSortOption,
+        controller?.signal,
+        // No onProgress callback - this is a silent background refresh
+      );
+
+      // Update memory cache
+      const cache = this.getCacheForMode(mode);
+      const cacheKey = this.getCacheKey(
+        authorQuery,
+        mode,
+        sortOption as InspireSortOption,
+      );
+      cache.set(cacheKey, entries);
+
+      // Enrich with local status
+      await this.enrichLocalStatus(entries, controller?.signal);
+
+      // Persist to local cache
+      await this.persistEnrichedCache(
+        entries,
+        mode,
+        authorQuery,
+        sortOption as InspireSortOption,
+      );
+
+      Zotero.debug(
+        `[${config.addonName}] Background refresh completed: ${entries.length} papers cached`,
+      );
+    } catch (err) {
+      if ((err as any)?.name === "AbortError") {
+        throw err;
+      }
+      Zotero.debug(
+        `[${config.addonName}] Background refresh error: ${err}`,
+      );
+      // Don't rethrow - background refresh failure is not critical
+    }
+  }
+
+  /**
    * Enrich local status for entries by checking if they exist in the local library.
    * Uses batch SQL queries to minimize database interactions.
    *
@@ -10429,7 +10571,13 @@ class InspireReferencePanelController {
     // Hide old container immediately
     oldListEl.style.display = "none";
     // Insert new container after old one
-    oldListEl.parentNode?.insertBefore(newListEl, oldListEl.nextSibling);
+    // FIX-DOM-INSERTION: Ensure new element is always in DOM with fallback
+    if (oldListEl.parentNode) {
+      oldListEl.parentNode.insertBefore(newListEl, oldListEl.nextSibling);
+    } else {
+      // Fallback: append to body (listEl should be last child after sortRow)
+      this.body.appendChild(newListEl);
+    }
     this.listEl = newListEl;
     this.setupEventDelegation();
     // Remove old container asynchronously
@@ -10926,6 +11074,7 @@ class InspireReferencePanelController {
     ) as HTMLButtonElement;
 
     // Apply initial inline styles for pill button tabs
+    // Note: flex-shrink, box-sizing are set by applyTabButtonStyle for consistency
     // FIX-WINDOWS-APPEARANCE: Add appearance: none to disable OS theme on Windows
     // FIX-WINDOWS-BACKGROUND: Use background (not background-color) to override Windows gradient
     button.style.cssText = `
@@ -10965,12 +11114,86 @@ class InspireReferencePanelController {
     return button;
   }
 
+  private createFavoritesTabButton(container: HTMLDivElement): HTMLButtonElement {
+    const button = ztoolkit.UI.appendElement(
+      {
+        tag: "button",
+        classList: ["zinspire-ref-panel__tab", "zinspire-ref-panel__tab--favorites"],
+        properties: { textContent: "⭐" },
+        attributes: {
+          type: "button",
+          title: getString("references-panel-favorite-title"),
+        },
+      },
+      container,
+    ) as HTMLButtonElement;
+
+    button.style.cssText = `
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      background: var(--material-background, #fff);
+      background-image: none;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      font-size: 14px;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--fill-quinary, #d1d5db);
+    `;
+
+    button.addEventListener("mouseenter", () => {
+      if (button.getAttribute("data-active") !== "true") {
+        button.style.borderColor = "#94a3b8";
+        button.style.background = "var(--fill-quinary, #f1f5f9)";
+      }
+    });
+    button.addEventListener("mouseleave", () => {
+      if (button.getAttribute("data-active") !== "true") {
+        button.style.borderColor = "var(--fill-quinary, #d1d5db)";
+        button.style.background = "var(--material-background, #fff)";
+      }
+    });
+
+    button.addEventListener("click", () => {
+      this.showFavoritesList();
+    });
+    return button;
+  }
+
   private async activateViewMode(mode: InspireViewMode) {
-    if (this.viewMode === mode) {
+    // Allow switching even if viewMode matches when coming from favorites view
+    if (this.viewMode === mode && !this.isFavoritesViewActive) {
       if (mode !== "entryCited" && mode !== "search") {
         return;
       }
     }
+
+    // FIX-CHART-FROM-FAVORITES: Track if we're coming from favorites view
+    // Chart container was hidden in favorites view, need to wait for layout
+    const wasInFavoritesView = this.isFavoritesViewActive;
+
+    // Deactivate favorites view when switching to any tab
+    if (this.isFavoritesViewActive) {
+      this.updateFavoritesTabStyle(false);
+      // FIX-FAVORITES-LIST-CLEAR: Explicitly clear the list content when exiting favorites
+      // This ensures the favorites content is removed before any mode-specific rendering
+      this.listEl.replaceChildren();
+    }
+
+    // FIX-CHART-FROM-FAVORITES: Wait for layout to complete after restoring chart container
+    // When chart container changes from display:none to display:"", clientWidth is 0 until reflow
+    if (wasInFavoritesView && this.chartContainer) {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+    }
+
     if (mode === "entryCited" && this.viewMode !== "entryCited") {
       if (
         this.viewMode === "references" ||
@@ -11040,13 +11263,14 @@ class InspireReferencePanelController {
         ? this.entryCitedSource?.recid || this.entryCitedSource?.authorQuery
         : this.currentRecid;
     if (!targetKey) {
-      const message =
-        mode === "entryCited"
-          ? getString("references-panel-entry-select")
-          : getString("references-panel-status-empty");
       this.allEntries = [];
       this.renderChartImmediate();
-      this.renderMessage(message);
+      if (mode === "entryCited") {
+        // Show favorite authors list instead of empty message
+        this.renderFavoriteAuthorsList();
+      } else {
+        this.renderMessage(getString("references-panel-status-empty"));
+      }
       return;
     }
     const cache = this.getCacheForMode(mode);
@@ -11112,23 +11336,32 @@ class InspireReferencePanelController {
       Object.entries(this.tabButtons) as [InspireViewMode, HTMLButtonElement][]
     ).forEach(([mode, button]) => {
       if (mode === "entryCited") {
-        button.hidden = !hasEntrySource;
-        button.disabled = !hasEntrySource;
+        // FIX-CITING-TAB-OVERFLOW: Use explicit display style instead of just hidden attribute
+        // The hidden attribute alone doesn't properly collapse the button in flex containers
+        const shouldShow = hasEntrySource;
+        button.hidden = !shouldShow;
+        button.disabled = !shouldShow;
+        // Set explicit display style to ensure proper layout collapse
+        button.style.display = shouldShow ? "" : "none";
         // Update the tab label dynamically based on source type
         button.textContent = this.getTabLabel(mode);
       } else if (mode === "search") {
         // Search tab is always visible and enabled
         button.hidden = false;
         button.disabled = false;
+        button.style.display = "";
         button.textContent = this.getTabLabel(mode);
       }
-      const isActive = mode === this.viewMode;
+      // When favorites view is active, all other tabs should be inactive
+      const isActive = !this.isFavoritesViewActive && mode === this.viewMode;
       button.setAttribute("data-active", String(isActive));
       button.setAttribute("aria-pressed", String(isActive));
       applyTabButtonStyle(button, isActive);
     });
     this.updateEntryCitedControls();
     this.updateSortSelector();
+    // Note: Do NOT call updateFavoritesTabStyle(false) here!
+    // The favorites tab style is managed by showFavoritesList() and activateViewMode().
   }
 
   private updateEntryCitedControls() {
@@ -11137,18 +11370,17 @@ class InspireReferencePanelController {
     }
     const isEntryMode = this.viewMode === "entryCited";
     this.entryViewBackButton.hidden = !isEntryMode;
-    // Must also set display to override inline-flex from applyNavButtonStyle
-    this.entryViewBackButton.style.display = isEntryMode
-      ? "inline-flex"
-      : "none";
+    // FIX-CITING-TAB-JUMP: Use visibility instead of display to avoid layout reflow
+    // The button always occupies space (inline-flex), but becomes invisible when not in entry mode
+    // This prevents the navGroup from changing width and causing filterGroup to shrink
+    this.entryViewBackButton.style.display = "inline-flex";
+    this.entryViewBackButton.style.visibility = isEntryMode ? "visible" : "hidden";
     if (isEntryMode) {
       // Update tooltip with target tab name
       const previousTabLabel = this.getTabLabel(this.entryCitedPreviousMode);
       this.entryViewBackButton.title = getString(
         "references-panel-entry-back",
-        {
-          args: { tab: previousTabLabel },
-        },
+        { args: { tab: previousTabLabel } },
       );
     }
   }
@@ -12330,6 +12562,13 @@ class InspireReferencePanelController {
       onHide: () => {
         // Called when author preview is hidden
       },
+      isFavorite: (authorInfo: AuthorSearchInfo) => {
+        const favorites = this.getFavoriteAuthors();
+        return favorites.some((f) => this.isSameAuthor(f.authorSearchInfo, authorInfo));
+      },
+      toggleFavorite: (authorInfo: AuthorSearchInfo) => {
+        this.toggleAuthorFavorite(authorInfo);
+      },
     };
   }
 
@@ -12636,6 +12875,64 @@ class InspireReferencePanelController {
       Zotero.launchURL?.(url);
     });
     popup.appendChild(openItem);
+
+    // Add popup to document and open at mouse position
+    doc.documentElement.appendChild(popup);
+    popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
+    popup.openPopupAtScreen(event.screenX, event.screenY, true);
+  }
+
+  /**
+   * Show context menu for entry row with favorite option.
+   */
+  private showEntryContextMenu(recid: string, event: MouseEvent): void {
+    const doc = this.listEl.ownerDocument;
+    let entry = this.allEntries.find((e) => e.recid === recid);
+
+    // If entry not found in allEntries, check favorite papers for basic info
+    if (!entry) {
+      const favPaper = this.getFavoritePapers().find((p) => p.recid === recid);
+      if (favPaper) {
+        // Create minimal entry from favorite paper data
+        entry = {
+          id: recid,
+          recid,
+          title: favPaper.title,
+          displayText: favPaper.title,
+          authors: favPaper.authors ? [favPaper.authors] : undefined,
+          year: favPaper.year?.toString(),
+        } as InspireReferenceEntry;
+      } else {
+        return; // Cannot show menu without any entry info
+      }
+    }
+
+    // Remove existing popup if any
+    const popupId = "zinspire-entry-context-popup";
+    const existingPopup = doc.getElementById(popupId);
+    if (existingPopup) {
+      existingPopup.remove();
+    }
+
+    // Create XUL menupopup
+    const popup = (doc as any).createXULElement("menupopup") as XUL.MenuPopup;
+    popup.id = popupId;
+
+    // Favorite/unfavorite option
+    const isFavorite = this.isPaperFavorite(recid);
+    const favItem = (doc as any).createXULElement("menuitem");
+    favItem.setAttribute(
+      "label",
+      getString(
+        isFavorite
+          ? "references-panel-favorite-paper-remove"
+          : "references-panel-favorite-paper-add",
+      ),
+    );
+    favItem.addEventListener("command", () => {
+      this.togglePaperFavorite(entry);
+    });
+    popup.appendChild(favItem);
 
     // Add popup to document and open at mouse position
     doc.documentElement.appendChild(popup);
@@ -13058,6 +13355,8 @@ class InspireReferencePanelController {
       return;
     }
     this.clearAuthorProfileState();
+
+    // Remember previous mode for back navigation
     const previousMode =
       this.viewMode === "entryCited"
         ? this.entryCitedPreviousMode
@@ -13069,6 +13368,8 @@ class InspireReferencePanelController {
     ) {
       this.entryCitedPreviousMode = previousMode;
     }
+
+    // Capture scroll state before switching
     const recidChanged = this.entryCitedSource?.recid !== entry.recid;
     this.pendingEntryScrollReset = true;
     if (this.viewMode !== "entryCited") {
@@ -13076,18 +13377,27 @@ class InspireReferencePanelController {
     } else if (recidChanged) {
       this.entryCitedReturnScroll = undefined;
     }
+
+    // Set entry source with label
     const label =
       entry.displayText ||
       entry.title ||
       getString("references-panel-entry-label-default");
     this.entryCitedSource = { recid: entry.recid, label };
+
+    // Update tab display first (makes "Citing..." tab visible)
     this.updateTabSelection();
+
+    // If not already in entryCited mode, use activateViewMode for proper UI setup
+    // activateViewMode handles: updateSearchUIVisibility, updateAuthorProfileCard, etc.
     if (this.viewMode !== "entryCited") {
       await this.activateViewMode("entryCited").catch(() => void 0);
       this.resetListScroll();
       this.pendingEntryScrollReset = false;
       return;
     }
+
+    // Already in entryCited mode - just reload entries if recid changed
     if (recidChanged) {
       await this.loadEntries(entry.recid, "entryCited", {
         force: true,
@@ -13270,6 +13580,29 @@ class InspireReferencePanelController {
     }
     header.appendChild(nameEl);
 
+    // Favorite star button
+    const isFavorite = this.isCurrentAuthorFavorite();
+    const starBtn = doc.createElement("button");
+    starBtn.type = "button";
+    starBtn.textContent = isFavorite ? "★" : "☆";
+    starBtn.title = getString(
+      isFavorite
+        ? "references-panel-favorite-remove"
+        : "references-panel-favorite-add",
+    );
+    starBtn.style.cssText = `
+      border: none;
+      background: transparent;
+      font-size: 14px;
+      cursor: pointer;
+      color: ${isFavorite ? "#f59e0b" : "var(--fill-tertiary, #94a3b8)"};
+      padding: 0 4px;
+      margin-left: auto;
+      flex-shrink: 0;
+    `;
+    starBtn.onclick = () => this.toggleCurrentAuthorFavorite();
+    header.appendChild(starBtn);
+
     if (this.authorProfileCollapsed) {
       return;
     }
@@ -13345,23 +13678,103 @@ class InspireReferencePanelController {
     }
 
     if (this.authorProfile?.advisors?.length) {
-      const advisors = this.authorProfile.advisors
-        .map((advisor) => advisor.name)
-        .filter(Boolean)
-        .join(", ");
-      if (advisors) {
-        const advisorEl = doc.createElement("div");
-        advisorEl.style.fontSize = "12px";
-        advisorEl.style.color = "var(--fill-secondary, #64748b)";
-        advisorEl.style.marginTop = "4px";
-        advisorEl.textContent = `${getString("references-panel-author-advisors")}: ${advisors}`;
-        content.appendChild(advisorEl);
-      }
+      const advisorEl = doc.createElement("div");
+      advisorEl.style.fontSize = "12px";
+      advisorEl.style.color = "var(--fill-secondary, #64748b)";
+      advisorEl.style.marginTop = "4px";
+
+      const label = doc.createElement("span");
+      label.textContent = `${getString("references-panel-author-advisors")}: `;
+      advisorEl.appendChild(label);
+
+      // Render each advisor, with links for those that have recid
+      this.authorProfile.advisors.forEach((advisor, index) => {
+        if (index > 0) {
+          advisorEl.appendChild(doc.createTextNode(", "));
+        }
+
+        if (advisor.recid) {
+          // Create clickable link for advisor with recid
+          const link = doc.createElement("a");
+          link.textContent = advisor.name;
+          link.href = "#";
+          link.style.color = "#0066cc"; // Use explicit blue color for links
+          link.style.textDecoration = "none";
+          link.style.cursor = "pointer";
+          link.addEventListener("mouseenter", () => {
+            link.style.textDecoration = "underline";
+          });
+          link.addEventListener("mouseleave", () => {
+            link.style.textDecoration = "none";
+          });
+          link.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Switch to advisor's papers tab (same as clicking co-author)
+            const advisorInfo: AuthorSearchInfo = {
+              fullName: advisor.name,
+              recid: advisor.recid,
+            };
+            this.showAuthorPapersTab(advisorInfo).catch(() => void 0);
+          });
+          advisorEl.appendChild(link);
+        } else {
+          // Plain text for advisor without recid
+          advisorEl.appendChild(doc.createTextNode(advisor.name));
+        }
+      });
+
+      content.appendChild(advisorEl);
     }
 
     const links = this.buildAuthorProfileLinks(doc);
     if (links) {
       content.appendChild(links);
+    }
+
+    // Breadcrumb navigation for author chain (at bottom of profile card)
+    if (this.authorNavigationStack.length > 0) {
+      const navEl = doc.createElement("div");
+      navEl.style.cssText = `
+        font-size: 11px;
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px solid var(--fill-quinary, #e2e8f0);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px;
+      `;
+      // Add "»" prefix
+      const prefix = doc.createElement("span");
+      prefix.textContent = "» ";
+      prefix.style.color = "var(--fill-tertiary, #94a3b8)";
+      navEl.appendChild(prefix);
+      // Show all authors in the stack as clickable links
+      this.authorNavigationStack.forEach((source, index) => {
+        if (index > 0) {
+          const sep = doc.createElement("span");
+          sep.textContent = " › ";
+          sep.style.color = "var(--fill-tertiary, #94a3b8)";
+          navEl.appendChild(sep);
+        }
+        const link = doc.createElement("a");
+        link.textContent = source.label;
+        link.title = getString("references-panel-entry-back-author", {
+          args: { author: source.label },
+        });
+        link.style.cssText = `
+          color: #0066cc;
+          cursor: pointer;
+          text-decoration: none;
+        `;
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          this.navigateToAuthorInStack(index);
+        });
+        navEl.appendChild(link);
+      });
+      content.appendChild(navEl);
     }
   }
 
@@ -13450,6 +13863,7 @@ class InspireReferencePanelController {
       return;
     }
     this.authorPreview?.hide();
+
     // Generate cache key: priority recid > BAI > name
     let authorQuery: string;
     if (authorInfo.recid) {
@@ -13464,6 +13878,27 @@ class InspireReferencePanelController {
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
+
+    // Exit favorites view if active (just update tab style, loadEntries handles everything else)
+    if (this.isFavoritesViewActive) {
+      this.updateFavoritesTabStyle(false);
+    }
+
+    // Push current author to navigation stack (for breadcrumb navigation)
+    // Only push if: 1) we have a current author, 2) it's different from the new author
+    if (this.entryCitedSource?.authorSearchInfo) {
+      const currentAuthor = this.entryCitedSource.authorSearchInfo;
+      // Don't push if navigating to the same author
+      if (!this.isSameAuthor(currentAuthor, authorInfo)) {
+        // Remove any existing occurrence of current author from stack (avoid duplicates)
+        this.authorNavigationStack = this.authorNavigationStack.filter(
+          (s) => s.authorSearchInfo && !this.isSameAuthor(s.authorSearchInfo, currentAuthor),
+        );
+        this.authorNavigationStack.push(this.entryCitedSource);
+      }
+    }
+
+    // Remember previous mode for back navigation
     const previousMode =
       this.viewMode === "entryCited"
         ? this.entryCitedPreviousMode
@@ -13475,44 +13910,45 @@ class InspireReferencePanelController {
     ) {
       this.entryCitedPreviousMode = previousMode;
     }
-    const queryChanged = this.entryCitedSource?.authorQuery !== authorQuery;
-    this.pendingEntryScrollReset = true;
+
+    // Capture scroll state before switching
     if (this.viewMode !== "entryCited") {
       this.entryCitedReturnScroll = this.captureScrollState();
-    } else if (queryChanged) {
-      this.entryCitedReturnScroll = undefined;
     }
+
     // Use shortened display label for the author (just the name, not "Papers by X")
     const displayLabel =
       authorInfo.fullName.length > 30
         ? authorInfo.fullName.substring(0, 27) + "..."
         : authorInfo.fullName;
+
+    // FIX-FAVORITES-EXIT-V3: Set entryCitedSource and viewMode BEFORE any UI updates
+    // This ensures Author tab is visible and correctly styled
     this.entryCitedSource = {
       authorQuery,
       authorSearchInfo: authorInfo,
-      label: displayLabel, // Just the author name, message templates will add "Papers by"
+      label: displayLabel,
     };
+
+    // Switch to entryCited mode
+    this.viewMode = "entryCited";
     this.prepareAuthorProfileState(authorInfo);
     this.updateTabSelection();
-    if (this.viewMode !== "entryCited") {
-      await this.activateViewMode("entryCited").catch(() => void 0);
-      this.resetListScroll();
-      this.pendingEntryScrollReset = false;
-      this.updateAuthorProfileCard();
-      return;
+
+    // Show chart container and sort row (hidden in favorites view)
+    if (this.chartContainer) {
+      this.chartContainer.style.display = "";
     }
-    if (queryChanged) {
-      // Use authorQuery as the cache key for loadEntries
-      await this.loadEntries(authorQuery, "entryCited", {
-        force: true,
-        resetScroll: true,
-      }).catch(() => void 0);
-      this.pendingEntryScrollReset = false;
-    } else {
-      this.renderReferenceList();
-      this.resetListScroll();
-      this.pendingEntryScrollReset = false;
+    if (this.sortRow) {
+      this.sortRow.style.display = "";
     }
+
+    // Load author papers
+    this.pendingEntryScrollReset = true;
+    await this.loadEntries(authorQuery, "entryCited", {
+      resetScroll: true,
+    }).catch(() => void 0);
+    this.pendingEntryScrollReset = false;
     this.updateAuthorProfileCard();
   }
 
@@ -13520,6 +13956,8 @@ class InspireReferencePanelController {
     if (this.viewMode !== "entryCited") {
       return;
     }
+    // Clear author navigation stack when exiting entryCited mode
+    this.authorNavigationStack = [];
     const target =
       this.entryCitedPreviousMode === "citedBy"
         ? "citedBy"
@@ -13530,6 +13968,752 @@ class InspireReferencePanelController {
     await this.activateViewMode(target).catch(() => void 0);
     this.applyScrollState(scrollState);
     this.entryCitedReturnScroll = undefined;
+  }
+
+  /**
+   * Navigate to an author in the navigation stack.
+   * Truncates the stack to the selected index and shows that author's papers.
+   */
+  private navigateToAuthorInStack(index: number) {
+    if (index < 0 || index >= this.authorNavigationStack.length) {
+      return;
+    }
+    const target = this.authorNavigationStack[index];
+    if (!target?.authorSearchInfo) {
+      return;
+    }
+    // Truncate stack to before the selected index
+    this.authorNavigationStack = this.authorNavigationStack.slice(0, index);
+    // Navigate to the selected author
+    this.showAuthorPapersTab(target.authorSearchInfo).catch(() => void 0);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Favorite Authors Management (FTR-FAVORITE-AUTHORS)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private getFavoriteAuthors(): FavoriteAuthor[] {
+    try {
+      const json = getPref("favorite_authors") as string;
+      return JSON.parse(json || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  private saveFavoriteAuthors(favorites: FavoriteAuthor[]): void {
+    setPref("favorite_authors", JSON.stringify(favorites));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Favorite Papers Management (FTR-FAVORITE-PAPERS)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private getFavoritePapers(): FavoritePaper[] {
+    try {
+      const json = getPref("favorite_papers") as string;
+      return JSON.parse(json || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  private saveFavoritePapers(favorites: FavoritePaper[]): void {
+    setPref("favorite_papers", JSON.stringify(favorites));
+  }
+
+  private isPaperFavorite(recid: string): boolean {
+    const favorites = this.getFavoritePapers();
+    return favorites.some((f) => f.recid === recid);
+  }
+
+  private togglePaperFavorite(entry: InspireReferenceEntry): void {
+    if (!entry.recid) return; // Cannot favorite without recid
+    const favorites = this.getFavoritePapers();
+    const existingIndex = favorites.findIndex((f) => f.recid === entry.recid);
+    if (existingIndex >= 0) {
+      favorites.splice(existingIndex, 1);
+      this.showToast(getString("references-panel-favorite-paper-removed"));
+    } else {
+      // Extract surname only from first author
+      const firstAuthorFull = entry.authors?.[0];
+      let authorSurname: string | undefined;
+      if (firstAuthorFull) {
+        // Author format is usually "Surname, FirstName" or "Surname"
+        const commaIdx = firstAuthorFull.indexOf(",");
+        authorSurname = commaIdx > 0 ? firstAuthorFull.substring(0, commaIdx).trim() : firstAuthorFull.trim();
+      }
+      const authors = authorSurname
+        ? entry.authors && entry.authors.length > 1
+          ? `${authorSurname} et al.`
+          : authorSurname
+        : undefined;
+      favorites.push({
+        recid: entry.recid,
+        itemID: entry.localItemID, // Save Zotero item ID for navigation
+        title: entry.title || entry.displayText || "Untitled",
+        authors,
+        year: entry.year ? parseInt(entry.year, 10) : undefined,
+        addedAt: Date.now(),
+      });
+      this.showToast(getString("references-panel-favorite-paper-added"));
+    }
+    this.saveFavoritePapers(favorites);
+  }
+
+  private isCurrentAuthorFavorite(): boolean {
+    if (!this.entryCitedSource?.authorSearchInfo) {
+      return false;
+    }
+    const favorites = this.getFavoriteAuthors();
+    const current = this.entryCitedSource.authorSearchInfo;
+    return favorites.some((f) => this.isSameAuthor(f.authorSearchInfo, current));
+  }
+
+  private isSameAuthor(a: AuthorSearchInfo, b: AuthorSearchInfo): boolean {
+    if (a.recid && b.recid) return a.recid === b.recid;
+    if (a.bai && b.bai) return a.bai === b.bai;
+    return a.fullName.toLowerCase() === b.fullName.toLowerCase();
+  }
+
+  private toggleCurrentAuthorFavorite(): void {
+    if (!this.entryCitedSource?.authorSearchInfo) {
+      return;
+    }
+    const favorites = this.getFavoriteAuthors();
+    const current = this.entryCitedSource.authorSearchInfo;
+    const existingIndex = favorites.findIndex((f) =>
+      this.isSameAuthor(f.authorSearchInfo, current),
+    );
+    if (existingIndex >= 0) {
+      favorites.splice(existingIndex, 1);
+      this.showToast(getString("references-panel-favorite-removed"));
+    } else {
+      favorites.push({
+        authorSearchInfo: current,
+        label: this.entryCitedSource.label,
+        addedAt: Date.now(),
+      });
+      this.showToast(getString("references-panel-favorite-added"));
+    }
+    this.saveFavoriteAuthors(favorites);
+    this.updateAuthorProfileCard();
+  }
+
+  /**
+   * Toggle favorite status for any author (used by preview card).
+   */
+  private toggleAuthorFavorite(authorInfo: AuthorSearchInfo): void {
+    const favorites = this.getFavoriteAuthors();
+    const existingIndex = favorites.findIndex((f) =>
+      this.isSameAuthor(f.authorSearchInfo, authorInfo),
+    );
+    if (existingIndex >= 0) {
+      favorites.splice(existingIndex, 1);
+      this.showToast(getString("references-panel-favorite-removed"));
+    } else {
+      const label =
+        authorInfo.fullName.length > 30
+          ? authorInfo.fullName.substring(0, 27) + "..."
+          : authorInfo.fullName;
+      favorites.push({
+        authorSearchInfo: authorInfo,
+        label,
+        addedAt: Date.now(),
+      });
+      this.showToast(getString("references-panel-favorite-added"));
+    }
+    this.saveFavoriteAuthors(favorites);
+    // Update profile card if viewing this author
+    if (
+      this.entryCitedSource?.authorSearchInfo &&
+      this.isSameAuthor(this.entryCitedSource.authorSearchInfo, authorInfo)
+    ) {
+      this.updateAuthorProfileCard();
+    }
+  }
+
+  private removeFavoriteAuthor(index: number): void {
+    const favorites = this.getFavoriteAuthors();
+    if (index >= 0 && index < favorites.length) {
+      favorites.splice(index, 1);
+      this.saveFavoriteAuthors(favorites);
+      // Re-render favorites list if in favorites view, otherwise render reference list
+      if (this.isFavoritesViewActive) {
+        this.renderFavoriteAuthorsList();
+      } else {
+        this.renderReferenceList();
+      }
+    }
+  }
+
+  private reorderFavoriteAuthor(fromIndex: number, toIndex: number): void {
+    const favorites = this.getFavoriteAuthors();
+    if (
+      fromIndex < 0 ||
+      fromIndex >= favorites.length ||
+      toIndex < 0 ||
+      toIndex > favorites.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const [item] = favorites.splice(fromIndex, 1);
+    favorites.splice(toIndex, 0, item);
+    this.saveFavoriteAuthors(favorites);
+    this.renderFavoriteAuthorsList();
+  }
+
+  private reorderFavoritePaper(fromIndex: number, toIndex: number): void {
+    const papers = this.getFavoritePapers();
+    if (
+      fromIndex < 0 ||
+      fromIndex >= papers.length ||
+      toIndex < 0 ||
+      toIndex > papers.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const [item] = papers.splice(fromIndex, 1);
+    papers.splice(toIndex, 0, item);
+    this.saveFavoritePapers(papers);
+    this.renderFavoriteAuthorsList();
+  }
+
+  /**
+   * Show favorites list by clearing current author and re-rendering.
+   */
+  private showFavoritesList(): void {
+    this.entryCitedSource = undefined;
+    this.authorProfile = undefined;
+    this.authorStats = undefined;
+    this.authorNavigationStack = [];
+    this.updateAuthorProfileCard();
+    this.updateFavoritesTabStyle(true); // Sets isFavoritesViewActive = true
+    this.updateTabSelection(); // Deselect other tabs (now respects isFavoritesViewActive)
+    // Hide chart and sort row when showing favorites (keep filter row for filtering)
+    if (this.chartContainer) {
+      this.chartContainer.style.display = "none";
+    }
+    if (this.sortRow) {
+      this.sortRow.style.display = "none";
+    }
+    this.renderFavoriteAuthorsList();
+  }
+
+  /**
+   * Update the favorites tab (⭐) style.
+   */
+  private updateFavoritesTabStyle(isActive: boolean): void {
+    if (!this.favoritesTabButton) return;
+    // This is the single source of truth for isFavoritesViewActive
+    this.isFavoritesViewActive = isActive;
+    this.favoritesTabButton.setAttribute("data-active", String(isActive));
+    // Use same colors as other tabs (applyTabButtonStyle in pickerUI.ts)
+    const activeBlue = "#0060df"; // Zotero's primary blue
+    if (isActive) {
+      this.favoritesTabButton.style.background = activeBlue;
+      this.favoritesTabButton.style.borderColor = activeBlue;
+    } else {
+      this.favoritesTabButton.style.background = "var(--material-background, #fff)";
+      this.favoritesTabButton.style.borderColor = "var(--fill-quinary, #d1d5db)";
+      // Restore chart and sort row when leaving favorites view
+      if (this.chartContainer) {
+        this.chartContainer.style.display = "";
+      }
+      if (this.sortRow) {
+        this.sortRow.style.display = "";
+      }
+    }
+  }
+
+  private renderFavoriteAuthorsList(): void {
+    const doc = this.listEl.ownerDocument;
+    this.listEl.replaceChildren();
+
+    // Apply filter if any
+    const filterText = this.filterText.toLowerCase().trim();
+
+    // Get and filter authors
+    const allAuthors = this.getFavoriteAuthors();
+    const authors = filterText
+      ? allAuthors.filter(
+          (fav) =>
+            fav.label.toLowerCase().includes(filterText) ||
+            fav.authorSearchInfo.fullName.toLowerCase().includes(filterText) ||
+            fav.authorSearchInfo.bai?.toLowerCase().includes(filterText),
+        )
+      : allAuthors;
+
+    // Get and filter papers
+    const allPapers = this.getFavoritePapers();
+    const papers = filterText
+      ? allPapers.filter(
+          (fav) =>
+            fav.title.toLowerCase().includes(filterText) ||
+            fav.authors?.toLowerCase().includes(filterText) ||
+            fav.recid.includes(filterText),
+        )
+      : allPapers;
+
+    // Container
+    const container = doc.createElement("div");
+    container.style.cssText = `padding: 16px; text-align: left;`;
+
+    // Render Authors section
+    this.renderFavoriteAuthorsSection(doc, container, authors);
+
+    // Render Papers section
+    this.renderFavoritePapersSection(doc, container, papers);
+
+    this.listEl.appendChild(container);
+  }
+
+  private renderFavoriteAuthorsSection(
+    doc: Document,
+    container: HTMLElement,
+    favorites: FavoriteAuthor[],
+  ): void {
+    // Section wrapper
+    const section = doc.createElement("div");
+    section.className = "zinspire-favorites-section";
+
+    // Collapsible header
+    const header = doc.createElement("div");
+    header.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--fill-primary, #334155);
+    `;
+
+    const arrow = doc.createElement("span");
+    arrow.textContent = "▼";
+    arrow.style.cssText = `
+      font-size: 10px;
+      transition: transform 0.15s ease;
+    `;
+
+    const titleText = doc.createElement("span");
+    titleText.textContent = getString("references-panel-favorite-title");
+
+    const countBadge = doc.createElement("span");
+    countBadge.textContent = `(${favorites.length})`;
+    countBadge.style.cssText = `
+      font-weight: 400;
+      color: var(--fill-secondary, #64748b);
+    `;
+
+    header.appendChild(arrow);
+    header.appendChild(titleText);
+    header.appendChild(countBadge);
+    section.appendChild(header);
+
+    // Content container
+    const content = doc.createElement("div");
+    content.className = "zinspire-favorites-content";
+
+    if (favorites.length === 0) {
+      // Empty state
+      const empty = doc.createElement("div");
+      empty.style.cssText = `
+        font-size: 12px;
+        color: var(--fill-secondary, #64748b);
+      `;
+      empty.textContent = getString("references-panel-favorite-empty");
+      content.appendChild(empty);
+    } else {
+      // Favorite authors list
+      const list = doc.createElement("div");
+      list.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        text-align: left;
+      `;
+
+      // Drag state
+      let draggedIndex: number | null = null;
+
+      favorites.forEach((fav, index) => {
+        const row = this.createFavoriteAuthorRow(doc, fav, index);
+
+        // Drag events
+        row.addEventListener("dragstart", (e) => {
+          draggedIndex = index;
+          row.style.opacity = "0.5";
+          row.style.cursor = "grabbing";
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+          }
+        });
+
+        row.addEventListener("dragend", () => {
+          row.style.opacity = "1";
+          row.style.cursor = "grab";
+          draggedIndex = null;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+        });
+
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+          if (e.clientY < midY) {
+            row.style.borderTop = "2px solid #0060df";
+          } else {
+            row.style.borderBottom = "2px solid #0060df";
+          }
+        });
+
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          let targetIndex = e.clientY < midY ? index : index + 1;
+          if (draggedIndex < targetIndex) targetIndex--;
+          this.reorderFavoriteAuthor(draggedIndex, targetIndex);
+        });
+
+        list.appendChild(row);
+      });
+      content.appendChild(list);
+    }
+
+    section.appendChild(content);
+
+    // Toggle collapse on header click
+    header.addEventListener("click", () => {
+      const isCollapsed = content.style.display === "none";
+      content.style.display = isCollapsed ? "" : "none";
+      arrow.style.transform = isCollapsed ? "" : "rotate(-90deg)";
+    });
+
+    container.appendChild(section);
+  }
+
+  private renderFavoritePapersSection(
+    doc: Document,
+    container: HTMLElement,
+    papers: FavoritePaper[],
+  ): void {
+    // Section wrapper
+    const section = doc.createElement("div");
+    section.className = "zinspire-favorites-section";
+    section.style.marginTop = "16px";
+
+    // Collapsible header
+    const header = doc.createElement("div");
+    header.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--fill-primary, #334155);
+    `;
+
+    const arrow = doc.createElement("span");
+    arrow.textContent = "▼";
+    arrow.style.cssText = `
+      font-size: 10px;
+      transition: transform 0.15s ease;
+    `;
+
+    const titleText = doc.createElement("span");
+    titleText.textContent = getString("references-panel-favorite-papers-title");
+
+    const countBadge = doc.createElement("span");
+    countBadge.textContent = `(${papers.length})`;
+    countBadge.style.cssText = `
+      font-weight: 400;
+      color: var(--fill-secondary, #64748b);
+    `;
+
+    header.appendChild(arrow);
+    header.appendChild(titleText);
+    header.appendChild(countBadge);
+    section.appendChild(header);
+
+    // Content container
+    const content = doc.createElement("div");
+    content.className = "zinspire-favorites-content";
+
+    if (papers.length === 0) {
+      const empty = doc.createElement("div");
+      empty.style.cssText = `
+        font-size: 12px;
+        color: var(--fill-secondary, #64748b);
+      `;
+      empty.textContent = getString("references-panel-favorite-papers-empty");
+      content.appendChild(empty);
+    } else {
+      const list = doc.createElement("div");
+      list.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      `;
+
+      // Drag state
+      let draggedIndex: number | null = null;
+
+      papers.forEach((paper, index) => {
+        const row = this.createFavoritePaperRow(doc, paper, index);
+
+        // Drag events
+        row.addEventListener("dragstart", (e) => {
+          draggedIndex = index;
+          row.style.opacity = "0.5";
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+          }
+        });
+
+        row.addEventListener("dragend", () => {
+          row.style.opacity = "1";
+          draggedIndex = null;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+        });
+
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+          if (e.clientY < midY) {
+            row.style.borderTop = "2px solid #0060df";
+          } else {
+            row.style.borderBottom = "2px solid #0060df";
+          }
+        });
+
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          let targetIndex = e.clientY < midY ? index : index + 1;
+          if (draggedIndex < targetIndex) targetIndex--;
+          this.reorderFavoritePaper(draggedIndex, targetIndex);
+        });
+
+        list.appendChild(row);
+      });
+      content.appendChild(list);
+    }
+
+    section.appendChild(content);
+
+    // Toggle collapse on header click
+    header.addEventListener("click", () => {
+      const isCollapsed = content.style.display === "none";
+      content.style.display = isCollapsed ? "" : "none";
+      arrow.style.transform = isCollapsed ? "" : "rotate(-90deg)";
+    });
+
+    container.appendChild(section);
+  }
+
+  private createFavoritePaperRow(
+    doc: Document,
+    paper: FavoritePaper,
+    index: number,
+  ): HTMLElement {
+    const row = doc.createElement("div");
+    row.setAttribute("draggable", "true");
+    row.setAttribute("data-index", String(index));
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: var(--material-background, #f8fafc);
+      cursor: grab;
+    `;
+
+    // Drag handle
+    const dragHandle = doc.createElement("span");
+    dragHandle.textContent = "⋮⋮";
+    dragHandle.style.cssText = `
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: grab;
+      font-size: 10px;
+      user-select: none;
+    `;
+    row.appendChild(dragHandle);
+
+    // Paper link - format: "Author (Year): Title"
+    const link = doc.createElement("a");
+    // Extract surname from stored author string (handles legacy full-name format)
+    let authorPart = "Unknown";
+    if (paper.authors) {
+      // If contains comma, extract surname (before comma)
+      const commaIdx = paper.authors.indexOf(",");
+      if (commaIdx > 0 && !paper.authors.includes(" et al.")) {
+        authorPart = paper.authors.substring(0, commaIdx).trim();
+      } else {
+        authorPart = paper.authors;
+      }
+    }
+    const yearPart = paper.year ? ` (${paper.year})` : "";
+    const titlePart =
+      paper.title.length > 50
+        ? paper.title.substring(0, 47) + "..."
+        : paper.title;
+    link.textContent = `📄 ${authorPart}${yearPart}: ${titlePart}`;
+    link.title = paper.title;
+    link.style.cssText = `
+      flex: 1;
+      color: #0066cc;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 12px;
+    `;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Navigate to Zotero item if itemID exists and item is valid
+      if (paper.itemID) {
+        const item = Zotero.Items.get(paper.itemID);
+        if (item && !item.deleted) {
+          ZoteroPane.selectItem(paper.itemID);
+        } else {
+          // Item was deleted, fallback to INSPIRE page
+          Zotero.launchURL?.(`https://inspirehep.net/literature/${paper.recid}`);
+        }
+      } else {
+        Zotero.launchURL?.(`https://inspirehep.net/literature/${paper.recid}`);
+      }
+    });
+    row.appendChild(link);
+
+    // Remove button
+    const removeBtn = doc.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = getString("references-panel-favorite-paper-remove");
+    removeBtn.style.cssText = `
+      border: none;
+      background: transparent;
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+    `;
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.removeFavoritePaper(index);
+    });
+    row.appendChild(removeBtn);
+
+    return row;
+  }
+
+  private removeFavoritePaper(index: number): void {
+    const papers = this.getFavoritePapers();
+    if (index >= 0 && index < papers.length) {
+      papers.splice(index, 1);
+      this.saveFavoritePapers(papers);
+      if (this.isFavoritesViewActive) {
+        this.renderFavoriteAuthorsList();
+      }
+    }
+  }
+
+  private createFavoriteAuthorRow(
+    doc: Document,
+    fav: FavoriteAuthor,
+    index: number,
+  ): HTMLElement {
+    const row = doc.createElement("div");
+    row.setAttribute("data-index", String(index));
+    row.draggable = true;
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: var(--material-background, #f8fafc);
+      cursor: grab;
+      transition: background 0.15s ease, transform 0.15s ease;
+    `;
+
+    // Drag handle
+    const handle = doc.createElement("span");
+    handle.textContent = "⋮⋮";
+    handle.style.cssText = `
+      color: var(--fill-tertiary, #94a3b8);
+      font-size: 10px;
+      cursor: grab;
+      user-select: none;
+      letter-spacing: -2px;
+    `;
+    row.appendChild(handle);
+
+    // Author link
+    const link = doc.createElement("a");
+    link.textContent = `★ ${fav.label}`;
+    link.title = fav.authorSearchInfo.bai || fav.authorSearchInfo.fullName;
+    link.style.cssText = `
+      flex: 1;
+      color: #0066cc;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 12px;
+    `;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.showAuthorPapersTab(fav.authorSearchInfo).catch(() => void 0);
+    });
+    row.appendChild(link);
+
+    // Remove button
+    const removeBtn = doc.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = getString("references-panel-favorite-remove");
+    removeBtn.style.cssText = `
+      border: none;
+      background: transparent;
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+    `;
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.removeFavoriteAuthor(index);
+    });
+    row.appendChild(removeBtn);
+
+    return row;
   }
 
   private isCurrentItemRelated(localItem: Zotero.Item) {
@@ -13711,7 +14895,13 @@ class InspireReferencePanelController {
     // Hide old container immediately (no reflow)
     oldListEl.style.display = "none";
     // Insert new container after old one
-    oldListEl.parentNode?.insertBefore(newListEl, oldListEl.nextSibling);
+    // FIX-DOM-INSERTION: Ensure new element is always in DOM with fallback
+    if (oldListEl.parentNode) {
+      oldListEl.parentNode.insertBefore(newListEl, oldListEl.nextSibling);
+    } else {
+      // Fallback: append to body (listEl should be last child after sortRow)
+      this.body.appendChild(newListEl);
+    }
     this.listEl = newListEl;
     // Re-register event delegation on new container
     this.setupEventDelegation();

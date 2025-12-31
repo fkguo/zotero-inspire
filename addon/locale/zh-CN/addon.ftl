@@ -39,7 +39,7 @@ pane-item-references-sidenav = INSPIRE 引用
 references-panel-tab-references = 引用
 references-panel-tab-cited = 被引
 references-panel-tab-entry-cited = 引用...
-references-panel-tab-author-papers = 论文...
+references-panel-tab-author-papers = 作者
 references-panel-status-empty = 选择一条条目以加载 INSPIRE 数据
 references-panel-reader-mode = 阅读器视图中不支持 INSPIRE 数据
 references-panel-select-item = 请选择单个常规条目以查看 INSPIRE 数据
@@ -63,6 +63,20 @@ references-panel-forward = 前进
 references-panel-forward-tooltip = 前往下一条 Zotero 条目
 references-panel-entry-back = 返回 { $tab }
 references-panel-entry-back-tooltip = 返回上一视图
+references-panel-entry-back-author = 返回 { $author }
+references-panel-favorite-title = 收藏的作者
+references-panel-favorite-empty = 暂无收藏的作者。点击作者资料中的 ☆ 添加。
+references-panel-favorite-add = 添加到收藏
+references-panel-favorite-remove = 从收藏中移除
+references-panel-favorite-added = 已添加到收藏
+references-panel-favorite-removed = 已从收藏中移除
+references-panel-favorite-view = 查看所有收藏的作者
+references-panel-favorite-papers-title = 收藏的论文
+references-panel-favorite-papers-empty = 暂无收藏的论文。右键点击条目添加。
+references-panel-favorite-paper-add = 收藏论文
+references-panel-favorite-paper-remove = 取消收藏论文
+references-panel-favorite-paper-added = 论文已收藏
+references-panel-favorite-paper-removed = 论文已取消收藏
 references-panel-filter-placeholder = 筛选条目
 references-panel-quick-filters = 筛选
 references-panel-quick-filter-high-citations = 高引用（>50）
@@ -443,6 +457,11 @@ collab-tag-disabled = 请在 首选项 → INSPIRE 中启用合作组标签功�
 
 # 基金信息提取 - 主窗口菜单
 menuitem-copy-funding = 复制基金信息
+
+# 收藏论文 - 主窗口菜单 (FTR-FAVORITE-PAPERS)
+menuitem-favorite-paper = 切换收藏论文
+references-panel-favorite-paper-select-one = 请选择一个条目以切换收藏状态
+references-panel-favorite-paper-no-recid = 无法收藏：未找到 INSPIRE ID
 
 # 基金信息提取 - 进度消息
 funding-extraction-progress = 正在从 PDF 提取基金信息...

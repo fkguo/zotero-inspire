@@ -46,6 +46,8 @@ declare namespace _ZoteroTypes {
       "collab_tag_auto": boolean;
       "collab_tag_template": string;
       "funding_china_only": boolean;
+      "favorite_authors": string;
+      "favorite_papers": string;
     };
   }
 }
