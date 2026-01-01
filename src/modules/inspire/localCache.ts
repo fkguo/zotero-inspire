@@ -828,41 +828,103 @@ class InspireLocalCache {
 
       const children = await IOUtils.getChildren(this.cacheDir);
 
-      const promises = children
-        .filter((filePath) => this.isCacheFile(filePath))
-        .map(async (filePath) => {
-          try {
-            const cached = await this.readCacheFile(filePath);
+      const cacheFiles = children.filter((filePath) => this.isCacheFile(filePath));
 
-            if (!cached) {
-              // File is corrupted or unreadable, delete it
-              await IOUtils.remove(filePath);
-              return 1;
-            }
+      // PERF: Avoid reading/decompressing/parsing every cache file at once.
+      // Use a small concurrency and periodically yield to keep Zotero responsive.
+      const CONCURRENCY = 4;
 
-            // Check TTL
-            if (cached.ttl > 0) {
-              const ttlMs = cached.ttl * 60 * 60 * 1000;
-              const age = Date.now() - cached.ts;
-              if (age > ttlMs) {
-                await IOUtils.remove(filePath);
-                return 1;
-              }
-            }
+      const cacheTypeOrder: LocalCacheType[] = [
+        "author_profile",
+        "author_papers",
+        "preprintCandidates",
+        "crossref",
+        "preprint",
+        "cited",
+        "author",
+        "refs",
+      ];
+
+      const getTypeFromFilePath = (filePath: string): LocalCacheType | null => {
+        const fileName = filePath.split(/[\\/]/).pop() ?? "";
+        for (const t of cacheTypeOrder) {
+          if (fileName.startsWith(`${t}_`)) return t;
+        }
+        return null;
+      };
+
+      const getTTLHoursForType = (t: LocalCacheType): number => {
+        if (t === "refs" || t === "preprintCandidates") return DEFAULT_TTL_REFS;
+        if (t === "author_profile") return DEFAULT_TTL_AUTHOR_PROFILE;
+        return this.getTTLHours();
+      };
+
+      const processFile = async (filePath: string): Promise<number> => {
+        try {
+          const t = getTypeFromFilePath(filePath);
+          const ttlHours = t ? getTTLHoursForType(t) : undefined;
+
+          // Permanent caches don't expire (skip heavy checks).
+          if (ttlHours !== undefined && ttlHours <= 0) {
             return 0;
-          } catch {
-            // If file is corrupted or unreadable, try to delete it
+          }
+
+          // Fast path: use filesystem mtime when possible (avoids gzip+JSON.parse).
+          if (ttlHours !== undefined && ttlHours > 0) {
             try {
-              await IOUtils.remove(filePath);
-              return 1;
+              const stat = await IOUtils.stat(filePath);
+              const lastModified = (stat as any)?.lastModified as
+                | number
+                | undefined;
+              if (typeof lastModified === "number" && Number.isFinite(lastModified)) {
+                const ageMs = Date.now() - lastModified;
+                const ttlMs = ttlHours * 60 * 60 * 1000;
+                if (ageMs > ttlMs) {
+                  await IOUtils.remove(filePath);
+                  return 1;
+                }
+                return 0;
+              }
             } catch {
-              return 0;
+              // Fall back to content-based check below
             }
           }
-        });
 
-      const results = await Promise.all(promises);
-      const deleted = results.reduce((sum: number, count) => sum + count, 0);
+          // Fallback: read+parse to check per-file TTL/timestamp or unknown type.
+          const cached = await this.readCacheFile(filePath);
+          if (!cached) {
+            await IOUtils.remove(filePath);
+            return 1;
+          }
+
+          if (cached.ttl > 0) {
+            const ttlMs = cached.ttl * 60 * 60 * 1000;
+            const age = Date.now() - cached.ts;
+            if (age > ttlMs) {
+              await IOUtils.remove(filePath);
+              return 1;
+            }
+          }
+          return 0;
+        } catch {
+          // If file is corrupted or unreadable, try to delete it
+          try {
+            await IOUtils.remove(filePath);
+            return 1;
+          } catch {
+            return 0;
+          }
+        }
+      };
+
+      let deleted = 0;
+      for (let i = 0; i < cacheFiles.length; i += CONCURRENCY) {
+        const batch = cacheFiles.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(batch.map((p) => processFile(p)));
+        deleted += results.reduce((sum, count) => sum + count, 0);
+        // Yield to keep UI responsive during large purges.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
 
       if (deleted > 0) {
         Zotero.debug(

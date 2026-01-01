@@ -2177,9 +2177,10 @@ class InspireReferencePanelController {
   }
 
   private updatePanelRightInset() {
-    // Only apply special inset in entryCited mode (Citing...), to avoid changing the
-    // layout of other tabs that already render correctly.
-    if (this.viewMode !== "entryCited") {
+    // Only apply special inset in entryCited mode when showing a paper's "Citing…"
+    // list (entryCitedSource.recid). Author view also uses entryCited mode but
+    // doesn't suffer from the right-rail occlusion issue and must not be narrowed.
+    if (this.viewMode !== "entryCited" || !this.entryCitedSource?.recid) {
       this.setPanelRightInsetPx(0);
       return;
     }
@@ -3767,8 +3768,11 @@ class InspireReferencePanelController {
       }
     }
 
-    const { getPDFReferencesParser } =
-      await import("./inspire/pdfAnnotate/pdfReferencesParser");
+    const [{ getPDFReferencesParser }, { buildPdfTextCandidatesForReferenceParsing }] =
+      await Promise.all([
+        import("./inspire/pdfAnnotate/pdfReferencesParser"),
+        import("./inspire/pdfAnnotate/textSampling"),
+      ]);
 
     // FTR-MULTI-PDF-FIX: Get PDF directly from attachmentItemID instead of finding first PDF
     const attachment = Zotero.Items.get(attachmentItemID);
@@ -3813,11 +3817,47 @@ class InspireReferencePanelController {
         return false;
       }
 
-      // Parse the reference list
       const parser = getPDFReferencesParser();
-      const mapping = parser.parseReferencesSection(pdfText);
+      const candidates = buildPdfTextCandidatesForReferenceParsing(pdfText);
 
-      if (mapping) {
+      let chosenText = pdfText;
+      let chosenCandidate = candidates[candidates.length - 1] ?? {
+        kind: "full" as const,
+        value: pdfText.length,
+        startIndex: 0,
+        text: pdfText,
+      };
+
+      // Prefer the smallest tail slice that still captures the beginning of the references list
+      // (i.e., includes low labels like 1–5). Fall back to full text to avoid regressions.
+      let mapping: Awaited<ReturnType<typeof parser.parseReferencesSection>> | null =
+        null;
+      for (const candidate of candidates) {
+        const candidateMapping = parser.parseReferencesSection(candidate.text);
+        if (!candidateMapping || candidateMapping.totalLabels <= 0) {
+          continue;
+        }
+
+        const labelNums = Array.from(candidateMapping.labelCounts.keys())
+          .map((l) => parseInt(l, 10))
+          .filter((n) => Number.isFinite(n));
+        const minLabel =
+          labelNums.length > 0 ? Math.min(...labelNums) : Number.POSITIVE_INFINITY;
+        const hasLowStart =
+          candidateMapping.labelCounts.has("1") ||
+          (Number.isFinite(minLabel) && minLabel <= 5);
+
+        mapping = candidateMapping;
+        chosenText = candidate.text;
+        chosenCandidate = candidate;
+
+        if (hasLowStart || candidate.kind === "full") {
+          break;
+        }
+      }
+
+      let appliedNumeric = false;
+      if (mapping && mapping.totalLabels > 0) {
         labelMatcher.setPDFMapping(mapping);
 
         // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
@@ -3846,8 +3886,9 @@ class InspireReferencePanelController {
           }),
         );
         Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE] Successfully applied PDF mapping`,
+          `[${config.addonName}] [PDF-PARSE] Successfully applied PDF mapping (source=${chosenCandidate.kind}, startIndex=${chosenCandidate.startIndex})`,
         );
+        appliedNumeric = true;
         // Don't return yet - also try author-year parsing for RMP-style papers
       }
 
@@ -3858,8 +3899,30 @@ class InspireReferencePanelController {
         `[${config.addonName}] [PDF-PARSE] Trying author-year format parsing (regardless of numeric result)...`,
       );
 
-      const authorYearMapping =
-        parser.parseAuthorYearReferencesSection(pdfText);
+      let appliedAuthorYear = false;
+      let authorYearMapping:
+        | Awaited<ReturnType<typeof parser.parseAuthorYearReferencesSection>>
+        | null = null;
+      let authorYearCandidate = chosenCandidate;
+
+      // Prefer sampling for author-year too (especially when numeric parsing failed).
+      if (appliedNumeric) {
+        authorYearMapping = parser.parseAuthorYearReferencesSection(chosenText);
+      } else {
+        for (const candidate of candidates) {
+          const candidateMapping =
+            parser.parseAuthorYearReferencesSection(candidate.text);
+          if (!candidateMapping || candidateMapping.authorYearMap.size <= 0) {
+            continue;
+          }
+          authorYearMapping = candidateMapping;
+          authorYearCandidate = candidate;
+          if (candidateMapping.authorYearMap.size >= 5 || candidate.kind === "full") {
+            break;
+          }
+        }
+      }
+
       if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
         labelMatcher.setAuthorYearMapping(authorYearMapping);
         // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
@@ -3869,8 +3932,9 @@ class InspireReferencePanelController {
           authorYearMapping,
         );
         Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE] Successfully applied author-year mapping with ${authorYearMapping.authorYearMap.size} entries`,
+          `[${config.addonName}] [PDF-PARSE] Successfully applied author-year mapping with ${authorYearMapping.authorYearMap.size} entries (source=${authorYearCandidate.kind}, startIndex=${authorYearCandidate.startIndex})`,
         );
+        appliedAuthorYear = true;
       } else {
         Zotero.debug(
           `[${config.addonName}] [PDF-PARSE] Author-year parsing found ${authorYearMapping?.authorYearMap.size ?? 0} entries (not enough)`,
@@ -3878,7 +3942,7 @@ class InspireReferencePanelController {
       }
 
       // Return true if we got either numeric or author-year mapping
-      if (mapping && mapping.totalLabels > 0) {
+      if (appliedNumeric || appliedAuthorYear) {
         return true;
       }
 
@@ -13176,6 +13240,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       onHide: () => {
         // Called when preview is hidden
       },
+      isFavorite: (entry) => this.isPaperFavorite(entry.recid, entry.localItemID),
+      onToggleFavorite: async (entry) => {
+        this.togglePaperFavorite(entry);
+      },
     };
   }
 
@@ -14573,6 +14641,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
     // Switch to entryCited mode
     this.viewMode = "entryCited";
+    this.requestPanelRightInsetUpdate();
     this.prepareAuthorProfileState(authorInfo);
     this.updateTabSelection();
 

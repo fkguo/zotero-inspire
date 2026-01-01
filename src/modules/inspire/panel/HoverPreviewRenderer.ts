@@ -63,6 +63,8 @@ export interface PreviewRenderContext {
   citationType?: "numeric" | "author-year" | "arxiv";
   /** Whether entry has a PDF attachment (for showing Open PDF button) */
   hasPdf?: boolean;
+  /** Whether entry is a favorite (for showing star button) */
+  isFavorite?: boolean;
 
   // Action callbacks (async to support state refresh after completion)
   onAdd?: (entry: InspireReferenceEntry) => void | Promise<void>;
@@ -72,6 +74,7 @@ export interface PreviewRenderContext {
   onSelectInLibrary?: (entry: InspireReferenceEntry) => void;
   onCopyBibtex?: (entry: InspireReferenceEntry) => void | Promise<void>;
   onCopyTexkey?: (entry: InspireReferenceEntry) => void | Promise<void>;
+  onToggleFavorite?: (entry: InspireReferenceEntry) => void | Promise<void>;
   onNavigate?: (delta: number) => void;
   onAbstractContextMenu?: (e: MouseEvent, el: HTMLElement) => void;
 }
@@ -410,6 +413,38 @@ export class HoverPreviewRenderer {
     statusEl.appendChild(statusText);
 
     actionRow.appendChild(statusEl);
+
+    // Favorite toggle (rightmost, like author preview)
+    const canFavorite = Boolean(entry.recid || entry.localItemID);
+    if (
+      canFavorite &&
+      typeof ctx.isFavorite === "boolean" &&
+      ctx.onToggleFavorite
+    ) {
+      const isFav = ctx.isFavorite;
+      const favBtn = this.doc.createElement("button");
+      favBtn.type = "button";
+      favBtn.textContent = isFav ? "★" : "☆";
+      favBtn.title = getString(
+        isFav ? "references-panel-favorite-remove" : "references-panel-favorite-add",
+      );
+      favBtn.style.cssText = `
+        border: none;
+        background: transparent;
+        font-size: 14px;
+        cursor: pointer;
+        color: ${isFav ? "#f59e0b" : "var(--fill-tertiary, #94a3b8)"};
+        padding: 0 2px;
+        margin-left: 6px;
+        flex-shrink: 0;
+      `;
+      favBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.onToggleFavorite?.(entry);
+      });
+      actionRow.appendChild(favBtn);
+    }
 
     card.appendChild(actionRow);
   }

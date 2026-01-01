@@ -91,6 +91,27 @@ const MULTI_AUTHOR_OUTSIDE_REGEX = new RegExp(
   "gi",
 );
 
+// Author-year citations WITHOUT parentheses (broken PDF text layers)
+// Examples:
+// - "symmetry Adler and Dashen, 1968 ." (missing parentheses)
+// - "Abarbanel and Goldberger 1968 and Heimann 1973 ." (missing parentheses and comma)
+// Matches: "Adler and Dashen, 1968", "M.-T. Li et al., 2013", "Larionov, Strikman, and Bleicher, 2015"
+const BARE_AUTHOR_YEAR_GROUP_REGEX = new RegExp(
+  `\\b(` +
+    `(?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?` + // Optional initials
+    `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,}` + // First surname token (>=2 chars total)
+    `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,})*` + // Optional compound surname tokens
+    `(?:` +
+      `(?:\\s*,\\s+[Aa]nd\\s+|\\s+[Aa]nd\\s+|\\s*&\\s+|\\s*,\\s*)` + // separators
+      `(?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?` + // Optional initials
+      `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,}` +
+      `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,})*` +
+    `)*` +
+    `(?:\\s+[Ee]t\\s+[Aa]l\\.?)*` +
+  `)\\s*(?:,\\s*|\\s+)((?:1[5-9]\\d{2}|20\\d{2})[a-z]?(?:\\s*,\\s*(?:1[5-9]\\d{2}|20\\d{2})[a-z]?)*)\\b`,
+  "g",
+);
+
 const TWO_AUTHORS_REGEX = new RegExp(
   `\\b([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s+(?:and|&)\\s+([${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]+)\\s*\\((\\d{4}[a-z]?(?:\\s*,\\s*\\d{4}[a-z]?)*)\\)`,
   "gi",
@@ -181,6 +202,12 @@ function tryParseAsConcatenatedRange(
 
   const num = parseInt(label, 10);
   if (isNaN(num)) return null;
+
+  // Guard: avoid treating publication years as concatenated ranges.
+  // Example: "1968" (year) was expanded into "19-68" → [19..68].
+  if (label.length === 4 && num >= 1500 && num <= 2099) {
+    return null;
+  }
 
   // Need at least 3 digits to split - 2-digit numbers like "15" should NEVER be treated
   // as concatenated ranges. "15" is always label 15, not "1-5".
@@ -1428,6 +1455,47 @@ export class CitationParser {
       }
 
       // If we found matches with Pattern 0a, return early (don't continue with other patterns)
+      if (matches.length > 0) {
+        return this.buildAuthorYearResult(matches);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Pattern 0b: Single (or repeated) author-year citations WITHOUT parentheses
+    // Handles broken PDF text layers that drop parentheses:
+    // - "Adler and Dashen, 1968"
+    // - "M.-T. Li et al., 2013"
+    // - "Larionov, Strikman, and Bleicher, 2015"
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (
+      !hasParenthesizedYears &&
+      /\b(?:1[5-9]\d{2}|20\d{2})[a-z]?\b/.test(processedText)
+    ) {
+      let bareMatch: RegExpExecArray | null;
+      BARE_AUTHOR_YEAR_GROUP_REGEX.lastIndex = 0;
+      while ((bareMatch = BARE_AUTHOR_YEAR_GROUP_REGEX.exec(processedText)) !== null) {
+        const full = bareMatch[0].trim();
+        const parsed = this.parseAuthorYearGroup(full);
+        for (const p of parsed) {
+          // Check for duplicate - must consider initials for disambiguation
+          const isDuplicate = matches.some((m) => {
+            if (m.authors[0] !== p.authors[0] || m.year !== p.year) return false;
+            const mInitial = m.authorInitials?.[0];
+            const pInitial = p.authorInitials?.[0];
+            if (mInitial && pInitial) return mInitial === pInitial;
+            if (mInitial || pInitial) return false;
+            if (m.isEtAl !== p.isEtAl) return false;
+            return true;
+          });
+          if (!isDuplicate) {
+            matches.push({ ...p, full });
+            debugLog(
+              `[PDF-ANNOTATE] Author-year Pattern 0b match: "${p.authors.join(", ")} (${p.year})" from "${full}", initials=[${p.authorInitials?.join(",") || ""}]`,
+            );
+          }
+        }
+      }
+
       if (matches.length > 0) {
         return this.buildAuthorYearResult(matches);
       }

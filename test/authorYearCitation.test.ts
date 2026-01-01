@@ -207,6 +207,46 @@ describe("Author-Year Citation Detection", () => {
         expect(result?.labels).toContain("Guo");
         expect(result?.labels).toContain("2017");
       });
+
+      it("should detect broken text-layer author-year WITHOUT parentheses: Adler and Dashen, 1968", () => {
+        const text = "symmetry Adler and Dashen, 1968 .";
+        const result = parser.parseSelection(text);
+        expect(result).not.toBeNull();
+        expect(result?.type).toBe("author-year");
+        expect(result?.labels).toContain("Adler");
+        expect(result?.labels).toContain("Dashen");
+        expect(result?.labels).toContain("1968");
+      });
+
+      it("should detect broken text-layer author-year WITHOUT comma: Abarbanel and Goldberger 1968 and Heimann 1973", () => {
+        const text = "as Abarbanel and Goldberger 1968 and Heimann 1973 .";
+        const result = parser.parseSelection(text);
+        expect(result).not.toBeNull();
+        expect(result?.type).toBe("author-year");
+        // Should detect both citations
+        expect(result?.labels).toContain("Abarbanel");
+        expect(result?.labels).toContain("Goldberger");
+        expect(result?.labels).toContain("Heimann");
+        expect(result?.labels).toContain("1968");
+        expect(result?.labels).toContain("1973");
+        expect(result?.subCitations).toBeDefined();
+        expect(result?.subCitations?.length).toBe(2);
+      });
+
+      it("should detect multiple years WITHOUT parentheses: Bjorken 1966, 1970", () => {
+        const text = "the Bjorken 1966, 1970 and Ellis-Jaffe 1974 sum rules";
+        const result = parser.parseSelection(text);
+        expect(result).not.toBeNull();
+        expect(result?.type).toBe("author-year");
+        expect(result?.labels).toContain("Bjorken");
+        expect(result?.labels).toContain("1966");
+        expect(result?.labels).toContain("1970");
+        expect(result?.labels).toContain("Ellis-Jaffe");
+        expect(result?.labels).toContain("1974");
+        // Should have subCitations for 3 distinct citations (Bjorken 1966/1970 + Ellis-Jaffe 1974)
+        expect(result?.subCitations).toBeDefined();
+        expect(result?.subCitations?.length).toBe(3);
+      });
     });
 
     // Year suffix disambiguation tests
