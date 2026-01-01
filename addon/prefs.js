@@ -15,6 +15,8 @@ pref("__prefsPrefix__.pdf_fuzzy_citation", false); // Aggressive citation detect
 pref("__prefsPrefix__.pdf_parse_refs_list", false); // Parse PDF reference list to fix label mapping (for multi-citation references)
 pref("__prefsPrefix__.pdf_force_mapping_on_mismatch", true); // When PDF/INSPIRE reference counts diverge, force PDF mapping and skip index fallback
 pref("__prefsPrefix__.quick_filters_last_used", "[]");
+// Developer/debug toggles
+pref("__prefsPrefix__.debug_panel_layout", false); // Enable panel layout debug logs/UI
 // Local cache settings
 pref("__prefsPrefix__.local_cache_enable", true);
 pref("__prefsPrefix__.local_cache_ttl_hours", 24);

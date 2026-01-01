@@ -70,6 +70,9 @@ export function applyRefEntryRowStyle(el: HTMLElement): void {
   el.style.boxSizing = "border-box";
   el.style.overflow = "hidden";
   el.style.padding = "4px 0";
+  // Some host styles (including Zotero UI) can set `white-space: nowrap` on anchors.
+  // Ensure entry rows can wrap normally to avoid horizontal overflow.
+  el.style.whiteSpace = "normal";
 }
 
 /**
@@ -164,6 +167,7 @@ export function applyRefEntryContentStyle(el: HTMLElement): void {
     overflow: hidden;
     word-break: break-word;
     overflow-wrap: break-word;
+    white-space: normal;
   `;
 
   // FIX-PANEL-WIDTH-OVERFLOW: Style title and meta for proper text wrapping
@@ -177,6 +181,7 @@ export function applyRefEntryContentStyle(el: HTMLElement): void {
       overflow-wrap: break-word;
       word-break: break-word;
       max-width: 100%;
+      white-space: normal;
     `;
   }
 
@@ -190,6 +195,7 @@ export function applyRefEntryContentStyle(el: HTMLElement): void {
       overflow-wrap: break-word;
       word-break: break-word;
       max-width: 100%;
+      white-space: normal;
     `;
   }
 }

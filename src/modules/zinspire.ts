@@ -1151,6 +1151,12 @@ export class ZInspireReferencePane {
 }
 
 class InspireReferencePanelController {
+  private static get PANEL_LAYOUT_DEBUG(): boolean {
+    return getPref("debug_panel_layout") === true;
+  }
+  // Fallback right-side safe inset when we can't detect the icon rail via DOM APIs.
+  // Chosen to match Zotero's typical right icon rail width (incl. padding).
+  private static readonly RIGHT_RAIL_FALLBACK_PX = 56;
   private static readonly instances =
     new Set<InspireReferencePanelController>();
   private static navigationStack: NavigationSnapshot[] = [];
@@ -1312,6 +1318,23 @@ class InspireReferencePanelController {
   private entryCitedReturnScroll?: ScrollState;
   private pendingEntryScrollReset = false;
   private allEntries: InspireReferenceEntry[] = [];
+  // Right-side item-pane sidenav inset (prevents text painting under icon rail)
+  private panelRightInsetPx = 0;
+  private baseBodyPaddingRightPx?: number;
+  private panelRightInsetResizeObserver?: ResizeObserver;
+  private panelRightInsetWindowResizeHandler?: () => void;
+  private panelRightInsetTarget?: HTMLElement;
+  private pendingPanelRightInsetUpdate = false;
+  private panelRightInsetSource:
+    | "target"
+    | "targetLeft"
+    | "targetOverlap"
+    | "hitTest"
+    | "fallback"
+    | "none" =
+    "none";
+  private panelLayoutDebugLastSummary = "";
+  private panelLayoutDebugLastOverflowAudit = "";
   // LRU caches to prevent unbounded memory growth
   // References: ~100 entries, each with InspireReferenceEntry[]
   private referencesCache = new LRUCache<string, InspireReferenceEntry[]>(
@@ -1511,17 +1534,29 @@ class InspireReferencePanelController {
   constructor(body: HTMLDivElement) {
     this.body = body;
     this.body.classList.add("zinspire-ref-panel");
+    // FIX-PANEL-WIDTH-OVERFLOW (Citing…): Zotero's item pane uses nested flex layouts
+    // (item-pane-custom-section → collapsible-section). Long unbroken strings in our
+    // panel (notably INSPIRE titles) can force these flex items wider than the
+    // available column and overlap the right-side icon rail. Ensure ancestors can
+    // shrink by explicitly setting `min-width: 0`.
+    this.applyHostFlexWidthFixes();
     // NOTE: Removed `contain: layout` as it breaks position:fixed for modal dialogs
-    this.body.style.cssText = `
-      width: 100%;
-      min-width: 0;
-      max-width: 100%;
-      overflow: hidden;
-      box-sizing: border-box;
-      position: relative;
-      display: flex;
-      flex-direction: column;
-    `;
+    // Important: do NOT clobber existing inline styles from Zotero's ItemPaneManager
+    // (e.g. padding/width constraints for the right-side item pane icon rail).
+    this.body.style.width = "100%";
+    this.body.style.minWidth = "0";
+    this.body.style.maxWidth = "100%";
+    this.body.style.overflow = "hidden";
+    this.body.style.boxSizing = "border-box";
+    this.body.style.position = "relative";
+    this.body.style.display = "flex";
+    this.body.style.flexDirection = "column";
+    // Ensure internal list scrolling works even if CSS files fail to load.
+    // Without an explicit height, a flex column can grow with content and cause
+    // the outer item pane to scroll/jump when large lists render (observed in Citing…).
+    this.body.style.height = "100%";
+    this.body.style.minHeight = "0";
+    // Right-side icon rail (sidenav) overlap is handled via dynamic body paddingRight.
     this.enableTextSelection();
 
     // Initialize chart collapsed state from preferences
@@ -1585,17 +1620,58 @@ class InspireReferencePanelController {
       },
       row1,
     ) as HTMLSpanElement;
-    // FIX-PANEL-WIDTH-OVERFLOW: Add text overflow handling
+    // FIX-PANEL-WIDTH-OVERFLOW: Avoid `white-space: nowrap` on long status text.
+    // In Zotero item pane, custom sections sit inside nested flex layouts. A single
+    // long unbreakable line can inflate the flex item's min-content width and make
+    // the whole panel overflow horizontally (most noticeable in Citing… where the
+    // status includes an author/title label). Keep it visually 1-line by clamping
+    // height, but allow breaking for intrinsic sizing.
     this.statusEl.style.cssText = `
+      display: block;
       font-size: 13px;
       font-weight: 500;
       color: var(--fill-primary, #1e293b);
       flex: 1;
       min-width: 0;
+      max-width: 100%;
       overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
+      line-height: 1.2;
+      max-height: 1.2em;
     `;
+
+    // Debug helper: native tooltips are not selectable/copyable.
+    if (InspireReferencePanelController.PANEL_LAYOUT_DEBUG) {
+      const copyBtn = body.ownerDocument.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy layout";
+      copyBtn.title = "Copy panel layout debug info";
+      copyBtn.style.cssText = `
+        flex-shrink: 0;
+        border: 1px solid var(--fill-quinary, #d1d5db);
+        background: var(--material-background, #fff);
+        color: var(--fill-secondary, #64748b);
+        border-radius: 6px;
+        padding: 2px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        user-select: none;
+      `;
+      copyBtn.addEventListener("click", () => {
+        const parts = [
+          this.statusEl?.title?.trim?.() || "",
+          this.panelLayoutDebugLastSummary?.trim?.() || "",
+          this.panelLayoutDebugLastOverflowAudit?.trim?.() || "",
+        ].filter(Boolean);
+        if (!parts.length) {
+          return;
+        }
+        this.copyToClipboard(parts.join("\n\n"));
+      });
+      row1.appendChild(copyBtn);
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Row 2: Tab buttons (pill button style)
@@ -1689,7 +1765,7 @@ class InspireReferencePanelController {
     const filterInputWrapper = filterDoc.createElement("div");
     filterInputWrapper.className = "zinspire-filter-input-wrapper";
     filterInputWrapper.style.cssText =
-      INLINE_HINT_WRAPPER_STYLE + `min-width: 120px; flex: 1;`;
+      INLINE_HINT_WRAPPER_STYLE + `min-width: 0; flex: 1 1 120px; max-width: 100%;`;
 
     // Create filter input using native DOM
     this.filterInput = filterDoc.createElement("input");
@@ -1958,6 +2034,11 @@ class InspireReferencePanelController {
     this.listEl.style.boxSizing = "border-box";
     this.listEl.style.overflowX = "hidden";
     this.listEl.style.overflowY = "auto";
+    // Ensure list content can wrap even if host styles apply `white-space: nowrap`.
+    this.listEl.style.whiteSpace = "normal";
+    // Prevent outer item pane scroll jumps when list grows (progressive append)
+    this.listEl.style.flex = "1 1 auto";
+    this.listEl.style.minHeight = "0";
 
     // Phase 0.1 Refactor: Initialize EntryListRenderer for row rendering
     this.entryRenderer = new EntryListRenderer({
@@ -2001,6 +2082,358 @@ class InspireReferencePanelController {
 
     // FTR-PDF-ANNOTATE: Register for citation lookup events
     this.initPdfCitationLookup();
+    // Keep toolbar content clear of the right-side icon rail (sidenav)
+    this.startPanelRightInsetTracking();
+  }
+
+  private applyHostFlexWidthFixes() {
+    try {
+      // Custom section host (flex item in `.zotero-view-item` flex column)
+      const host = this.body.closest("item-pane-custom-section") as
+        | HTMLElement
+        | null;
+      if (host) {
+        host.style.minWidth = "0";
+        host.style.maxWidth = "100%";
+      }
+
+      // Collapsible section wrapper (also uses flex layout)
+      const section = this.body.closest("collapsible-section") as
+        | HTMLElement
+        | null;
+      if (section) {
+        section.style.minWidth = "0";
+        section.style.maxWidth = "100%";
+      }
+    } catch {
+      // Ignore DOM/namespace edge cases
+    }
+  }
+
+  private startPanelRightInsetTracking() {
+    this.captureBaseBodyPaddingRight();
+    this.updatePanelRightInset();
+    // Re-measure after first layout pass (some hosts report 0px before paint)
+    setTimeout(() => this.updatePanelRightInset(), 0);
+
+    const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
+    if (win) {
+      this.panelRightInsetWindowResizeHandler = () => this.updatePanelRightInset();
+      win.addEventListener("resize", this.panelRightInsetWindowResizeHandler, {
+        passive: true,
+      } as any);
+    }
+
+    if (typeof ResizeObserver !== "undefined") {
+      this.panelRightInsetResizeObserver = new ResizeObserver(() =>
+        this.updatePanelRightInset(),
+      );
+      // Observe panel width changes (splitter drag doesn't always trigger window resize)
+      this.panelRightInsetResizeObserver.observe(this.body);
+      const target = this.findPanelRightInsetTarget();
+      if (target) {
+        this.panelRightInsetTarget = target;
+        this.panelRightInsetResizeObserver.observe(target);
+      }
+    }
+  }
+
+  private requestPanelRightInsetUpdate() {
+    if (this.pendingPanelRightInsetUpdate) {
+      return;
+    }
+    this.pendingPanelRightInsetUpdate = true;
+    const win =
+      this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+    const raf =
+      (win as any)?.requestAnimationFrame ||
+      this.body.ownerDocument?.defaultView?.requestAnimationFrame ||
+      null;
+    if (typeof raf === "function") {
+      raf(() => {
+        this.pendingPanelRightInsetUpdate = false;
+        this.updatePanelRightInset();
+      });
+      return;
+    }
+    // Fallback: schedule async
+    setTimeout(() => {
+      this.pendingPanelRightInsetUpdate = false;
+      this.updatePanelRightInset();
+    }, 0);
+  }
+
+  private captureBaseBodyPaddingRight() {
+    if (typeof this.baseBodyPaddingRightPx === "number") {
+      return;
+    }
+    const win =
+      this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+    const computed = win?.getComputedStyle?.(this.body);
+    const raw = computed?.paddingRight ?? "";
+    const px = Number.parseFloat(raw);
+    this.baseBodyPaddingRightPx = Number.isFinite(px) ? px : 0;
+  }
+
+  private updatePanelRightInset() {
+    // Only apply special inset in entryCited mode (Citing...), to avoid changing the
+    // layout of other tabs that already render correctly.
+    if (this.viewMode !== "entryCited") {
+      this.setPanelRightInsetPx(0);
+      return;
+    }
+
+    const target =
+      this.panelRightInsetTarget || this.findPanelRightInsetTarget();
+    // If the sidenav was found after init, start observing it too.
+    if (
+      target &&
+      target !== this.panelRightInsetTarget &&
+      this.panelRightInsetResizeObserver
+    ) {
+      this.panelRightInsetTarget = target;
+      try {
+        this.panelRightInsetResizeObserver.observe(target);
+      } catch {
+        // Ignore observe errors (e.g. disconnected node)
+      }
+    }
+
+    const byTargetLeftEdge = target
+      ? this.computeRightInsetToTargetLeftEdge(target)
+      : 0;
+
+    // If we can locate the rail element and its left edge is already to the right of
+    // our panel, do NOT apply any extra inset. The pointer-based hit-test can produce
+    // small false positives (e.g. due to overlay scrollbars), which would create an
+    // uneven right-side gutter in Citing… compared to other tabs.
+    if (target && byTargetLeftEdge <= 0) {
+      this.panelRightInsetSource = "targetLeft";
+      this.setPanelRightInsetPx(0);
+      return;
+    }
+
+    const byHitTest = target ? 0 : this.computeRightInsetFromHitTest();
+    const best = Math.max(byTargetLeftEdge, byHitTest);
+    if (best > 0) {
+      this.panelRightInsetSource =
+        best === byTargetLeftEdge ? "targetLeft" : "hitTest";
+      this.setPanelRightInsetPx(best);
+      return;
+    }
+
+    // Only apply fallback when we actually have a horizontal overflow risk.
+    // If text already fits, forcing a right inset just wastes space.
+    const needsInset =
+      (this.statusEl?.scrollWidth ?? 0) > (this.statusEl?.clientWidth ?? 0);
+    if (needsInset) {
+      this.panelRightInsetSource = "fallback";
+      this.setPanelRightInsetPx(
+        InspireReferencePanelController.RIGHT_RAIL_FALLBACK_PX,
+      );
+      return;
+    }
+
+    this.panelRightInsetSource = "none";
+    this.setPanelRightInsetPx(0);
+  }
+
+  private computeRightInsetToTargetLeftEdge(target: HTMLElement): number {
+    const targetRect = target.getBoundingClientRect();
+    const bodyRect = this.body.getBoundingClientRect();
+    // Reserve space up to the rail's *left* edge. This is more robust than a
+    // pointer-based hit-test when parts of the rail (or icons) don't receive
+    // pointer events, which can under-estimate the required inset.
+    const needed = bodyRect.right - targetRect.left;
+    if (!(needed > 0) || !Number.isFinite(needed)) {
+      return 0;
+    }
+    // Small padding so text doesn't visually touch the rail
+    return Math.round(needed) + 4;
+  }
+
+  private computeRightInsetFromHitTest(): number {
+    const doc = this.body.ownerDocument;
+    const win = doc.defaultView;
+    if (!win || typeof doc.elementFromPoint !== "function") {
+      return 0;
+    }
+
+    const bodyRect = this.body.getBoundingClientRect();
+    if (!(bodyRect.width > 0) || !(bodyRect.height > 0)) {
+      return 0;
+    }
+
+    const visibleTop = Math.max(0, bodyRect.top);
+    const visibleBottom = Math.min(win.innerHeight, bodyRect.bottom);
+    // If the panel isn't visible (or is fully offscreen), a hit-test at y=0 will
+    // often hit the window toolbar instead of the right-side rail and incorrectly
+    // clear the inset. In that case, keep the current inset and wait for a visible
+    // layout pass.
+    if (!(visibleBottom > visibleTop)) {
+      return this.panelRightInsetPx;
+    }
+
+    const statusRect = this.statusEl?.getBoundingClientRect?.();
+    const rightX = Math.max(0, Math.min(win.innerWidth - 1, Math.round(bodyRect.right - 1)));
+
+    const clampY = (y: number) =>
+      Math.max(0, Math.min(win.innerHeight - 1, Math.round(y)));
+
+    // Sample a few points within the visible portion of the panel. The right-side
+    // rail doesn't always cover y=0 (toolbar area), and the panel may be partially
+    // scrolled offscreen, so a single-point hit-test is too fragile.
+    const candidateYs: number[] = [];
+    if (statusRect && statusRect.height > 0) {
+      candidateYs.push(statusRect.top + statusRect.height / 2);
+    }
+    candidateYs.push(visibleTop + 12);
+    candidateYs.push((visibleTop + visibleBottom) / 2);
+    candidateYs.push(visibleBottom - 12);
+
+    const sampleYs = Array.from(
+      new Set(
+        candidateYs
+          .map((y) => clampY(y))
+          .map((y) => Math.max(0, Math.min(win.innerHeight - 1, y))),
+      ),
+    ).filter((y) => y >= 0 && y <= win.innerHeight - 1);
+
+    const maxScan = Math.min(200, Math.floor(bodyRect.width));
+    const step = 2;
+
+    let bestPadded = 0;
+    let bestY = sampleYs[0] ?? clampY(visibleTop + 12);
+    let bestHit0: Element | null = null;
+
+    for (const y of sampleYs) {
+      const hit0 = doc.elementFromPoint(rightX, y) as Element | null;
+      if (!hit0) {
+        continue;
+      }
+      if (hit0 === this.body || this.body.contains(hit0)) {
+        continue;
+      }
+
+      let inset = 0;
+      for (let dx = 1; dx <= maxScan; dx += step) {
+        const x = rightX - dx;
+        if (x < 0) break;
+        const hit = doc.elementFromPoint(x, y) as Element | null;
+        if (!hit) break;
+        if (hit === this.body || this.body.contains(hit)) {
+          inset = dx;
+          break;
+        }
+      }
+
+      const padded = inset > 0 ? inset + 4 : 0;
+      if (padded > bestPadded) {
+        bestPadded = padded;
+        bestY = y;
+        bestHit0 = hit0;
+      }
+    }
+
+    if (
+      InspireReferencePanelController.PANEL_LAYOUT_DEBUG &&
+      bestPadded !== this.panelRightInsetPx
+    ) {
+      const describe = (el: Element | null) => {
+        if (!el) return "null";
+        const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
+        const cls = (el as HTMLElement).className
+          ? `.${String((el as HTMLElement).className).trim().replace(/\s+/g, ".")}`
+          : "";
+        return `${el.tagName.toLowerCase()}${id}${cls}`;
+      };
+      const rail0 = bestHit0 ? this.getIconRailAncestor(bestHit0) : null;
+      Zotero.debug(
+        `[${config.addonName}] [PANEL-LAYOUT] hitTest inset=${bestPadded}px at (${rightX},${bestY}), hit=${describe(bestHit0)}, rail=${describe(rail0)}`,
+      );
+    }
+
+    return bestPadded;
+  }
+
+  private getIconRailAncestor(el: Element): HTMLElement | null {
+    const rail = el.closest(
+      "#zotero-item-pane-sidenav, #item-pane-sidenav, #zotero-context-pane-sidenav, " +
+        ".item-pane-sidenav, .context-pane-sidenav, [class*='sidenav']",
+    ) as HTMLElement | null;
+    return rail;
+  }
+
+  private setPanelRightInsetPx(px: number) {
+    this.captureBaseBodyPaddingRight();
+    // The inset can legitimately exceed the visible rail width when the panel itself
+    // has already overflowed offscreen to the right (we need to "eat" the offscreen
+    // portion + the on-screen rail overlap). Keep a generous cap to avoid pathological
+    // values while still allowing real fixes.
+    const clamped = Math.max(0, Math.min(2000, Math.round(px)));
+    if (clamped === this.panelRightInsetPx) {
+      return;
+    }
+    this.panelRightInsetPx = clamped;
+    const base = this.baseBodyPaddingRightPx ?? 0;
+    const padRight = Math.max(0, Math.round(base + clamped));
+    // Use padding-right to keep content clear of Zotero's right-side icon rail.
+    // This is more stable than `width: calc(100% - …)` in flex layouts, where the
+    // percentage part can resolve unexpectedly and cause the panel to grow wider.
+    this.body.style.width = "100%";
+    this.body.style.maxWidth = "100%";
+    this.body.style.paddingRight = `${padRight}px`;
+
+    if (InspireReferencePanelController.PANEL_LAYOUT_DEBUG) {
+      try {
+        const target =
+          this.panelRightInsetTarget || this.findPanelRightInsetTarget();
+        const tr = target?.getBoundingClientRect?.();
+        const br = this.body.getBoundingClientRect();
+        const summary =
+          `[PANEL-LAYOUT] apply mode=${this.viewMode} inset=${clamped}px source=${this.panelRightInsetSource} ` +
+          `basePadRight=${Math.round(base)}px padRight=${padRight}px bodyW=${Math.round(br.width)}px ` +
+          `railW=${tr ? Math.round(tr.width) : "?"}px railL=${tr ? Math.round(tr.left) : "?"}px bodyR=${Math.round(br.right)}px`;
+        this.panelLayoutDebugLastSummary = summary;
+        Zotero.debug(`[${config.addonName}] ${summary}`);
+      } catch (e) {
+        Zotero.debug(
+          `[${config.addonName}] [PANEL-LAYOUT] apply inset=${clamped}px source=${this.panelRightInsetSource} (basePadRight=${Math.round(base)}px, mode=${this.viewMode}) err=${e}`,
+        );
+      }
+    }
+  }
+
+  private findPanelRightInsetTarget(): HTMLElement | null {
+    const doc = this.body.ownerDocument;
+    // Prefer stable IDs in Zotero 7
+    const direct = doc.querySelector(
+      "#zotero-view-item-sidenav, #zotero-item-pane-sidenav, #zotero-context-pane-sidenav",
+    ) as HTMLElement | null;
+    if (direct) {
+      return direct;
+    }
+
+    // Fall back to common class names (item pane + reader context pane)
+    const roots: Element[] = [];
+    const contextRoot =
+      this.body.closest(".context-pane") ||
+      this.body.closest("#zotero-context-pane");
+    if (contextRoot) roots.push(contextRoot);
+    const itemPaneRoot =
+      this.body.closest(".item-pane") || this.body.closest("#zotero-item-pane");
+    if (itemPaneRoot) roots.push(itemPaneRoot);
+    roots.push(doc.documentElement);
+
+    for (const root of roots) {
+      const el = root.querySelector(
+        ".zotero-view-item-sidenav, .item-pane-sidenav, .context-pane-sidenav",
+      ) as HTMLElement | null;
+      if (el) {
+        return el;
+      }
+    }
+    return null;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -6946,6 +7379,17 @@ class InspireReferencePanelController {
       this.chartResizeObserver.disconnect();
       this.chartResizeObserver = undefined;
     }
+    // Cleanup right inset observers/listeners
+    if (this.panelRightInsetResizeObserver) {
+      this.panelRightInsetResizeObserver.disconnect();
+      this.panelRightInsetResizeObserver = undefined;
+    }
+    if (this.panelRightInsetWindowResizeHandler) {
+      const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
+      win?.removeEventListener("resize", this.panelRightInsetWindowResizeHandler);
+      this.panelRightInsetWindowResizeHandler = undefined;
+    }
+    this.panelRightInsetTarget = undefined;
     // FTR-DARK-MODE-AUTO: Remove theme change listener
     this.removeThemeChangeListener();
     // Clear chart state
@@ -8945,19 +9389,43 @@ class InspireReferencePanelController {
     }
   }
 
+  private ensureSpinnerKeyframes() {
+    try {
+      const doc = this.body.ownerDocument;
+      const STYLE_ID = "zinspire-spinner-keyframes";
+      if (doc.getElementById(STYLE_ID)) {
+        return;
+      }
+      const style = doc.createElement("style");
+      style.id = STYLE_ID;
+      style.textContent = `
+@keyframes zinspire-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+/* Collapsible-section extra buttons are XUL <toolbarbutton> with icons rendered via
+   anonymous content (.toolbarbutton-icon) and/or list-style-image. Querying the icon
+   node via DOM often fails, so animate via CSS selectors instead. */
+toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loading .toolbarbutton-icon,
+toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loading image,
+toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loading img {
+  animation: zinspire-spin 1s linear infinite;
+  transform-origin: center;
+}
+      `.trim();
+      (doc.head || doc.documentElement || doc.body || this.body).appendChild(
+        style,
+      );
+    } catch {
+      // Ignore style injection failures
+    }
+  }
+
   /**
    * Set loading state for the section header refresh button.
-   * Swaps the icon to Zotero's built-in loading.svg (with animation) during loading.
+   * Spins the refresh icon during loading.
    */
   private setRefreshButtonLoading(loading: boolean) {
-    // FIX-WINDOWS-REFRESH-ICON: Use local icon instead of Zotero built-in
-    const REFRESH_ICON = `chrome://${config.addonRef}/content/icons/refresh.svg`;
-    const LOADING_ICON = "chrome://global/skin/icons/loading.svg";
-
-    Zotero.debug(
-      `[${config.addonName}] setRefreshButtonLoading called: loading=${loading}`,
-    );
-
     try {
       // Find section container from body
       let section: Element | null = this.body.parentElement;
@@ -8974,9 +9442,6 @@ class InspireReferencePanelController {
       }
 
       if (!section) {
-        Zotero.debug(
-          `[${config.addonName}] setRefreshButtonLoading: section not found`,
-        );
         return;
       }
 
@@ -8986,28 +9451,27 @@ class InspireReferencePanelController {
       ) as Element | null;
 
       if (!refreshBtn) {
-        Zotero.debug(
-          `[${config.addonName}] setRefreshButtonLoading: refresh button not found`,
-        );
         return;
       }
 
-      // Find the icon inside the refresh button
-      const icon = refreshBtn.querySelector(
-        ".toolbarbutton-icon, image",
-      ) as HTMLElement | null;
+      // Ensure keyframes + selector-based animation rules exist.
+      this.ensureSpinnerKeyframes();
+      // Toggle class on the XUL toolbarbutton; CSS targets its internal icon.
+      (refreshBtn as HTMLElement).classList?.toggle(
+        "zinspire-section-button-loading",
+        loading,
+      );
+      // Visual feedback even if animation is blocked by platform/native theming.
+      (refreshBtn as HTMLElement).style.cursor = loading ? "progress" : "";
+      (refreshBtn as HTMLElement).style.opacity = loading ? "0.8" : "";
 
-      if (icon) {
-        const currentSrc = icon.getAttribute("src");
-        const newSrc = loading ? LOADING_ICON : REFRESH_ICON;
-        Zotero.debug(
-          `[${config.addonName}] setRefreshButtonLoading: changing icon from ${currentSrc} to ${newSrc}`,
-        );
-        icon.setAttribute("src", newSrc);
+      // Prevent repeated clicks while a refresh is in flight
+      if (loading) {
+        // `disabled` on XUL toolbarbutton can hide list-style-image on some platforms.
+        // Prefer pointer-events as a soft-disable; click is still guarded by request cancelation.
+        (refreshBtn as HTMLElement).style.pointerEvents = "none";
       } else {
-        Zotero.debug(
-          `[${config.addonName}] setRefreshButtonLoading: icon element not found in refresh button`,
-        );
+        (refreshBtn as HTMLElement).style.pointerEvents = "";
       }
     } catch (e) {
       Zotero.debug(`[${config.addonName}] setRefreshButtonLoading error: ${e}`);
@@ -10568,6 +11032,10 @@ class InspireReferencePanelController {
     newListEl.style.boxSizing = "border-box";
     newListEl.style.overflowX = "hidden";
     newListEl.style.overflowY = "auto";
+    newListEl.style.whiteSpace = "normal";
+    // Keep list scroll internal to the panel to avoid outer item pane scroll jumps
+    newListEl.style.flex = "1 1 auto";
+    newListEl.style.minHeight = "0";
     // Hide old container immediately
     oldListEl.style.display = "none";
     // Insert new container after old one
@@ -10713,6 +11181,158 @@ class InspireReferencePanelController {
     // This is needed because rendering replaces listEl, losing the DOM focus
     if (this.focusedEntryID) {
       this.listEl.focus({ preventScroll: true });
+    }
+
+    if (
+      InspireReferencePanelController.PANEL_LAYOUT_DEBUG &&
+      this.viewMode === "entryCited"
+    ) {
+      const win =
+        this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+      const raf = (win as any)?.requestAnimationFrame || null;
+      if (typeof raf === "function") {
+        raf(() => this.debugAuditPanelOverflow("afterRenderReferenceList"));
+      } else {
+        setTimeout(
+          () => this.debugAuditPanelOverflow("afterRenderReferenceList"),
+          0,
+        );
+      }
+    }
+  }
+
+  private debugAuditPanelOverflow(context: string) {
+    if (
+      !InspireReferencePanelController.PANEL_LAYOUT_DEBUG ||
+      this.viewMode !== "entryCited"
+    ) {
+      return;
+    }
+    try {
+      const win =
+        this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+      if (!win) return;
+
+      const bodyRect = this.body.getBoundingClientRect();
+      const computedPadRightRaw = win.getComputedStyle(this.body).paddingRight;
+      const padRight = Number.parseFloat(computedPadRightRaw || "0");
+      const padRightPx = Number.isFinite(padRight) ? padRight : 0;
+      const contentRight = bodyRect.right - padRightPx;
+
+      const rail =
+        this.panelRightInsetTarget || this.findPanelRightInsetTarget();
+      const railRect = rail?.getBoundingClientRect?.();
+      // If there's a right-side rail overlapping our panel area, treat its left edge
+      // as the "safe" right boundary. This catches occlusion that wouldn't show up as
+      // element overflow beyond the panel itself.
+      const safeRight =
+        railRect && Number.isFinite(railRect.left)
+          ? Math.min(contentRight, railRect.left)
+          : contentRight;
+
+      const describe = (el: Element | null) => {
+        if (!el) return "null";
+        const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
+        const cls = (el as HTMLElement).className
+          ? `.${String((el as HTMLElement).className).trim().replace(/\s+/g, ".")}`
+          : "";
+        return `${el.tagName.toLowerCase()}${id}${cls}`;
+      };
+
+      type Offender = {
+        label: string;
+        el: Element;
+        overflowPx: number;
+        rectRight: number;
+        clientWidth: number;
+        scrollWidth: number;
+      };
+
+      const offenders: Offender[] = [];
+      const check = (el: Element | null | undefined, label: string) => {
+        if (!el) return;
+        const rect = (el as HTMLElement).getBoundingClientRect?.();
+        if (!rect) return;
+        const rectRight = rect.right;
+        const overflowPx = rectRight - safeRight;
+        let clientWidth = 0;
+        let scrollWidth = 0;
+        if (el instanceof win.HTMLElement) {
+          clientWidth = el.clientWidth || 0;
+          scrollWidth = el.scrollWidth || 0;
+        }
+        const contentOverflow =
+          clientWidth > 0 && scrollWidth > clientWidth + 1;
+        const rectOverflow = overflowPx > 1;
+        if (rectOverflow || contentOverflow) {
+          offenders.push({
+            label,
+            el,
+            overflowPx: rectOverflow ? overflowPx : 0,
+            rectRight,
+            clientWidth,
+            scrollWidth,
+          });
+        }
+      };
+
+      // High-level containers
+      check(this.body.querySelector(".zinspire-ref-panel__toolbar"), "toolbar");
+      check(this.chartContainer, "chartContainer");
+      check(this.listEl, "listEl");
+
+      // Sample first few rows to find the exact culprit (limit for performance)
+      const rows = this.listEl.querySelectorAll(".zinspire-ref-entry");
+      const sampleCount = Math.min(rows.length, 12);
+      for (let i = 0; i < sampleCount; i++) {
+        const row = rows[i] as HTMLElement;
+        check(row, `row[${i}]`);
+        check(row.querySelector(".zinspire-ref-entry__title"), `row[${i}].title`);
+        check(
+          row.querySelector(".zinspire-ref-entry__title-link"),
+          `row[${i}].titleLink`,
+        );
+        check(row.querySelector(".zinspire-ref-entry__meta"), `row[${i}].meta`);
+        check(
+          row.querySelector(".zinspire-ref-entry__stats-button"),
+          `row[${i}].statsBtn`,
+        );
+      }
+
+      if (!offenders.length) {
+        return;
+      }
+
+      offenders.sort((a, b) => {
+        const ao = Math.max(a.overflowPx, a.scrollWidth - a.clientWidth);
+        const bo = Math.max(b.overflowPx, b.scrollWidth - b.clientWidth);
+        return bo - ao;
+      });
+
+      const top = offenders.slice(0, 4);
+      const topText = top
+        .map((o) => {
+          const sw =
+            o.clientWidth > 0 ? ` sw=${o.scrollWidth}px cw=${o.clientWidth}px` : "";
+          return `${o.label}:${describe(o.el)} ov=${Math.round(o.overflowPx)}px${sw}`;
+        })
+        .join(" | ");
+
+      Zotero.debug(
+        `[${config.addonName}] [PANEL-LAYOUT] overflowAudit ${context} ` +
+          `inset=${this.panelRightInsetPx}px source=${this.panelRightInsetSource} ` +
+          `bodyR=${Math.round(bodyRect.right)}px padR=${Math.round(padRightPx)}px contentR=${Math.round(contentRight)}px safeR=${Math.round(safeRight)}px ` +
+          `rail=${describe(rail)} railL=${railRect ? Math.round(railRect.left) : "?"}px railW=${railRect ? Math.round(railRect.width) : "?"}px ` +
+          `rows=${rows.length} top=${topText}`,
+      );
+      this.panelLayoutDebugLastOverflowAudit =
+        `[PANEL-LAYOUT] overflowAudit ${context} ` +
+        `inset=${this.panelRightInsetPx}px source=${this.panelRightInsetSource} ` +
+        `contentR=${Math.round(contentRight)}px safeR=${Math.round(safeRight)}px ` +
+        `railL=${railRect ? Math.round(railRect.left) : "?"}px railW=${railRect ? Math.round(railRect.width) : "?"}px ` +
+        `top=${topText}`;
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] [PANEL-LAYOUT] overflowAudit error: ${e}`);
     }
   }
 
@@ -11003,11 +11623,11 @@ class InspireReferencePanelController {
     // For entryCited mode, show different message based on source type
     if (this.entryCitedSource?.authorQuery) {
       return getString("references-panel-count-author", {
-        args: { count, label: this.getEntryCitedLabel() },
+        args: { count, label: this.getEntryCitedLabelForStatus() },
       });
     }
     return getString("references-panel-count-entry", {
-      args: { count, label: this.getEntryCitedLabel() },
+      args: { count, label: this.getEntryCitedLabelForStatus() },
     });
   }
 
@@ -11034,11 +11654,11 @@ class InspireReferencePanelController {
     // For entryCited mode, show different message based on source type
     if (this.entryCitedSource?.authorQuery) {
       return getString("references-panel-filter-count-author", {
-        args: { visible, total, label: this.getEntryCitedLabel() },
+        args: { visible, total, label: this.getEntryCitedLabelForStatus() },
       });
     }
     return getString("references-panel-filter-count-entry", {
-      args: { visible, total, label: this.getEntryCitedLabel() },
+      args: { visible, total, label: this.getEntryCitedLabelForStatus() },
     });
   }
 
@@ -11047,6 +11667,14 @@ class InspireReferencePanelController {
       this.entryCitedSource?.label ||
       getString("references-panel-entry-label-default")
     );
+  }
+
+  private getEntryCitedLabelForStatus(maxLength = 80): string {
+    const normalized = this.getEntryCitedLabel().replace(/\s+/g, " ").trim();
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+    return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
   }
 
   private getSearchLabel() {
@@ -11208,6 +11836,7 @@ class InspireReferencePanelController {
     this.clearFocusedEntry();
 
     this.viewMode = mode;
+    this.requestPanelRightInsetUpdate();
     this.updateTabSelection();
     this.updateSearchUIVisibility();
     this.updateAuthorProfileCard();
@@ -11369,12 +11998,14 @@ class InspireReferencePanelController {
       return;
     }
     const isEntryMode = this.viewMode === "entryCited";
+
     this.entryViewBackButton.hidden = !isEntryMode;
     // FIX-CITING-TAB-JUMP: Use visibility instead of display to avoid layout reflow
     // The button always occupies space (inline-flex), but becomes invisible when not in entry mode
     // This prevents the navGroup from changing width and causing filterGroup to shrink
     this.entryViewBackButton.style.display = "inline-flex";
     this.entryViewBackButton.style.visibility = isEntryMode ? "visible" : "hidden";
+
     if (isEntryMode) {
       // Update tooltip with target tab name
       const previousTabLabel = this.getTabLabel(this.entryCitedPreviousMode);
@@ -14892,6 +15523,9 @@ class InspireReferencePanelController {
     newListEl.style.boxSizing = "border-box";
     newListEl.style.overflowX = "hidden";
     newListEl.style.overflowY = "auto";
+    // Keep list scroll internal to the panel to avoid outer item pane scroll jumps
+    newListEl.style.flex = "1 1 auto";
+    newListEl.style.minHeight = "0";
     // Hide old container immediately (no reflow)
     oldListEl.style.display = "none";
     // Insert new container after old one
@@ -14923,6 +15557,35 @@ class InspireReferencePanelController {
 
   private setStatus(text: string) {
     this.statusEl.textContent = text;
+    // In entryCited mode the status message may truncate the label to avoid overflow;
+    // keep the full label accessible via tooltip.
+    if (this.viewMode === "entryCited" && this.entryCitedSource?.label) {
+      const baseTitle = this.entryCitedSource.label;
+      if (InspireReferencePanelController.PANEL_LAYOUT_DEBUG) {
+        const win =
+          this.body.ownerDocument?.defaultView ||
+          Zotero.getMainWindow?.() ||
+          null;
+        const computedPadRight =
+          win?.getComputedStyle?.(this.body)?.paddingRight ?? "";
+        const basePadRight = Math.round(this.baseBodyPaddingRightPx ?? 0);
+        const bodyWidth = this.body.clientWidth || 0;
+        const statusClientWidth = this.statusEl.clientWidth || 0;
+        const statusScrollWidth = this.statusEl.scrollWidth || 0;
+        this.statusEl.title =
+          `${baseTitle}\n` +
+          `[PANEL-LAYOUT] mode=entryCited inset=${this.panelRightInsetPx}px source=${this.panelRightInsetSource} ` +
+          `basePadRight=${basePadRight}px bodyPadRight=${computedPadRight} ` +
+          `bodyW=${bodyWidth}px statusCW=${statusClientWidth}px statusSW=${statusScrollWidth}px`;
+      } else {
+        this.statusEl.title = baseTitle;
+      }
+      // Status text changes are the main trigger of the visible overlap in Citing...
+      // Re-measure the right-side icon rail overlap after DOM updates.
+      this.requestPanelRightInsetUpdate();
+      return;
+    }
+    this.statusEl.title = text;
   }
 
   private cancelActiveRequest() {

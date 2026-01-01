@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "pdf_parse_refs_list": boolean;
       "pdf_force_mapping_on_mismatch": boolean;
       "quick_filters_last_used": string;
+      "debug_panel_layout": boolean;
       "local_cache_enable": boolean;
       "local_cache_ttl_hours": number;
       "local_cache_show_source": boolean;
