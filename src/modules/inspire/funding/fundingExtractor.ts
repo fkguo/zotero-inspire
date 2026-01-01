@@ -88,6 +88,8 @@ export function extractFundingInfo(text: string): FundingInfo[] {
               if (!nextMatch) break;
               const nextGrant = nextMatch[1];
               if (!nextGrant) break;
+              const matchText = nextMatch[0] ?? "";
+              if (matchText.length === 0) break;
 
               const nextGrantTrimmed = nextGrant.trim();
               if (validateGrantNumber(funder.id, nextGrantTrimmed)) {
@@ -104,7 +106,9 @@ export function extractFundingInfo(text: string): FundingInfo[] {
                   ),
                 });
               }
-              currentLastIndex += nextMatch.index + nextMatch[0].length;
+              const advanceBy = nextMatch.index + matchText.length;
+              if (advanceBy <= 0) break;
+              currentLastIndex += advanceBy;
             }
           }
         }

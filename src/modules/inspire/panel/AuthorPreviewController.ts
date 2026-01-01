@@ -38,6 +38,10 @@ export interface AuthorPreviewCallbacks {
   onShow?: (authorInfo: AuthorSearchInfo) => void;
   /** Called when preview is hidden */
   onHide?: () => void;
+  /** Check if author is favorite */
+  isFavorite?: (authorInfo: AuthorSearchInfo) => boolean;
+  /** Toggle favorite status */
+  toggleFavorite?: (authorInfo: AuthorSearchInfo) => void;
 }
 
 /**
@@ -471,6 +475,36 @@ export class AuthorPreviewController {
       this.callbacks.onViewPapers?.(authorInfo);
     });
     actions.appendChild(viewLink);
+
+    // Favorite button
+    if (this.callbacks.isFavorite && this.callbacks.toggleFavorite) {
+      const isFav = this.callbacks.isFavorite(authorInfo);
+      const favBtn = doc.createElement("button");
+      favBtn.type = "button";
+      favBtn.textContent = isFav ? "★" : "☆";
+      favBtn.title = getString(
+        isFav
+          ? "references-panel-favorite-remove"
+          : "references-panel-favorite-add",
+      );
+      favBtn.style.cssText = `
+        border: none;
+        background: transparent;
+        font-size: 14px;
+        cursor: pointer;
+        color: ${isFav ? "#f59e0b" : "var(--fill-tertiary, #94a3b8)"};
+        padding: 0 2px;
+        margin-left: auto;
+      `;
+      favBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.callbacks.toggleFavorite?.(authorInfo);
+        // Re-render to update button state
+        this.renderCard(card, authorInfo, profile);
+      });
+      actions.appendChild(favBtn);
+    }
 
     if (actions.children.length) {
       card.appendChild(actions);

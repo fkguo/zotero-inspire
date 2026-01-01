@@ -36,10 +36,10 @@ pane-item-references-header = INSPIRE References
 pane-item-references-sidenav = INSPIRE References
     .label = INSPIRE References
     .tooltiptext = INSPIRE References
-references-panel-tab-references = References
+references-panel-tab-references = Refs.
 references-panel-tab-cited = Cited by
 references-panel-tab-entry-cited = Citing...
-references-panel-tab-author-papers = Papers...
+references-panel-tab-author-papers = Author
 references-panel-status-empty = Select an item to load INSPIRE data
 references-panel-reader-mode = INSPIRE data is unavailable in the reader view
 references-panel-select-item = Select a single regular item to view INSPIRE data
@@ -63,6 +63,26 @@ references-panel-forward = Forward
 references-panel-forward-tooltip = Go forward to the next Zotero item
 references-panel-entry-back = Back to { $tab }
 references-panel-entry-back-tooltip = Return to the previous view
+references-panel-entry-back-author = Back to { $author }
+references-panel-favorite-title = Favorite Authors
+references-panel-favorite-empty = No favorite authors yet. Click ☆ in author profile to add.
+references-panel-favorite-add = Add to favorites
+references-panel-favorite-remove = Remove from favorites
+references-panel-favorite-added = Added to favorites
+references-panel-favorite-removed = Removed from favorites
+references-panel-favorite-view = View all favorite authors
+references-panel-favorite-papers-title = Favorite Papers
+references-panel-favorite-papers-empty = No favorite papers yet. Right-click on an entry to add.
+references-panel-favorite-paper-add = Add paper to favorites
+references-panel-favorite-paper-remove = Remove paper from favorites
+references-panel-favorite-paper-added = Paper added to favorites
+references-panel-favorite-paper-removed = Paper removed from favorites
+references-panel-favorite-presentations-title = Favorite Presentations
+references-panel-favorite-presentations-empty = No favorite presentations yet. Right-click on a presentation to add.
+references-panel-favorite-presentation-add = Add presentation to favorites
+references-panel-favorite-presentation-remove = Remove presentation from favorites
+references-panel-favorite-presentation-added = Presentation added to favorites
+references-panel-favorite-presentation-removed = Presentation removed from favorites
 references-panel-filter-placeholder = Filter entries
 references-panel-quick-filters = Filters
 references-panel-quick-filter-high-citations = High citations (>50)
@@ -448,6 +468,11 @@ collab-tag-disabled = Enable collaboration tags in Preferences → INSPIRE to us
 
 # Funding extraction - Main window menu
 menuitem-copy-funding = Copy Funding Info
+
+# Favorite paper - Main window menu (FTR-FAVORITE-PAPERS)
+menuitem-favorite-paper = Toggle Favorite Paper
+references-panel-favorite-paper-select-one = Select exactly one item to toggle favorite
+references-panel-favorite-paper-no-recid = Cannot favorite: no INSPIRE ID found
 
 # Funding extraction - Progress messages
 funding-extraction-progress = Extracting funding info from PDF...

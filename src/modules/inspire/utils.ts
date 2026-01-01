@@ -147,7 +147,13 @@ export class ZInsUtils {
           this.unregisterNotifier(notifierID);
           return;
         }
-        addon.hooks.onNotify(event, type, ids, extraData);
+        void Promise.resolve(
+          addon.hooks.onNotify(event, type, ids, extraData),
+        ).catch((err) => {
+          Zotero.debug(
+            `[${config.addonName}] Notifier onNotify error: ${String(err)}`,
+          );
+        });
       },
     };
 

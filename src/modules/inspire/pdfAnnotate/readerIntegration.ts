@@ -20,6 +20,7 @@ import {
   type PDFReferenceMapping,
   type AuthorYearReferenceMapping,
 } from "./pdfReferencesParser";
+import { buildPdfTextCandidatesForReferenceParsing } from "./textSampling";
 import type { InspireReferenceEntry } from "../types";
 import { LRUCache, ReaderTabHelper } from "../utils";
 import type {
@@ -338,6 +339,8 @@ export class ReaderIntegration {
    */
   setMaxKnownLabel(itemID: number, maxLabel: number): void {
     this.transientState.maxKnownLabelByItem.set(itemID, maxLabel);
+    // Prevent unbounded growth if many PDFs are opened in one session.
+    this.capMap(this.transientState.maxKnownLabelByItem, 300);
     Zotero.debug(
       `[${config.addonName}] [PDF-ANNOTATE] Set maxKnownLabel=${maxLabel} for item ${itemID}`,
     );
@@ -1420,11 +1423,13 @@ export class ReaderIntegration {
       // FTR-PDF-MATCHING: Pass itemID to set maxKnownLabel after fetch
       const preloadPromise = this.preloadReferencesForRecid(recid, itemID);
       this.transientState.preloadingRecids.set(recid, preloadPromise);
+      this.capMap(this.transientState.preloadingRecids, 100);
 
       // Clean up after preload completes
       preloadPromise
         .then(() => {
           this.transientState.preloadedRecids.add(recid);
+          this.capSet(this.transientState.preloadedRecids, 300);
         })
         .catch((err) => {
           Zotero.debug(
@@ -1605,9 +1610,43 @@ export class ReaderIntegration {
         return;
       }
 
-      // Parse references
       const parser = getPDFReferencesParser();
-      const mapping = parser.parseReferencesSection(pdfText);
+      const candidates = buildPdfTextCandidatesForReferenceParsing(pdfText);
+
+      let chosenText = pdfText;
+      let chosenCandidate = candidates[candidates.length - 1] ?? {
+        kind: "full" as const,
+        value: pdfText.length,
+        startIndex: 0,
+        text: pdfText,
+      };
+
+      // Prefer the smallest tail slice that still captures the beginning of the references list
+      // (i.e., includes low labels like 1–5). Fall back to full text to avoid regressions.
+      let mapping: PDFReferenceMapping | null = null;
+      for (const candidate of candidates) {
+        const candidateMapping = parser.parseReferencesSection(candidate.text);
+        if (!candidateMapping || candidateMapping.totalLabels <= 0) {
+          continue;
+        }
+
+        const labelNums = Array.from(candidateMapping.labelCounts.keys())
+          .map((l) => parseInt(l, 10))
+          .filter((n) => Number.isFinite(n));
+        const minLabel =
+          labelNums.length > 0 ? Math.min(...labelNums) : Number.POSITIVE_INFINITY;
+        const hasLowStart =
+          candidateMapping.labelCounts.has("1") ||
+          (Number.isFinite(minLabel) && minLabel <= 5);
+
+        mapping = candidateMapping;
+        chosenText = candidate.text;
+        chosenCandidate = candidate;
+
+        if (hasLowStart || candidate.kind === "full") {
+          break;
+        }
+      }
 
       if (mapping && mapping.totalLabels > 0) {
         // FTR-MULTI-PDF-FIX: Cache under attachmentItemID, not parentItemID
@@ -1623,18 +1662,18 @@ export class ReaderIntegration {
         }
 
         Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] Cached numeric mapping (${mapping.totalLabels} labels) for attachment ${attachmentItemID} (parent=${parentItemID})`,
+          `[${config.addonName}] [PRELOAD-PDF] Cached numeric mapping (${mapping.totalLabels} labels) for attachment ${attachmentItemID} (parent=${parentItemID}), source=${chosenCandidate.kind}, startIndex=${chosenCandidate.startIndex}`,
         );
       }
 
       // Also try author-year parsing
       const authorYearMapping =
-        parser.parseAuthorYearReferencesSection(pdfText);
+        parser.parseAuthorYearReferencesSection(chosenText);
       if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
         // FTR-MULTI-PDF-FIX: Cache under attachmentItemID, not parentItemID
         this.pdfAuthorYearMappingCache.set(attachmentItemID, authorYearMapping);
         Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] Cached author-year mapping (${authorYearMapping.authorYearMap.size} entries) for attachment ${attachmentItemID} (parent=${parentItemID})`,
+          `[${config.addonName}] [PRELOAD-PDF] Cached author-year mapping (${authorYearMapping.authorYearMap.size} entries) for attachment ${attachmentItemID} (parent=${parentItemID}), source=${chosenCandidate.kind}, startIndex=${chosenCandidate.startIndex}`,
         );
       }
     } catch (err) {
@@ -2155,6 +2194,64 @@ export class ReaderIntegration {
   }
 
   /**
+   * Extract a short text sample from Zotero char array without processing the full page.
+   * Used to avoid UI freezes on very large PDFs.
+   */
+  private extractTextFromCharsLimited(
+    chars: ZoteroChar[],
+    maxChars: number,
+  ): string {
+    if (!chars?.length || maxChars <= 0) return "";
+
+    const parts: string[] = [];
+    let length = 0;
+
+    for (const char of chars) {
+      if (char.ignorable) continue;
+
+      const c = char.c ?? "";
+      if (c) {
+        parts.push(c);
+        length += c.length;
+      }
+
+      // Preserve basic spacing/newlines to help citation regexes
+      if (char.paragraphBreakAfter) {
+        parts.push("\n\n");
+        length += 2;
+      } else if (char.lineBreakAfter) {
+        parts.push("\n");
+        length += 1;
+      } else if (char.spaceAfter) {
+        parts.push(" ");
+        length += 1;
+      }
+
+      if (length >= maxChars) break;
+    }
+
+    return parts.join("").trim();
+  }
+
+  private capSet<T>(set: Set<T>, maxSize: number): void {
+    if (!set || maxSize <= 0) return;
+    while (set.size > maxSize) {
+      const first = set.values().next().value as T | undefined;
+      if (first === undefined) break;
+      set.delete(first);
+    }
+  }
+
+  private capMap<K, V>(map: Map<K, V>, maxSize: number): void {
+    if (!map || maxSize <= 0) return;
+    while (map.size > maxSize) {
+      const firstKey = map.keys().next().value as K | undefined;
+      if (firstKey === undefined) break;
+      map.delete(firstKey);
+    }
+  }
+
+  /**
    * Get full text from a reader using Zotero's structured data.
    * Falls back to null if structured data is not available.
    *
@@ -2277,6 +2374,17 @@ export class ReaderIntegration {
             if (tabData?.type === "reader") {
               // Small delay to let the reader initialize
               setTimeout(() => this.handleReaderTabOpened(tabID), 500);
+            }
+          }
+
+          // Handle reader tab close/remove to prevent state leaks
+          if (
+            (event === "close" || event === "remove" || event === "delete") &&
+            ids.length > 0
+          ) {
+            for (const id of ids) {
+              const tabID = String(id);
+              this.handleReaderTabClosed(tabID);
             }
           }
         },
@@ -2418,6 +2526,7 @@ export class ReaderIntegration {
       // FTR-RECID-AUTO-UPDATE: Track items without recid
       if (!recid) {
         this.transientState.itemsAwaitingRecid.add(parentItemID);
+        this.capSet(this.transientState.itemsAwaitingRecid, 300);
         Zotero.debug(
           `[${config.addonName}] [RECID-AUTO-UPDATE] Item ${parentItemID} opened without recid, tracking for auto-update`,
         );
@@ -2461,6 +2570,48 @@ export class ReaderIntegration {
     }
   }
 
+  private handleReaderTabClosed(tabID: string): void {
+    try {
+      const state = this.readerStates.get(tabID);
+      if (!state) {
+        // Still clear the entry if present (defensive)
+        this.clearReaderState(tabID);
+        return;
+      }
+
+      this.clearReaderState(tabID);
+
+      // Clean transient per-item state to avoid long-session memory growth.
+      const attachmentItemID = state.itemID;
+      this.transientState.citationFormatByItem.delete(attachmentItemID);
+      this.transientState.scanningFormatItems.delete(attachmentItemID);
+      this.transientState.maxKnownLabelByItem.delete(attachmentItemID);
+      this.transientState.pdfParsingItems.delete(attachmentItemID);
+      this.transientState.pdfParsingPromises.delete(attachmentItemID);
+
+      // Best-effort: clear caches keyed by attachment item ID
+      this.pdfMappingCache.delete(attachmentItemID);
+      this.pdfAuthorYearMappingCache.delete(attachmentItemID);
+      this.overlayMappingCache.delete(attachmentItemID);
+      this.processedDataCache.delete(attachmentItemID);
+
+      // Clear recid tracking for this parent item (if applicable)
+      const parentItemID = state.parentItemID;
+      this.transientState.itemsAwaitingRecid.delete(parentItemID);
+      if (this.currentReaderParentItemID === parentItemID) {
+        this.currentReaderParentItemID = undefined;
+      }
+
+      Zotero.debug(
+        `[${config.addonName}] [FORMAT-DETECT] Cleaned reader tab state: tabID=${tabID}, attachment=${attachmentItemID}, parent=${parentItemID}`,
+      );
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [FORMAT-DETECT] Failed to cleanup reader tab ${tabID}: ${err}`,
+      );
+    }
+  }
+
   /**
    * Detect citation format in background by sampling PDF text.
    * Non-blocking - runs asynchronously without blocking UI.
@@ -2477,6 +2628,7 @@ export class ReaderIntegration {
 
       // Cache the detected format
       this.transientState.citationFormatByItem.set(itemID, format);
+      this.capMap(this.transientState.citationFormatByItem, 300);
 
       Zotero.debug(
         `[${config.addonName}] [FORMAT-DETECT] Detected format for item ${itemID}: ${format}`,
@@ -2490,6 +2642,7 @@ export class ReaderIntegration {
       );
       // Default to numeric on error
       this.transientState.citationFormatByItem.set(itemID, "numeric");
+      this.capMap(this.transientState.citationFormatByItem, 300);
     } finally {
       this.transientState.scanningFormatItems.delete(itemID);
     }
@@ -2514,6 +2667,8 @@ export class ReaderIntegration {
     let authorYearCount = 0;
     let sampledPages = 0;
     const maxPagesToSample = 10;
+    const maxCharsPerPage = 8000;
+    const minCitationsForDecision = 3;
 
     try {
       // ═══════════════════════════════════════════════════════════════════════
@@ -2529,76 +2684,78 @@ export class ReaderIntegration {
       }
 
       // ═══════════════════════════════════════════════════════════════════════
-      // Method 2: Use Zotero fulltext cache (most efficient)
+      // Method 2: Sample a few pages (bounded work, avoids full-doc text building)
       // ═══════════════════════════════════════════════════════════════════════
-      const cachedText = await this.getFulltextFromCache(reader);
-      if (cachedText && cachedText.length > 500) {
-        const result = this.analyzeTextForCitationFormat(cachedText, parser);
-        numericCount = result.numeric;
-        authorYearCount = result.authorYear;
-        sampledPages = 1;
-        Zotero.debug(
-          `[${config.addonName}] [FORMAT-DETECT] Using fulltext cache (${cachedText.length} chars)`,
-        );
-      } else {
-        // ═════════════════════════════════════════════════════════════════════
-        // Method 3: Use structured page data (fallback)
-        // ═════════════════════════════════════════════════════════════════════
-        const fullText = await this.getFullTextFromStructuredData(reader);
+      const pdfDocument = this.getPDFDocument(reader);
+      const numPages = pdfDocument?.numPages || 0;
 
-        if (fullText && fullText.length > 500) {
-          const result = this.analyzeTextForCitationFormat(fullText, parser);
-          numericCount = result.numeric;
-          authorYearCount = result.authorYear;
-          sampledPages = 1;
-        } else {
-          // Fallback: sample from individual pages
-          const pdfDocument = this.getPDFDocument(reader);
-          if (!pdfDocument) {
-            return "numeric";
-          }
+      const pagesToSample: number[] = [];
+      const pushUnique = (idx: number) => {
+        // Skip title page (0) and avoid the last page (often references/end matter)
+        if (!Number.isFinite(idx)) return;
+        if (idx <= 0) return;
+        if (idx >= numPages) return;
+        if (numPages > 2 && idx >= numPages - 1) return;
+        if (!pagesToSample.includes(idx)) {
+          pagesToSample.push(idx);
+        }
+      };
 
-          const numPages = pdfDocument.numPages || 0;
-          if (numPages === 0) {
-            return "numeric";
-          }
+      if (numPages > 0) {
+        // Early pages where citations typically appear
+        for (let i = 1; i < Math.min(5, Math.max(1, numPages - 1)); i++) {
+          pushUnique(i);
+        }
 
-          // Sample from beginning, middle (skip title page and references)
-          const pagesToSample: number[] = [];
-          if (numPages > 2) {
-            for (let i = 1; i < Math.min(5, numPages - 1); i++) {
-              pagesToSample.push(i);
-            }
-            const mid = Math.floor(numPages / 2);
-            for (let i = mid - 1; i <= mid + 1 && i < numPages - 1; i++) {
-              if (i > 0 && !pagesToSample.includes(i)) {
-                pagesToSample.push(i);
-              }
-            }
-          }
+        // Mid-document samples (avoid references)
+        const mid = Math.floor(numPages / 2);
+        for (let i = mid - 1; i <= mid + 1; i++) {
+          pushUnique(i);
+        }
 
-          for (const pageIndex of pagesToSample.slice(0, maxPagesToSample)) {
-            try {
-              const pageData = await this.getStructuredPageData(
-                reader,
-                pageIndex,
-              );
-              if (pageData?.chars?.length) {
-                const pageText = this.extractTextFromChars(pageData.chars);
-                if (pageText.length > 100) {
-                  const result = this.analyzeTextForCitationFormat(
-                    pageText,
-                    parser,
-                  );
-                  numericCount += result.numeric;
-                  authorYearCount += result.authorYear;
-                  sampledPages++;
-                }
-              }
-            } catch {
-              // Skip failed pages
-            }
+        // Quarter points (in long PDFs citations may start later)
+        if (numPages >= 12) {
+          pushUnique(Math.floor(numPages * 0.25));
+          pushUnique(Math.floor(numPages * 0.75));
+        }
+
+        pagesToSample.sort((a, b) => a - b);
+
+        for (const pageIndex of pagesToSample.slice(0, maxPagesToSample)) {
+          try {
+            const pageData = await this.getStructuredPageData(reader, pageIndex);
+            if (!pageData?.chars?.length) continue;
+            const pageText = this.extractTextFromCharsLimited(
+              pageData.chars,
+              maxCharsPerPage,
+            );
+            if (pageText.length < 100) continue;
+            const result = this.analyzeTextForCitationFormat(pageText, parser);
+            numericCount += result.numeric;
+            authorYearCount += result.authorYear;
+            sampledPages++;
+          } catch {
+            // Skip failed pages
           }
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Method 3: Fallback to a bounded prefix from fulltext cache (if needed)
+      // ═══════════════════════════════════════════════════════════════════════
+      const totalSoFar = numericCount + authorYearCount;
+      if (totalSoFar < minCitationsForDecision) {
+        const cachedText = await this.getFulltextFromCache(reader);
+        if (cachedText && cachedText.length > 500) {
+          const MAX_CACHE_SAMPLE_CHARS = 250_000;
+          const sample = cachedText.slice(0, MAX_CACHE_SAMPLE_CHARS);
+          const result = this.analyzeTextForCitationFormat(sample, parser);
+          numericCount += result.numeric;
+          authorYearCount += result.authorYear;
+          sampledPages++;
+          Zotero.debug(
+            `[${config.addonName}] [FORMAT-DETECT] Used fulltext cache sample (${sample.length}/${cachedText.length} chars)`,
+          );
         }
       }
     } catch (err) {

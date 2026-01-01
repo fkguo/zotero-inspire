@@ -15,6 +15,8 @@ pref("__prefsPrefix__.pdf_fuzzy_citation", false); // Aggressive citation detect
 pref("__prefsPrefix__.pdf_parse_refs_list", false); // Parse PDF reference list to fix label mapping (for multi-citation references)
 pref("__prefsPrefix__.pdf_force_mapping_on_mismatch", true); // When PDF/INSPIRE reference counts diverge, force PDF mapping and skip index fallback
 pref("__prefsPrefix__.quick_filters_last_used", "[]");
+// Developer/debug toggles
+pref("__prefsPrefix__.debug_panel_layout", false); // Enable panel layout debug logs/UI
 // Local cache settings
 pref("__prefsPrefix__.local_cache_enable", true);
 pref("__prefsPrefix__.local_cache_ttl_hours", 24);
@@ -43,3 +45,9 @@ pref("__prefsPrefix__.collab_tag_auto", false); // Auto-add tags when updating/i
 pref("__prefsPrefix__.collab_tag_template", "{name}"); // Tag format template ({name} = collaboration name)
 // Funding extraction settings (FTR-FUNDING-EXTRACTION)
 pref("__prefsPrefix__.funding_china_only", true); // Only extract Chinese funding agencies (NSFC, CAS, MoST, etc.)
+// Favorite authors (FTR-FAVORITE-AUTHORS)
+pref("__prefsPrefix__.favorite_authors", "[]"); // JSON array of FavoriteAuthor objects
+// Favorite papers (FTR-FAVORITE-PAPERS)
+pref("__prefsPrefix__.favorite_papers", "[]"); // JSON array of FavoritePaper objects
+// Favorite presentations (FTR-FAVORITE-PRESENTATIONS)
+pref("__prefsPrefix__.favorite_presentations", "[]"); // JSON array of FavoritePresentation objects

@@ -1,6 +1,6 @@
 import { config } from "../../../package.json";
 import { getString } from "../../utils/locale";
-import { getPref } from "../../utils/prefs";
+import { getPref, setPref } from "../../utils/prefs";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   DOI_ORG_URL,
@@ -17,7 +17,7 @@ const PLUGIN_ICON = `chrome://${config.addonRef}/content/icons/inspire-icon.png`
 // ─────────────────────────────────────────────────────────────────────────────
 const ARXIV_EXTRA_LINE_REGEX = /^.*(arXiv:|_eprint:).*$(\n|)/gim;
 
-import type { jsobject, ItemWithPendingInspireNote } from "./types";
+import type { jsobject, ItemWithPendingInspireNote, FavoritePaper } from "./types";
 import {
   getInspireMeta,
   getCrossrefCount,
@@ -1087,6 +1087,97 @@ export class ZInspire {
   }
 
   /**
+   * Toggle favorite paper status for selected item from main window menu.
+   * FTR-FAVORITE-PAPERS
+   */
+  /**
+   * Toggle favorite paper or presentation status for selected item from main window menu.
+   * FTR-FAVORITE-PAPERS / FTR-FAVORITE-PRESENTATIONS
+   */
+  toggleFavoritePaperFromMenu() {
+    const items = ZoteroPane.getSelectedItems();
+    if (!items || items.length !== 1) {
+      new ztoolkit.ProgressWindow(config.addonName)
+        .createLine({
+          text: getString("references-panel-favorite-paper-select-one"),
+          type: "default",
+        })
+        .show();
+      return;
+    }
+    const item = items[0];
+    if (!item.isRegularItem()) return;
+
+    const recid = deriveRecidFromItem(item);
+    const isPresentation = item.itemType === "presentation";
+    const prefKey = isPresentation ? "favorite_presentations" : "favorite_papers";
+
+    // Get current favorites
+    const json = getPref(prefKey) as string;
+    let favorites: FavoritePaper[];
+    try {
+      favorites = JSON.parse(json || "[]");
+    } catch {
+      favorites = [];
+    }
+
+    // Check if already favorite - match by recid if available, otherwise by itemID
+    const existingIndex = favorites.findIndex(
+      (f) => (recid && f.recid === recid) || (item.id && f.itemID === item.id),
+    );
+    if (existingIndex >= 0) {
+      favorites.splice(existingIndex, 1);
+      new ztoolkit.ProgressWindow(config.addonName)
+        .createLine({
+          text: getString(
+            isPresentation
+              ? "references-panel-favorite-presentation-removed"
+              : "references-panel-favorite-paper-removed",
+          ),
+          type: "success",
+        })
+        .show();
+    } else {
+      // Get item info
+      const title = item.getField("title") as string;
+      const creators = item.getCreators();
+      const creatorType = isPresentation ? "presenter" : "author";
+      const creatorTypeID = Zotero.CreatorTypes.getID(creatorType);
+      const firstCreator = creators.find((c) => c.creatorTypeID === creatorTypeID);
+      const creatorCount = creators.filter(
+        (c) => c.creatorTypeID === creatorTypeID,
+      ).length;
+      const authors = firstCreator
+        ? creatorCount > 1
+          ? `${firstCreator.lastName} et al.`
+          : firstCreator.lastName
+        : undefined;
+      const year = parseInt(item.getField("year") as string, 10) || undefined;
+
+      favorites.push({
+        recid: recid || undefined,
+        itemID: item.id,
+        title: title || "Untitled",
+        authors,
+        year,
+        addedAt: Date.now(),
+      });
+      new ztoolkit.ProgressWindow(config.addonName)
+        .createLine({
+          text: getString(
+            isPresentation
+              ? "references-panel-favorite-presentation-added"
+              : "references-panel-favorite-paper-added",
+          ),
+          type: "success",
+        })
+        .show();
+    }
+
+    setPref(prefKey, JSON.stringify(favorites));
+  }
+
+  /**
    * Fetch BibTeX for multiple recids in batches and concatenate results.
    */
   private async fetchBibTeXBatch(recids: string[]): Promise<string | null> {
@@ -1156,7 +1247,7 @@ export class ZInspire {
 
     // Show completion notification
     this.showPreprintNotification(
-      getString("preprint-update-success" as any, {
+      getString("preprint-update-success", {
         args: { count: updateResult.success },
       }),
       "success",
@@ -1201,7 +1292,7 @@ export class ZInspire {
           `[${config.addonName}] checkSelectedItemsPreprints: no preprints, showing notification`,
         );
         this.showPreprintNotification(
-          getString("preprint-no-preprints" as any),
+          getString("preprint-no-preprints"),
           "default",
         );
         return;
@@ -1236,7 +1327,7 @@ export class ZInspire {
     const scanProgress = new ProgressWindowHelper(config.addonName);
     scanProgress.createLine({
       icon: PLUGIN_ICON,
-      text: getString("preprint-check-scanning" as any),
+      text: getString("preprint-check-scanning"),
       progress: 0,
     });
     scanProgress.show(-1);
@@ -1253,7 +1344,7 @@ export class ZInspire {
 
       if (preprints.length === 0) {
         this.showPreprintNotification(
-          getString("preprint-no-preprints" as any),
+          getString("preprint-no-preprints"),
           "default",
         );
         return;
@@ -1279,7 +1370,7 @@ export class ZInspire {
     const scanProgress = new ProgressWindowHelper(config.addonName);
     scanProgress.createLine({
       icon: PLUGIN_ICON,
-      text: getString("preprint-check-scanning" as any),
+      text: getString("preprint-check-scanning"),
       progress: 0,
     });
     scanProgress.show(-1);
@@ -1293,7 +1384,7 @@ export class ZInspire {
 
       if (preprints.length === 0) {
         this.showPreprintNotification(
-          getString("preprint-no-preprints" as any),
+          getString("preprint-no-preprints"),
           "default",
         );
         return;
@@ -1334,7 +1425,7 @@ export class ZInspire {
     const progressWindow = new ProgressWindowHelper(config.addonName);
     progressWindow.createLine({
       icon: PLUGIN_ICON,
-      text: getString("preprint-check-progress" as any, {
+      text: getString("preprint-check-progress", {
         args: { current: 0, total: preprints.length },
       }),
       progress: 0,
@@ -1352,7 +1443,7 @@ export class ZInspire {
           if (this.isCancelled) return;
           progressWindow.changeLine({
             icon: PLUGIN_ICON,
-            text: getString("preprint-check-progress" as any, {
+            text: getString("preprint-check-progress", {
               args: { current, total },
             }),
             progress: Math.round((current / total) * 100),
@@ -1369,7 +1460,7 @@ export class ZInspire {
 
       if (this.isCancelled) {
         this.showPreprintNotification(
-          getString("preprint-check-cancelled" as any),
+          getString("preprint-check-cancelled"),
           "fail",
         );
         return;
@@ -1391,7 +1482,7 @@ export class ZInspire {
 
       // Show completion notification
       this.showPreprintNotification(
-        getString("preprint-update-success" as any, {
+        getString("preprint-update-success", {
           args: { count: updateResult.success },
         }),
         "success",
@@ -1401,7 +1492,7 @@ export class ZInspire {
       this.removeEscapeListener();
       if (err.name === "AbortError") {
         this.showPreprintNotification(
-          getString("preprint-check-cancelled" as any),
+          getString("preprint-check-cancelled"),
           "fail",
         );
       } else {
@@ -1434,7 +1525,7 @@ export class ZInspire {
       // If no published items found, show simple notification
       if (publishedResults.length === 0) {
         this.showPreprintNotification(
-          getString("preprint-all-current" as any),
+          getString("preprint-all-current"),
           "default",
         );
         resolve({ selectedItemIDs: [], cancelled: false });
@@ -1470,7 +1561,7 @@ export class ZInspire {
         background-color: var(--material-sidepane, #f5f5f5);
         border-radius: 8px 8px 0 0;
       `;
-      header.textContent = getString("preprint-found-published" as any, {
+      header.textContent = getString("preprint-found-published", {
         args: { count: publishedResults.length },
       });
       panel.appendChild(header);
@@ -1484,9 +1575,9 @@ export class ZInspire {
         display: flex; gap: 16px;
       `;
       summaryBar.innerHTML = `
-        <span>${getString("preprint-results-published" as any)}: ${summary.published}</span>
-        <span>${getString("preprint-results-unpublished" as any)}: ${summary.unpublished}</span>
-        <span>${getString("preprint-results-errors" as any)}: ${summary.errors}</span>
+        <span>${getString("preprint-results-published")}: ${summary.published}</span>
+        <span>${getString("preprint-results-unpublished")}: ${summary.unpublished}</span>
+        <span>${getString("preprint-results-errors")}: ${summary.errors}</span>
       `;
       panel.appendChild(summaryBar);
 
@@ -1540,7 +1631,7 @@ export class ZInspire {
       });
       selectAllContainer.appendChild(selectAllCheckbox);
       selectAllContainer.appendChild(
-        doc.createTextNode(getString("preprint-select-all" as any)),
+        doc.createTextNode(getString("preprint-select-all")),
       );
       actions.appendChild(selectAllContainer);
 
@@ -1550,7 +1641,7 @@ export class ZInspire {
 
       // Cancel button
       const cancelBtn = doc.createElement("button");
-      cancelBtn.textContent = getString("preprint-cancel" as any);
+      cancelBtn.textContent = getString("preprint-cancel");
       cancelBtn.style.cssText = `
         padding: 6px 16px; min-width: 80px;
         border: 1px solid var(--fill-quinary, #ccc);
@@ -1561,7 +1652,7 @@ export class ZInspire {
 
       // Update button
       const updateBtn = doc.createElement("button");
-      updateBtn.textContent = getString("preprint-update-selected" as any);
+      updateBtn.textContent = getString("preprint-update-selected");
       updateBtn.style.cssText = `
         padding: 6px 16px; min-width: 80px; border: none;
         border-radius: 4px; background-color: #0066cc; color: #fff;
@@ -1705,7 +1796,7 @@ export class ZInspire {
 
     if (!isCollabTagEnabled()) {
       this.showCollabTagNotification(
-        getString("collab-tag-disabled" as any),
+        getString("collab-tag-disabled"),
         "fail",
       );
       return;
@@ -1716,7 +1807,7 @@ export class ZInspire {
 
     if (!regularItems.length) {
       this.showCollabTagNotification(
-        getString("collab-tag-no-selection" as any),
+        getString("collab-tag-no-selection"),
         "fail",
       );
       return;
@@ -1726,7 +1817,7 @@ export class ZInspire {
     const progressWindow = new ProgressWindowHelper(config.addonName);
     progressWindow.createLine({
       icon: PLUGIN_ICON,
-      text: getString("collab-tag-progress" as any),
+      text: getString("collab-tag-progress"),
       progress: 0,
     });
     progressWindow.show(-1);
@@ -1735,7 +1826,7 @@ export class ZInspire {
       const result = await batchAddCollabTags(regularItems, (done, total) => {
         progressWindow.changeLine({
           icon: PLUGIN_ICON,
-          text: getString("collab-tag-progress" as any),
+          text: getString("collab-tag-progress"),
           progress: Math.round((done / total) * 100),
         });
       });
@@ -1744,7 +1835,7 @@ export class ZInspire {
 
       // Show result notification
       this.showCollabTagNotification(
-        getString("collab-tag-result" as any, {
+        getString("collab-tag-result", {
           args: {
             added: result.added,
             updated: result.updated,
@@ -1759,7 +1850,7 @@ export class ZInspire {
         `[${config.addonName}] addCollabTagsToSelection error: ${err}`,
       );
       this.showCollabTagNotification(
-        getString("collab-tag-result" as any, {
+        getString("collab-tag-result", {
           args: { added: 0, updated: 0, skipped: 0 },
         }),
         "fail",
@@ -1778,7 +1869,7 @@ export class ZInspire {
 
     if (!isCollabTagEnabled()) {
       this.showCollabTagNotification(
-        getString("collab-tag-disabled" as any),
+        getString("collab-tag-disabled"),
         "fail",
       );
       return;
@@ -1787,7 +1878,7 @@ export class ZInspire {
     const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
     if (!collection) {
       this.showCollabTagNotification(
-        getString("collab-tag-no-selection" as any),
+        getString("collab-tag-no-selection"),
         "fail",
       );
       return;
@@ -1799,7 +1890,7 @@ export class ZInspire {
 
     if (!items.length) {
       this.showCollabTagNotification(
-        getString("collab-tag-no-selection" as any),
+        getString("collab-tag-no-selection"),
         "fail",
       );
       return;
@@ -1809,7 +1900,7 @@ export class ZInspire {
     const progressWindow = new ProgressWindowHelper(config.addonName);
     progressWindow.createLine({
       icon: PLUGIN_ICON,
-      text: getString("collab-tag-progress" as any),
+      text: getString("collab-tag-progress"),
       progress: 0,
     });
     progressWindow.show(-1);
@@ -1818,7 +1909,7 @@ export class ZInspire {
       const result = await batchAddCollabTags(items, (done, total) => {
         progressWindow.changeLine({
           icon: PLUGIN_ICON,
-          text: getString("collab-tag-progress" as any),
+          text: getString("collab-tag-progress"),
           progress: Math.round((done / total) * 100),
         });
       });
@@ -1827,7 +1918,7 @@ export class ZInspire {
 
       // Show result notification
       this.showCollabTagNotification(
-        getString("collab-tag-result" as any, {
+        getString("collab-tag-result", {
           args: {
             added: result.added,
             updated: result.updated,
@@ -1842,7 +1933,7 @@ export class ZInspire {
         `[${config.addonName}] reapplyCollabTagsToCollection error: ${err}`,
       );
       this.showCollabTagNotification(
-        getString("collab-tag-result" as any, {
+        getString("collab-tag-result", {
           args: { added: 0, updated: 0, skipped: 0 },
         }),
         "fail",

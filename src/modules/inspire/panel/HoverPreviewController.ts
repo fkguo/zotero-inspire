@@ -57,6 +57,10 @@ export interface PreviewActionCallbacks {
   onShow?: (entry: InspireReferenceEntry) => void;
   /** Called when preview is hidden */
   onHide?: () => void;
+  /** Check if entry is favorited */
+  isFavorite?: (entry: InspireReferenceEntry) => boolean;
+  /** Toggle favorite status */
+  onToggleFavorite?: (entry: InspireReferenceEntry) => void | Promise<void>;
 }
 
 /**
@@ -436,6 +440,9 @@ export class HoverPreviewController {
       label: this.label,
       citationType: this.citationType,
       hasPdf: this.callbacks.hasPdf ? this.callbacks.hasPdf(entry) : false,
+      isFavorite: this.callbacks.isFavorite
+        ? this.callbacks.isFavorite(entry)
+        : undefined,
       onAdd: this.callbacks.onAdd
         ? (e) => this.callbacks.onAdd!(e)
         : undefined,
@@ -511,10 +518,34 @@ export class HoverPreviewController {
       onCopyTexkey: this.callbacks.onCopyTexkey
         ? (e) => this.callbacks.onCopyTexkey!(e)
         : undefined,
+      onToggleFavorite: this.callbacks.onToggleFavorite
+        ? async (e) => {
+            const oldAbstractEl = card.querySelector(
+              ".zinspire-preview-card__abstract",
+            ) as HTMLElement | null;
+            const savedAbstractHTML = oldAbstractEl?.innerHTML;
+            const savedLatexSource = oldAbstractEl?.dataset.latexSource;
+
+            await this.callbacks.onToggleFavorite!(e);
+            this.buildContent(card, e);
+
+            if (savedLatexSource && e.abstract === savedLatexSource) {
+              const newAbstractEl = card.querySelector(
+                ".zinspire-preview-card__abstract",
+              ) as HTMLElement | null;
+              if (newAbstractEl && savedAbstractHTML) {
+                newAbstractEl.innerHTML = savedAbstractHTML;
+                newAbstractEl.dataset.latexSource = savedLatexSource;
+                return;
+              }
+            }
+            this.fetchAbstract(e, card);
+          }
+        : undefined,
       onNavigate: (delta) => this.navigate(delta),
       onAbstractContextMenu: this.callbacks.onAbstractContextMenu
         ? (e, el) => {
-            this.setContextMenuOpen(true);
+          this.setContextMenuOpen(true);
             this.callbacks.onAbstractContextMenu!(e, el, entry);
           }
         : undefined,

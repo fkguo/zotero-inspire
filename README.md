@@ -64,6 +64,7 @@ Select an item with an INSPIRE record, then find the **INSPIRE** section in the 
 | **Entry Cited**   | Papers citing a specific reference, appears only after clicking the `Cited by ...` button below an entry |
 | **Author Papers** | All papers by a clicked author, appears only after clicking an author name                                 |
 | **🔍 Search**     | INSPIRE search results                                                                                     |
+| **⭐ Favorites**   | Your favorite authors and papers                                                                           |
 
 ### Search INSPIRE
 
@@ -111,6 +112,7 @@ inspire: j Phys.Rev.D       → Search by journal
 | Click citation count | View citing papers       |
 | Click 📋             | Copy BibTeX              |
 | Click T              | Copy citation key        |
+| Right-click entry    | Context menu (Favorites) |
 
 ### Filtering & Sorting
 
@@ -123,6 +125,15 @@ inspire: j Phys.Rev.D       → Search by journal
 
 - **Back/Forward**: Use the ← → buttons to navigate between previously viewed items, like browser history
 - **Keyboard**: Arrow keys, Home/End, and vim-style j/k navigation (see Keyboard Shortcuts)
+
+### Favorites
+
+The **⭐ Favorites** tab lets you quickly access your favorite authors, papers, and presentations:
+
+- **Favorite Authors**: Click the star (☆/★) button in the Author Papers tab or author preview card to add authors to favorites
+- **Favorite Papers & Presentations**: Right-click any entry within the INSPIRE References panel and select "Add paper to favorites" (or "Add presentation to favorites"), or use the right-click menu in Zotero's main window. Items of type "Presentation" are automatically categorized under "Favorite Presentations".
+- **Quick Access**: All favorites are displayed in the Favorites tab with drag-and-drop reordering within each category (Authors, Papers, Presentations)
+- **Filtering**: Use the text filter to search within your favorites
 
 ### Batch Operations
 

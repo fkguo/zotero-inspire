@@ -108,6 +108,9 @@ import {
   type AuthorSearchInfo,
   type InspireAuthorProfile,
   type AuthorStats,
+  type FavoriteAuthor,
+  type FavoritePaper,
+  type FavoritePresentation,
   type InspireReferenceEntry,
   type InspireArxivDetails,
   type ScrollSnapshot,
@@ -1149,6 +1152,12 @@ export class ZInspireReferencePane {
 }
 
 class InspireReferencePanelController {
+  private static get PANEL_LAYOUT_DEBUG(): boolean {
+    return getPref("debug_panel_layout") === true;
+  }
+  // Fallback right-side safe inset when we can't detect the icon rail via DOM APIs.
+  // Chosen to match Zotero's typical right icon rail width (incl. padding).
+  private static readonly RIGHT_RAIL_FALLBACK_PX = 56;
   private static readonly instances =
     new Set<InspireReferencePanelController>();
   private static navigationStack: NavigationSnapshot[] = [];
@@ -1291,7 +1300,11 @@ class InspireReferencePanelController {
   private filterInlineHint?: InlineHintHelper;
   private filterHistory: SearchHistoryItem[] = [];
   private sortSelect!: HTMLSelectElement;
+  private filterRow?: HTMLElement; // Row 3: filter + navigation
+  private sortRow?: HTMLElement; // Row 4: sort + cache indicator
   private tabButtons!: Record<InspireViewMode, HTMLButtonElement>;
+  private favoritesTabButton?: HTMLButtonElement;
+  private isFavoritesViewActive = false; // Track if favorites view is active
   private filterText = "";
   private viewMode: InspireViewMode = "references";
   private referenceSort: ReferenceSortOption = DEFAULT_REFERENCE_SORT;
@@ -1300,11 +1313,29 @@ class InspireReferencePanelController {
   private currentItemID?: number;
   private currentRecid?: string;
   private entryCitedSource?: EntryCitedSource;
+  private authorNavigationStack: EntryCitedSource[] = []; // Stack for author navigation history
   private entryCitedPreviousMode: Exclude<InspireViewMode, "entryCited"> =
     "references";
   private entryCitedReturnScroll?: ScrollState;
   private pendingEntryScrollReset = false;
   private allEntries: InspireReferenceEntry[] = [];
+  // Right-side item-pane sidenav inset (prevents text painting under icon rail)
+  private panelRightInsetPx = 0;
+  private baseBodyPaddingRightPx?: number;
+  private panelRightInsetResizeObserver?: ResizeObserver;
+  private panelRightInsetWindowResizeHandler?: () => void;
+  private panelRightInsetTarget?: HTMLElement;
+  private pendingPanelRightInsetUpdate = false;
+  private panelRightInsetSource:
+    | "target"
+    | "targetLeft"
+    | "targetOverlap"
+    | "hitTest"
+    | "fallback"
+    | "none" =
+    "none";
+  private panelLayoutDebugLastSummary = "";
+  private panelLayoutDebugLastOverflowAudit = "";
   // LRU caches to prevent unbounded memory growth
   // References: ~100 entries, each with InspireReferenceEntry[]
   private referencesCache = new LRUCache<string, InspireReferenceEntry[]>(
@@ -1504,19 +1535,29 @@ class InspireReferencePanelController {
   constructor(body: HTMLDivElement) {
     this.body = body;
     this.body.classList.add("zinspire-ref-panel");
-    // FTR-PANEL-WIDTH-FIX: Ensure panel respects container width at all sizes
-    // Use width: 100% with overflow handling to prevent content from exceeding sidebar width
+    // FIX-PANEL-WIDTH-OVERFLOW (Citing…): Zotero's item pane uses nested flex layouts
+    // (item-pane-custom-section → collapsible-section). Long unbroken strings in our
+    // panel (notably INSPIRE titles) can force these flex items wider than the
+    // available column and overlap the right-side icon rail. Ensure ancestors can
+    // shrink by explicitly setting `min-width: 0`.
+    this.applyHostFlexWidthFixes();
     // NOTE: Removed `contain: layout` as it breaks position:fixed for modal dialogs
-    this.body.style.cssText = `
-      width: 100%;
-      max-width: 100%;
-      min-width: 0;
-      overflow: hidden;
-      box-sizing: border-box;
-      position: relative;
-      display: flex;
-      flex-direction: column;
-    `;
+    // Important: do NOT clobber existing inline styles from Zotero's ItemPaneManager
+    // (e.g. padding/width constraints for the right-side item pane icon rail).
+    this.body.style.width = "100%";
+    this.body.style.minWidth = "0";
+    this.body.style.maxWidth = "100%";
+    this.body.style.overflow = "hidden";
+    this.body.style.boxSizing = "border-box";
+    this.body.style.position = "relative";
+    this.body.style.display = "flex";
+    this.body.style.flexDirection = "column";
+    // Ensure internal list scrolling works even if CSS files fail to load.
+    // Without an explicit height, a flex column can grow with content and cause
+    // the outer item pane to scroll/jump when large lists render (observed in Citing…).
+    this.body.style.height = "100%";
+    this.body.style.minHeight = "0";
+    // Right-side icon rail (sidenav) overlap is handled via dynamic body paddingRight.
     this.enableTextSelection();
 
     // Initialize chart collapsed state from preferences
@@ -1580,17 +1621,58 @@ class InspireReferencePanelController {
       },
       row1,
     ) as HTMLSpanElement;
-    // FIX-PANEL-WIDTH-OVERFLOW: Add text overflow handling
+    // FIX-PANEL-WIDTH-OVERFLOW: Avoid `white-space: nowrap` on long status text.
+    // In Zotero item pane, custom sections sit inside nested flex layouts. A single
+    // long unbreakable line can inflate the flex item's min-content width and make
+    // the whole panel overflow horizontally (most noticeable in Citing… where the
+    // status includes an author/title label). Keep it visually 1-line by clamping
+    // height, but allow breaking for intrinsic sizing.
     this.statusEl.style.cssText = `
+      display: block;
       font-size: 13px;
       font-weight: 500;
       color: var(--fill-primary, #1e293b);
       flex: 1;
       min-width: 0;
+      max-width: 100%;
       overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
+      line-height: 1.2;
+      max-height: 1.2em;
     `;
+
+    // Debug helper: native tooltips are not selectable/copyable.
+    if (InspireReferencePanelController.PANEL_LAYOUT_DEBUG) {
+      const copyBtn = body.ownerDocument.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy layout";
+      copyBtn.title = "Copy panel layout debug info";
+      copyBtn.style.cssText = `
+        flex-shrink: 0;
+        border: 1px solid var(--fill-quinary, #d1d5db);
+        background: var(--material-background, #fff);
+        color: var(--fill-secondary, #64748b);
+        border-radius: 6px;
+        padding: 2px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        user-select: none;
+      `;
+      copyBtn.addEventListener("click", () => {
+        const parts = [
+          this.statusEl?.title?.trim?.() || "",
+          this.panelLayoutDebugLastSummary?.trim?.() || "",
+          this.panelLayoutDebugLastOverflowAudit?.trim?.() || "",
+        ].filter(Boolean);
+        if (!parts.length) {
+          return;
+        }
+        this.copyToClipboard(parts.join("\n\n"));
+      });
+      row1.appendChild(copyBtn);
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Row 2: Tab buttons (pill button style)
@@ -1612,15 +1694,17 @@ class InspireReferencePanelController {
 
     const tabs = body.ownerDocument.createElement("div");
     tabs.className = "zinspire-ref-panel__tabs";
-    // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
+    // FIX-PANEL-WIDTH-OVERFLOW: Use flex instead of inline-flex to properly constrain width
     tabs.style.cssText = `
-      display: inline-flex;
+      display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 6px;
       min-width: 0;
       max-width: 100%;
+      width: 100%;
       overflow: hidden;
+      box-sizing: border-box;
     `;
     row2.appendChild(tabs);
 
@@ -1630,12 +1714,17 @@ class InspireReferencePanelController {
       entryCited: this.createTabButton(tabs, "entryCited"),
       search: this.createTabButton(tabs, "search"),
     };
+
+    // Favorites tab (★)
+    this.favoritesTabButton = this.createFavoritesTabButton(tabs);
+
     this.updateTabSelection();
 
     // ═══════════════════════════════════════════════════════════════════════
     // Row 3: Filter (left) + Navigation (right)
     // ═══════════════════════════════════════════════════════════════════════
     const row3 = body.ownerDocument.createElement("div");
+    this.filterRow = row3; // Save reference for favorites view toggle
     // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     row3.style.cssText = `
       display: flex;
@@ -1677,7 +1766,7 @@ class InspireReferencePanelController {
     const filterInputWrapper = filterDoc.createElement("div");
     filterInputWrapper.className = "zinspire-filter-input-wrapper";
     filterInputWrapper.style.cssText =
-      INLINE_HINT_WRAPPER_STYLE + `min-width: 120px; flex: 1;`;
+      INLINE_HINT_WRAPPER_STYLE + `min-width: 0; flex: 1 1 120px; max-width: 100%;`;
 
     // Create filter input using native DOM
     this.filterInput = filterDoc.createElement("input");
@@ -1817,7 +1906,10 @@ class InspireReferencePanelController {
     ) as HTMLButtonElement;
     this.entryViewBackButton.hidden = true;
     this.applyNavButtonStyle(this.entryViewBackButton, true);
-    this.entryViewBackButton.style.display = "none";
+    // FIX-CITING-TAB-JUMP: Use visibility:hidden instead of display:none for initial state
+    // This ensures the button always occupies space, preventing layout reflow when it appears
+    this.entryViewBackButton.style.display = "inline-flex";
+    this.entryViewBackButton.style.visibility = "hidden";
 
     // Rate limiter status indicator
     this.rateLimiterStatusEl = ztoolkit.UI.appendElement(
@@ -1854,6 +1946,7 @@ class InspireReferencePanelController {
     // Positioned below chart container for better visual hierarchy
     // ═══════════════════════════════════════════════════════════════════════
     const row4 = body.ownerDocument.createElement("div");
+    this.sortRow = row4; // Save reference for favorites view toggle
     // FIX-PANEL-WIDTH-OVERFLOW: Add width constraints to prevent overflow
     row4.style.cssText = `
       display: flex;
@@ -1942,6 +2035,11 @@ class InspireReferencePanelController {
     this.listEl.style.boxSizing = "border-box";
     this.listEl.style.overflowX = "hidden";
     this.listEl.style.overflowY = "auto";
+    // Ensure list content can wrap even if host styles apply `white-space: nowrap`.
+    this.listEl.style.whiteSpace = "normal";
+    // Prevent outer item pane scroll jumps when list grows (progressive append)
+    this.listEl.style.flex = "1 1 auto";
+    this.listEl.style.minHeight = "0";
 
     // Phase 0.1 Refactor: Initialize EntryListRenderer for row rendering
     this.entryRenderer = new EntryListRenderer({
@@ -1985,6 +2083,359 @@ class InspireReferencePanelController {
 
     // FTR-PDF-ANNOTATE: Register for citation lookup events
     this.initPdfCitationLookup();
+    // Keep toolbar content clear of the right-side icon rail (sidenav)
+    this.startPanelRightInsetTracking();
+  }
+
+  private applyHostFlexWidthFixes() {
+    try {
+      // Custom section host (flex item in `.zotero-view-item` flex column)
+      const host = this.body.closest("item-pane-custom-section") as
+        | HTMLElement
+        | null;
+      if (host) {
+        host.style.minWidth = "0";
+        host.style.maxWidth = "100%";
+      }
+
+      // Collapsible section wrapper (also uses flex layout)
+      const section = this.body.closest("collapsible-section") as
+        | HTMLElement
+        | null;
+      if (section) {
+        section.style.minWidth = "0";
+        section.style.maxWidth = "100%";
+      }
+    } catch {
+      // Ignore DOM/namespace edge cases
+    }
+  }
+
+  private startPanelRightInsetTracking() {
+    this.captureBaseBodyPaddingRight();
+    this.updatePanelRightInset();
+    // Re-measure after first layout pass (some hosts report 0px before paint)
+    setTimeout(() => this.updatePanelRightInset(), 0);
+
+    const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
+    if (win) {
+      this.panelRightInsetWindowResizeHandler = () => this.updatePanelRightInset();
+      win.addEventListener("resize", this.panelRightInsetWindowResizeHandler, {
+        passive: true,
+      } as any);
+    }
+
+    if (typeof ResizeObserver !== "undefined") {
+      this.panelRightInsetResizeObserver = new ResizeObserver(() =>
+        this.updatePanelRightInset(),
+      );
+      // Observe panel width changes (splitter drag doesn't always trigger window resize)
+      this.panelRightInsetResizeObserver.observe(this.body);
+      const target = this.findPanelRightInsetTarget();
+      if (target) {
+        this.panelRightInsetTarget = target;
+        this.panelRightInsetResizeObserver.observe(target);
+      }
+    }
+  }
+
+  private requestPanelRightInsetUpdate() {
+    if (this.pendingPanelRightInsetUpdate) {
+      return;
+    }
+    this.pendingPanelRightInsetUpdate = true;
+    const win =
+      this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+    const raf =
+      (win as any)?.requestAnimationFrame ||
+      this.body.ownerDocument?.defaultView?.requestAnimationFrame ||
+      null;
+    if (typeof raf === "function") {
+      raf(() => {
+        this.pendingPanelRightInsetUpdate = false;
+        this.updatePanelRightInset();
+      });
+      return;
+    }
+    // Fallback: schedule async
+    setTimeout(() => {
+      this.pendingPanelRightInsetUpdate = false;
+      this.updatePanelRightInset();
+    }, 0);
+  }
+
+  private captureBaseBodyPaddingRight() {
+    if (typeof this.baseBodyPaddingRightPx === "number") {
+      return;
+    }
+    const win =
+      this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+    const computed = win?.getComputedStyle?.(this.body);
+    const raw = computed?.paddingRight ?? "";
+    const px = Number.parseFloat(raw);
+    this.baseBodyPaddingRightPx = Number.isFinite(px) ? px : 0;
+  }
+
+  private updatePanelRightInset() {
+    // Only apply special inset in entryCited mode when showing a paper's "Citing…"
+    // list (entryCitedSource.recid). Author view also uses entryCited mode but
+    // doesn't suffer from the right-rail occlusion issue and must not be narrowed.
+    if (this.viewMode !== "entryCited" || !this.entryCitedSource?.recid) {
+      this.setPanelRightInsetPx(0);
+      return;
+    }
+
+    const target =
+      this.panelRightInsetTarget || this.findPanelRightInsetTarget();
+    // If the sidenav was found after init, start observing it too.
+    if (
+      target &&
+      target !== this.panelRightInsetTarget &&
+      this.panelRightInsetResizeObserver
+    ) {
+      this.panelRightInsetTarget = target;
+      try {
+        this.panelRightInsetResizeObserver.observe(target);
+      } catch {
+        // Ignore observe errors (e.g. disconnected node)
+      }
+    }
+
+    const byTargetLeftEdge = target
+      ? this.computeRightInsetToTargetLeftEdge(target)
+      : 0;
+
+    // If we can locate the rail element and its left edge is already to the right of
+    // our panel, do NOT apply any extra inset. The pointer-based hit-test can produce
+    // small false positives (e.g. due to overlay scrollbars), which would create an
+    // uneven right-side gutter in Citing… compared to other tabs.
+    if (target && byTargetLeftEdge <= 0) {
+      this.panelRightInsetSource = "targetLeft";
+      this.setPanelRightInsetPx(0);
+      return;
+    }
+
+    const byHitTest = target ? 0 : this.computeRightInsetFromHitTest();
+    const best = Math.max(byTargetLeftEdge, byHitTest);
+    if (best > 0) {
+      this.panelRightInsetSource =
+        best === byTargetLeftEdge ? "targetLeft" : "hitTest";
+      this.setPanelRightInsetPx(best);
+      return;
+    }
+
+    // Only apply fallback when we actually have a horizontal overflow risk.
+    // If text already fits, forcing a right inset just wastes space.
+    const needsInset =
+      (this.statusEl?.scrollWidth ?? 0) > (this.statusEl?.clientWidth ?? 0);
+    if (needsInset) {
+      this.panelRightInsetSource = "fallback";
+      this.setPanelRightInsetPx(
+        InspireReferencePanelController.RIGHT_RAIL_FALLBACK_PX,
+      );
+      return;
+    }
+
+    this.panelRightInsetSource = "none";
+    this.setPanelRightInsetPx(0);
+  }
+
+  private computeRightInsetToTargetLeftEdge(target: HTMLElement): number {
+    const targetRect = target.getBoundingClientRect();
+    const bodyRect = this.body.getBoundingClientRect();
+    // Reserve space up to the rail's *left* edge. This is more robust than a
+    // pointer-based hit-test when parts of the rail (or icons) don't receive
+    // pointer events, which can under-estimate the required inset.
+    const needed = bodyRect.right - targetRect.left;
+    if (!(needed > 0) || !Number.isFinite(needed)) {
+      return 0;
+    }
+    // Small padding so text doesn't visually touch the rail
+    return Math.round(needed) + 4;
+  }
+
+  private computeRightInsetFromHitTest(): number {
+    const doc = this.body.ownerDocument;
+    const win = doc.defaultView;
+    if (!win || typeof doc.elementFromPoint !== "function") {
+      return 0;
+    }
+
+    const bodyRect = this.body.getBoundingClientRect();
+    if (!(bodyRect.width > 0) || !(bodyRect.height > 0)) {
+      return 0;
+    }
+
+    const visibleTop = Math.max(0, bodyRect.top);
+    const visibleBottom = Math.min(win.innerHeight, bodyRect.bottom);
+    // If the panel isn't visible (or is fully offscreen), a hit-test at y=0 will
+    // often hit the window toolbar instead of the right-side rail and incorrectly
+    // clear the inset. In that case, keep the current inset and wait for a visible
+    // layout pass.
+    if (!(visibleBottom > visibleTop)) {
+      return this.panelRightInsetPx;
+    }
+
+    const statusRect = this.statusEl?.getBoundingClientRect?.();
+    const rightX = Math.max(0, Math.min(win.innerWidth - 1, Math.round(bodyRect.right - 1)));
+
+    const clampY = (y: number) =>
+      Math.max(0, Math.min(win.innerHeight - 1, Math.round(y)));
+
+    // Sample a few points within the visible portion of the panel. The right-side
+    // rail doesn't always cover y=0 (toolbar area), and the panel may be partially
+    // scrolled offscreen, so a single-point hit-test is too fragile.
+    const candidateYs: number[] = [];
+    if (statusRect && statusRect.height > 0) {
+      candidateYs.push(statusRect.top + statusRect.height / 2);
+    }
+    candidateYs.push(visibleTop + 12);
+    candidateYs.push((visibleTop + visibleBottom) / 2);
+    candidateYs.push(visibleBottom - 12);
+
+    const sampleYs = Array.from(
+      new Set(
+        candidateYs
+          .map((y) => clampY(y))
+          .map((y) => Math.max(0, Math.min(win.innerHeight - 1, y))),
+      ),
+    ).filter((y) => y >= 0 && y <= win.innerHeight - 1);
+
+    const maxScan = Math.min(200, Math.floor(bodyRect.width));
+    const step = 2;
+
+    let bestPadded = 0;
+    let bestY = sampleYs[0] ?? clampY(visibleTop + 12);
+    let bestHit0: Element | null = null;
+
+    for (const y of sampleYs) {
+      const hit0 = doc.elementFromPoint(rightX, y) as Element | null;
+      if (!hit0) {
+        continue;
+      }
+      if (hit0 === this.body || this.body.contains(hit0)) {
+        continue;
+      }
+
+      let inset = 0;
+      for (let dx = 1; dx <= maxScan; dx += step) {
+        const x = rightX - dx;
+        if (x < 0) break;
+        const hit = doc.elementFromPoint(x, y) as Element | null;
+        if (!hit) break;
+        if (hit === this.body || this.body.contains(hit)) {
+          inset = dx;
+          break;
+        }
+      }
+
+      const padded = inset > 0 ? inset + 4 : 0;
+      if (padded > bestPadded) {
+        bestPadded = padded;
+        bestY = y;
+        bestHit0 = hit0;
+      }
+    }
+
+    if (
+      InspireReferencePanelController.PANEL_LAYOUT_DEBUG &&
+      bestPadded !== this.panelRightInsetPx
+    ) {
+      const describe = (el: Element | null) => {
+        if (!el) return "null";
+        const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
+        const cls = (el as HTMLElement).className
+          ? `.${String((el as HTMLElement).className).trim().replace(/\s+/g, ".")}`
+          : "";
+        return `${el.tagName.toLowerCase()}${id}${cls}`;
+      };
+      const rail0 = bestHit0 ? this.getIconRailAncestor(bestHit0) : null;
+      Zotero.debug(
+        `[${config.addonName}] [PANEL-LAYOUT] hitTest inset=${bestPadded}px at (${rightX},${bestY}), hit=${describe(bestHit0)}, rail=${describe(rail0)}`,
+      );
+    }
+
+    return bestPadded;
+  }
+
+  private getIconRailAncestor(el: Element): HTMLElement | null {
+    const rail = el.closest(
+      "#zotero-item-pane-sidenav, #item-pane-sidenav, #zotero-context-pane-sidenav, " +
+        ".item-pane-sidenav, .context-pane-sidenav, [class*='sidenav']",
+    ) as HTMLElement | null;
+    return rail;
+  }
+
+  private setPanelRightInsetPx(px: number) {
+    this.captureBaseBodyPaddingRight();
+    // The inset can legitimately exceed the visible rail width when the panel itself
+    // has already overflowed offscreen to the right (we need to "eat" the offscreen
+    // portion + the on-screen rail overlap). Keep a generous cap to avoid pathological
+    // values while still allowing real fixes.
+    const clamped = Math.max(0, Math.min(2000, Math.round(px)));
+    if (clamped === this.panelRightInsetPx) {
+      return;
+    }
+    this.panelRightInsetPx = clamped;
+    const base = this.baseBodyPaddingRightPx ?? 0;
+    const padRight = Math.max(0, Math.round(base + clamped));
+    // Use padding-right to keep content clear of Zotero's right-side icon rail.
+    // This is more stable than `width: calc(100% - …)` in flex layouts, where the
+    // percentage part can resolve unexpectedly and cause the panel to grow wider.
+    this.body.style.width = "100%";
+    this.body.style.maxWidth = "100%";
+    this.body.style.paddingRight = `${padRight}px`;
+
+    if (InspireReferencePanelController.PANEL_LAYOUT_DEBUG) {
+      try {
+        const target =
+          this.panelRightInsetTarget || this.findPanelRightInsetTarget();
+        const tr = target?.getBoundingClientRect?.();
+        const br = this.body.getBoundingClientRect();
+        const summary =
+          `[PANEL-LAYOUT] apply mode=${this.viewMode} inset=${clamped}px source=${this.panelRightInsetSource} ` +
+          `basePadRight=${Math.round(base)}px padRight=${padRight}px bodyW=${Math.round(br.width)}px ` +
+          `railW=${tr ? Math.round(tr.width) : "?"}px railL=${tr ? Math.round(tr.left) : "?"}px bodyR=${Math.round(br.right)}px`;
+        this.panelLayoutDebugLastSummary = summary;
+        Zotero.debug(`[${config.addonName}] ${summary}`);
+      } catch (e) {
+        Zotero.debug(
+          `[${config.addonName}] [PANEL-LAYOUT] apply inset=${clamped}px source=${this.panelRightInsetSource} (basePadRight=${Math.round(base)}px, mode=${this.viewMode}) err=${e}`,
+        );
+      }
+    }
+  }
+
+  private findPanelRightInsetTarget(): HTMLElement | null {
+    const doc = this.body.ownerDocument;
+    // Prefer stable IDs in Zotero 7
+    const direct = doc.querySelector(
+      "#zotero-view-item-sidenav, #zotero-item-pane-sidenav, #zotero-context-pane-sidenav",
+    ) as HTMLElement | null;
+    if (direct) {
+      return direct;
+    }
+
+    // Fall back to common class names (item pane + reader context pane)
+    const roots: Element[] = [];
+    const contextRoot =
+      this.body.closest(".context-pane") ||
+      this.body.closest("#zotero-context-pane");
+    if (contextRoot) roots.push(contextRoot);
+    const itemPaneRoot =
+      this.body.closest(".item-pane") || this.body.closest("#zotero-item-pane");
+    if (itemPaneRoot) roots.push(itemPaneRoot);
+    roots.push(doc.documentElement);
+
+    for (const root of roots) {
+      const el = root.querySelector(
+        ".zotero-view-item-sidenav, .item-pane-sidenav, .context-pane-sidenav",
+      ) as HTMLElement | null;
+      if (el) {
+        return el;
+      }
+    }
+    return null;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -3317,8 +3768,11 @@ class InspireReferencePanelController {
       }
     }
 
-    const { getPDFReferencesParser } =
-      await import("./inspire/pdfAnnotate/pdfReferencesParser");
+    const [{ getPDFReferencesParser }, { buildPdfTextCandidatesForReferenceParsing }] =
+      await Promise.all([
+        import("./inspire/pdfAnnotate/pdfReferencesParser"),
+        import("./inspire/pdfAnnotate/textSampling"),
+      ]);
 
     // FTR-MULTI-PDF-FIX: Get PDF directly from attachmentItemID instead of finding first PDF
     const attachment = Zotero.Items.get(attachmentItemID);
@@ -3363,11 +3817,47 @@ class InspireReferencePanelController {
         return false;
       }
 
-      // Parse the reference list
       const parser = getPDFReferencesParser();
-      const mapping = parser.parseReferencesSection(pdfText);
+      const candidates = buildPdfTextCandidatesForReferenceParsing(pdfText);
 
-      if (mapping) {
+      let chosenText = pdfText;
+      let chosenCandidate = candidates[candidates.length - 1] ?? {
+        kind: "full" as const,
+        value: pdfText.length,
+        startIndex: 0,
+        text: pdfText,
+      };
+
+      // Prefer the smallest tail slice that still captures the beginning of the references list
+      // (i.e., includes low labels like 1–5). Fall back to full text to avoid regressions.
+      let mapping: Awaited<ReturnType<typeof parser.parseReferencesSection>> | null =
+        null;
+      for (const candidate of candidates) {
+        const candidateMapping = parser.parseReferencesSection(candidate.text);
+        if (!candidateMapping || candidateMapping.totalLabels <= 0) {
+          continue;
+        }
+
+        const labelNums = Array.from(candidateMapping.labelCounts.keys())
+          .map((l) => parseInt(l, 10))
+          .filter((n) => Number.isFinite(n));
+        const minLabel =
+          labelNums.length > 0 ? Math.min(...labelNums) : Number.POSITIVE_INFINITY;
+        const hasLowStart =
+          candidateMapping.labelCounts.has("1") ||
+          (Number.isFinite(minLabel) && minLabel <= 5);
+
+        mapping = candidateMapping;
+        chosenText = candidate.text;
+        chosenCandidate = candidate;
+
+        if (hasLowStart || candidate.kind === "full") {
+          break;
+        }
+      }
+
+      let appliedNumeric = false;
+      if (mapping && mapping.totalLabels > 0) {
         labelMatcher.setPDFMapping(mapping);
 
         // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
@@ -3396,8 +3886,9 @@ class InspireReferencePanelController {
           }),
         );
         Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE] Successfully applied PDF mapping`,
+          `[${config.addonName}] [PDF-PARSE] Successfully applied PDF mapping (source=${chosenCandidate.kind}, startIndex=${chosenCandidate.startIndex})`,
         );
+        appliedNumeric = true;
         // Don't return yet - also try author-year parsing for RMP-style papers
       }
 
@@ -3408,8 +3899,30 @@ class InspireReferencePanelController {
         `[${config.addonName}] [PDF-PARSE] Trying author-year format parsing (regardless of numeric result)...`,
       );
 
-      const authorYearMapping =
-        parser.parseAuthorYearReferencesSection(pdfText);
+      let appliedAuthorYear = false;
+      let authorYearMapping:
+        | Awaited<ReturnType<typeof parser.parseAuthorYearReferencesSection>>
+        | null = null;
+      let authorYearCandidate = chosenCandidate;
+
+      // Prefer sampling for author-year too (especially when numeric parsing failed).
+      if (appliedNumeric) {
+        authorYearMapping = parser.parseAuthorYearReferencesSection(chosenText);
+      } else {
+        for (const candidate of candidates) {
+          const candidateMapping =
+            parser.parseAuthorYearReferencesSection(candidate.text);
+          if (!candidateMapping || candidateMapping.authorYearMap.size <= 0) {
+            continue;
+          }
+          authorYearMapping = candidateMapping;
+          authorYearCandidate = candidate;
+          if (candidateMapping.authorYearMap.size >= 5 || candidate.kind === "full") {
+            break;
+          }
+        }
+      }
+
       if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
         labelMatcher.setAuthorYearMapping(authorYearMapping);
         // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
@@ -3419,8 +3932,9 @@ class InspireReferencePanelController {
           authorYearMapping,
         );
         Zotero.debug(
-          `[${config.addonName}] [PDF-PARSE] Successfully applied author-year mapping with ${authorYearMapping.authorYearMap.size} entries`,
+          `[${config.addonName}] [PDF-PARSE] Successfully applied author-year mapping with ${authorYearMapping.authorYearMap.size} entries (source=${authorYearCandidate.kind}, startIndex=${authorYearCandidate.startIndex})`,
         );
+        appliedAuthorYear = true;
       } else {
         Zotero.debug(
           `[${config.addonName}] [PDF-PARSE] Author-year parsing found ${authorYearMapping?.authorYearMap.size ?? 0} entries (not enough)`,
@@ -3428,7 +3942,7 @@ class InspireReferencePanelController {
       }
 
       // Return true if we got either numeric or author-year mapping
-      if (mapping && mapping.totalLabels > 0) {
+      if (appliedNumeric || appliedAuthorYear) {
         return true;
       }
 
@@ -4488,8 +5002,13 @@ class InspireReferencePanelController {
       clearTimeout(this.filterDebounceTimer);
     }
     this.filterDebounceTimer = setTimeout(() => {
-      this.renderChart();
-      this.renderReferenceList();
+      // In favorites view, re-render favorites list instead of reference list
+      if (this.isFavoritesViewActive) {
+        this.renderFavoriteAuthorsList();
+      } else {
+        this.renderChart();
+        this.renderReferenceList();
+      }
     }, this.filterDebounceDelay);
   }
 
@@ -5425,10 +5944,21 @@ class InspireReferencePanelController {
       }
     };
 
-    // FTR-COPY-LINK: Right-click to copy link URL
+    // FTR-COPY-LINK: Right-click to copy link URL or favorite paper
     this.boundHandleListContextMenu = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target) return;
+
+      // Check if right-clicked on an entry row
+      const entryRow = target.closest("[data-recid]") as HTMLElement | null;
+      if (entryRow) {
+        const recid = entryRow.getAttribute("data-recid");
+        if (recid) {
+          event.preventDefault();
+          this.showEntryContextMenu(recid, event);
+          return;
+        }
+      }
 
       // Check if right-clicked on a link (anchor element)
       const anchor = target.closest("a") as HTMLAnchorElement | null;
@@ -6459,7 +6989,7 @@ class InspireReferencePanelController {
       max-width: 100%;
       width: 100%;
       display: block;
-      overflow: visible;
+      overflow: hidden;
     `;
     // No viewBox - draw in actual pixels, SVG will naturally fill width
 
@@ -6914,6 +7444,17 @@ class InspireReferencePanelController {
       this.chartResizeObserver.disconnect();
       this.chartResizeObserver = undefined;
     }
+    // Cleanup right inset observers/listeners
+    if (this.panelRightInsetResizeObserver) {
+      this.panelRightInsetResizeObserver.disconnect();
+      this.panelRightInsetResizeObserver = undefined;
+    }
+    if (this.panelRightInsetWindowResizeHandler) {
+      const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
+      win?.removeEventListener("resize", this.panelRightInsetWindowResizeHandler);
+      this.panelRightInsetWindowResizeHandler = undefined;
+    }
+    this.panelRightInsetTarget = undefined;
     // FTR-DARK-MODE-AUTO: Remove theme change listener
     this.removeThemeChangeListener();
     // Clear chart state
@@ -7206,9 +7747,17 @@ class InspireReferencePanelController {
             .catch(() => {});
         } else if (this.entryCitedSource?.authorSearchInfo) {
           // Author papers mode: clear cache using author query as key
-          const authorKey =
-            this.entryCitedSource.authorSearchInfo.bai ||
-            this.entryCitedSource.authorSearchInfo.fullName;
+          // FIX-CACHE-KEY: Use same key format as showAuthorPapersTab/loadEntries
+          // The key format is "bai:{bai}" or "recid:{recid}" or "{fullName}"
+          const authorInfo = this.entryCitedSource.authorSearchInfo;
+          let authorKey: string;
+          if (authorInfo.recid) {
+            authorKey = `recid:${authorInfo.recid}`;
+          } else if (authorInfo.bai) {
+            authorKey = `bai:${authorInfo.bai}`;
+          } else {
+            authorKey = authorInfo.fullName;
+          }
           if (authorKey) {
             this.entryCitedCache.delete(authorKey);
             // Delete both unsorted and sorted cache
@@ -8421,6 +8970,11 @@ class InspireReferencePanelController {
         this.clearAutoCheckNotification();
         this.autoCheckPendingDiff = undefined;
 
+        // FTR-FAVORITE-PAPERS: Exit favorites view when item changes
+        if (this.isFavoritesViewActive) {
+          this.updateFavoritesTabStyle(false);
+        }
+
         // In search mode, don't clear entries - preserve search results
         if (this.viewMode !== "search") {
           this.clearEntryCitedContext();
@@ -8900,19 +9454,43 @@ class InspireReferencePanelController {
     }
   }
 
+  private ensureSpinnerKeyframes() {
+    try {
+      const doc = this.body.ownerDocument;
+      const STYLE_ID = "zinspire-spinner-keyframes";
+      if (doc.getElementById(STYLE_ID)) {
+        return;
+      }
+      const style = doc.createElement("style");
+      style.id = STYLE_ID;
+      style.textContent = `
+@keyframes zinspire-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+/* Collapsible-section extra buttons are XUL <toolbarbutton> with icons rendered via
+   anonymous content (.toolbarbutton-icon) and/or list-style-image. Querying the icon
+   node via DOM often fails, so animate via CSS selectors instead. */
+toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loading .toolbarbutton-icon,
+toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loading image,
+toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loading img {
+  animation: zinspire-spin 1s linear infinite;
+  transform-origin: center;
+}
+      `.trim();
+      (doc.head || doc.documentElement || doc.body || this.body).appendChild(
+        style,
+      );
+    } catch {
+      // Ignore style injection failures
+    }
+  }
+
   /**
    * Set loading state for the section header refresh button.
-   * Swaps the icon to Zotero's built-in loading.svg (with animation) during loading.
+   * Spins the refresh icon during loading.
    */
   private setRefreshButtonLoading(loading: boolean) {
-    // FIX-WINDOWS-REFRESH-ICON: Use local icon instead of Zotero built-in
-    const REFRESH_ICON = `chrome://${config.addonRef}/content/icons/refresh.svg`;
-    const LOADING_ICON = "chrome://global/skin/icons/loading.svg";
-
-    Zotero.debug(
-      `[${config.addonName}] setRefreshButtonLoading called: loading=${loading}`,
-    );
-
     try {
       // Find section container from body
       let section: Element | null = this.body.parentElement;
@@ -8929,9 +9507,6 @@ class InspireReferencePanelController {
       }
 
       if (!section) {
-        Zotero.debug(
-          `[${config.addonName}] setRefreshButtonLoading: section not found`,
-        );
         return;
       }
 
@@ -8941,28 +9516,27 @@ class InspireReferencePanelController {
       ) as Element | null;
 
       if (!refreshBtn) {
-        Zotero.debug(
-          `[${config.addonName}] setRefreshButtonLoading: refresh button not found`,
-        );
         return;
       }
 
-      // Find the icon inside the refresh button
-      const icon = refreshBtn.querySelector(
-        ".toolbarbutton-icon, image",
-      ) as HTMLElement | null;
+      // Ensure keyframes + selector-based animation rules exist.
+      this.ensureSpinnerKeyframes();
+      // Toggle class on the XUL toolbarbutton; CSS targets its internal icon.
+      (refreshBtn as HTMLElement).classList?.toggle(
+        "zinspire-section-button-loading",
+        loading,
+      );
+      // Visual feedback even if animation is blocked by platform/native theming.
+      (refreshBtn as HTMLElement).style.cursor = loading ? "progress" : "";
+      (refreshBtn as HTMLElement).style.opacity = loading ? "0.8" : "";
 
-      if (icon) {
-        const currentSrc = icon.getAttribute("src");
-        const newSrc = loading ? LOADING_ICON : REFRESH_ICON;
-        Zotero.debug(
-          `[${config.addonName}] setRefreshButtonLoading: changing icon from ${currentSrc} to ${newSrc}`,
-        );
-        icon.setAttribute("src", newSrc);
+      // Prevent repeated clicks while a refresh is in flight
+      if (loading) {
+        // `disabled` on XUL toolbarbutton can hide list-style-image on some platforms.
+        // Prefer pointer-events as a soft-disable; click is still guarded by request cancelation.
+        (refreshBtn as HTMLElement).style.pointerEvents = "none";
       } else {
-        Zotero.debug(
-          `[${config.addonName}] setRefreshButtonLoading: icon element not found in refresh button`,
-        );
+        (refreshBtn as HTMLElement).style.pointerEvents = "";
       }
     } catch (e) {
       Zotero.debug(`[${config.addonName}] setRefreshButtonLoading error: ${e}`);
@@ -9042,8 +9616,9 @@ class InspireReferencePanelController {
 
     // Step 2: Check local file cache (if enabled)
     // Smart caching strategy:
-    // - References: always store without sort (client-side sorting)
+    // - References: always store without sort (client-side sorting), permanent cache
     // - Cited By/Author: if total <= CITED_BY_MAX_RESULTS, store without sort; otherwise by sort
+    // - Author Papers: show cached data immediately, refresh in background if expired (> 12h)
     if (!options.force) {
       const localCacheType = this.getLocalCacheType(mode);
       if (localCacheType) {
@@ -9052,8 +9627,15 @@ class InspireReferencePanelController {
           fromCache: true;
           ageHours: number;
           total?: number;
+          expired?: boolean;
         } | null = null;
         let usedClientSideSort = false;
+
+        // For author papers mode, use ignoreTTL to get cached data even if expired
+        // This enables offline support and faster initial display
+        const isAuthorMode =
+          mode === "entryCited" && this.entryCitedSource?.authorSearchInfo;
+        const shouldIgnoreTTL = isAuthorMode; // Allow expired cache for author papers
 
         if (mode === "references") {
           // References: always read without sort (client-side sorting)
@@ -9067,6 +9649,8 @@ class InspireReferencePanelController {
           const unsortedResult = await localCache.get<InspireReferenceEntry[]>(
             localCacheType,
             recid,
+            undefined,
+            shouldIgnoreTTL ? { ignoreTTL: true } : undefined,
           );
           if (
             unsortedResult &&
@@ -9082,6 +9666,7 @@ class InspireReferencePanelController {
               localCacheType,
               recid,
               sortOption,
+              shouldIgnoreTTL ? { ignoreTTL: true } : undefined,
             );
           }
         }
@@ -9106,7 +9691,7 @@ class InspireReferencePanelController {
             // Update cache source indicator (ageHours returned from get() to avoid re-reading file)
             this.cacheSource = "local";
             this.cacheSourceAge = localResult.ageHours;
-            this.cacheSourceExpired = false;
+            this.cacheSourceExpired = localResult.expired ?? false;
             this.updateCacheSourceDisplay();
             this.renderChart();
             this.renderReferenceList({ preserveScroll: !shouldReset });
@@ -9123,34 +9708,56 @@ class InspireReferencePanelController {
             }
             this.setRefreshButtonLoading(false);
 
-            // Local cache data is already enriched (complete with titles, authors, etc.)
-            // Only run enrichLocalStatus to update local item status (may have changed since cache)
-            const localCacheToken = `${mode}-${cacheKey}-local-${performance.now()}`;
-            this.pendingToken = localCacheToken;
-            const localEnrichController = createAbortController();
-            this.activeAbort = localEnrichController;
-            setTimeout(async () => {
-              if (this.pendingToken !== localCacheToken) {
-                return;
-              }
-              try {
-                await this.enrichLocalStatus(
-                  localResult.data,
-                  localEnrichController?.signal,
-                );
-              } catch (err) {
-                // Silently ignore errors
-                if ((err as any)?.name !== "AbortError") {
-                  Zotero.debug(
-                    `[${config.addonName}] Local status enrichment error: ${err}`,
+            // For author papers: if cache is expired (> 12h), trigger background refresh
+            // This updates the cache for next time while showing current data immediately
+            const AUTHOR_PAPERS_REFRESH_THRESHOLD_HOURS = 12;
+            if (
+              isAuthorMode &&
+              localResult.ageHours >= AUTHOR_PAPERS_REFRESH_THRESHOLD_HOURS
+            ) {
+              Zotero.debug(
+                `[${config.addonName}] Author papers cache expired (${localResult.ageHours}h), triggering background refresh`,
+              );
+              // Background refresh - don't await, don't block UI
+              this.refreshAuthorPapersInBackground(recid, mode, sortOption).catch(
+                (err) => {
+                  if ((err as any)?.name !== "AbortError") {
+                    Zotero.debug(
+                      `[${config.addonName}] Background refresh failed: ${err}`,
+                    );
+                  }
+                },
+              );
+            } else {
+              // Local cache data is already enriched (complete with titles, authors, etc.)
+              // Only run enrichLocalStatus to update local item status (may have changed since cache)
+              const localCacheToken = `${mode}-${cacheKey}-local-${performance.now()}`;
+              this.pendingToken = localCacheToken;
+              const localEnrichController = createAbortController();
+              this.activeAbort = localEnrichController;
+              setTimeout(async () => {
+                if (this.pendingToken !== localCacheToken) {
+                  return;
+                }
+                try {
+                  await this.enrichLocalStatus(
+                    localResult.data,
+                    localEnrichController?.signal,
                   );
+                } catch (err) {
+                  // Silently ignore errors
+                  if ((err as any)?.name !== "AbortError") {
+                    Zotero.debug(
+                      `[${config.addonName}] Local status enrichment error: ${err}`,
+                    );
+                  }
+                } finally {
+                  if (this.activeAbort === localEnrichController) {
+                    this.activeAbort = undefined;
+                  }
                 }
-              } finally {
-                if (this.activeAbort === localEnrichController) {
-                  this.activeAbort = undefined;
-                }
-              }
-            }, 0);
+              }, 0);
+            }
           }
           return;
         }
@@ -9799,6 +10406,70 @@ class InspireReferencePanelController {
   }
 
   /**
+   * Refresh author papers in the background.
+   * Fetches fresh data from API and updates both memory and local cache.
+   * Does not update UI - the data will be used on next load.
+   */
+  private async refreshAuthorPapersInBackground(
+    authorQuery: string,
+    mode: InspireViewMode,
+    sortOption: string,
+  ): Promise<void> {
+    if (!this.entryCitedSource?.authorSearchInfo) {
+      return;
+    }
+
+    const controller = createAbortController();
+    const authorInfo = this.entryCitedSource.authorSearchInfo;
+
+    try {
+      Zotero.debug(
+        `[${config.addonName}] Background refresh: fetching papers for ${authorInfo.fullName}`,
+      );
+
+      // Fetch fresh data from API
+      const entries = await this.fetchAuthorPapers(
+        authorInfo,
+        sortOption as InspireSortOption,
+        controller?.signal,
+        // No onProgress callback - this is a silent background refresh
+      );
+
+      // Update memory cache
+      const cache = this.getCacheForMode(mode);
+      const cacheKey = this.getCacheKey(
+        authorQuery,
+        mode,
+        sortOption as InspireSortOption,
+      );
+      cache.set(cacheKey, entries);
+
+      // Enrich with local status
+      await this.enrichLocalStatus(entries, controller?.signal);
+
+      // Persist to local cache
+      await this.persistEnrichedCache(
+        entries,
+        mode,
+        authorQuery,
+        sortOption as InspireSortOption,
+      );
+
+      Zotero.debug(
+        `[${config.addonName}] Background refresh completed: ${entries.length} papers cached`,
+      );
+    } catch (err) {
+      if ((err as any)?.name === "AbortError") {
+        throw err;
+      }
+      Zotero.debug(
+        `[${config.addonName}] Background refresh error: ${err}`,
+      );
+      // Don't rethrow - background refresh failure is not critical
+    }
+  }
+
+  /**
    * Enrich local status for entries by checking if they exist in the local library.
    * Uses batch SQL queries to minimize database interactions.
    *
@@ -10426,10 +11097,20 @@ class InspireReferencePanelController {
     newListEl.style.boxSizing = "border-box";
     newListEl.style.overflowX = "hidden";
     newListEl.style.overflowY = "auto";
+    newListEl.style.whiteSpace = "normal";
+    // Keep list scroll internal to the panel to avoid outer item pane scroll jumps
+    newListEl.style.flex = "1 1 auto";
+    newListEl.style.minHeight = "0";
     // Hide old container immediately
     oldListEl.style.display = "none";
     // Insert new container after old one
-    oldListEl.parentNode?.insertBefore(newListEl, oldListEl.nextSibling);
+    // FIX-DOM-INSERTION: Ensure new element is always in DOM with fallback
+    if (oldListEl.parentNode) {
+      oldListEl.parentNode.insertBefore(newListEl, oldListEl.nextSibling);
+    } else {
+      // Fallback: append to body (listEl should be last child after sortRow)
+      this.body.appendChild(newListEl);
+    }
     this.listEl = newListEl;
     this.setupEventDelegation();
     // Remove old container asynchronously
@@ -10565,6 +11246,158 @@ class InspireReferencePanelController {
     // This is needed because rendering replaces listEl, losing the DOM focus
     if (this.focusedEntryID) {
       this.listEl.focus({ preventScroll: true });
+    }
+
+    if (
+      InspireReferencePanelController.PANEL_LAYOUT_DEBUG &&
+      this.viewMode === "entryCited"
+    ) {
+      const win =
+        this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+      const raf = (win as any)?.requestAnimationFrame || null;
+      if (typeof raf === "function") {
+        raf(() => this.debugAuditPanelOverflow("afterRenderReferenceList"));
+      } else {
+        setTimeout(
+          () => this.debugAuditPanelOverflow("afterRenderReferenceList"),
+          0,
+        );
+      }
+    }
+  }
+
+  private debugAuditPanelOverflow(context: string) {
+    if (
+      !InspireReferencePanelController.PANEL_LAYOUT_DEBUG ||
+      this.viewMode !== "entryCited"
+    ) {
+      return;
+    }
+    try {
+      const win =
+        this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+      if (!win) return;
+
+      const bodyRect = this.body.getBoundingClientRect();
+      const computedPadRightRaw = win.getComputedStyle(this.body).paddingRight;
+      const padRight = Number.parseFloat(computedPadRightRaw || "0");
+      const padRightPx = Number.isFinite(padRight) ? padRight : 0;
+      const contentRight = bodyRect.right - padRightPx;
+
+      const rail =
+        this.panelRightInsetTarget || this.findPanelRightInsetTarget();
+      const railRect = rail?.getBoundingClientRect?.();
+      // If there's a right-side rail overlapping our panel area, treat its left edge
+      // as the "safe" right boundary. This catches occlusion that wouldn't show up as
+      // element overflow beyond the panel itself.
+      const safeRight =
+        railRect && Number.isFinite(railRect.left)
+          ? Math.min(contentRight, railRect.left)
+          : contentRight;
+
+      const describe = (el: Element | null) => {
+        if (!el) return "null";
+        const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
+        const cls = (el as HTMLElement).className
+          ? `.${String((el as HTMLElement).className).trim().replace(/\s+/g, ".")}`
+          : "";
+        return `${el.tagName.toLowerCase()}${id}${cls}`;
+      };
+
+      type Offender = {
+        label: string;
+        el: Element;
+        overflowPx: number;
+        rectRight: number;
+        clientWidth: number;
+        scrollWidth: number;
+      };
+
+      const offenders: Offender[] = [];
+      const check = (el: Element | null | undefined, label: string) => {
+        if (!el) return;
+        const rect = (el as HTMLElement).getBoundingClientRect?.();
+        if (!rect) return;
+        const rectRight = rect.right;
+        const overflowPx = rectRight - safeRight;
+        let clientWidth = 0;
+        let scrollWidth = 0;
+        if (el instanceof win.HTMLElement) {
+          clientWidth = el.clientWidth || 0;
+          scrollWidth = el.scrollWidth || 0;
+        }
+        const contentOverflow =
+          clientWidth > 0 && scrollWidth > clientWidth + 1;
+        const rectOverflow = overflowPx > 1;
+        if (rectOverflow || contentOverflow) {
+          offenders.push({
+            label,
+            el,
+            overflowPx: rectOverflow ? overflowPx : 0,
+            rectRight,
+            clientWidth,
+            scrollWidth,
+          });
+        }
+      };
+
+      // High-level containers
+      check(this.body.querySelector(".zinspire-ref-panel__toolbar"), "toolbar");
+      check(this.chartContainer, "chartContainer");
+      check(this.listEl, "listEl");
+
+      // Sample first few rows to find the exact culprit (limit for performance)
+      const rows = this.listEl.querySelectorAll(".zinspire-ref-entry");
+      const sampleCount = Math.min(rows.length, 12);
+      for (let i = 0; i < sampleCount; i++) {
+        const row = rows[i] as HTMLElement;
+        check(row, `row[${i}]`);
+        check(row.querySelector(".zinspire-ref-entry__title"), `row[${i}].title`);
+        check(
+          row.querySelector(".zinspire-ref-entry__title-link"),
+          `row[${i}].titleLink`,
+        );
+        check(row.querySelector(".zinspire-ref-entry__meta"), `row[${i}].meta`);
+        check(
+          row.querySelector(".zinspire-ref-entry__stats-button"),
+          `row[${i}].statsBtn`,
+        );
+      }
+
+      if (!offenders.length) {
+        return;
+      }
+
+      offenders.sort((a, b) => {
+        const ao = Math.max(a.overflowPx, a.scrollWidth - a.clientWidth);
+        const bo = Math.max(b.overflowPx, b.scrollWidth - b.clientWidth);
+        return bo - ao;
+      });
+
+      const top = offenders.slice(0, 4);
+      const topText = top
+        .map((o) => {
+          const sw =
+            o.clientWidth > 0 ? ` sw=${o.scrollWidth}px cw=${o.clientWidth}px` : "";
+          return `${o.label}:${describe(o.el)} ov=${Math.round(o.overflowPx)}px${sw}`;
+        })
+        .join(" | ");
+
+      Zotero.debug(
+        `[${config.addonName}] [PANEL-LAYOUT] overflowAudit ${context} ` +
+          `inset=${this.panelRightInsetPx}px source=${this.panelRightInsetSource} ` +
+          `bodyR=${Math.round(bodyRect.right)}px padR=${Math.round(padRightPx)}px contentR=${Math.round(contentRight)}px safeR=${Math.round(safeRight)}px ` +
+          `rail=${describe(rail)} railL=${railRect ? Math.round(railRect.left) : "?"}px railW=${railRect ? Math.round(railRect.width) : "?"}px ` +
+          `rows=${rows.length} top=${topText}`,
+      );
+      this.panelLayoutDebugLastOverflowAudit =
+        `[PANEL-LAYOUT] overflowAudit ${context} ` +
+        `inset=${this.panelRightInsetPx}px source=${this.panelRightInsetSource} ` +
+        `contentR=${Math.round(contentRight)}px safeR=${Math.round(safeRight)}px ` +
+        `railL=${railRect ? Math.round(railRect.left) : "?"}px railW=${railRect ? Math.round(railRect.width) : "?"}px ` +
+        `top=${topText}`;
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] [PANEL-LAYOUT] overflowAudit error: ${e}`);
     }
   }
 
@@ -10855,11 +11688,11 @@ class InspireReferencePanelController {
     // For entryCited mode, show different message based on source type
     if (this.entryCitedSource?.authorQuery) {
       return getString("references-panel-count-author", {
-        args: { count, label: this.getEntryCitedLabel() },
+        args: { count, label: this.getEntryCitedLabelForStatus() },
       });
     }
     return getString("references-panel-count-entry", {
-      args: { count, label: this.getEntryCitedLabel() },
+      args: { count, label: this.getEntryCitedLabelForStatus() },
     });
   }
 
@@ -10886,11 +11719,11 @@ class InspireReferencePanelController {
     // For entryCited mode, show different message based on source type
     if (this.entryCitedSource?.authorQuery) {
       return getString("references-panel-filter-count-author", {
-        args: { visible, total, label: this.getEntryCitedLabel() },
+        args: { visible, total, label: this.getEntryCitedLabelForStatus() },
       });
     }
     return getString("references-panel-filter-count-entry", {
-      args: { visible, total, label: this.getEntryCitedLabel() },
+      args: { visible, total, label: this.getEntryCitedLabelForStatus() },
     });
   }
 
@@ -10899,6 +11732,14 @@ class InspireReferencePanelController {
       this.entryCitedSource?.label ||
       getString("references-panel-entry-label-default")
     );
+  }
+
+  private getEntryCitedLabelForStatus(maxLength = 80): string {
+    const normalized = this.getEntryCitedLabel().replace(/\s+/g, " ").trim();
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+    return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
   }
 
   private getSearchLabel() {
@@ -10926,6 +11767,7 @@ class InspireReferencePanelController {
     ) as HTMLButtonElement;
 
     // Apply initial inline styles for pill button tabs
+    // Note: flex-shrink, box-sizing are set by applyTabButtonStyle for consistency
     // FIX-WINDOWS-APPEARANCE: Add appearance: none to disable OS theme on Windows
     // FIX-WINDOWS-BACKGROUND: Use background (not background-color) to override Windows gradient
     button.style.cssText = `
@@ -10965,12 +11807,86 @@ class InspireReferencePanelController {
     return button;
   }
 
+  private createFavoritesTabButton(container: HTMLDivElement): HTMLButtonElement {
+    const button = ztoolkit.UI.appendElement(
+      {
+        tag: "button",
+        classList: ["zinspire-ref-panel__tab", "zinspire-ref-panel__tab--favorites"],
+        properties: { textContent: "⭐" },
+        attributes: {
+          type: "button",
+          title: getString("references-panel-favorite-title"),
+        },
+      },
+      container,
+    ) as HTMLButtonElement;
+
+    button.style.cssText = `
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      background: var(--material-background, #fff);
+      background-image: none;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      font-size: 14px;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--fill-quinary, #d1d5db);
+    `;
+
+    button.addEventListener("mouseenter", () => {
+      if (button.getAttribute("data-active") !== "true") {
+        button.style.borderColor = "#94a3b8";
+        button.style.background = "var(--fill-quinary, #f1f5f9)";
+      }
+    });
+    button.addEventListener("mouseleave", () => {
+      if (button.getAttribute("data-active") !== "true") {
+        button.style.borderColor = "var(--fill-quinary, #d1d5db)";
+        button.style.background = "var(--material-background, #fff)";
+      }
+    });
+
+    button.addEventListener("click", () => {
+      this.showFavoritesList();
+    });
+    return button;
+  }
+
   private async activateViewMode(mode: InspireViewMode) {
-    if (this.viewMode === mode) {
+    // Allow switching even if viewMode matches when coming from favorites view
+    if (this.viewMode === mode && !this.isFavoritesViewActive) {
       if (mode !== "entryCited" && mode !== "search") {
         return;
       }
     }
+
+    // FIX-CHART-FROM-FAVORITES: Track if we're coming from favorites view
+    // Chart container was hidden in favorites view, need to wait for layout
+    const wasInFavoritesView = this.isFavoritesViewActive;
+
+    // Deactivate favorites view when switching to any tab
+    if (this.isFavoritesViewActive) {
+      this.updateFavoritesTabStyle(false);
+      // FIX-FAVORITES-LIST-CLEAR: Explicitly clear the list content when exiting favorites
+      // This ensures the favorites content is removed before any mode-specific rendering
+      this.listEl.replaceChildren();
+    }
+
+    // FIX-CHART-FROM-FAVORITES: Wait for layout to complete after restoring chart container
+    // When chart container changes from display:none to display:"", clientWidth is 0 until reflow
+    if (wasInFavoritesView && this.chartContainer) {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+    }
+
     if (mode === "entryCited" && this.viewMode !== "entryCited") {
       if (
         this.viewMode === "references" ||
@@ -10985,6 +11901,7 @@ class InspireReferencePanelController {
     this.clearFocusedEntry();
 
     this.viewMode = mode;
+    this.requestPanelRightInsetUpdate();
     this.updateTabSelection();
     this.updateSearchUIVisibility();
     this.updateAuthorProfileCard();
@@ -11040,13 +11957,14 @@ class InspireReferencePanelController {
         ? this.entryCitedSource?.recid || this.entryCitedSource?.authorQuery
         : this.currentRecid;
     if (!targetKey) {
-      const message =
-        mode === "entryCited"
-          ? getString("references-panel-entry-select")
-          : getString("references-panel-status-empty");
       this.allEntries = [];
       this.renderChartImmediate();
-      this.renderMessage(message);
+      if (mode === "entryCited") {
+        // Show favorite authors list instead of empty message
+        this.renderFavoriteAuthorsList();
+      } else {
+        this.renderMessage(getString("references-panel-status-empty"));
+      }
       return;
     }
     const cache = this.getCacheForMode(mode);
@@ -11112,23 +12030,32 @@ class InspireReferencePanelController {
       Object.entries(this.tabButtons) as [InspireViewMode, HTMLButtonElement][]
     ).forEach(([mode, button]) => {
       if (mode === "entryCited") {
-        button.hidden = !hasEntrySource;
-        button.disabled = !hasEntrySource;
+        // FIX-CITING-TAB-OVERFLOW: Use explicit display style instead of just hidden attribute
+        // The hidden attribute alone doesn't properly collapse the button in flex containers
+        const shouldShow = hasEntrySource;
+        button.hidden = !shouldShow;
+        button.disabled = !shouldShow;
+        // Set explicit display style to ensure proper layout collapse
+        button.style.display = shouldShow ? "" : "none";
         // Update the tab label dynamically based on source type
         button.textContent = this.getTabLabel(mode);
       } else if (mode === "search") {
         // Search tab is always visible and enabled
         button.hidden = false;
         button.disabled = false;
+        button.style.display = "";
         button.textContent = this.getTabLabel(mode);
       }
-      const isActive = mode === this.viewMode;
+      // When favorites view is active, all other tabs should be inactive
+      const isActive = !this.isFavoritesViewActive && mode === this.viewMode;
       button.setAttribute("data-active", String(isActive));
       button.setAttribute("aria-pressed", String(isActive));
       applyTabButtonStyle(button, isActive);
     });
     this.updateEntryCitedControls();
     this.updateSortSelector();
+    // Note: Do NOT call updateFavoritesTabStyle(false) here!
+    // The favorites tab style is managed by showFavoritesList() and activateViewMode().
   }
 
   private updateEntryCitedControls() {
@@ -11136,19 +12063,20 @@ class InspireReferencePanelController {
       return;
     }
     const isEntryMode = this.viewMode === "entryCited";
+
     this.entryViewBackButton.hidden = !isEntryMode;
-    // Must also set display to override inline-flex from applyNavButtonStyle
-    this.entryViewBackButton.style.display = isEntryMode
-      ? "inline-flex"
-      : "none";
+    // FIX-CITING-TAB-JUMP: Use visibility instead of display to avoid layout reflow
+    // The button always occupies space (inline-flex), but becomes invisible when not in entry mode
+    // This prevents the navGroup from changing width and causing filterGroup to shrink
+    this.entryViewBackButton.style.display = "inline-flex";
+    this.entryViewBackButton.style.visibility = isEntryMode ? "visible" : "hidden";
+
     if (isEntryMode) {
       // Update tooltip with target tab name
       const previousTabLabel = this.getTabLabel(this.entryCitedPreviousMode);
       this.entryViewBackButton.title = getString(
         "references-panel-entry-back",
-        {
-          args: { tab: previousTabLabel },
-        },
+        { args: { tab: previousTabLabel } },
       );
     }
   }
@@ -12312,6 +13240,10 @@ class InspireReferencePanelController {
       onHide: () => {
         // Called when preview is hidden
       },
+      isFavorite: (entry) => this.isPaperFavorite(entry.recid, entry.localItemID),
+      onToggleFavorite: async (entry) => {
+        this.togglePaperFavorite(entry);
+      },
     };
   }
 
@@ -12329,6 +13261,13 @@ class InspireReferencePanelController {
       },
       onHide: () => {
         // Called when author preview is hidden
+      },
+      isFavorite: (authorInfo: AuthorSearchInfo) => {
+        const favorites = this.getFavoriteAuthors();
+        return favorites.some((f) => this.isSameAuthor(f.authorSearchInfo, authorInfo));
+      },
+      toggleFavorite: (authorInfo: AuthorSearchInfo) => {
+        this.toggleAuthorFavorite(authorInfo);
       },
     };
   }
@@ -12636,6 +13575,73 @@ class InspireReferencePanelController {
       Zotero.launchURL?.(url);
     });
     popup.appendChild(openItem);
+
+    // Add popup to document and open at mouse position
+    doc.documentElement.appendChild(popup);
+    popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
+    popup.openPopupAtScreen(event.screenX, event.screenY, true);
+  }
+
+  /**
+   * Show context menu for entry row with favorite option.
+   */
+  private showEntryContextMenu(recid: string, event: MouseEvent): void {
+    const doc = this.listEl.ownerDocument;
+    let entry = this.allEntries.find((e) => e.recid === recid);
+
+    // If entry not found in allEntries, check favorite papers for basic info
+    if (!entry) {
+      const favPaper = this.getFavoritePapers().find((p) => p.recid === recid);
+      if (favPaper) {
+        // Create minimal entry from favorite paper data
+        entry = {
+          id: recid,
+          recid,
+          title: favPaper.title,
+          displayText: favPaper.title,
+          authors: favPaper.authors ? [favPaper.authors] : undefined,
+          year: favPaper.year?.toString(),
+        } as InspireReferenceEntry;
+      } else {
+        return; // Cannot show menu without any entry info
+      }
+    }
+
+    // Remove existing popup if any
+    const popupId = "zinspire-entry-context-popup";
+    const existingPopup = doc.getElementById(popupId);
+    if (existingPopup) {
+      existingPopup.remove();
+    }
+
+    // Create XUL menupopup
+    const popup = (doc as any).createXULElement("menupopup") as XUL.MenuPopup;
+    popup.id = popupId;
+
+    // Favorite/unfavorite option
+    let isPresentation = false;
+    if (entry.localItemID) {
+      const item = Zotero.Items.get(entry.localItemID);
+      if (item?.itemType === "presentation") {
+        isPresentation = true;
+      }
+    }
+
+    const isFavorite = this.isPaperFavorite(recid, entry.localItemID);
+    const favItem = (doc as any).createXULElement("menuitem");
+    const labelKey = isFavorite
+      ? isPresentation
+        ? "references-panel-favorite-presentation-remove"
+        : "references-panel-favorite-paper-remove"
+      : isPresentation
+        ? "references-panel-favorite-presentation-add"
+        : "references-panel-favorite-paper-add";
+
+    favItem.setAttribute("label", getString(labelKey as FluentMessageId));
+    favItem.addEventListener("command", () => {
+      this.togglePaperFavorite(entry);
+    });
+    popup.appendChild(favItem);
 
     // Add popup to document and open at mouse position
     doc.documentElement.appendChild(popup);
@@ -13058,6 +14064,8 @@ class InspireReferencePanelController {
       return;
     }
     this.clearAuthorProfileState();
+
+    // Remember previous mode for back navigation
     const previousMode =
       this.viewMode === "entryCited"
         ? this.entryCitedPreviousMode
@@ -13069,6 +14077,8 @@ class InspireReferencePanelController {
     ) {
       this.entryCitedPreviousMode = previousMode;
     }
+
+    // Capture scroll state before switching
     const recidChanged = this.entryCitedSource?.recid !== entry.recid;
     this.pendingEntryScrollReset = true;
     if (this.viewMode !== "entryCited") {
@@ -13076,18 +14086,27 @@ class InspireReferencePanelController {
     } else if (recidChanged) {
       this.entryCitedReturnScroll = undefined;
     }
+
+    // Set entry source with label
     const label =
       entry.displayText ||
       entry.title ||
       getString("references-panel-entry-label-default");
     this.entryCitedSource = { recid: entry.recid, label };
+
+    // Update tab display first (makes "Citing..." tab visible)
     this.updateTabSelection();
+
+    // If not already in entryCited mode, use activateViewMode for proper UI setup
+    // activateViewMode handles: updateSearchUIVisibility, updateAuthorProfileCard, etc.
     if (this.viewMode !== "entryCited") {
       await this.activateViewMode("entryCited").catch(() => void 0);
       this.resetListScroll();
       this.pendingEntryScrollReset = false;
       return;
     }
+
+    // Already in entryCited mode - just reload entries if recid changed
     if (recidChanged) {
       await this.loadEntries(entry.recid, "entryCited", {
         force: true,
@@ -13270,6 +14289,29 @@ class InspireReferencePanelController {
     }
     header.appendChild(nameEl);
 
+    // Favorite star button
+    const isFavorite = this.isCurrentAuthorFavorite();
+    const starBtn = doc.createElement("button");
+    starBtn.type = "button";
+    starBtn.textContent = isFavorite ? "★" : "☆";
+    starBtn.title = getString(
+      isFavorite
+        ? "references-panel-favorite-remove"
+        : "references-panel-favorite-add",
+    );
+    starBtn.style.cssText = `
+      border: none;
+      background: transparent;
+      font-size: 14px;
+      cursor: pointer;
+      color: ${isFavorite ? "#f59e0b" : "var(--fill-tertiary, #94a3b8)"};
+      padding: 0 4px;
+      margin-left: auto;
+      flex-shrink: 0;
+    `;
+    starBtn.onclick = () => this.toggleCurrentAuthorFavorite();
+    header.appendChild(starBtn);
+
     if (this.authorProfileCollapsed) {
       return;
     }
@@ -13345,23 +14387,103 @@ class InspireReferencePanelController {
     }
 
     if (this.authorProfile?.advisors?.length) {
-      const advisors = this.authorProfile.advisors
-        .map((advisor) => advisor.name)
-        .filter(Boolean)
-        .join(", ");
-      if (advisors) {
-        const advisorEl = doc.createElement("div");
-        advisorEl.style.fontSize = "12px";
-        advisorEl.style.color = "var(--fill-secondary, #64748b)";
-        advisorEl.style.marginTop = "4px";
-        advisorEl.textContent = `${getString("references-panel-author-advisors")}: ${advisors}`;
-        content.appendChild(advisorEl);
-      }
+      const advisorEl = doc.createElement("div");
+      advisorEl.style.fontSize = "12px";
+      advisorEl.style.color = "var(--fill-secondary, #64748b)";
+      advisorEl.style.marginTop = "4px";
+
+      const label = doc.createElement("span");
+      label.textContent = `${getString("references-panel-author-advisors")}: `;
+      advisorEl.appendChild(label);
+
+      // Render each advisor, with links for those that have recid
+      this.authorProfile.advisors.forEach((advisor, index) => {
+        if (index > 0) {
+          advisorEl.appendChild(doc.createTextNode(", "));
+        }
+
+        if (advisor.recid) {
+          // Create clickable link for advisor with recid
+          const link = doc.createElement("a");
+          link.textContent = advisor.name;
+          link.href = "#";
+          link.style.color = "#0066cc"; // Use explicit blue color for links
+          link.style.textDecoration = "none";
+          link.style.cursor = "pointer";
+          link.addEventListener("mouseenter", () => {
+            link.style.textDecoration = "underline";
+          });
+          link.addEventListener("mouseleave", () => {
+            link.style.textDecoration = "none";
+          });
+          link.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Switch to advisor's papers tab (same as clicking co-author)
+            const advisorInfo: AuthorSearchInfo = {
+              fullName: advisor.name,
+              recid: advisor.recid,
+            };
+            this.showAuthorPapersTab(advisorInfo).catch(() => void 0);
+          });
+          advisorEl.appendChild(link);
+        } else {
+          // Plain text for advisor without recid
+          advisorEl.appendChild(doc.createTextNode(advisor.name));
+        }
+      });
+
+      content.appendChild(advisorEl);
     }
 
     const links = this.buildAuthorProfileLinks(doc);
     if (links) {
       content.appendChild(links);
+    }
+
+    // Breadcrumb navigation for author chain (at bottom of profile card)
+    if (this.authorNavigationStack.length > 0) {
+      const navEl = doc.createElement("div");
+      navEl.style.cssText = `
+        font-size: 11px;
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px solid var(--fill-quinary, #e2e8f0);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px;
+      `;
+      // Add "»" prefix
+      const prefix = doc.createElement("span");
+      prefix.textContent = "» ";
+      prefix.style.color = "var(--fill-tertiary, #94a3b8)";
+      navEl.appendChild(prefix);
+      // Show all authors in the stack as clickable links
+      this.authorNavigationStack.forEach((source, index) => {
+        if (index > 0) {
+          const sep = doc.createElement("span");
+          sep.textContent = " › ";
+          sep.style.color = "var(--fill-tertiary, #94a3b8)";
+          navEl.appendChild(sep);
+        }
+        const link = doc.createElement("a");
+        link.textContent = source.label;
+        link.title = getString("references-panel-entry-back-author", {
+          args: { author: source.label },
+        });
+        link.style.cssText = `
+          color: #0066cc;
+          cursor: pointer;
+          text-decoration: none;
+        `;
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          this.navigateToAuthorInStack(index);
+        });
+        navEl.appendChild(link);
+      });
+      content.appendChild(navEl);
     }
   }
 
@@ -13450,6 +14572,7 @@ class InspireReferencePanelController {
       return;
     }
     this.authorPreview?.hide();
+
     // Generate cache key: priority recid > BAI > name
     let authorQuery: string;
     if (authorInfo.recid) {
@@ -13464,6 +14587,27 @@ class InspireReferencePanelController {
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
+
+    // Exit favorites view if active (just update tab style, loadEntries handles everything else)
+    if (this.isFavoritesViewActive) {
+      this.updateFavoritesTabStyle(false);
+    }
+
+    // Push current author to navigation stack (for breadcrumb navigation)
+    // Only push if: 1) we have a current author, 2) it's different from the new author
+    if (this.entryCitedSource?.authorSearchInfo) {
+      const currentAuthor = this.entryCitedSource.authorSearchInfo;
+      // Don't push if navigating to the same author
+      if (!this.isSameAuthor(currentAuthor, authorInfo)) {
+        // Remove any existing occurrence of current author from stack (avoid duplicates)
+        this.authorNavigationStack = this.authorNavigationStack.filter(
+          (s) => s.authorSearchInfo && !this.isSameAuthor(s.authorSearchInfo, currentAuthor),
+        );
+        this.authorNavigationStack.push(this.entryCitedSource);
+      }
+    }
+
+    // Remember previous mode for back navigation
     const previousMode =
       this.viewMode === "entryCited"
         ? this.entryCitedPreviousMode
@@ -13475,44 +14619,46 @@ class InspireReferencePanelController {
     ) {
       this.entryCitedPreviousMode = previousMode;
     }
-    const queryChanged = this.entryCitedSource?.authorQuery !== authorQuery;
-    this.pendingEntryScrollReset = true;
+
+    // Capture scroll state before switching
     if (this.viewMode !== "entryCited") {
       this.entryCitedReturnScroll = this.captureScrollState();
-    } else if (queryChanged) {
-      this.entryCitedReturnScroll = undefined;
     }
+
     // Use shortened display label for the author (just the name, not "Papers by X")
     const displayLabel =
       authorInfo.fullName.length > 30
         ? authorInfo.fullName.substring(0, 27) + "..."
         : authorInfo.fullName;
+
+    // FIX-FAVORITES-EXIT-V3: Set entryCitedSource and viewMode BEFORE any UI updates
+    // This ensures Author tab is visible and correctly styled
     this.entryCitedSource = {
       authorQuery,
       authorSearchInfo: authorInfo,
-      label: displayLabel, // Just the author name, message templates will add "Papers by"
+      label: displayLabel,
     };
+
+    // Switch to entryCited mode
+    this.viewMode = "entryCited";
+    this.requestPanelRightInsetUpdate();
     this.prepareAuthorProfileState(authorInfo);
     this.updateTabSelection();
-    if (this.viewMode !== "entryCited") {
-      await this.activateViewMode("entryCited").catch(() => void 0);
-      this.resetListScroll();
-      this.pendingEntryScrollReset = false;
-      this.updateAuthorProfileCard();
-      return;
+
+    // Show chart container and sort row (hidden in favorites view)
+    if (this.chartContainer) {
+      this.chartContainer.style.display = "";
     }
-    if (queryChanged) {
-      // Use authorQuery as the cache key for loadEntries
-      await this.loadEntries(authorQuery, "entryCited", {
-        force: true,
-        resetScroll: true,
-      }).catch(() => void 0);
-      this.pendingEntryScrollReset = false;
-    } else {
-      this.renderReferenceList();
-      this.resetListScroll();
-      this.pendingEntryScrollReset = false;
+    if (this.sortRow) {
+      this.sortRow.style.display = "";
     }
+
+    // Load author papers
+    this.pendingEntryScrollReset = true;
+    await this.loadEntries(authorQuery, "entryCited", {
+      resetScroll: true,
+    }).catch(() => void 0);
+    this.pendingEntryScrollReset = false;
     this.updateAuthorProfileCard();
   }
 
@@ -13520,6 +14666,8 @@ class InspireReferencePanelController {
     if (this.viewMode !== "entryCited") {
       return;
     }
+    // Clear author navigation stack when exiting entryCited mode
+    this.authorNavigationStack = [];
     const target =
       this.entryCitedPreviousMode === "citedBy"
         ? "citedBy"
@@ -13530,6 +14678,1102 @@ class InspireReferencePanelController {
     await this.activateViewMode(target).catch(() => void 0);
     this.applyScrollState(scrollState);
     this.entryCitedReturnScroll = undefined;
+  }
+
+  /**
+   * Navigate to an author in the navigation stack.
+   * Truncates the stack to the selected index and shows that author's papers.
+   */
+  private navigateToAuthorInStack(index: number) {
+    if (index < 0 || index >= this.authorNavigationStack.length) {
+      return;
+    }
+    const target = this.authorNavigationStack[index];
+    if (!target?.authorSearchInfo) {
+      return;
+    }
+    // Truncate stack to before the selected index
+    this.authorNavigationStack = this.authorNavigationStack.slice(0, index);
+    // Navigate to the selected author
+    this.showAuthorPapersTab(target.authorSearchInfo).catch(() => void 0);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Favorite Authors Management (FTR-FAVORITE-AUTHORS)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private getFavoriteAuthors(): FavoriteAuthor[] {
+    try {
+      const json = getPref("favorite_authors") as string;
+      return JSON.parse(json || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  private saveFavoriteAuthors(favorites: FavoriteAuthor[]): void {
+    setPref("favorite_authors", JSON.stringify(favorites));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Favorite Papers Management (FTR-FAVORITE-PAPERS)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private getFavoritePapers(): FavoritePaper[] {
+    try {
+      const json = getPref("favorite_papers") as string;
+      return JSON.parse(json || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  private saveFavoritePapers(favorites: FavoritePaper[]): void {
+    setPref("favorite_papers", JSON.stringify(favorites));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Favorite Presentations Management (FTR-FAVORITE-PRESENTATIONS)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private getFavoritePresentations(): FavoritePresentation[] {
+    try {
+      const json = getPref("favorite_presentations") as string;
+      return JSON.parse(json || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  private saveFavoritePresentations(favorites: FavoritePresentation[]): void {
+    setPref("favorite_presentations", JSON.stringify(favorites));
+  }
+
+  private isPaperFavorite(recid?: string, itemID?: number): boolean {
+    const papers = this.getFavoritePapers();
+    const presentations = this.getFavoritePresentations();
+
+    const check = (f: FavoritePaper | FavoritePresentation) => {
+      // Priority 1: Match by itemID if both have it
+      if (itemID && f.itemID) {
+        return f.itemID === itemID;
+      }
+      // Priority 2: Fallback to recid if one is missing itemID
+      return !!recid && !!f.recid && f.recid === recid;
+    };
+
+    return papers.some(check) || presentations.some(check);
+  }
+
+  private togglePaperFavorite(entry: InspireReferenceEntry): void {
+    if (!entry.recid && !entry.localItemID) return; // Cannot favorite without identifier
+
+    // Determine if this is a presentation
+    let isPresentation = false;
+    if (entry.localItemID) {
+      const item = Zotero.Items.get(entry.localItemID);
+      if (item?.itemType === "presentation") {
+        isPresentation = true;
+      }
+    }
+
+    const prefKey = isPresentation ? "favorite_presentations" : "favorite_papers";
+    const getFavorites = isPresentation
+      ? () => this.getFavoritePresentations()
+      : () => this.getFavoritePapers();
+    const saveFavorites = isPresentation
+      ? (favs: FavoritePresentation[]) => this.saveFavoritePresentations(favs)
+      : (favs: FavoritePaper[]) => this.saveFavoritePapers(favs);
+
+    const favorites = getFavorites();
+    const existingIndex = favorites.findIndex((f) => {
+      // Priority 1: Match by itemID if both have it
+      if (entry.localItemID && f.itemID) {
+        return f.itemID === entry.localItemID;
+      }
+      // Priority 2: Fallback to recid if one is missing itemID
+      return !!entry.recid && !!f.recid && f.recid === entry.recid;
+    });
+
+    if (existingIndex >= 0) {
+      favorites.splice(existingIndex, 1);
+      this.showToast(
+        getString(
+          isPresentation
+            ? "references-panel-favorite-presentation-removed"
+            : "references-panel-favorite-paper-removed",
+        ),
+      );
+    } else {
+      // Extract surname only from first author
+      const firstAuthorFull = entry.authors?.[0];
+      let authorSurname: string | undefined;
+      if (firstAuthorFull) {
+        // Author format is usually "Surname, FirstName" or "Surname"
+        const commaIdx = firstAuthorFull.indexOf(",");
+        authorSurname =
+          commaIdx > 0
+            ? firstAuthorFull.substring(0, commaIdx).trim()
+            : firstAuthorFull.trim();
+      }
+      const authors = authorSurname
+        ? entry.authors && entry.authors.length > 1
+          ? `${authorSurname} et al.`
+          : authorSurname
+        : undefined;
+      favorites.push({
+        recid: entry.recid || undefined,
+        itemID: entry.localItemID, // Save Zotero item ID for navigation
+        title: entry.title || entry.displayText || "Untitled",
+        authors,
+        year: entry.year ? parseInt(entry.year, 10) : undefined,
+        addedAt: Date.now(),
+      });
+      this.showToast(
+        getString(
+          isPresentation
+            ? "references-panel-favorite-presentation-added"
+            : "references-panel-favorite-paper-added",
+        ),
+      );
+    }
+    saveFavorites(favorites);
+  }
+
+  private isCurrentAuthorFavorite(): boolean {
+    if (!this.entryCitedSource?.authorSearchInfo) {
+      return false;
+    }
+    const favorites = this.getFavoriteAuthors();
+    const current = this.entryCitedSource.authorSearchInfo;
+    return favorites.some((f) => this.isSameAuthor(f.authorSearchInfo, current));
+  }
+
+  private isSameAuthor(a: AuthorSearchInfo, b: AuthorSearchInfo): boolean {
+    if (a.recid && b.recid) return a.recid === b.recid;
+    if (a.bai && b.bai) return a.bai === b.bai;
+    return a.fullName.toLowerCase() === b.fullName.toLowerCase();
+  }
+
+  private toggleCurrentAuthorFavorite(): void {
+    if (!this.entryCitedSource?.authorSearchInfo) {
+      return;
+    }
+    const favorites = this.getFavoriteAuthors();
+    const current = this.entryCitedSource.authorSearchInfo;
+    const existingIndex = favorites.findIndex((f) =>
+      this.isSameAuthor(f.authorSearchInfo, current),
+    );
+    if (existingIndex >= 0) {
+      favorites.splice(existingIndex, 1);
+      this.showToast(getString("references-panel-favorite-removed"));
+    } else {
+      favorites.push({
+        authorSearchInfo: current,
+        label: this.entryCitedSource.label,
+        addedAt: Date.now(),
+      });
+      this.showToast(getString("references-panel-favorite-added"));
+    }
+    this.saveFavoriteAuthors(favorites);
+    this.updateAuthorProfileCard();
+  }
+
+  /**
+   * Toggle favorite status for any author (used by preview card).
+   */
+  private toggleAuthorFavorite(authorInfo: AuthorSearchInfo): void {
+    const favorites = this.getFavoriteAuthors();
+    const existingIndex = favorites.findIndex((f) =>
+      this.isSameAuthor(f.authorSearchInfo, authorInfo),
+    );
+    if (existingIndex >= 0) {
+      favorites.splice(existingIndex, 1);
+      this.showToast(getString("references-panel-favorite-removed"));
+    } else {
+      const label =
+        authorInfo.fullName.length > 30
+          ? authorInfo.fullName.substring(0, 27) + "..."
+          : authorInfo.fullName;
+      favorites.push({
+        authorSearchInfo: authorInfo,
+        label,
+        addedAt: Date.now(),
+      });
+      this.showToast(getString("references-panel-favorite-added"));
+    }
+    this.saveFavoriteAuthors(favorites);
+    // Update profile card if viewing this author
+    if (
+      this.entryCitedSource?.authorSearchInfo &&
+      this.isSameAuthor(this.entryCitedSource.authorSearchInfo, authorInfo)
+    ) {
+      this.updateAuthorProfileCard();
+    }
+  }
+
+  private removeFavoriteAuthor(index: number): void {
+    const favorites = this.getFavoriteAuthors();
+    if (index >= 0 && index < favorites.length) {
+      favorites.splice(index, 1);
+      this.saveFavoriteAuthors(favorites);
+      // Re-render favorites list if in favorites view, otherwise render reference list
+      if (this.isFavoritesViewActive) {
+        this.renderFavoriteAuthorsList();
+      } else {
+        this.renderReferenceList();
+      }
+    }
+  }
+
+  private reorderFavoriteAuthor(fromIndex: number, toIndex: number): void {
+    const favorites = this.getFavoriteAuthors();
+    if (
+      fromIndex < 0 ||
+      fromIndex >= favorites.length ||
+      toIndex < 0 ||
+      toIndex > favorites.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const [item] = favorites.splice(fromIndex, 1);
+    favorites.splice(toIndex, 0, item);
+    this.saveFavoriteAuthors(favorites);
+    this.renderFavoriteAuthorsList();
+  }
+
+  private reorderFavoritePaper(fromIndex: number, toIndex: number): void {
+    const papers = this.getFavoritePapers();
+    if (
+      fromIndex < 0 ||
+      fromIndex >= papers.length ||
+      toIndex < 0 ||
+      toIndex > papers.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const [item] = papers.splice(fromIndex, 1);
+    papers.splice(toIndex, 0, item);
+    this.saveFavoritePapers(papers);
+    this.renderFavoriteAuthorsList();
+  }
+
+  private reorderFavoritePresentation(fromIndex: number, toIndex: number): void {
+    const presentations = this.getFavoritePresentations();
+    if (
+      fromIndex < 0 ||
+      fromIndex >= presentations.length ||
+      toIndex < 0 ||
+      toIndex > presentations.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const [item] = presentations.splice(fromIndex, 1);
+    presentations.splice(toIndex, 0, item);
+    this.saveFavoritePresentations(presentations);
+    this.renderFavoriteAuthorsList();
+  }
+
+  /**
+   * Show favorites list by clearing current author and re-rendering.
+   */
+  private showFavoritesList(): void {
+    this.entryCitedSource = undefined;
+    this.authorProfile = undefined;
+    this.authorStats = undefined;
+    this.authorNavigationStack = [];
+    this.updateAuthorProfileCard();
+    this.updateFavoritesTabStyle(true); // Sets isFavoritesViewActive = true
+    this.updateTabSelection(); // Deselect other tabs (now respects isFavoritesViewActive)
+    // Hide chart and sort row when showing favorites (keep filter row for filtering)
+    if (this.chartContainer) {
+      this.chartContainer.style.display = "none";
+    }
+    if (this.sortRow) {
+      this.sortRow.style.display = "none";
+    }
+    this.renderFavoriteAuthorsList();
+  }
+
+  /**
+   * Update the favorites tab (⭐) style.
+   */
+  private updateFavoritesTabStyle(isActive: boolean): void {
+    if (!this.favoritesTabButton) return;
+    // This is the single source of truth for isFavoritesViewActive
+    this.isFavoritesViewActive = isActive;
+    this.favoritesTabButton.setAttribute("data-active", String(isActive));
+    // Use same colors as other tabs (applyTabButtonStyle in pickerUI.ts)
+    const activeBlue = "#0060df"; // Zotero's primary blue
+    if (isActive) {
+      this.favoritesTabButton.style.background = activeBlue;
+      this.favoritesTabButton.style.borderColor = activeBlue;
+    } else {
+      this.favoritesTabButton.style.background = "var(--material-background, #fff)";
+      this.favoritesTabButton.style.borderColor = "var(--fill-quinary, #d1d5db)";
+      // Restore chart and sort row when leaving favorites view
+      if (this.chartContainer) {
+        this.chartContainer.style.display = "";
+      }
+      if (this.sortRow) {
+        this.sortRow.style.display = "";
+      }
+    }
+  }
+
+  private renderFavoriteAuthorsList(): void {
+    const doc = this.listEl.ownerDocument;
+    this.listEl.replaceChildren();
+
+    // Apply filter if any
+    const filterText = this.filterText.toLowerCase().trim();
+
+    // Get and filter authors
+    const allAuthors = this.getFavoriteAuthors();
+    const authors = filterText
+      ? allAuthors.filter(
+          (fav) =>
+            fav.label.toLowerCase().includes(filterText) ||
+            fav.authorSearchInfo.fullName.toLowerCase().includes(filterText) ||
+            fav.authorSearchInfo.bai?.toLowerCase().includes(filterText),
+        )
+      : allAuthors;
+
+    // Get and filter papers
+    const allPapers = this.getFavoritePapers();
+    const papers = filterText
+      ? allPapers.filter(
+          (fav) =>
+            fav.title.toLowerCase().includes(filterText) ||
+            fav.authors?.toLowerCase().includes(filterText) ||
+            (fav.recid && fav.recid.includes(filterText)),
+        )
+      : allPapers;
+
+    // Get and filter presentations (FTR-FAVORITE-PRESENTATIONS)
+    const allPresentations = this.getFavoritePresentations();
+    const presentations = filterText
+      ? allPresentations.filter(
+          (fav) =>
+            fav.title.toLowerCase().includes(filterText) ||
+            fav.authors?.toLowerCase().includes(filterText) ||
+            (fav.recid && fav.recid.includes(filterText)),
+        )
+      : allPresentations;
+
+    // Container
+    const container = doc.createElement("div");
+    container.style.cssText = `padding: 16px; text-align: left;`;
+
+    // Render Authors section
+    this.renderFavoriteAuthorsSection(doc, container, authors);
+
+    // Render Papers section
+    this.renderFavoritePapersSection(doc, container, papers);
+
+    // Render Presentations section (FTR-FAVORITE-PRESENTATIONS)
+    this.renderFavoritePresentationsSection(doc, container, presentations);
+
+    this.listEl.appendChild(container);
+  }
+
+  private renderFavoriteAuthorsSection(
+    doc: Document,
+    container: HTMLElement,
+    favorites: FavoriteAuthor[],
+  ): void {
+    // Section wrapper
+    const section = doc.createElement("div");
+    section.className = "zinspire-favorites-section";
+
+    // Collapsible header
+    const header = doc.createElement("div");
+    header.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--fill-primary, #334155);
+    `;
+
+    const arrow = doc.createElement("span");
+    arrow.textContent = "▼";
+    arrow.style.cssText = `
+      font-size: 10px;
+      transition: transform 0.15s ease;
+    `;
+
+    const titleText = doc.createElement("span");
+    titleText.textContent = getString("references-panel-favorite-title");
+
+    const countBadge = doc.createElement("span");
+    countBadge.textContent = `(${favorites.length})`;
+    countBadge.style.cssText = `
+      font-weight: 400;
+      color: var(--fill-secondary, #64748b);
+    `;
+
+    header.appendChild(arrow);
+    header.appendChild(titleText);
+    header.appendChild(countBadge);
+    section.appendChild(header);
+
+    // Content container
+    const content = doc.createElement("div");
+    content.className = "zinspire-favorites-content";
+
+    if (favorites.length === 0) {
+      // Empty state
+      const empty = doc.createElement("div");
+      empty.style.cssText = `
+        font-size: 12px;
+        color: var(--fill-secondary, #64748b);
+      `;
+      empty.textContent = getString("references-panel-favorite-empty");
+      content.appendChild(empty);
+    } else {
+      // Favorite authors list
+      const list = doc.createElement("div");
+      list.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        text-align: left;
+      `;
+
+      // Drag state
+      let draggedIndex: number | null = null;
+
+      favorites.forEach((fav, index) => {
+        const row = this.createFavoriteAuthorRow(doc, fav, index);
+
+        // Drag events
+        row.addEventListener("dragstart", (e) => {
+          draggedIndex = index;
+          row.style.opacity = "0.5";
+          row.style.cursor = "grabbing";
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+          }
+        });
+
+        row.addEventListener("dragend", () => {
+          row.style.opacity = "1";
+          row.style.cursor = "grab";
+          draggedIndex = null;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+        });
+
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+          if (e.clientY < midY) {
+            row.style.borderTop = "2px solid #0060df";
+          } else {
+            row.style.borderBottom = "2px solid #0060df";
+          }
+        });
+
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          let targetIndex = e.clientY < midY ? index : index + 1;
+          if (draggedIndex < targetIndex) targetIndex--;
+          this.reorderFavoriteAuthor(draggedIndex, targetIndex);
+        });
+
+        list.appendChild(row);
+      });
+      content.appendChild(list);
+    }
+
+    section.appendChild(content);
+
+    // Toggle collapse on header click
+    header.addEventListener("click", () => {
+      const isCollapsed = content.style.display === "none";
+      content.style.display = isCollapsed ? "" : "none";
+      arrow.style.transform = isCollapsed ? "" : "rotate(-90deg)";
+    });
+
+    container.appendChild(section);
+  }
+
+  private renderFavoritePapersSection(
+    doc: Document,
+    container: HTMLElement,
+    papers: FavoritePaper[],
+  ): void {
+    // Section wrapper
+    const section = doc.createElement("div");
+    section.className = "zinspire-favorites-section";
+    section.style.marginTop = "16px";
+
+    // Collapsible header
+    const header = doc.createElement("div");
+    header.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--fill-primary, #334155);
+    `;
+
+    const arrow = doc.createElement("span");
+    arrow.textContent = "▼";
+    arrow.style.cssText = `
+      font-size: 10px;
+      transition: transform 0.15s ease;
+    `;
+
+    const titleText = doc.createElement("span");
+    titleText.textContent = getString("references-panel-favorite-papers-title");
+
+    const countBadge = doc.createElement("span");
+    countBadge.textContent = `(${papers.length})`;
+    countBadge.style.cssText = `
+      font-weight: 400;
+      color: var(--fill-secondary, #64748b);
+    `;
+
+    header.appendChild(arrow);
+    header.appendChild(titleText);
+    header.appendChild(countBadge);
+    section.appendChild(header);
+
+    // Content container
+    const content = doc.createElement("div");
+    content.className = "zinspire-favorites-content";
+
+    if (papers.length === 0) {
+      const empty = doc.createElement("div");
+      empty.style.cssText = `
+        font-size: 12px;
+        color: var(--fill-secondary, #64748b);
+      `;
+      empty.textContent = getString("references-panel-favorite-papers-empty");
+      content.appendChild(empty);
+    } else {
+      const list = doc.createElement("div");
+      list.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      `;
+
+      // Drag state
+      let draggedIndex: number | null = null;
+
+      papers.forEach((paper, index) => {
+        const row = this.createFavoritePaperRow(doc, paper, index);
+
+        // Drag events
+        row.addEventListener("dragstart", (e) => {
+          draggedIndex = index;
+          row.style.opacity = "0.5";
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+          }
+        });
+
+        row.addEventListener("dragend", () => {
+          row.style.opacity = "1";
+          draggedIndex = null;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+        });
+
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+          if (e.clientY < midY) {
+            row.style.borderTop = "2px solid #0060df";
+          } else {
+            row.style.borderBottom = "2px solid #0060df";
+          }
+        });
+
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          let targetIndex = e.clientY < midY ? index : index + 1;
+          if (draggedIndex < targetIndex) targetIndex--;
+          this.reorderFavoritePaper(draggedIndex, targetIndex);
+        });
+
+        list.appendChild(row);
+      });
+      content.appendChild(list);
+    }
+
+    section.appendChild(content);
+
+    // Toggle collapse on header click
+    header.addEventListener("click", () => {
+      const isCollapsed = content.style.display === "none";
+      content.style.display = isCollapsed ? "" : "none";
+      arrow.style.transform = isCollapsed ? "" : "rotate(-90deg)";
+    });
+
+    container.appendChild(section);
+  }
+
+  private createFavoritePaperRow(
+    doc: Document,
+    paper: FavoritePaper,
+    index: number,
+  ): HTMLElement {
+    const row = doc.createElement("div");
+    row.setAttribute("draggable", "true");
+    row.setAttribute("data-index", String(index));
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: var(--material-background, #f8fafc);
+      cursor: grab;
+    `;
+
+    // Drag handle
+    const dragHandle = doc.createElement("span");
+    dragHandle.textContent = "⋮⋮";
+    dragHandle.style.cssText = `
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: grab;
+      font-size: 10px;
+      user-select: none;
+    `;
+    row.appendChild(dragHandle);
+
+    // Paper link - format: "Author (Year): Title"
+    const link = doc.createElement("a");
+    // Extract surname from stored author string (handles legacy full-name format)
+    let authorPart = "Unknown";
+    if (paper.authors) {
+      // If contains comma, extract surname (before comma)
+      const commaIdx = paper.authors.indexOf(",");
+      if (commaIdx > 0 && !paper.authors.includes(" et al.")) {
+        authorPart = paper.authors.substring(0, commaIdx).trim();
+      } else {
+        authorPart = paper.authors;
+      }
+    }
+    const yearPart = paper.year ? ` (${paper.year})` : "";
+    const titlePart =
+      paper.title.length > 50
+        ? paper.title.substring(0, 47) + "..."
+        : paper.title;
+    link.textContent = `📄 ${authorPart}${yearPart}: ${titlePart}`;
+    link.title = paper.title;
+    link.style.cssText = `
+      flex: 1;
+      color: #0066cc;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 12px;
+    `;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Navigate to Zotero item if itemID exists and item is valid
+      if (paper.itemID) {
+        const item = Zotero.Items.get(paper.itemID);
+        if (item && !item.deleted) {
+          ZoteroPane.selectItem(paper.itemID);
+        } else if (paper.recid) {
+          // Item was deleted, fallback to INSPIRE page
+          Zotero.launchURL?.(`https://inspirehep.net/literature/${paper.recid}`);
+        }
+      } else if (paper.recid) {
+        Zotero.launchURL?.(`https://inspirehep.net/literature/${paper.recid}`);
+      }
+    });
+    row.appendChild(link);
+
+    // Remove button
+    const removeBtn = doc.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = getString("references-panel-favorite-paper-remove");
+    removeBtn.style.cssText = `
+      border: none;
+      background: transparent;
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+    `;
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.removeFavoritePaper(index);
+    });
+    row.appendChild(removeBtn);
+
+    return row;
+  }
+
+  private removeFavoritePaper(index: number): void {
+    const papers = this.getFavoritePapers();
+    if (index >= 0 && index < papers.length) {
+      papers.splice(index, 1);
+      this.saveFavoritePapers(papers);
+      if (this.isFavoritesViewActive) {
+        this.renderFavoriteAuthorsList();
+      }
+    }
+  }
+
+  private removeFavoritePresentation(index: number): void {
+    const presentations = this.getFavoritePresentations();
+    if (index >= 0 && index < presentations.length) {
+      presentations.splice(index, 1);
+      this.saveFavoritePresentations(presentations);
+      if (this.isFavoritesViewActive) {
+        this.renderFavoriteAuthorsList();
+      }
+    }
+  }
+
+  private renderFavoritePresentationsSection(
+    doc: Document,
+    container: HTMLElement,
+    presentations: FavoritePresentation[],
+  ): void {
+    // Section wrapper
+    const section = doc.createElement("div");
+    section.className = "zinspire-favorites-section";
+    section.style.marginTop = "16px";
+
+    // Collapsible header
+    const header = doc.createElement("div");
+    header.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--fill-primary, #334155);
+    `;
+
+    const arrow = doc.createElement("span");
+    arrow.textContent = "▼";
+    arrow.style.cssText = `
+      font-size: 10px;
+      transition: transform 0.15s ease;
+    `;
+
+    const titleText = doc.createElement("span");
+    titleText.textContent = getString(
+      "references-panel-favorite-presentations-title",
+    );
+
+    const countBadge = doc.createElement("span");
+    countBadge.textContent = `(${presentations.length})`;
+    countBadge.style.cssText = `
+      font-weight: 400;
+      color: var(--fill-secondary, #64748b);
+    `;
+
+    header.appendChild(arrow);
+    header.appendChild(titleText);
+    header.appendChild(countBadge);
+    section.appendChild(header);
+
+    // Content container
+    const content = doc.createElement("div");
+    content.className = "zinspire-favorites-content";
+
+    if (presentations.length === 0) {
+      const empty = doc.createElement("div");
+      empty.style.cssText = `
+        font-size: 12px;
+        color: var(--fill-secondary, #64748b);
+      `;
+      empty.textContent = getString(
+        "references-panel-favorite-presentations-empty",
+      );
+      content.appendChild(empty);
+    } else {
+      const list = doc.createElement("div");
+      list.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      `;
+
+      // Drag state
+      let draggedIndex: number | null = null;
+
+      presentations.forEach((presentation, index) => {
+        const row = this.createFavoritePresentationRow(
+          doc,
+          presentation,
+          index,
+        );
+
+        // Drag events
+        row.addEventListener("dragstart", (e) => {
+          draggedIndex = index;
+          row.style.opacity = "0.5";
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+          }
+        });
+
+        row.addEventListener("dragend", () => {
+          row.style.opacity = "1";
+          draggedIndex = null;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+        });
+
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+          if (e.clientY < midY) {
+            row.style.borderTop = "2px solid #0060df";
+          } else {
+            row.style.borderBottom = "2px solid #0060df";
+          }
+        });
+
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          let targetIndex = e.clientY < midY ? index : index + 1;
+          if (draggedIndex < targetIndex) targetIndex--;
+          this.reorderFavoritePresentation(draggedIndex, targetIndex);
+        });
+
+        list.appendChild(row);
+      });
+      content.appendChild(list);
+    }
+
+    section.appendChild(content);
+
+    // Toggle collapse on header click
+    header.addEventListener("click", () => {
+      const isCollapsed = content.style.display === "none";
+      content.style.display = isCollapsed ? "" : "none";
+      arrow.style.transform = isCollapsed ? "" : "rotate(-90deg)";
+    });
+
+    container.appendChild(section);
+  }
+
+  private createFavoritePresentationRow(
+    doc: Document,
+    presentation: FavoritePresentation,
+    index: number,
+  ): HTMLElement {
+    const row = doc.createElement("div");
+    row.setAttribute("draggable", "true");
+    row.setAttribute("data-index", String(index));
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: var(--material-background, #f8fafc);
+      cursor: grab;
+    `;
+
+    // Drag handle
+    const dragHandle = doc.createElement("span");
+    dragHandle.textContent = "⋮⋮";
+    dragHandle.style.cssText = `
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: grab;
+      font-size: 10px;
+      user-select: none;
+    `;
+    row.appendChild(dragHandle);
+
+    // Presentation link - format: "Author (Year): Title"
+    const link = doc.createElement("a");
+    // Extract surname from stored author string
+    let authorPart = "Unknown";
+    if (presentation.authors) {
+      const commaIdx = presentation.authors.indexOf(",");
+      if (commaIdx > 0 && !presentation.authors.includes(" et al.")) {
+        authorPart = presentation.authors.substring(0, commaIdx).trim();
+      } else {
+        authorPart = presentation.authors;
+      }
+    }
+    const yearPart = presentation.year ? ` (${presentation.year})` : "";
+    const titlePart =
+      presentation.title.length > 50
+        ? presentation.title.substring(0, 47) + "..."
+        : presentation.title;
+    link.textContent = `🪧 ${authorPart}${yearPart}: ${titlePart}`;
+    link.title = presentation.title;
+    link.style.cssText = `
+      flex: 1;
+      color: #0066cc;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 12px;
+    `;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (presentation.itemID) {
+        const item = Zotero.Items.get(presentation.itemID);
+        if (item && !item.deleted) {
+          ZoteroPane.selectItem(presentation.itemID);
+        } else if (presentation.recid) {
+          Zotero.launchURL?.(
+            `https://inspirehep.net/literature/${presentation.recid}`,
+          );
+        }
+      } else if (presentation.recid) {
+        Zotero.launchURL?.(
+          `https://inspirehep.net/literature/${presentation.recid}`,
+        );
+      }
+    });
+    row.appendChild(link);
+
+    // Remove button
+    const removeBtn = doc.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = getString(
+      "references-panel-favorite-presentation-remove",
+    );
+    removeBtn.style.cssText = `
+      border: none;
+      background: transparent;
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+    `;
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.removeFavoritePresentation(index);
+    });
+    row.appendChild(removeBtn);
+
+    return row;
+  }
+
+  private createFavoriteAuthorRow(
+    doc: Document,
+    fav: FavoriteAuthor,
+    index: number,
+  ): HTMLElement {
+    const row = doc.createElement("div");
+    row.setAttribute("data-index", String(index));
+    row.draggable = true;
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: var(--material-background, #f8fafc);
+      cursor: grab;
+      transition: background 0.15s ease, transform 0.15s ease;
+    `;
+
+    // Drag handle
+    const handle = doc.createElement("span");
+    handle.textContent = "⋮⋮";
+    handle.style.cssText = `
+      color: var(--fill-tertiary, #94a3b8);
+      font-size: 10px;
+      cursor: grab;
+      user-select: none;
+      letter-spacing: -2px;
+    `;
+    row.appendChild(handle);
+
+    // Author link
+    const link = doc.createElement("a");
+    link.textContent = `★ ${fav.label}`;
+    link.title = fav.authorSearchInfo.bai || fav.authorSearchInfo.fullName;
+    link.style.cssText = `
+      flex: 1;
+      color: #0066cc;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 12px;
+    `;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.showAuthorPapersTab(fav.authorSearchInfo).catch(() => void 0);
+    });
+    row.appendChild(link);
+
+    // Remove button
+    const removeBtn = doc.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = getString("references-panel-favorite-remove");
+    removeBtn.style.cssText = `
+      border: none;
+      background: transparent;
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+    `;
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.removeFavoriteAuthor(index);
+    });
+    row.appendChild(removeBtn);
+
+    return row;
   }
 
   private isCurrentItemRelated(localItem: Zotero.Item) {
@@ -13708,10 +15952,19 @@ class InspireReferencePanelController {
     newListEl.style.boxSizing = "border-box";
     newListEl.style.overflowX = "hidden";
     newListEl.style.overflowY = "auto";
+    // Keep list scroll internal to the panel to avoid outer item pane scroll jumps
+    newListEl.style.flex = "1 1 auto";
+    newListEl.style.minHeight = "0";
     // Hide old container immediately (no reflow)
     oldListEl.style.display = "none";
     // Insert new container after old one
-    oldListEl.parentNode?.insertBefore(newListEl, oldListEl.nextSibling);
+    // FIX-DOM-INSERTION: Ensure new element is always in DOM with fallback
+    if (oldListEl.parentNode) {
+      oldListEl.parentNode.insertBefore(newListEl, oldListEl.nextSibling);
+    } else {
+      // Fallback: append to body (listEl should be last child after sortRow)
+      this.body.appendChild(newListEl);
+    }
     this.listEl = newListEl;
     // Re-register event delegation on new container
     this.setupEventDelegation();
@@ -13733,6 +15986,35 @@ class InspireReferencePanelController {
 
   private setStatus(text: string) {
     this.statusEl.textContent = text;
+    // In entryCited mode the status message may truncate the label to avoid overflow;
+    // keep the full label accessible via tooltip.
+    if (this.viewMode === "entryCited" && this.entryCitedSource?.label) {
+      const baseTitle = this.entryCitedSource.label;
+      if (InspireReferencePanelController.PANEL_LAYOUT_DEBUG) {
+        const win =
+          this.body.ownerDocument?.defaultView ||
+          Zotero.getMainWindow?.() ||
+          null;
+        const computedPadRight =
+          win?.getComputedStyle?.(this.body)?.paddingRight ?? "";
+        const basePadRight = Math.round(this.baseBodyPaddingRightPx ?? 0);
+        const bodyWidth = this.body.clientWidth || 0;
+        const statusClientWidth = this.statusEl.clientWidth || 0;
+        const statusScrollWidth = this.statusEl.scrollWidth || 0;
+        this.statusEl.title =
+          `${baseTitle}\n` +
+          `[PANEL-LAYOUT] mode=entryCited inset=${this.panelRightInsetPx}px source=${this.panelRightInsetSource} ` +
+          `basePadRight=${basePadRight}px bodyPadRight=${computedPadRight} ` +
+          `bodyW=${bodyWidth}px statusCW=${statusClientWidth}px statusSW=${statusScrollWidth}px`;
+      } else {
+        this.statusEl.title = baseTitle;
+      }
+      // Status text changes are the main trigger of the visible overlap in Citing...
+      // Re-measure the right-side icon rail overlap after DOM updates.
+      this.requestPanelRightInsetUpdate();
+      return;
+    }
+    this.statusEl.title = text;
   }
 
   private cancelActiveRequest() {

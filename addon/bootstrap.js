@@ -50,11 +50,19 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
 }
 
 async function onMainWindowLoad({ window }, reason) {
-  Zotero.__addonInstance__?.hooks.onMainWindowLoad(window);
+  try {
+    await Zotero.__addonInstance__?.hooks.onMainWindowLoad(window);
+  } catch (e) {
+    Zotero.logError(e);
+  }
 }
 
 async function onMainWindowUnload({ window }, reason) {
-  Zotero.__addonInstance__?.hooks.onMainWindowUnload(window);
+  try {
+    await Zotero.__addonInstance__?.hooks.onMainWindowUnload(window);
+  } catch (e) {
+    Zotero.logError(e);
+  }
 }
 
 function shutdown({ id, version, resourceURI, rootURI }, reason) {

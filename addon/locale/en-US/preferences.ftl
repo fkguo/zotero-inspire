@@ -156,4 +156,9 @@ pref-funding-china-only =
     .label = Extract only Chinese funding agencies
 pref-funding-china-only-desc = When enabled, only extract funding info from Chinese agencies (NSFC, CAS, MoST, etc.). Disable to extract all funders including DOE, NSF, ERC, etc.
 
+pref-dev = Developer
+pref-dev-panel-layout =
+    .label = Enable panel layout debug (Citing…)
+pref-dev-panel-layout-desc = Logs [PANEL-LAYOUT] lines and shows a "Copy layout" button in the panel header (for debugging).
+
 pref-help = { $name } Build { $version } { $time }

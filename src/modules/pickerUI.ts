@@ -70,6 +70,9 @@ export function applyRefEntryRowStyle(el: HTMLElement): void {
   el.style.boxSizing = "border-box";
   el.style.overflow = "hidden";
   el.style.padding = "4px 0";
+  // Some host styles (including Zotero UI) can set `white-space: nowrap` on anchors.
+  // Ensure entry rows can wrap normally to avoid horizontal overflow.
+  el.style.whiteSpace = "normal";
 }
 
 /**
@@ -164,6 +167,7 @@ export function applyRefEntryContentStyle(el: HTMLElement): void {
     overflow: hidden;
     word-break: break-word;
     overflow-wrap: break-word;
+    white-space: normal;
   `;
 
   // FIX-PANEL-WIDTH-OVERFLOW: Style title and meta for proper text wrapping
@@ -177,6 +181,7 @@ export function applyRefEntryContentStyle(el: HTMLElement): void {
       overflow-wrap: break-word;
       word-break: break-word;
       max-width: 100%;
+      white-space: normal;
     `;
   }
 
@@ -190,6 +195,7 @@ export function applyRefEntryContentStyle(el: HTMLElement): void {
       overflow-wrap: break-word;
       word-break: break-word;
       max-width: 100%;
+      white-space: normal;
     `;
   }
 }
@@ -247,6 +253,9 @@ export function applyTabButtonStyle(el: HTMLElement, isActive: boolean): void {
   el.style.cursor = "pointer";
   el.style.transition = "all 0.15s ease";
   el.style.whiteSpace = "nowrap";
+  // FIX-PANEL-WIDTH-OVERFLOW: Ensure consistent sizing across all tabs
+  el.style.flexShrink = "0";
+  el.style.boxSizing = "border-box";
 
   if (isActive) {
     // Active tab: blue pill to stand out from chart toggles
@@ -482,6 +491,7 @@ export function createRelatedSvg(
 /**
  * Apply inline styles to the author profile card (Author Papers header).
  * FTR-CONSISTENT-UI: Use same background as chart container for consistency
+ * FIX-CITING-TAB-OVERFLOW: Add width constraints to prevent overflow
  */
 export function applyAuthorProfileCardStyle(el: HTMLElement): void {
   el.style.background = "var(--material-sidepane, #f8fafc)";
@@ -489,6 +499,12 @@ export function applyAuthorProfileCardStyle(el: HTMLElement): void {
   el.style.borderRadius = "6px";
   el.style.padding = "10px 12px";
   el.style.marginBottom = "8px";
+  // FIX-CITING-TAB-OVERFLOW: Add width constraints
+  el.style.width = "100%";
+  el.style.maxWidth = "100%";
+  el.style.minWidth = "0";
+  el.style.boxSizing = "border-box";
+  el.style.overflow = "hidden";
 }
 
 /**

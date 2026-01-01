@@ -56,6 +56,11 @@
     type="bool"
   />
   <preference
+    id="pref-debug_panel_layout"
+    name="__prefsPrefix__.debug_panel_layout"
+    type="bool"
+  />
+  <preference
     id="pref-reader_auto_reopen"
     name="__prefsPrefix__.reader_auto_reopen"
     type="bool"
@@ -810,6 +815,22 @@
           style="flex: 1; margin-left: 8px"
         />
       </hbox>
+    </vbox>
+  </vbox>
+
+  <!-- Developer -->
+  <vbox class="zinspire-pref-section">
+    <html:h3 class="zinspire-pref-title" data-l10n-id="pref-dev"></html:h3>
+    <vbox class="zinspire-pref-row">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-debug_panel_layout"
+        preference="extensions.zotero.inspiremeta.debug_panel_layout"
+        data-l10n-id="pref-dev-panel-layout"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-dev-panel-layout-desc"
+      ></html:p>
     </vbox>
   </vbox>
 

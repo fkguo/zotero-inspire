@@ -306,8 +306,13 @@ export class EntryListRenderer {
     // Cache dark mode value for this render (avoid multiple isDarkMode() calls)
     const dark = ctx.darkMode ?? isDarkMode();
 
-    // Store entry ID for event delegation
+    // Store entry ID and recid for event delegation
     row.dataset.entryId = entry.id;
+    if (entry.recid) {
+      row.dataset.recid = entry.recid;
+    } else {
+      delete row.dataset.recid;
+    }
 
     // Update checkbox state
     const checkbox = row.querySelector(
@@ -431,7 +436,16 @@ export class EntryListRenderer {
       titleLink.textContent = entry.title + ";";
       titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
       titleLink.style.wordBreak = "break-word";
-      titleLink.style.overflowWrap = "break-word";
+      // Make long titles wrap even when they contain long unbroken segments
+      // (and even if host CSS sets `a { white-space: nowrap; padding: … }`).
+      titleLink.style.overflowWrap = "anywhere";
+      // Force wrapping even if host CSS applies `white-space: nowrap` to links.
+      titleLink.style.whiteSpace = "normal";
+      // Reset global Zotero anchor padding that can otherwise eat horizontal space.
+      titleLink.style.padding = "0";
+      titleLink.style.margin = "0";
+      titleLink.style.display = "inline";
+      titleLink.style.maxWidth = "100%";
     }
 
     // Update meta (journal, DOI, arXiv links)
