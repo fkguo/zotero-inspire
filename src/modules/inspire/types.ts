@@ -60,13 +60,18 @@ export interface FavoriteAuthor {
  * Favorite paper for quick access in References Panel.
  */
 export interface FavoritePaper {
-  recid: string;
+  recid?: string;
   itemID?: number; // Zotero item ID for navigation
   title: string;
   authors?: string; // First author or abbreviated author list
   year?: number;
   addedAt: number;
 }
+
+/**
+ * Favorite presentation for quick access in References Panel.
+ */
+export interface FavoritePresentation extends FavoritePaper {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reference Entry Types

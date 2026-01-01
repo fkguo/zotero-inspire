@@ -110,6 +110,7 @@ import {
   type AuthorStats,
   type FavoriteAuthor,
   type FavoritePaper,
+  type FavoritePresentation,
   type InspireReferenceEntry,
   type InspireArxivDetails,
   type ScrollSnapshot,
@@ -13550,16 +13551,25 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     popup.id = popupId;
 
     // Favorite/unfavorite option
-    const isFavorite = this.isPaperFavorite(recid);
+    let isPresentation = false;
+    if (entry.localItemID) {
+      const item = Zotero.Items.get(entry.localItemID);
+      if (item?.itemType === "presentation") {
+        isPresentation = true;
+      }
+    }
+
+    const isFavorite = this.isPaperFavorite(recid, entry.localItemID);
     const favItem = (doc as any).createXULElement("menuitem");
-    favItem.setAttribute(
-      "label",
-      getString(
-        isFavorite
-          ? "references-panel-favorite-paper-remove"
-          : "references-panel-favorite-paper-add",
-      ),
-    );
+    const labelKey = isFavorite
+      ? isPresentation
+        ? "references-panel-favorite-presentation-remove"
+        : "references-panel-favorite-paper-remove"
+      : isPresentation
+        ? "references-panel-favorite-presentation-add"
+        : "references-panel-favorite-paper-add";
+
+    favItem.setAttribute("label", getString(labelKey as FluentMessageId));
     favItem.addEventListener("command", () => {
       this.togglePaperFavorite(entry);
     });
@@ -14653,18 +14663,78 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     setPref("favorite_papers", JSON.stringify(favorites));
   }
 
-  private isPaperFavorite(recid: string): boolean {
-    const favorites = this.getFavoritePapers();
-    return favorites.some((f) => f.recid === recid);
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Favorite Presentations Management (FTR-FAVORITE-PRESENTATIONS)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private getFavoritePresentations(): FavoritePresentation[] {
+    try {
+      const json = getPref("favorite_presentations") as string;
+      return JSON.parse(json || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  private saveFavoritePresentations(favorites: FavoritePresentation[]): void {
+    setPref("favorite_presentations", JSON.stringify(favorites));
+  }
+
+  private isPaperFavorite(recid?: string, itemID?: number): boolean {
+    const papers = this.getFavoritePapers();
+    const presentations = this.getFavoritePresentations();
+
+    const check = (f: FavoritePaper | FavoritePresentation) => {
+      // Priority 1: Match by itemID if both have it
+      if (itemID && f.itemID) {
+        return f.itemID === itemID;
+      }
+      // Priority 2: Fallback to recid if one is missing itemID
+      return !!recid && !!f.recid && f.recid === recid;
+    };
+
+    return papers.some(check) || presentations.some(check);
   }
 
   private togglePaperFavorite(entry: InspireReferenceEntry): void {
-    if (!entry.recid) return; // Cannot favorite without recid
-    const favorites = this.getFavoritePapers();
-    const existingIndex = favorites.findIndex((f) => f.recid === entry.recid);
+    if (!entry.recid && !entry.localItemID) return; // Cannot favorite without identifier
+
+    // Determine if this is a presentation
+    let isPresentation = false;
+    if (entry.localItemID) {
+      const item = Zotero.Items.get(entry.localItemID);
+      if (item?.itemType === "presentation") {
+        isPresentation = true;
+      }
+    }
+
+    const prefKey = isPresentation ? "favorite_presentations" : "favorite_papers";
+    const getFavorites = isPresentation
+      ? () => this.getFavoritePresentations()
+      : () => this.getFavoritePapers();
+    const saveFavorites = isPresentation
+      ? (favs: FavoritePresentation[]) => this.saveFavoritePresentations(favs)
+      : (favs: FavoritePaper[]) => this.saveFavoritePapers(favs);
+
+    const favorites = getFavorites();
+    const existingIndex = favorites.findIndex((f) => {
+      // Priority 1: Match by itemID if both have it
+      if (entry.localItemID && f.itemID) {
+        return f.itemID === entry.localItemID;
+      }
+      // Priority 2: Fallback to recid if one is missing itemID
+      return !!entry.recid && !!f.recid && f.recid === entry.recid;
+    });
+
     if (existingIndex >= 0) {
       favorites.splice(existingIndex, 1);
-      this.showToast(getString("references-panel-favorite-paper-removed"));
+      this.showToast(
+        getString(
+          isPresentation
+            ? "references-panel-favorite-presentation-removed"
+            : "references-panel-favorite-paper-removed",
+        ),
+      );
     } else {
       // Extract surname only from first author
       const firstAuthorFull = entry.authors?.[0];
@@ -14672,7 +14742,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (firstAuthorFull) {
         // Author format is usually "Surname, FirstName" or "Surname"
         const commaIdx = firstAuthorFull.indexOf(",");
-        authorSurname = commaIdx > 0 ? firstAuthorFull.substring(0, commaIdx).trim() : firstAuthorFull.trim();
+        authorSurname =
+          commaIdx > 0
+            ? firstAuthorFull.substring(0, commaIdx).trim()
+            : firstAuthorFull.trim();
       }
       const authors = authorSurname
         ? entry.authors && entry.authors.length > 1
@@ -14680,16 +14753,22 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           : authorSurname
         : undefined;
       favorites.push({
-        recid: entry.recid,
+        recid: entry.recid || undefined,
         itemID: entry.localItemID, // Save Zotero item ID for navigation
         title: entry.title || entry.displayText || "Untitled",
         authors,
         year: entry.year ? parseInt(entry.year, 10) : undefined,
         addedAt: Date.now(),
       });
-      this.showToast(getString("references-panel-favorite-paper-added"));
+      this.showToast(
+        getString(
+          isPresentation
+            ? "references-panel-favorite-presentation-added"
+            : "references-panel-favorite-paper-added",
+        ),
+      );
     }
-    this.saveFavoritePapers(favorites);
+    saveFavorites(favorites);
   }
 
   private isCurrentAuthorFavorite(): boolean {
@@ -14812,6 +14891,23 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.renderFavoriteAuthorsList();
   }
 
+  private reorderFavoritePresentation(fromIndex: number, toIndex: number): void {
+    const presentations = this.getFavoritePresentations();
+    if (
+      fromIndex < 0 ||
+      fromIndex >= presentations.length ||
+      toIndex < 0 ||
+      toIndex > presentations.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const [item] = presentations.splice(fromIndex, 1);
+    presentations.splice(toIndex, 0, item);
+    this.saveFavoritePresentations(presentations);
+    this.renderFavoriteAuthorsList();
+  }
+
   /**
    * Show favorites list by clearing current author and re-rendering.
    */
@@ -14884,9 +14980,20 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           (fav) =>
             fav.title.toLowerCase().includes(filterText) ||
             fav.authors?.toLowerCase().includes(filterText) ||
-            fav.recid.includes(filterText),
+            (fav.recid && fav.recid.includes(filterText)),
         )
       : allPapers;
+
+    // Get and filter presentations (FTR-FAVORITE-PRESENTATIONS)
+    const allPresentations = this.getFavoritePresentations();
+    const presentations = filterText
+      ? allPresentations.filter(
+          (fav) =>
+            fav.title.toLowerCase().includes(filterText) ||
+            fav.authors?.toLowerCase().includes(filterText) ||
+            (fav.recid && fav.recid.includes(filterText)),
+        )
+      : allPresentations;
 
     // Container
     const container = doc.createElement("div");
@@ -14897,6 +15004,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
     // Render Papers section
     this.renderFavoritePapersSection(doc, container, papers);
+
+    // Render Presentations section (FTR-FAVORITE-PRESENTATIONS)
+    this.renderFavoritePresentationsSection(doc, container, presentations);
 
     this.listEl.appendChild(container);
   }
@@ -15234,11 +15344,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         const item = Zotero.Items.get(paper.itemID);
         if (item && !item.deleted) {
           ZoteroPane.selectItem(paper.itemID);
-        } else {
+        } else if (paper.recid) {
           // Item was deleted, fallback to INSPIRE page
           Zotero.launchURL?.(`https://inspirehep.net/literature/${paper.recid}`);
         }
-      } else {
+      } else if (paper.recid) {
         Zotero.launchURL?.(`https://inspirehep.net/literature/${paper.recid}`);
       }
     });
@@ -15275,6 +15385,256 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.renderFavoriteAuthorsList();
       }
     }
+  }
+
+  private removeFavoritePresentation(index: number): void {
+    const presentations = this.getFavoritePresentations();
+    if (index >= 0 && index < presentations.length) {
+      presentations.splice(index, 1);
+      this.saveFavoritePresentations(presentations);
+      if (this.isFavoritesViewActive) {
+        this.renderFavoriteAuthorsList();
+      }
+    }
+  }
+
+  private renderFavoritePresentationsSection(
+    doc: Document,
+    container: HTMLElement,
+    presentations: FavoritePresentation[],
+  ): void {
+    // Section wrapper
+    const section = doc.createElement("div");
+    section.className = "zinspire-favorites-section";
+    section.style.marginTop = "16px";
+
+    // Collapsible header
+    const header = doc.createElement("div");
+    header.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--fill-primary, #334155);
+    `;
+
+    const arrow = doc.createElement("span");
+    arrow.textContent = "▼";
+    arrow.style.cssText = `
+      font-size: 10px;
+      transition: transform 0.15s ease;
+    `;
+
+    const titleText = doc.createElement("span");
+    titleText.textContent = getString(
+      "references-panel-favorite-presentations-title",
+    );
+
+    const countBadge = doc.createElement("span");
+    countBadge.textContent = `(${presentations.length})`;
+    countBadge.style.cssText = `
+      font-weight: 400;
+      color: var(--fill-secondary, #64748b);
+    `;
+
+    header.appendChild(arrow);
+    header.appendChild(titleText);
+    header.appendChild(countBadge);
+    section.appendChild(header);
+
+    // Content container
+    const content = doc.createElement("div");
+    content.className = "zinspire-favorites-content";
+
+    if (presentations.length === 0) {
+      const empty = doc.createElement("div");
+      empty.style.cssText = `
+        font-size: 12px;
+        color: var(--fill-secondary, #64748b);
+      `;
+      empty.textContent = getString(
+        "references-panel-favorite-presentations-empty",
+      );
+      content.appendChild(empty);
+    } else {
+      const list = doc.createElement("div");
+      list.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      `;
+
+      // Drag state
+      let draggedIndex: number | null = null;
+
+      presentations.forEach((presentation, index) => {
+        const row = this.createFavoritePresentationRow(
+          doc,
+          presentation,
+          index,
+        );
+
+        // Drag events
+        row.addEventListener("dragstart", (e) => {
+          draggedIndex = index;
+          row.style.opacity = "0.5";
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+          }
+        });
+
+        row.addEventListener("dragend", () => {
+          row.style.opacity = "1";
+          draggedIndex = null;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+        });
+
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          list.querySelectorAll("[data-index]").forEach((el) => {
+            (el as HTMLElement).style.borderTop = "";
+            (el as HTMLElement).style.borderBottom = "";
+          });
+          if (e.clientY < midY) {
+            row.style.borderTop = "2px solid #0060df";
+          } else {
+            row.style.borderBottom = "2px solid #0060df";
+          }
+        });
+
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          if (draggedIndex === null || draggedIndex === index) return;
+          const rect = row.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          let targetIndex = e.clientY < midY ? index : index + 1;
+          if (draggedIndex < targetIndex) targetIndex--;
+          this.reorderFavoritePresentation(draggedIndex, targetIndex);
+        });
+
+        list.appendChild(row);
+      });
+      content.appendChild(list);
+    }
+
+    section.appendChild(content);
+
+    // Toggle collapse on header click
+    header.addEventListener("click", () => {
+      const isCollapsed = content.style.display === "none";
+      content.style.display = isCollapsed ? "" : "none";
+      arrow.style.transform = isCollapsed ? "" : "rotate(-90deg)";
+    });
+
+    container.appendChild(section);
+  }
+
+  private createFavoritePresentationRow(
+    doc: Document,
+    presentation: FavoritePresentation,
+    index: number,
+  ): HTMLElement {
+    const row = doc.createElement("div");
+    row.setAttribute("draggable", "true");
+    row.setAttribute("data-index", String(index));
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: var(--material-background, #f8fafc);
+      cursor: grab;
+    `;
+
+    // Drag handle
+    const dragHandle = doc.createElement("span");
+    dragHandle.textContent = "⋮⋮";
+    dragHandle.style.cssText = `
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: grab;
+      font-size: 10px;
+      user-select: none;
+    `;
+    row.appendChild(dragHandle);
+
+    // Presentation link - format: "Author (Year): Title"
+    const link = doc.createElement("a");
+    // Extract surname from stored author string
+    let authorPart = "Unknown";
+    if (presentation.authors) {
+      const commaIdx = presentation.authors.indexOf(",");
+      if (commaIdx > 0 && !presentation.authors.includes(" et al.")) {
+        authorPart = presentation.authors.substring(0, commaIdx).trim();
+      } else {
+        authorPart = presentation.authors;
+      }
+    }
+    const yearPart = presentation.year ? ` (${presentation.year})` : "";
+    const titlePart =
+      presentation.title.length > 50
+        ? presentation.title.substring(0, 47) + "..."
+        : presentation.title;
+    link.textContent = `🪧 ${authorPart}${yearPart}: ${titlePart}`;
+    link.title = presentation.title;
+    link.style.cssText = `
+      flex: 1;
+      color: #0066cc;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 12px;
+    `;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (presentation.itemID) {
+        const item = Zotero.Items.get(presentation.itemID);
+        if (item && !item.deleted) {
+          ZoteroPane.selectItem(presentation.itemID);
+        } else if (presentation.recid) {
+          Zotero.launchURL?.(
+            `https://inspirehep.net/literature/${presentation.recid}`,
+          );
+        }
+      } else if (presentation.recid) {
+        Zotero.launchURL?.(
+          `https://inspirehep.net/literature/${presentation.recid}`,
+        );
+      }
+    });
+    row.appendChild(link);
+
+    // Remove button
+    const removeBtn = doc.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = getString(
+      "references-panel-favorite-presentation-remove",
+    );
+    removeBtn.style.cssText = `
+      border: none;
+      background: transparent;
+      color: var(--fill-tertiary, #94a3b8);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+    `;
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.removeFavoritePresentation(index);
+    });
+    row.appendChild(removeBtn);
+
+    return row;
   }
 
   private createFavoriteAuthorRow(

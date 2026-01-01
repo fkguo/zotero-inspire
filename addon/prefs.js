@@ -49,3 +49,5 @@ pref("__prefsPrefix__.funding_china_only", true); // Only extract Chinese fundin
 pref("__prefsPrefix__.favorite_authors", "[]"); // JSON array of FavoriteAuthor objects
 // Favorite papers (FTR-FAVORITE-PAPERS)
 pref("__prefsPrefix__.favorite_papers", "[]"); // JSON array of FavoritePaper objects
+// Favorite presentations (FTR-FAVORITE-PRESENTATIONS)
+pref("__prefsPrefix__.favorite_presentations", "[]"); // JSON array of FavoritePresentation objects

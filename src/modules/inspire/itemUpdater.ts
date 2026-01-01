@@ -1090,11 +1090,18 @@ export class ZInspire {
    * Toggle favorite paper status for selected item from main window menu.
    * FTR-FAVORITE-PAPERS
    */
+  /**
+   * Toggle favorite paper or presentation status for selected item from main window menu.
+   * FTR-FAVORITE-PAPERS / FTR-FAVORITE-PRESENTATIONS
+   */
   toggleFavoritePaperFromMenu() {
     const items = ZoteroPane.getSelectedItems();
     if (!items || items.length !== 1) {
       new ztoolkit.ProgressWindow(config.addonName)
-        .createLine({ text: getString("references-panel-favorite-paper-select-one"), type: "default" })
+        .createLine({
+          text: getString("references-panel-favorite-paper-select-one"),
+          type: "default",
+        })
         .show();
       return;
     }
@@ -1102,15 +1109,11 @@ export class ZInspire {
     if (!item.isRegularItem()) return;
 
     const recid = deriveRecidFromItem(item);
-    if (!recid) {
-      new ztoolkit.ProgressWindow(config.addonName)
-        .createLine({ text: getString("references-panel-favorite-paper-no-recid"), type: "default" })
-        .show();
-      return;
-    }
+    const isPresentation = item.itemType === "presentation";
+    const prefKey = isPresentation ? "favorite_presentations" : "favorite_papers";
 
     // Get current favorites
-    const json = getPref("favorite_papers") as string;
+    const json = getPref(prefKey) as string;
     let favorites: FavoritePaper[];
     try {
       favorites = JSON.parse(json || "[]");
@@ -1118,29 +1121,41 @@ export class ZInspire {
       favorites = [];
     }
 
-    // Check if already favorite
-    const existingIndex = favorites.findIndex((f) => f.recid === recid);
+    // Check if already favorite - match by recid if available, otherwise by itemID
+    const existingIndex = favorites.findIndex(
+      (f) => (recid && f.recid === recid) || (item.id && f.itemID === item.id),
+    );
     if (existingIndex >= 0) {
       favorites.splice(existingIndex, 1);
       new ztoolkit.ProgressWindow(config.addonName)
-        .createLine({ text: getString("references-panel-favorite-paper-removed"), type: "success" })
+        .createLine({
+          text: getString(
+            isPresentation
+              ? "references-panel-favorite-presentation-removed"
+              : "references-panel-favorite-paper-removed",
+          ),
+          type: "success",
+        })
         .show();
     } else {
       // Get item info
       const title = item.getField("title") as string;
       const creators = item.getCreators();
-      const authorTypeID = Zotero.CreatorTypes.getID("author");
-      const firstAuthor = creators.find((c) => c.creatorTypeID === authorTypeID);
-      const authorCount = creators.filter((c) => c.creatorTypeID === authorTypeID).length;
-      const authors = firstAuthor
-        ? authorCount > 1
-          ? `${firstAuthor.lastName} et al.`
-          : firstAuthor.lastName
+      const creatorType = isPresentation ? "presenter" : "author";
+      const creatorTypeID = Zotero.CreatorTypes.getID(creatorType);
+      const firstCreator = creators.find((c) => c.creatorTypeID === creatorTypeID);
+      const creatorCount = creators.filter(
+        (c) => c.creatorTypeID === creatorTypeID,
+      ).length;
+      const authors = firstCreator
+        ? creatorCount > 1
+          ? `${firstCreator.lastName} et al.`
+          : firstCreator.lastName
         : undefined;
       const year = parseInt(item.getField("year") as string, 10) || undefined;
 
       favorites.push({
-        recid,
+        recid: recid || undefined,
         itemID: item.id,
         title: title || "Untitled",
         authors,
@@ -1148,11 +1163,18 @@ export class ZInspire {
         addedAt: Date.now(),
       });
       new ztoolkit.ProgressWindow(config.addonName)
-        .createLine({ text: getString("references-panel-favorite-paper-added"), type: "success" })
+        .createLine({
+          text: getString(
+            isPresentation
+              ? "references-panel-favorite-presentation-added"
+              : "references-panel-favorite-paper-added",
+          ),
+          type: "success",
+        })
         .show();
     }
 
-    setPref("favorite_papers", JSON.stringify(favorites));
+    setPref(prefKey, JSON.stringify(favorites));
   }
 
   /**

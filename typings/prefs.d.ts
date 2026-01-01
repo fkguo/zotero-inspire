@@ -49,6 +49,7 @@ declare namespace _ZoteroTypes {
       "funding_china_only": boolean;
       "favorite_authors": string;
       "favorite_papers": string;
+      "favorite_presentations": string;
     };
   }
 }
