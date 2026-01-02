@@ -34,6 +34,14 @@ extra-order-citations-first =
 extra-order-arxiv-first =
     .label = arXiv ID first
 
+pref-cites-column-exclude-self =
+    .label = Cites column: exclude self-citations
+pref-cites-column-exclude-self-desc = Use citation counts without self-citations (when available). If the items list doesn't update, switch collections or restart Zotero.
+
+pref-arxiv-in-journal-abbrev =
+    .label = Legacy: write arXiv ID into Journal Abbr.
+pref-arxiv-in-journal-abbrev-desc = For unpublished papers, store `arXiv:...` in the Journal Abbreviation field.
+
 pref-arxiv-tag1 =
     .label = Add arXiv primary category as tag (e.g., hep-ph, nucl-th)
 

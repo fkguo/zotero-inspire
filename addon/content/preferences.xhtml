@@ -11,6 +11,16 @@
     type="string"
   />
   <preference
+    id="pref-cites_column_exclude_self"
+    name="__prefsPrefix__.cites_column_exclude_self"
+    type="bool"
+  />
+  <preference
+    id="pref-arxiv_in_journal_abbrev"
+    name="__prefsPrefix__.arxiv_in_journal_abbrev"
+    type="bool"
+  />
+  <preference
     id="pref-latex_render_mode"
     name="__prefsPrefix__.latex_render_mode"
     type="string"
@@ -280,6 +290,28 @@
         </radiogroup>
       </vbox>
     </hbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 10px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-cites_column_exclude_self"
+        preference="extensions.zotero.inspiremeta.cites_column_exclude_self"
+        data-l10n-id="pref-cites-column-exclude-self"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-cites-column-exclude-self-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-arxiv_in_journal_abbrev"
+        preference="extensions.zotero.inspiremeta.arxiv_in_journal_abbrev"
+        data-l10n-id="pref-arxiv-in-journal-abbrev"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-arxiv-in-journal-abbrev-desc"
+      ></html:p>
+    </vbox>
   </vbox>
 
   <!-- arXiv Tag -->

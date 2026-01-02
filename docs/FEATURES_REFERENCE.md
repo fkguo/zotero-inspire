@@ -135,6 +135,24 @@ When hovering over an author name, a profile preview card appears with the follo
 
 ---
 
+## 1.9 Item Tree Custom Columns
+
+Zotero's main item list (Item Tree) supports two custom columns:
+
+| Column | Data Source (local) | Notes |
+| ------ | ------------------- | ----- |
+| `Cites` | `Extra` field | Reads `X citations ...` lines written by this plugin; default includes self-citations |
+| `arXiv` | Journal Abbr. / Extra / URL / DOI | Extracted via `extractArxivIdFromItem()`; no network requests. Sorting normalizes old-style IDs (e.g., `hep-th/9802109`) by numeric part. |
+
+**Preferences**:
+
+| Preference | Type | Default | Description |
+| ---------- | ---- | ------- | ----------- |
+| `cites_column_exclude_self` | boolean | false | Show citation counts without self-citations when available. If the items list doesn't update, switch collections or restart Zotero. |
+| `arxiv_in_journal_abbrev` | boolean | false | Legacy: write `arXiv:...` into `journalAbbreviation` for unpublished papers (kept for backward compatibility). |
+
+---
+
 ## 2. Caching System
 
 ### 2.1 Memory Caches (LRU)
@@ -460,7 +478,7 @@ Detects unpublished arXiv preprints and checks if they have been published.
 
 A Zotero item is identified as an unpublished preprint if:
 
-- `journalAbbreviation` starts with `arXiv:` AND has no non-arXiv DOI
+- `journalAbbreviation` starts with `arXiv:` (legacy mode / older items) AND has no non-arXiv DOI
 - Or has only arXiv DOI (`10.48550/arXiv.xxx`)
 - Or has `arXiv:` in Extra field but no journal info
 

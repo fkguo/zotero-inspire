@@ -34,6 +34,14 @@ extra-order-citations-first =
 extra-order-arxiv-first =
     .label = arXiv ID 优先
 
+pref-cites-column-exclude-self =
+    .label = Cites 列：不含自引
+pref-cites-column-exclude-self-desc = 在可用时使用不含自引的引用次数。若主列表未刷新，可切换集合或重启 Zotero。
+
+pref-arxiv-in-journal-abbrev =
+    .label = （兼容）将 arXiv 号写入 Journal Abbr.
+pref-arxiv-in-journal-abbrev-desc = 对未发表论文，将 `arXiv:...` 写入 Journal Abbreviation 字段。
+
 pref-arxiv-tag1 =
     .label = 添加 arXiv 主分类作为标签（如 hep-ph、nucl-th）
 

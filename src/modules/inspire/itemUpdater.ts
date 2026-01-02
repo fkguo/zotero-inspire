@@ -1973,6 +1973,7 @@ export async function setInspireMeta(
   let extra = item.getField("extra") as string;
   const publication = item.getField("publicationTitle") as string;
   const citekey_pref = getPref("citekey");
+  const arxivInJournalAbbrev = getPref("arxiv_in_journal_abbrev");
 
   if (metaInspire.recid !== -1 && metaInspire.recid !== undefined) {
     if (operation === "full" || operation === "noabstract") {
@@ -2076,7 +2077,7 @@ export async function setInspireMeta(
         }
 
         if (!metaInspire.journalAbbreviation) {
-          if (item.itemType == "journalArticle") {
+          if (arxivInJournalAbbrev && item.itemType == "journalArticle") {
             item.setField("journalAbbreviation", arXivInfo);
           }
           // Clear publicationTitle if it contains arXiv info (unpublished preprint should have empty Publication field)
@@ -2164,6 +2165,7 @@ export async function setInspireMetaSelective(
   let extra = item.getField("extra") as string;
   const publication = item.getField("publicationTitle") as string;
   const citekey_pref = getPref("citekey");
+  const arxivInJournalAbbrev = getPref("arxiv_in_journal_abbrev");
 
   // Build a set of allowed field names for quick lookup
   const allowedFields = new Set(allowedChanges.map((c) => c.field));
@@ -2204,6 +2206,7 @@ export async function setInspireMetaSelective(
             item.setField("publicationTitle", metaInspire.journalAbbreviation);
           }
         } else if (
+          arxivInJournalAbbrev &&
           metaInspire.arxiv?.value &&
           item.itemType === "journalArticle"
         ) {

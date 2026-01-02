@@ -351,6 +351,20 @@
 - **引用优先**：引用数显示在 Extra 字段顶部
 - **arXiv 优先**：arXiv ID 显示在顶部
 
+### 主列表自定义列（Cites / arXiv）
+
+在 Zotero 主列表（条目列表）中可启用两列：
+
+- **Cites**：显示 INSPIRE 引用数（来自插件写入 Extra 的 `X citations ...` 行；默认含自引，可配置为不含自引）
+- **arXiv**：显示 arXiv 号（本地提取：Journal Abbr. / Extra / URL / DOI；排序会对旧式 `hep-th/9802109` 等按数字部分规范化）
+
+启用方式：在条目列表表头打开列选择器，勾选 `Cites` / `arXiv`。
+
+相关选项：
+
+- **Cites 列：不含自引**：切换显示含/不含自引的引用数；若主列表未刷新，可切换集合或重启 Zotero。
+- **（兼容）将 arXiv 号写入 Journal Abbr.**：默认关闭（已有 arXiv 列后不再推荐写入 Journal Abbr.，仅用于向后兼容）。
+
 ### arXiv 分类标签
 
 启用后，自动将 arXiv 主分类（如 hep-ph、nucl-th）添加为标签。

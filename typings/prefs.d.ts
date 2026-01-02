@@ -12,6 +12,8 @@ declare namespace _ZoteroTypes {
       "tag_norecid": string;
       "tag_enable": boolean;
       "extra_order": string;
+      "cites_column_exclude_self": boolean;
+      "arxiv_in_journal_abbrev": boolean;
       "arxiv_tag_enable": boolean;
       "max_authors": number;
       "reader_auto_reopen": boolean;
