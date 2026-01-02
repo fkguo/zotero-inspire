@@ -99,17 +99,27 @@ function cacheProfile(
   }
 
   // Save to local persistent cache for offline support
-  // Use recid as primary key for local cache (most stable identifier)
-  const localCacheKey = profile.recid || primaryKey;
-  localCache.set<InspireAuthorProfile>(
-    "author_profile",
-    localCacheKey,
-    profile,
-    undefined,
-    undefined,
-  ).catch((e) => {
-    Zotero.debug(`[${config.addonName}] Failed to save author profile to local cache: ${e}`);
-  });
+  // Keep the local cache readable from *all* entry points:
+  // - recid lookup reads `authorInfo.recid` (bare recid)
+  // - BAI/name lookup reads the prefixed in-memory cache key (e.g. `bai:...`, `name:...`)
+  const localCacheKeys = new Set<string>();
+  localCacheKeys.add(primaryKey);
+  if (profile.recid) {
+    localCacheKeys.add(profile.recid);
+  }
+  if (profile.bai) {
+    localCacheKeys.add(`bai:${profile.bai}`);
+  }
+
+  for (const key of localCacheKeys) {
+    localCache
+      .set<InspireAuthorProfile>("author_profile", key, profile, undefined, undefined)
+      .catch((e) => {
+        Zotero.debug(
+          `[${config.addonName}] Failed to save author profile to local cache (${key}): ${e}`,
+        );
+      });
+  }
 }
 
 /**
