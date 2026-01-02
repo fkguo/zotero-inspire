@@ -226,6 +226,13 @@ export {
   type CollabTagProgressCallback,
 } from "./collabTagService";
 
+// Re-export Item Tree custom columns (FTR-CUSTOM-COLUMNS)
+export {
+  registerInspireItemTreeColumns,
+  unregisterInspireItemTreeColumns,
+  refreshInspireItemTreeColumns,
+} from "./itemTreeColumns";
+
 // Re-export PDF annotate module (FTR-PDF-ANNOTATE)
 export {
   // Types

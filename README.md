@@ -79,6 +79,18 @@ inspire: j Phys.Rev.D       → Search by journal
 
 **From the panel (more convenient)**: Click the 🔍 Search tab and enter your query directly (no prefix needed). Search history is saved and accessible via dropdown (use right or tab to accept inline hint from history records).
 
+### Custom Columns (Main Item List)
+
+Zotero's main item list supports two additional columns:
+
+- **`Cites`** — Citation counts from INSPIRE (stored in `Extra` by this plugin). Default: includes self-citations (configurable).
+- **`arXiv`** — arXiv ID extracted locally (from Journal Abbr. / Extra / URL / DOI).
+
+Enable them via the column picker in the items list header. Preferences:
+
+- **Cites column: exclude self-citations** — Switch between total vs. without self-citations. If the list doesn't update immediately, switch collections or restart Zotero.
+- **Legacy: write arXiv ID into Journal Abbr.** — Disabled by default now that an `arXiv` column exists (kept for backward compatibility).
+
 ---
 
 ## Panel Features

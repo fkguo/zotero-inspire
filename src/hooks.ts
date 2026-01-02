@@ -18,6 +18,9 @@ import {
   onRenderModeChange,
   deriveRecidFromItem,
   clearFundingCache,
+  registerInspireItemTreeColumns,
+  unregisterInspireItemTreeColumns,
+  refreshInspireItemTreeColumns,
 } from "./modules/inspire";
 import {
   ENRICH_BATCH_RANGE,
@@ -31,6 +34,7 @@ import { registerPrefsScripts } from "./modules/prefScript";
 let purgeTimer: ReturnType<typeof setTimeout> | undefined;
 let preprintCheckTimer: ReturnType<typeof setTimeout> | undefined;
 let preprintCheckController: AbortController | undefined;
+let itemTreePrefsObserverID: symbol | undefined;
 
 async function onStartup() {
   await Promise.all([
@@ -170,6 +174,27 @@ async function onMainWindowLoad(_win: Window): Promise<void> {
 
   // FTR-PDF-ANNOTATE: Initialize Reader integration for citation detection
   getReaderIntegration().initialize();
+
+  // FTR-CUSTOM-COLUMNS: Register custom item tree columns (Cites, arXiv)
+  try {
+    await registerInspireItemTreeColumns();
+
+    // Refresh item tree cells when Cites column mode changes
+    if (!itemTreePrefsObserverID && (Zotero.Prefs as any).registerObserver) {
+      const prefName = `${config.prefsPrefix}.cites_column_exclude_self`;
+      itemTreePrefsObserverID = (Zotero.Prefs as any).registerObserver(
+        prefName,
+        () => {
+          refreshInspireItemTreeColumns(true);
+        },
+        true,
+      ) as symbol;
+    }
+  } catch (err) {
+    Zotero.debug(
+      `[${config.addonName}] Failed to register item tree columns: ${err}`,
+    );
+  }
 }
 
 async function onMainWindowUnload(_win: Window): Promise<void> {
@@ -202,6 +227,17 @@ function onShutdown(): void {
   localCache.flushWrites().catch(() => {
     // Ignore flush errors during shutdown
   });
+
+  // FTR-CUSTOM-COLUMNS: Unregister custom item tree columns
+  unregisterInspireItemTreeColumns();
+  if (itemTreePrefsObserverID) {
+    try {
+      Zotero.Prefs.unregisterObserver(itemTreePrefsObserverID);
+    } catch {
+      // Ignore unregister errors during shutdown
+    }
+    itemTreePrefsObserverID = undefined;
+  }
   // Remove addon object
   addon.data.alive = false;
   // @ts-ignore - Plugin instance is not typed
