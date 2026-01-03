@@ -305,11 +305,11 @@ Claude（Anthropic）与 Gemini 协议不同，建议单独适配：
 
 | Milestone | Scope | Done Definition（可验收点） | Status（commit，仅本地记录不 push） |
 | --- | --- | --- | --- |
-| M1 | **AI Profiles + Quick Actions** | `ai_profiles/ai_active_profile_id/ai_prompt_templates` 生效；对话框内可选 profile；API key 通过 secretStore 保存/清除；提供“Test Connection”。 | ✅ `e91376d` + `3c9f5d6` |
-| M2 | **LLM Client（多 provider + streaming）** | OpenAI-Compatible/Claude/Gemini 统一接口；支持非流式与（至少 OpenAI-Compatible）流式；错误归一化（401/429/timeout）；不在日志输出 key。 | ✅ `396996e` |
-| M3 | **AI… 对话框 + 方案 B 内置 Markdown 编辑器** | header 栏新增 `AI…`；对话框支持 Summary/Recommend/My Notes；支持 Copy Markdown / Save as Note / Export `.md…`；My Notes 可写 Markdown + 预览（含数学渲染）。 | ✅ `ee67389` |
-| M4 | **10.3(B) Query Expansion Recommend** | AI 生成 INSPIRE queries → 插件 Search API 拉取 → 与 Related 合并去重 → AI grounded rerank 分组；UI 展示分组 + 解释；推荐条目可点击打开/导入。 | ✅ `711d0bd` |
-| M5 | **12.2 增强（完整实现）** | Streaming UI、userGoal、Follow-ups、AutoPilot（多条目队列 + throttle）、失败自动降级、可复现记录（front matter/hash）、主题 chips 过滤；提供“Copy debug info”（不含敏感）。 | ✅ `0376160` |
+| M1 | **AI Profiles（含模板 prefs 基础设施）** | `ai_profiles/ai_active_profile_id` 生效；对话框内可选 profile；API key 通过 secretStore 保存/清除；提供“Test Connection”。（`ai_prompt_templates` 目前仅提供存储结构，后续可扩展为 quick actions UI） | Done: `e91376d` + `3c9f5d6` |
+| M2 | **LLM Client（多 provider + streaming）** | OpenAI-Compatible/Claude/Gemini 统一接口；支持非流式与（至少 OpenAI-Compatible）流式；错误归一化（401/429/timeout）；不在日志输出 key。 | Done: `396996e` |
+| M3 | **AI… 对话框 + 方案 B 内置 Markdown 编辑器** | header 栏新增 `AI…`；对话框支持 Summary/Recommend/My Notes；支持 Copy Markdown / Save as Note / Export `.md…`；My Notes 可写 Markdown + 预览（含数学渲染）。 | Done: `ee67389` |
+| M4 | **10.3(B) Query Expansion Recommend** | AI 生成 INSPIRE queries → 插件 Search API 拉取 → 与 Related 合并去重 → AI grounded rerank 分组；UI 展示分组 + 解释；推荐条目可点击打开/导入。 | Done: `711d0bd` |
+| M5 | **12.2 增强（完整实现）** | Streaming UI、userGoal、Follow-ups、AutoPilot（多条目队列 + throttle）、失败自动降级、可复现记录（front matter/hash）、主题 chips 过滤。 | Done: `0376160` |
 
 实现顺序建议：`M1 → M2 → M3 → M4 → M5`（M4 依赖 M2/M3；M5 依赖全部）。
 
