@@ -121,6 +121,21 @@ function sanitizeFilenamePart(input: string): string {
     .slice(0, 120);
 }
 
+function redactUrlForDebug(raw: string): string {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  try {
+    const u = new URL(text);
+    u.username = "";
+    u.password = "";
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return text.replace(/\/\/([^@]+)@/g, "//***@");
+  }
+}
+
 function stripYamlFrontMatter(markdown: string): string {
   const src = String(markdown ?? "");
   if (!src.startsWith("---")) return src;
@@ -765,6 +780,17 @@ export class AIDialog {
       this.setStatus("Copied");
     });
     footer.appendChild(copyBtn);
+
+    const debugBtn = doc.createElement("button");
+    debugBtn.textContent = "Copy Debug";
+    debugBtn.className = "zinspire-ai-dialog__btn";
+    debugBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    debugBtn.style.borderRadius = "6px";
+    debugBtn.style.padding = "6px 10px";
+    debugBtn.style.fontSize = "12px";
+    debugBtn.style.cursor = "pointer";
+    debugBtn.addEventListener("click", () => void this.copyDebugInfo());
+    footer.appendChild(debugBtn);
 
     const saveNoteBtn = doc.createElement("button");
     saveNoteBtn.textContent = "Save as Note";
@@ -2736,6 +2762,71 @@ Answer in Markdown.`;
       settings: this.lastSummaryInputs,
       promptVersion,
     });
+  }
+
+  private async copyDebugInfo(): Promise<void> {
+    try {
+      const now = new Date().toISOString();
+      const profile = getActiveAIProfile();
+      const secret = await getAIProviderApiKey(`profile:${profile.id}`);
+      const hasKey = isNonEmptyString(secret.apiKey);
+      const meta = await this.ensureSeedMeta().catch(() => null);
+      const cacheDir = await localCache.getCacheDir().catch(() => null);
+
+      const debug = {
+        addon: config.addonName,
+        version,
+        time: now,
+        seed: {
+          title: meta?.title || "",
+          recid: meta?.recid || "",
+          citekey: meta?.citekey || "",
+          authorYear: meta?.authorYear || "",
+          zoteroItemKey: meta?.zoteroItemKey || "",
+        },
+        profile: {
+          id: profile.id,
+          name: profile.name,
+          provider: profile.provider,
+          baseURL: redactUrlForDebug(profile.baseURL || ""),
+          model: profile.model,
+          preset: profile.preset || "",
+        },
+        apiKey: {
+          present: hasKey,
+          storage: secret.storage,
+        },
+        prefs: {
+          outputLanguage: String(getPref("ai_summary_output_language") || ""),
+          style: String(getPref("ai_summary_style") || ""),
+          citationFormat: String(getPref("ai_summary_citation_format") || ""),
+          maxRefs: Number(getPref("ai_summary_max_refs") || 0),
+          includeSeedAbstract: getPref("ai_summary_include_seed_abstract") === true,
+          includeRefAbstracts: getPref("ai_summary_include_abstracts") === true,
+          streaming: getPref("ai_summary_streaming") !== false,
+          cacheEnable: getPref("ai_summary_cache_enable") === true,
+          cacheTTLHours: Number(getPref("ai_summary_cache_ttl_hours") || 0),
+          localCacheEnable: getPref("local_cache_enable") === true,
+        },
+        templates: {
+          query: String(this.recommendQueryTemplateSelect?.value || ""),
+          rerank: String(this.recommendRerankTemplateSelect?.value || ""),
+          userCount: getUserPromptTemplates().length,
+        },
+        lastSummaryInputs: this.lastSummaryInputs || null,
+        localCacheDir: cacheDir,
+      };
+
+      const text = `zotero-inspire AI debug info (review before sharing)\n\n\`\`\`json\n${JSON.stringify(
+        debug,
+        null,
+        2,
+      )}\n\`\`\`\n`;
+      await copyToClipboard(text);
+      this.setStatus("Debug info copied");
+    } catch (err: any) {
+      this.setStatus(`Copy debug failed: ${String(err?.message || err)}`);
+    }
   }
 
   private async saveAsZoteroNote(): Promise<void> {
