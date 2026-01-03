@@ -19,6 +19,11 @@ declare namespace _ZoteroTypes {
       "reader_auto_reopen": boolean;
       "chart_enable": boolean;
       "chart_default_collapsed": boolean;
+      "related_papers_enable": boolean;
+      "related_papers_exclude_reviews": boolean;
+      "related_papers_max_results": number;
+      "citation_graph_max_results": number;
+      "external_token": string;
       "latex_render_mode": string;
       "search_history_days": number;
       "pdf_fuzzy_citation": boolean;

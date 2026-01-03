@@ -59,8 +59,10 @@ import {
   INSPIRE_SORT_OPTIONS,
   DEFAULT_REFERENCE_SORT,
   DEFAULT_CITED_BY_SORT,
+  DEFAULT_RELATED_SORT,
   isReferenceSortOption,
   isInspireSortOption,
+  isRelatedSortOption,
   SEARCH_HISTORY_MAX_ENTRIES,
   SEARCH_HISTORY_PREF_KEY,
   SEARCH_HISTORY_DAYS_PREF_KEY,
@@ -82,6 +84,7 @@ import {
   ENTRY_CITED_CACHE_SIZE,
   METADATA_CACHE_SIZE,
   SEARCH_CACHE_SIZE,
+  RELATED_CACHE_SIZE,
   ROW_POOL_MAX_SIZE,
   CHART_MAX_BAR_WIDTH,
   RENDER_PAGE_SIZE_FILTERED,
@@ -104,6 +107,7 @@ import {
   // Types
   type ReferenceSortOption,
   type InspireSortOption,
+  type RelatedSortOption,
   type InspireViewMode,
   type AuthorSearchInfo,
   type InspireAuthorProfile,
@@ -197,6 +201,10 @@ import {
   // Local cache
   fetchReferencesEntries,
   enrichReferencesEntries,
+  fetchRelatedPapersEntries,
+  RELATED_PAPERS_ALGORITHM_VERSION,
+  isPdgReviewOfParticlePhysicsTitle,
+  isReviewArticleEntry,
   localCache,
   // Cache types
   type CacheSource,
@@ -239,6 +247,8 @@ import {
   // AuthorPreviewController (Phase 0.5 refactor)
   AuthorPreviewController,
   type AuthorPreviewCallbacks,
+  // Citation graph dialog (FTR-CITATION-GRAPH)
+  CitationGraphDialog,
 } from "./inspire";
 
 // Re-export for external use
@@ -1310,6 +1320,10 @@ class InspireReferencePanelController {
   private referenceSort: ReferenceSortOption = DEFAULT_REFERENCE_SORT;
   private citedBySort: InspireSortOption = DEFAULT_CITED_BY_SORT;
   private entryCitedSort: InspireSortOption = DEFAULT_CITED_BY_SORT;
+  private relatedSort: RelatedSortOption = DEFAULT_RELATED_SORT;
+  private relatedDisabledForPdg = false;
+  private citationGraphDialog?: CitationGraphDialog;
+  private citationGraphButton?: HTMLButtonElement;
   private currentItemID?: number;
   private currentRecid?: string;
   private entryCitedSource?: EntryCitedSource;
@@ -1344,6 +1358,10 @@ class InspireReferencePanelController {
   // Cited-by: ~50 entries (large arrays, paginated data)
   private citedByCache = new LRUCache<string, InspireReferenceEntry[]>(
     CITED_BY_CACHE_SIZE,
+  );
+  // Related papers: ~50 entries (ranked suggestions)
+  private relatedCache = new LRUCache<string, InspireReferenceEntry[]>(
+    RELATED_CACHE_SIZE,
   );
   // Entry-cited: ~50 entries (similar to cited-by)
   private entryCitedCache = new LRUCache<string, InspireReferenceEntry[]>(
@@ -1643,6 +1661,41 @@ class InspireReferencePanelController {
       max-height: 1.2em;
     `;
 
+    // Row 1 right-side actions
+    const row1Actions = body.ownerDocument.createElement("div");
+    row1Actions.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    `;
+    row1.appendChild(row1Actions);
+
+    // Citation Graph button (FTR-CITATION-GRAPH)
+    const graphBtn = body.ownerDocument.createElement("button");
+    graphBtn.type = "button";
+    graphBtn.textContent =
+      getString("references-panel-citation-graph-button") || "Graph…";
+    graphBtn.title =
+      getString("references-panel-citation-graph-tooltip") ||
+      "Open citation graph";
+    graphBtn.style.cssText = `
+      flex-shrink: 0;
+      border: 1px solid var(--fill-quinary, #d1d5db);
+      background: var(--material-background, #fff);
+      color: var(--fill-secondary, #64748b);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      user-select: none;
+    `;
+    graphBtn.addEventListener("click", () => {
+      this.openCitationGraphDialog();
+    });
+    row1Actions.appendChild(graphBtn);
+    this.citationGraphButton = graphBtn;
+
     // Debug helper: native tooltips are not selectable/copyable.
     if (InspireReferencePanelController.PANEL_LAYOUT_DEBUG) {
       const copyBtn = body.ownerDocument.createElement("button");
@@ -1671,7 +1724,7 @@ class InspireReferencePanelController {
         }
         this.copyToClipboard(parts.join("\n\n"));
       });
-      row1.appendChild(copyBtn);
+      row1Actions.appendChild(copyBtn);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1711,6 +1764,7 @@ class InspireReferencePanelController {
     this.tabButtons = {
       references: this.createTabButton(tabs, "references"),
       citedBy: this.createTabButton(tabs, "citedBy"),
+      related: this.createTabButton(tabs, "related"),
       entryCited: this.createTabButton(tabs, "entryCited"),
       search: this.createTabButton(tabs, "search"),
     };
@@ -4405,6 +4459,7 @@ class InspireReferencePanelController {
     const tabOrder: InspireViewMode[] = [
       "references",
       "citedBy",
+      "related",
       "entryCited",
       "search",
     ];
@@ -6539,6 +6594,24 @@ class InspireReferencePanelController {
   }
 
   /**
+   * FTR-RELATED-PAPERS: Check if the Related tab is enabled in preferences.
+   */
+  private isRelatedPapersEnabled(): boolean {
+    return getPref("related_papers_enable") !== false;
+  }
+
+  private shouldExcludeReviewArticlesInRelated(): boolean {
+    return getPref("related_papers_exclude_reviews") !== false;
+  }
+
+  private getRelatedPapersMaxResults(): number {
+    const raw = getPref("related_papers_max_results");
+    const value =
+      typeof raw === "number" && Number.isFinite(raw) ? Math.floor(raw) : 50;
+    return Math.min(200, Math.max(10, value));
+  }
+
+  /**
    * Show message when chart is disabled and user tries to interact with it.
    */
   private showChartDisabledMessage() {
@@ -7412,9 +7485,13 @@ class InspireReferencePanelController {
     this.cancelActiveRequest();
     // PERF-FIX-2: Cancel any ongoing export operations
     this.cancelExport();
+    // FTR-CITATION-GRAPH: Cleanup citation graph dialog
+    this.citationGraphDialog?.dispose();
+    this.citationGraphDialog = undefined;
     this.allEntries = [];
     this.referencesCache.clear();
     this.citedByCache.clear();
+    this.relatedCache.clear();
     this.entryCitedCache.clear();
     this.metadataCache.clear();
     this.rowCache.clear();
@@ -7736,6 +7813,12 @@ class InspireReferencePanelController {
           .delete("cited", this.currentRecid, this.citedBySort)
           .catch(() => {});
         break;
+      case "related": {
+        const relatedKey = this.getCacheKey(this.currentRecid, "related");
+        this.relatedCache.delete(relatedKey);
+        localCache.delete("related", relatedKey).catch(() => {});
+        break;
+      }
       case "entryCited":
         if (this.entryCitedSource?.recid) {
           const cacheKey = this.entryCitedSource.recid;
@@ -7784,7 +7867,11 @@ class InspireReferencePanelController {
     this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
 
     // Re-trigger the load based on view mode (force=true to bypass any remaining cache)
-    if (this.viewMode === "references" || this.viewMode === "citedBy") {
+    if (
+      this.viewMode === "references" ||
+      this.viewMode === "citedBy" ||
+      this.viewMode === "related"
+    ) {
       if (this.currentItemID) {
         const item = Zotero.Items.get(this.currentItemID);
         if (item) {
@@ -9567,9 +9654,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (options.force) {
       const localCacheType = this.getLocalCacheType(mode);
       if (localCacheType) {
-        if (mode === "references") {
-          // References only use unsorted cache
-          await localCache.delete(localCacheType, recid);
+        if (mode === "references" || mode === "related") {
+          // References/Related only use unsorted cache
+          await localCache.delete(
+            localCacheType,
+            mode === "related" ? cacheKey : recid,
+          );
         } else {
           // Cited By / Author: delete both unsorted and sorted cache
           await Promise.all([
@@ -9586,7 +9676,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (isActiveMode) {
         const shouldReset = Boolean(options.resetScroll);
         const entriesForDisplay =
-          mode === "references" ? this.getSortedReferences(cached) : cached;
+          mode === "references"
+            ? this.getSortedReferences(cached)
+            : mode === "related"
+              ? this.getSortedRelated(cached)
+              : cached;
         this.allEntries = entriesForDisplay;
         // Reset totalApiCount for cached data (allEntries.length is accurate)
         this.totalApiCount = null;
@@ -9637,13 +9731,13 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           mode === "entryCited" && this.entryCitedSource?.authorSearchInfo;
         const shouldIgnoreTTL = isAuthorMode; // Allow expired cache for author papers
 
-        if (mode === "references") {
-          // References: always read without sort (client-side sorting)
+        if (mode === "references" || mode === "related") {
+          // References/Related: read without sort (References are client-side sorted; Related is pre-ranked)
           localResult = await localCache.get<InspireReferenceEntry[]>(
             localCacheType,
-            recid,
+            mode === "related" ? cacheKey : recid,
           );
-          usedClientSideSort = true;
+          usedClientSideSort = mode === "references";
         } else {
           // Cited By / Author Papers: try unsorted cache first (if data was complete)
           const unsortedResult = await localCache.get<InspireReferenceEntry[]>(
@@ -9677,14 +9771,17 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           if (isActiveMode) {
             const shouldReset = Boolean(options.resetScroll);
             // Apply client-side sorting if using unsorted cache
-            const entriesForDisplay = usedClientSideSort
-              ? mode === "references"
-                ? this.getSortedReferences(localResult.data)
-                : this.getSortedCitedBy(
-                    localResult.data,
-                    sortOption as InspireSortOption,
-                  )
-              : localResult.data;
+            const entriesForDisplay =
+              mode === "related"
+                ? this.getSortedRelated(localResult.data)
+                : usedClientSideSort
+                  ? mode === "references"
+                    ? this.getSortedReferences(localResult.data)
+                    : this.getSortedCitedBy(
+                        localResult.data,
+                        sortOption as InspireSortOption,
+                      )
+                  : localResult.data;
             this.allEntries = entriesForDisplay;
             this.totalApiCount = localResult.total ?? null;
             this.chartSelectedBins.clear();
@@ -9719,7 +9816,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
                 `[${config.addonName}] Author papers cache expired (${localResult.ageHours}h), triggering background refresh`,
               );
               // Background refresh - don't await, don't block UI
-              this.refreshAuthorPapersInBackground(recid, mode, sortOption).catch(
+              this.refreshAuthorPapersInBackground(
+                recid,
+                mode,
+                sortOption ?? this.entryCitedSort,
+              ).catch(
                 (err) => {
                   if ((err as any)?.name !== "AbortError") {
                     Zotero.debug(
@@ -9862,6 +9963,77 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           signal: controller?.signal,
           onProgress: referencesOnProgress,
         });
+      } else if (mode === "related") {
+        // Related papers mode (bibliographic coupling) with incremental progress updates.
+        // Results are re-ranked as anchors are processed, so we re-render instead of append.
+        this.totalApiCount = null;
+
+        // PDG RPP is too generic: disable Related to avoid noisy results and heavy API usage.
+        this.relatedDisabledForPdg = false;
+        const currentItem =
+          typeof this.currentItemID === "number"
+            ? Zotero.Items.get(this.currentItemID)
+            : undefined;
+        const currentTitle = currentItem?.getField("title");
+        if (isPdgReviewOfParticlePhysicsTitle(currentTitle)) {
+          this.relatedDisabledForPdg = true;
+          this.setStatus(getString("references-panel-status-related-disabled-pdg"));
+          entries = [];
+          // Skip network calls and render empty state below.
+        } else {
+          const seedRefs = await this.getSeedReferencesForRelated(
+            recid,
+            controller?.signal,
+          );
+          const relatedMaxResults = this.getRelatedPapersMaxResults();
+          const excludeReviewArticles = this.shouldExcludeReviewArticlesInRelated();
+
+          const relatedOnProgress = (progress: {
+            processedAnchors: number;
+            totalAnchors: number;
+            entries: InspireReferenceEntry[];
+          }) => {
+            if (this.pendingToken !== token || this.viewMode !== mode) {
+              return;
+            }
+
+            this.allEntries = this.getSortedRelated(progress.entries);
+
+            if (!this.filterText) {
+              this.setStatus(
+                getString("references-panel-status-loading-related-progress", {
+                  args: {
+                    done: progress.processedAnchors,
+                    total: progress.totalAnchors,
+                  },
+                }),
+              );
+            }
+
+            // First update: render full UI
+            if (!hasRenderedFirstPage) {
+              this.renderChartImmediate();
+              this.renderReferenceList({ preserveScroll: false });
+              if (options.resetScroll) {
+                this.resetListScroll();
+              }
+              hasRenderedFirstPage = true;
+              return;
+            }
+
+            // Subsequent updates: full re-render to reflect re-ranking and filtering
+            this.renderReferenceList({ preserveScroll: true });
+          };
+
+          entries = await fetchRelatedPapersEntries(recid, seedRefs, {
+            signal: controller?.signal,
+            onProgress: relatedOnProgress,
+            params: {
+              maxResults: relatedMaxResults,
+              excludeReviewArticles,
+            },
+          });
+        }
       } else if (
         mode === "entryCited" &&
         this.entryCitedSource?.authorSearchInfo
@@ -9889,7 +10061,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
       if (this.pendingToken === token && this.viewMode === mode) {
         const entriesForDisplay =
-          mode === "references" ? this.getSortedReferences(entries) : entries;
+          mode === "references"
+            ? this.getSortedReferences(entries)
+            : mode === "related"
+              ? this.getSortedRelated(entries)
+              : entries;
         this.allEntries = entriesForDisplay;
         this.chartSelectedBins.clear(); // Clear chart selection on data change
         // Update cache source indicator - data from API
@@ -9980,6 +10156,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             enrichMode,
             enrichRecid,
             enrichSortOption,
+            cacheKey,
           );
         } catch (err) {
           // Silently ignore enrichment errors - they don't affect core functionality
@@ -9996,7 +10173,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       }
 
       // Only attempt stale cache fallback for modes that have TTL-based caching
-      // (citedBy, entryCited/author) - references are permanent so never expire
+      // (citedBy, related, entryCited/author) - references are permanent so never expire
       if (mode !== "references") {
         const localCacheType = this.getLocalCacheType(mode);
         if (localCacheType) {
@@ -10012,27 +10189,37 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             expired?: boolean;
           } | null = null;
 
-          // Try unsorted cache first (if data was complete), then sorted cache
-          const unsortedResult = await localCache.get<InspireReferenceEntry[]>(
-            localCacheType,
-            recid,
-            undefined,
-            { ignoreTTL: true },
-          );
-          if (
-            unsortedResult &&
-            unsortedResult.total !== undefined &&
-            unsortedResult.total <= CITED_BY_MAX_RESULTS
-          ) {
-            staleResult = unsortedResult;
-          } else {
-            // Try sort-specific cache
+          if (mode === "related") {
+            // Related: only one local cache file (pre-ranked by relevance)
             staleResult = await localCache.get<InspireReferenceEntry[]>(
               localCacheType,
-              recid,
-              sortOption,
+              cacheKey,
+              undefined,
               { ignoreTTL: true },
             );
+          } else {
+            // Try unsorted cache first (if data was complete), then sorted cache
+            const unsortedResult = await localCache.get<InspireReferenceEntry[]>(
+              localCacheType,
+              recid,
+              undefined,
+              { ignoreTTL: true },
+            );
+            if (
+              unsortedResult &&
+              unsortedResult.total !== undefined &&
+              unsortedResult.total <= CITED_BY_MAX_RESULTS
+            ) {
+              staleResult = unsortedResult;
+            } else {
+              // Try sort-specific cache
+              staleResult = await localCache.get<InspireReferenceEntry[]>(
+                localCacheType,
+                recid,
+                sortOption,
+                { ignoreTTL: true },
+              );
+            }
           }
 
           if (staleResult) {
@@ -10043,10 +10230,13 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             // Populate memory cache and display stale data
             cache.set(cacheKey, staleResult.data);
             if (isActiveMode) {
-              const entriesForDisplay = this.getSortedCitedBy(
-                staleResult.data,
-                sortOption as InspireSortOption,
-              );
+              const entriesForDisplay =
+                mode === "related"
+                  ? this.getSortedRelated(staleResult.data)
+                  : this.getSortedCitedBy(
+                      staleResult.data,
+                      sortOption as InspireSortOption,
+                    );
               this.allEntries = entriesForDisplay;
               this.totalApiCount = staleResult.total ?? null;
               this.chartSelectedBins.clear();
@@ -10091,6 +10281,38 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.setRefreshButtonLoading(false);
       }
     }
+  }
+
+  /**
+   * FTR-RELATED-PAPERS: Get seed reference list for anchor selection.
+   * Prefer memory cache → local cache → network.
+   */
+  private async getSeedReferencesForRelated(
+    seedRecid: string,
+    signal?: AbortSignal,
+  ): Promise<InspireReferenceEntry[]> {
+    if (signal?.aborted) {
+      const err = new Error("Aborted");
+      (err as any).name = "AbortError";
+      throw err;
+    }
+
+    // 1) Memory cache (References tab)
+    const memory = this.referencesCache.get(seedRecid);
+    if (memory && memory.length) {
+      return memory;
+    }
+
+    // 2) Local cache (refs is permanent)
+    const local = await localCache
+      .get<InspireReferenceEntry[]>("refs", seedRecid)
+      .catch(() => null);
+    if (local?.data?.length) {
+      return local.data;
+    }
+
+    // 3) Network
+    return await fetchReferencesEntries(seedRecid, { signal });
   }
 
   private async fetchCitedBy(
@@ -10971,6 +11193,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         typeof metadata.citation_count_without_self_citations === "number"
           ? metadata.citation_count_without_self_citations
           : undefined,
+      documentType: Array.isArray(metadata.document_type)
+        ? metadata.document_type
+        : undefined,
       publicationInfo,
       publicationInfoErrata: errata,
       arxivDetails: arxiv,
@@ -11633,6 +11858,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (mode === "citedBy") {
       return this.citedByCache;
     }
+    if (mode === "related") {
+      return this.relatedCache;
+    }
     if (mode === "search") {
       return this.searchCache;
     }
@@ -11645,6 +11873,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     if (mode === "citedBy") {
       return getString("references-panel-status-loading-cited");
+    }
+    if (mode === "related") {
+      return getString("references-panel-status-loading-related");
     }
     if (mode === "search") {
       return getString("references-panel-status-loading-search");
@@ -11663,6 +11894,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (mode === "citedBy") {
       return getString("references-panel-empty-cited");
     }
+    if (mode === "related") {
+      if (this.relatedDisabledForPdg) {
+        return getString("references-panel-empty-related-disabled-pdg");
+      }
+      return getString("references-panel-empty-related");
+    }
     if (mode === "search") {
       return getString("references-panel-search-empty");
     }
@@ -11679,6 +11916,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     if (mode === "citedBy") {
       return getString("references-panel-count-cited", { args: { count } });
+    }
+    if (mode === "related") {
+      return getString("references-panel-count-related", { args: { count } });
     }
     if (mode === "search") {
       return getString("references-panel-count-search", {
@@ -11708,6 +11948,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     if (mode === "citedBy") {
       return getString("references-panel-filter-count-cited", {
+        args: { visible, total },
+      });
+    }
+    if (mode === "related") {
+      return getString("references-panel-filter-count-related", {
         args: { visible, total },
       });
     }
@@ -11860,6 +12105,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   private async activateViewMode(mode: InspireViewMode) {
+    // FTR-RELATED-PAPERS: If the feature is disabled, fall back to References.
+    if (mode === "related" && !this.isRelatedPapersEnabled()) {
+      mode = "references";
+    }
+
     // Allow switching even if viewMode matches when coming from favorites view
     if (this.viewMode === mode && !this.isFavoritesViewActive) {
       if (mode !== "entryCited" && mode !== "search") {
@@ -11891,6 +12141,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (
         this.viewMode === "references" ||
         this.viewMode === "citedBy" ||
+        this.viewMode === "related" ||
         this.viewMode === "search"
       ) {
         this.entryCitedPreviousMode = this.viewMode;
@@ -11978,7 +12229,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       mode === "entryCited" && this.pendingEntryScrollReset;
     if (cached) {
       const entriesForDisplay =
-        mode === "references" ? this.getSortedReferences(cached) : cached;
+        mode === "references"
+          ? this.getSortedReferences(cached)
+          : mode === "related"
+            ? this.getSortedRelated(cached)
+            : cached;
       this.allEntries = entriesForDisplay;
       if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
         this.updateAuthorStats(entriesForDisplay);
@@ -12026,6 +12281,17 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       return;
     }
     const hasEntrySource = Boolean(this.entryCitedSource);
+    const relatedEnabled = this.isRelatedPapersEnabled();
+
+    // If the preference was turned off while already on the tab, switch away.
+    if (
+      !relatedEnabled &&
+      this.viewMode === "related" &&
+      !this.isFavoritesViewActive
+    ) {
+      this.activateViewMode("references").catch(() => void 0);
+      return;
+    }
     (
       Object.entries(this.tabButtons) as [InspireViewMode, HTMLButtonElement][]
     ).forEach(([mode, button]) => {
@@ -12038,6 +12304,13 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         // Set explicit display style to ensure proper layout collapse
         button.style.display = shouldShow ? "" : "none";
         // Update the tab label dynamically based on source type
+        button.textContent = this.getTabLabel(mode);
+      } else if (mode === "related") {
+        // Related tab visibility is controlled via preference
+        const shouldShow = relatedEnabled;
+        button.hidden = !shouldShow;
+        button.disabled = !shouldShow;
+        button.style.display = shouldShow ? "" : "none";
         button.textContent = this.getTabLabel(mode);
       } else if (mode === "search") {
         // Search tab is always visible and enabled
@@ -12088,6 +12361,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (mode === "citedBy") {
       return getString("references-panel-tab-cited");
     }
+    if (mode === "related") {
+      return getString("references-panel-tab-related");
+    }
     if (mode === "search") {
       return getString("references-panel-tab-search");
     }
@@ -12115,9 +12391,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         ? this.referenceSort
         : this.viewMode === "citedBy"
           ? this.citedBySort
-          : this.viewMode === "search"
-            ? this.searchSort
-            : this.entryCitedSort;
+          : this.viewMode === "related"
+            ? this.relatedSort
+            : this.viewMode === "search"
+              ? this.searchSort
+              : this.entryCitedSort;
     this.sortSelect.value = currentValue;
     const hasTarget =
       this.viewMode === "entryCited"
@@ -12131,6 +12409,22 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   private getSortOptionsForMode(mode: InspireViewMode) {
+    if (mode === "related") {
+      return [
+        {
+          value: "relevance",
+          label: getString("references-panel-sort-related"),
+        },
+        {
+          value: "mostrecent",
+          label: getString("references-panel-sort-mostrecent"),
+        },
+        {
+          value: "mostcited",
+          label: getString("references-panel-sort-mostcited"),
+        },
+      ];
+    }
     if (mode === "references") {
       return [
         {
@@ -12161,6 +12455,31 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   private handleSortChange(rawValue: string) {
+    if (this.viewMode === "related") {
+      if (!this.currentRecid) {
+        this.sortSelect.value = this.relatedSort;
+        return;
+      }
+      if (!isRelatedSortOption(rawValue)) {
+        this.sortSelect.value = this.relatedSort;
+        return;
+      }
+      if (rawValue === this.relatedSort) {
+        return;
+      }
+      this.relatedSort = rawValue;
+      const cacheKey = this.getCacheKey(this.currentRecid, "related");
+      const cached = this.relatedCache.get(cacheKey);
+      if (cached) {
+        this.allEntries = this.getSortedRelated(cached);
+        this.totalApiCount = null;
+        this.renderReferenceList();
+      } else if (this.allEntries.length) {
+        this.allEntries = this.getSortedRelated(this.allEntries);
+        this.renderReferenceList();
+      }
+      return;
+    }
     if (this.viewMode === "references") {
       if (!this.currentRecid) {
         this.sortSelect.value = this.referenceSort;
@@ -12963,6 +13282,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (mode === "citedBy") {
       return this.citedBySort;
     }
+    if (mode === "related") {
+      return undefined;
+    }
     if (mode === "search") {
       return this.searchSort;
     }
@@ -12979,6 +13301,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         return "refs";
       case "citedBy":
         return "cited";
+      case "related":
+        return "related";
       case "entryCited":
         // Author papers use "author" type; entry cited-by uses "cited"
         return this.entryCitedSource?.authorSearchInfo ? "author" : "cited";
@@ -13006,6 +13330,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     mode: InspireViewMode,
     recid: string,
     sortOption?: ReferenceSortOption | InspireSortOption,
+    relatedCacheKey?: string,
   ): Promise<void> {
     const localCacheType = this.getLocalCacheType(mode);
     if (!localCacheType) return;
@@ -13024,6 +13349,19 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         );
         Zotero.debug(
           `[${config.addonName}] Persisted enriched references cache: ${recid} (${entries.length} entries)`,
+        );
+      } else if (mode === "related") {
+        // Related papers: store without sort (relevance is pre-ranked)
+        const key = relatedCacheKey ?? this.getCacheKey(recid, "related");
+        await localCache.set(
+          localCacheType,
+          key,
+          entries,
+          undefined,
+          entries.length,
+        );
+        Zotero.debug(
+          `[${config.addonName}] Persisted related papers cache: ${recid} (${entries.length} entries)`,
         );
       } else if (totalFromApi <= CITED_BY_MAX_RESULTS) {
         // Data is complete - store without sort for client-side sorting
@@ -13065,6 +13403,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (mode === "citedBy") {
       return `${recidOrQuery}:cited:${sort ?? this.citedBySort}`;
     }
+    if (mode === "related") {
+      const maxResults = this.getRelatedPapersMaxResults();
+      const excludeReviews = this.shouldExcludeReviewArticlesInRelated();
+      return `${recidOrQuery}:related:v${RELATED_PAPERS_ALGORITHM_VERSION}:m${maxResults}:er${excludeReviews ? 1 : 0}`;
+    }
     if (mode === "entryCited") {
       // Differentiate author queries from recid queries
       const prefix = this.entryCitedSource?.authorQuery ? "author" : "entry";
@@ -13094,6 +13437,52 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       sorted.sort(
         (a, b) => this.getCitationValue(b) - this.getCitationValue(a),
       );
+    }
+    return sorted;
+  }
+
+  private getSortedRelated(entries: InspireReferenceEntry[]) {
+    // Apply "exclude reviews" at display time as well, so the preference
+    // takes effect immediately even for cached results.
+    let filtered = entries.filter((e) => !isPdgReviewOfParticlePhysicsTitle(e.title));
+    if (this.shouldExcludeReviewArticlesInRelated()) {
+      filtered = filtered.filter((e) => !isReviewArticleEntry(e));
+    }
+
+    if (this.relatedSort === "relevance") {
+      return filtered;
+    }
+    const sorted = [...filtered];
+    if (this.relatedSort === "mostrecent") {
+      sorted.sort((a, b) => {
+        const aYear = Number(a.year);
+        const bYear = Number(b.year);
+        const safeA = Number.isFinite(aYear) ? aYear : -Infinity;
+        const safeB = Number.isFinite(bYear) ? bYear : -Infinity;
+        if (safeB !== safeA) return safeB - safeA;
+
+        const aShared = a.relatedSharedRefCount ?? 0;
+        const bShared = b.relatedSharedRefCount ?? 0;
+        if (bShared !== aShared) return bShared - aShared;
+
+        return this.getCitationValue(b) - this.getCitationValue(a);
+      });
+    } else if (this.relatedSort === "mostcited") {
+      sorted.sort((a, b) => {
+        const aCites = this.getCitationValue(a);
+        const bCites = this.getCitationValue(b);
+        if (bCites !== aCites) return bCites - aCites;
+
+        const aShared = a.relatedSharedRefCount ?? 0;
+        const bShared = b.relatedSharedRefCount ?? 0;
+        if (bShared !== aShared) return bShared - aShared;
+
+        const aYear = Number(a.year);
+        const bYear = Number(b.year);
+        const safeA = Number.isFinite(aYear) ? aYear : -Infinity;
+        const safeB = Number.isFinite(bYear) ? bYear : -Infinity;
+        return safeB - safeA;
+      });
     }
     return sorted;
   }
@@ -16158,6 +16547,69 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       this.body,
       this.listEl,
     );
+  }
+
+  private openCitationGraphDialog() {
+    const seedRecid = this.currentRecid;
+    if (!seedRecid) {
+      this.showToast(getString("references-panel-no-recid"));
+      return;
+    }
+
+    const item =
+      typeof this.currentItemID === "number"
+        ? Zotero.Items.get(this.currentItemID)
+        : undefined;
+    const rawTitle = item?.getField("title");
+    const seedTitle = typeof rawTitle === "string" ? rawTitle : undefined;
+    const authorLabel = (() => {
+      if (!item) return undefined;
+      try {
+        const creators: any[] = (item as any)?.getCreators?.() ?? [];
+        const first = Array.isArray(creators) ? creators[0] : undefined;
+        const lastNameRaw =
+          (first?.lastName as string | undefined) ??
+          (first?.name as string | undefined) ??
+          "";
+        const lastName = typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
+        const authorPart = lastName
+          ? creators.length > 1
+            ? `${lastName} et al.`
+            : lastName
+          : "";
+        const dateRaw = item.getField("date");
+        const match =
+          typeof dateRaw === "string"
+            ? dateRaw.match(/(19|20)\d{2}/)
+            : null;
+        const year = match ? match[0] : "";
+        if (year) {
+          return authorPart ? `${authorPart} (${year})` : year;
+        }
+        return authorPart || undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+
+    if (isPdgReviewOfParticlePhysicsTitle(seedTitle)) {
+      this.showToast(getString("references-panel-citation-graph-disabled-pdg"));
+      return;
+    }
+
+    this.citationGraphDialog?.dispose();
+    const dialog = new CitationGraphDialog(
+      this.body.ownerDocument,
+      { recid: seedRecid, title: seedTitle, authorLabel },
+      {
+        onDispose: () => {
+          if (this.citationGraphDialog === dialog) {
+            this.citationGraphDialog = undefined;
+          }
+        },
+      },
+    );
+    this.citationGraphDialog = dialog;
   }
 
   private showToast(message: string) {

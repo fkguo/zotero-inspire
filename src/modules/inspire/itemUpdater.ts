@@ -57,6 +57,7 @@ import {
 } from "./collabTagService";
 import { createAbortController } from "./utils";
 import { copyFundingInfo } from "./funding";
+import { CitationGraphDialog } from "./panel/CitationGraphDialog";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -242,6 +243,151 @@ export class ZInspire {
       this.updateItemsConcurrent(operation);
     } else {
       this.removeEscapeListener();
+    }
+  }
+
+  private buildItemAuthorLabel(item: Zotero.Item): string | undefined {
+    try {
+      const creators: any[] = (item as any)?.getCreators?.() ?? [];
+      const first = Array.isArray(creators) ? creators[0] : undefined;
+      const lastNameRaw =
+        (first?.lastName as string | undefined) ??
+        (first?.name as string | undefined) ??
+        "";
+      const lastName = typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
+      const authorPart = lastName
+        ? creators.length > 1
+          ? `${lastName} et al.`
+          : lastName
+        : "";
+      const dateRaw = item.getField("date");
+      const match =
+        typeof dateRaw === "string" ? dateRaw.match(/(19|20)\d{2}/) : null;
+      const year = match ? match[0] : "";
+      if (year) {
+        return authorPart ? `${authorPart} (${year})` : year;
+      }
+      return authorPart || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Open a combined citation graph dialog for the current item selection.
+   * Requires at least 2 selected items with valid INSPIRE recids.
+   */
+  openCombinedCitationGraphFromSelection(): void {
+    try {
+      const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
+      const regularItems = items.filter((item) => item?.isRegularItem());
+
+      const seeds: Array<{ recid: string; title?: string; authorLabel?: string }> = [];
+      const seen = new Set<string>();
+      const MAX_SEEDS = 10;
+
+      for (const item of regularItems) {
+        const recid = deriveRecidFromItem(item);
+        if (!recid || seen.has(recid)) continue;
+        seen.add(recid);
+        const rawTitle = item.getField("title");
+        const title = typeof rawTitle === "string" ? rawTitle : undefined;
+        const authorLabel = this.buildItemAuthorLabel(item);
+        seeds.push({ recid, title, authorLabel });
+        if (seeds.length >= MAX_SEEDS) {
+          break;
+        }
+      }
+
+      if (seeds.length < 2) {
+        this.showCacheNotification(
+          getString("citation-graph-merge-no-selection") ||
+            "Select at least two items with INSPIRE IDs to merge citation graphs.",
+          "info",
+        );
+        return;
+      }
+
+      if (regularItems.length > seeds.length && regularItems.length > MAX_SEEDS) {
+        this.showCacheNotification(
+          getString("citation-graph-merge-truncated", {
+            args: { count: MAX_SEEDS },
+          }) ||
+            `Selection is large; only the first ${MAX_SEEDS} seeds will be used.`,
+          "info",
+        );
+      }
+
+      const win = Zotero.getMainWindow();
+      const doc = win?.document;
+      if (!doc) {
+        return;
+      }
+
+      new CitationGraphDialog(doc, seeds);
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] openCombinedCitationGraphFromSelection error: ${err}`,
+      );
+    }
+  }
+
+  /**
+   * Open a combined citation graph dialog for the currently selected collection.
+   * Uses up to MAX_SEEDS items with valid INSPIRE recids.
+   */
+  openCombinedCitationGraphFromCollection(): void {
+    try {
+      const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
+      const items = collection?.getChildItems?.() ?? [];
+      const regularItems = items.filter((item) => item?.isRegularItem());
+
+      const seeds: Array<{ recid: string; title?: string; authorLabel?: string }> = [];
+      const seen = new Set<string>();
+      const MAX_SEEDS = 10;
+
+      for (const item of regularItems) {
+        const recid = deriveRecidFromItem(item);
+        if (!recid || seen.has(recid)) continue;
+        seen.add(recid);
+        const rawTitle = item.getField("title");
+        const title = typeof rawTitle === "string" ? rawTitle : undefined;
+        const authorLabel = this.buildItemAuthorLabel(item);
+        seeds.push({ recid, title, authorLabel });
+        if (seeds.length >= MAX_SEEDS) {
+          break;
+        }
+      }
+
+      if (seeds.length < 2) {
+        this.showCacheNotification(
+          getString("citation-graph-merge-no-selection") ||
+            "Select a collection with at least two items with INSPIRE IDs to merge citation graphs.",
+          "info",
+        );
+        return;
+      }
+
+      if (regularItems.length > MAX_SEEDS) {
+        this.showCacheNotification(
+          getString("citation-graph-merge-truncated", {
+            args: { count: MAX_SEEDS },
+          }) || `Only the first ${MAX_SEEDS} seeds will be used.`,
+          "info",
+        );
+      }
+
+      const win = Zotero.getMainWindow();
+      const doc = win?.document;
+      if (!doc) {
+        return;
+      }
+
+      new CitationGraphDialog(doc, seeds);
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] openCombinedCitationGraphFromCollection error: ${err}`,
+      );
     }
   }
 

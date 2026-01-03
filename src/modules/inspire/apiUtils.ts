@@ -417,30 +417,67 @@ export async function findItemsByRecids(
   const result = new Map<string, number>();
   if (!recids.length) return result;
 
-  const fieldID = Zotero.ItemFields.getID("archiveLocation");
-  if (!fieldID) return result;
-
-  const CHUNK_SIZE = 500;
-  for (let i = 0; i < recids.length; i += CHUNK_SIZE) {
-    const chunk = recids.slice(i, i + CHUNK_SIZE);
-    const placeholders = chunk.map(() => "?").join(",");
-    const sql = `
-      SELECT itemID, value
-      FROM itemData
-        JOIN itemDataValues USING(valueID)
-      WHERE fieldID = ? AND value IN (${placeholders})
-    `;
-    try {
-      const rows = await Zotero.DB.queryAsync(sql, [fieldID, ...chunk]);
-      if (rows) {
-        for (const row of rows) {
-          result.set(row.value as string, Number(row.itemID));
+  // First, try archiveLocation field
+  const archiveFieldID = Zotero.ItemFields.getID("archiveLocation");
+  if (archiveFieldID) {
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < recids.length; i += CHUNK_SIZE) {
+      const chunk = recids.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(",");
+      const sql = `
+        SELECT itemID, value
+        FROM itemData
+          JOIN itemDataValues USING(valueID)
+        WHERE fieldID = ? AND value IN (${placeholders})
+      `;
+      try {
+        const rows = await Zotero.DB.queryAsync(sql, [archiveFieldID, ...chunk]);
+        if (rows) {
+          for (const row of rows) {
+            result.set(row.value as string, Number(row.itemID));
+          }
         }
+      } catch (e) {
+        Zotero.debug(`[${config.addonName}] Error querying archiveLocation: ${e}`);
       }
-    } catch (e) {
-      Zotero.debug(`[${config.addonName}] Error querying items by recid: ${e}`);
     }
   }
+
+  // Then, try URL field for remaining recids
+  const remainingRecids = recids.filter(r => !result.has(r));
+  if (remainingRecids.length > 0) {
+    const urlFieldID = Zotero.ItemFields.getID("url");
+    if (urlFieldID) {
+      // Build URL patterns for INSPIRE
+      const urlPatterns = remainingRecids.map(r => `%inspirehep.net/literature/${r}%`);
+      for (let i = 0; i < urlPatterns.length; i += 100) {
+        const chunk = urlPatterns.slice(i, i + 100);
+        const recidChunk = remainingRecids.slice(i, i + 100);
+        const conditions = chunk.map(() => "value LIKE ?").join(" OR ");
+        const sql = `
+          SELECT itemID, value
+          FROM itemData
+            JOIN itemDataValues USING(valueID)
+          WHERE fieldID = ? AND (${conditions})
+        `;
+        try {
+          const rows = await Zotero.DB.queryAsync(sql, [urlFieldID, ...chunk]);
+          if (rows) {
+            for (const row of rows) {
+              const url = row.value as string;
+              const match = url.match(/inspirehep\.net\/literature\/(\d+)/);
+              if (match) {
+                result.set(match[1], Number(row.itemID));
+              }
+            }
+          }
+        } catch (e) {
+          Zotero.debug(`[${config.addonName}] Error querying URL field: ${e}`);
+        }
+      }
+    }
+  }
+
   return result;
 }
 

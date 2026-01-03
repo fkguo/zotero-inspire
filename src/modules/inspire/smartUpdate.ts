@@ -730,6 +730,7 @@ export function compareItemWithInspire(
   // If no journal info but has arXiv, use arXiv as fallback (matches setInspireMeta logic)
   let effectiveJournalAbbr = metaInspire.journalAbbreviation;
   if (
+    getPref("arxiv_in_journal_abbrev") === true &&
     !effectiveJournalAbbr &&
     metaInspire.arxiv?.value &&
     item.itemType === "journalArticle"

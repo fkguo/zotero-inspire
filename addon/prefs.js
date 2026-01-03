@@ -11,6 +11,11 @@ pref("__prefsPrefix__.max_authors", 3);
 pref("__prefsPrefix__.reader_auto_reopen", false);
 pref("__prefsPrefix__.chart_enable", true);
 pref("__prefsPrefix__.chart_default_collapsed", true);
+pref("__prefsPrefix__.related_papers_enable", true); // FTR-RELATED-PAPERS: enable Related tab
+pref("__prefsPrefix__.related_papers_exclude_reviews", true); // FTR-RELATED-PAPERS: exclude review articles (default on)
+pref("__prefsPrefix__.related_papers_max_results", 50); // FTR-RELATED-PAPERS: max related papers to display
+pref("__prefsPrefix__.citation_graph_max_results", 25); // FTR-CITATION-GRAPH: max references/cited-by shown per side (global across seeds)
+pref("__prefsPrefix__.external_token", ""); // External integrations: connector auth token (generated on first startup)
 pref("__prefsPrefix__.latex_render_mode", "katex"); // LaTeX rendering: "unicode" | "katex"
 pref("__prefsPrefix__.search_history_days", 30);
 pref("__prefsPrefix__.pdf_fuzzy_citation", false); // Aggressive citation detection for broken PDF text layers

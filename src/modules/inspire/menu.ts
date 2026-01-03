@@ -66,6 +66,18 @@ export class ZInsMenu {
     ];
 
     if (isItem) {
+      // Citation graph actions for items (FTR-CITATION-GRAPH / Phase 3.1)
+      children.push(
+        { tag: "menuseparator" },
+        {
+          tag: "menuitem",
+          label: getString("menuitem-citation-graph-merge"),
+          commandListener: () => {
+            _globalThis.inspire.openCombinedCitationGraphFromSelection?.();
+          },
+        },
+      );
+
       // Copy actions for items
       children.push(
         { tag: "menuseparator" },
@@ -139,6 +151,18 @@ export class ZInsMenu {
         },
       );
     } else {
+      // Citation graph actions for collections (FTR-CITATION-GRAPH / Phase 3.1)
+      children.push(
+        { tag: "menuseparator" },
+        {
+          tag: "menuitem",
+          label: getString("menuitem-citation-graph-merge"),
+          commandListener: () => {
+            _globalThis.inspire.openCombinedCitationGraphFromCollection?.();
+          },
+        },
+      );
+
       // Collection-specific actions (FTR-PREPRINT-WATCH)
       children.push(
         { tag: "menuseparator" },

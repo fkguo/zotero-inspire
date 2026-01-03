@@ -11,6 +11,7 @@ import {
   SMALL_AUTHOR_GROUP_THRESHOLD,
   type QuickFilterType,
 } from "./constants";
+import { isReviewArticleEntry } from "./reviewUtils";
 import type { InspireReferenceEntry, InspireArxivDetails } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +130,14 @@ export function matchesPreprintOnly(entry: InspireReferenceEntry): boolean {
 }
 
 /**
+ * Non-review articles filter: hide entries marked as reviews.
+ * Uses INSPIRE document_type and journal heuristics; missing metadata passes through.
+ */
+export function matchesNonReviewOnly(entry: InspireReferenceEntry): boolean {
+  return !isReviewArticleEntry(entry);
+}
+
+/**
  * Related only filter: papers marked as related.
  */
 export function matchesRelatedOnly(entry: InspireReferenceEntry): boolean {
@@ -177,6 +186,8 @@ export function getQuickFilterPredicate(
       return (entry, ctx) => matchesRecentYears(entry, ctx, 5);
     case "recent1Year":
       return (entry, ctx) => matchesRecentYears(entry, ctx, 1);
+    case "nonReviewOnly":
+      return (entry) => matchesNonReviewOnly(entry);
     case "publishedOnly":
       return matchesPublishedOnly;
     case "preprintOnly":
@@ -230,6 +241,7 @@ export const QUICK_FILTER_EXCLUSIONS: Record<
   highCitations: [],
   recent5Years: ["recent1Year"],
   recent1Year: ["recent5Years"],
+  nonReviewOnly: [],
   publishedOnly: ["preprintOnly"],
   preprintOnly: ["publishedOnly"],
   relatedOnly: [],

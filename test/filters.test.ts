@@ -11,6 +11,7 @@ import {
   matchesRecentYears,
   matchesPublishedOnly,
   matchesPreprintOnly,
+  matchesNonReviewOnly,
   matchesRelatedOnly,
   matchesLocalItems,
   matchesOnlineItems,
@@ -242,6 +243,47 @@ describe("matchesPreprintOnly", () => {
   });
 });
 
+describe("matchesNonReviewOnly", () => {
+  it("returns false for review document type", () => {
+    const entry = createEntry({ documentType: ["review"] });
+    expect(matchesNonReviewOnly(entry)).toBe(false);
+  });
+
+  it("returns true for non-review document type", () => {
+    const entry = createEntry({ documentType: ["article"] });
+    expect(matchesNonReviewOnly(entry)).toBe(true);
+  });
+
+  it("returns false for major review journals even when documentType is missing", () => {
+    const entry = createEntry({
+      documentType: undefined,
+      publicationInfo: { journal_title: "Rev. Mod. Phys." },
+    });
+    expect(matchesNonReviewOnly(entry)).toBe(false);
+  });
+
+  it("returns false for Annual Review journals", () => {
+    const entry = createEntry({
+      documentType: undefined,
+      publicationInfo: { journal_title: "Annual Review of Nuclear and Particle Science" },
+    });
+    expect(matchesNonReviewOnly(entry)).toBe(false);
+  });
+
+  it("returns false for Phys. Rep. abbreviation", () => {
+    const entry = createEntry({
+      documentType: undefined,
+      publicationInfo: { journal_title_abbrev: "Phys. Rep." },
+    });
+    expect(matchesNonReviewOnly(entry)).toBe(false);
+  });
+
+  it("returns true when documentType is missing", () => {
+    const entry = createEntry({ documentType: undefined });
+    expect(matchesNonReviewOnly(entry)).toBe(true);
+  });
+});
+
 describe("matchesRelatedOnly", () => {
   it("returns true for related papers", () => {
     const entry = createEntry({ isRelated: true });
@@ -332,6 +374,7 @@ describe("getQuickFilterPredicate", () => {
     expect(getQuickFilterPredicate("highCitations")).toBeDefined();
     expect(getQuickFilterPredicate("recent5Years")).toBeDefined();
     expect(getQuickFilterPredicate("recent1Year")).toBeDefined();
+    expect(getQuickFilterPredicate("nonReviewOnly")).toBeDefined();
     expect(getQuickFilterPredicate("publishedOnly")).toBeDefined();
     expect(getQuickFilterPredicate("preprintOnly")).toBeDefined();
     expect(getQuickFilterPredicate("relatedOnly")).toBeDefined();
@@ -427,5 +470,9 @@ describe("getExcludedFilters", () => {
 
   it("returns empty array for relatedOnly", () => {
     expect(getExcludedFilters("relatedOnly")).toEqual([]);
+  });
+
+  it("returns empty array for nonReviewOnly", () => {
+    expect(getExcludedFilters("nonReviewOnly")).toEqual([]);
   });
 });

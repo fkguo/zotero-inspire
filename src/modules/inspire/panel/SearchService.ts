@@ -282,6 +282,9 @@ export function buildEntryFromSearchHit(
     publicationInfoErrata: errata,
     arxivDetails,
     doi,
+    documentType: Array.isArray(metaObj?.document_type)
+      ? (metaObj.document_type as string[])
+      : undefined,
   };
 
   // Build displayText for proper filtering

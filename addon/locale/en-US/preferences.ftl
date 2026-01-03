@@ -54,6 +54,20 @@ pref-chart-enable-desc = Show interactive statistics chart (by year/citations) a
 pref-chart-default-collapsed =
     .label = Collapsed by default
 
+pref-related-papers-enable =
+    .label = Enable Related Papers tab
+pref-related-papers-enable-desc = Show a Related tab that recommends papers sharing references with the current paper.
+
+pref-related-papers-exclude-reviews =
+    .label = Exclude review articles
+pref-related-papers-exclude-reviews-desc = Hide review articles (document type: review) and papers in major review journals (RMP, Phys. Rep., PPNP, Rep. Prog. Phys., Annual Reviews) in Related recommendations.
+
+pref-related-papers-max-results-label = Related papers to show:
+pref-related-papers-max-results-desc = Maximum number of items displayed in the Related tab (default: 50).
+
+pref-citation-graph-max-results-label = Citation graph papers to show:
+pref-citation-graph-max-results-desc = Maximum number of references and cited-by papers shown in the citation graph (default: 25).
+
 pref-keyboard-shortcuts-title = Keyboard Shortcuts
 pref-keyboard-shortcuts-desc = Navigate and interact with entries using keyboard
 pref-keyboard-shortcuts-nav = ↑/↓ or j/k: Navigate entries · Home/End: Jump to first/last · ←/→: Back/Forward

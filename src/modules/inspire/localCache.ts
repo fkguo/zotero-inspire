@@ -840,6 +840,7 @@ class InspireLocalCache {
         "preprintCandidates",
         "crossref",
         "preprint",
+        "related",
         "cited",
         "author",
         "refs",

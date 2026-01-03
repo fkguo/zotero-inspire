@@ -448,6 +448,50 @@ export class EntryListRenderer {
       titleLink.style.maxWidth = "100%";
     }
 
+    // FTR-RELATED-PAPERS: Render shared-reference badge (only in related mode)
+    const relatedBadge = row.querySelector(
+      ".zinspire-ref-entry__related-badge",
+    ) as HTMLElement | null;
+    if (relatedBadge) {
+      const sharedCount = entry.relatedSharedRefCount ?? 0;
+      if (ctx.viewMode === "related" && sharedCount > 0) {
+        relatedBadge.textContent = `↔${sharedCount}`;
+
+        const baseTitle = getString("references-panel-related-badge-tooltip", {
+          args: { count: sharedCount },
+        });
+        const titles =
+          Array.isArray(entry.relatedSharedRefTitles) &&
+          entry.relatedSharedRefTitles.length
+            ? `\n${entry.relatedSharedRefTitles.join("\n")}`
+            : "";
+        relatedBadge.title = baseTitle + titles;
+
+        relatedBadge.style.display = "inline-flex";
+        relatedBadge.style.alignItems = "center";
+        relatedBadge.style.justifyContent = "center";
+        relatedBadge.style.marginLeft = "6px";
+        relatedBadge.style.padding = "0 6px";
+        relatedBadge.style.height = "16px";
+        relatedBadge.style.borderRadius = "8px";
+        relatedBadge.style.fontSize = "10px";
+        relatedBadge.style.lineHeight = "16px";
+        relatedBadge.style.whiteSpace = "nowrap";
+        relatedBadge.style.userSelect = "none";
+        relatedBadge.style.background = dark
+          ? "rgba(148, 163, 184, 0.18)"
+          : "var(--material-mix-quinary, #f1f5f9)";
+        relatedBadge.style.color = "var(--fill-secondary, #64748b)";
+        relatedBadge.style.border = dark
+          ? "1px solid rgba(148, 163, 184, 0.25)"
+          : "1px solid var(--fill-quinary, #d1d5db)";
+      } else {
+        relatedBadge.textContent = "";
+        relatedBadge.title = "";
+        relatedBadge.style.display = "none";
+      }
+    }
+
     // Update meta (journal, DOI, arXiv links)
     const meta = row.querySelector(
       ".zinspire-ref-entry__meta",

@@ -28,6 +28,7 @@ import type {
   InspireReference,
 } from "./apiTypes";
 import { inspireFetch } from "./rateLimiter";
+import { buildSmartTitle } from "./citationGraphService";
 import { LRUCache } from "./utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,6 +175,10 @@ export function buildReferenceEntry(
     doi,
     texkey,
   };
+
+  // Apply smart title fallback if title is unavailable
+  entry.title = buildSmartTitle(entry, strings);
+
   entry.displayText = buildDisplayText(entry);
   return entry;
 }
@@ -388,6 +393,12 @@ function applyMetadataToEntry(
   if (typeof metadata.citation_count_without_self_citations === "number") {
     entry.citationCountWithoutSelf =
       metadata.citation_count_without_self_citations;
+  }
+  if (Array.isArray(metadata.document_type) && metadata.document_type.length) {
+    entry.documentType = metadata.document_type.filter(
+      (t: unknown): t is string =>
+        typeof t === "string" && t.trim().length > 0,
+    );
   }
 
   // Title update

@@ -61,10 +61,14 @@ Select an item with an INSPIRE record, then find the **INSPIRE** section in the 
 | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **References**    | Papers cited by this item                                                                                  |
 | **Cited by**      | Papers that cite this item                                                                                 |
+| **Related**       | Recommended papers based on shared references (bibliographic coupling)                                     |
 | **Entry Cited**   | Papers citing a specific reference, appears only after clicking the `Cited by ...` button below an entry |
 | **Author Papers** | All papers by a clicked author, appears only after clicking an author name                                 |
 | **🔍 Search**     | INSPIRE search results                                                                                     |
 | **⭐ Favorites**   | Your favorite authors and papers                                                                           |
+
+Note: Related-paper discovery ignores the PDG "Review of Particle Physics" reference as a seed anchor (it is cited by most HEP papers and usually hurts relevance).
+Citation Graph: a 1-hop visualization (refs/cited-by capped at 50); click nodes to open INSPIRE, right-click to expand (re-root).
 
 ### Search INSPIRE
 
@@ -130,7 +134,7 @@ Enable them via the column picker in the items list header. Preferences:
 
 - **Text filter**: Type keywords to filter entries; supports multi-word, phrase search (`"exact phrase"`), journal abbreviations (`"PRL"`, `"PRD"`, `"JHEP"`, etc.), and international characters (ä→ae)
 - **Quick filters**: Click the Filters button for presets (high citations, recent papers, published only, etc.)
-- **Sort options**: INSPIRE order, newest first, or most cited first
+- **Sort options**: INSPIRE order, relevance (Related tab), newest first, or most cited first
 - **Chart filters**: Click bars in the statistics chart to filter by year or citation range; Ctrl/Cmd+click for multi-select
 
 ### Navigation

@@ -99,8 +99,22 @@ export interface InspireReferenceEntry {
   searchText: string;
   localItemID?: number;
   isRelated?: boolean;
+  /** FTR-RELATED-PAPERS: bibliographic coupling signal (how many shared references) */
+  relatedSharedRefCount?: number;
+  /** FTR-RELATED-PAPERS: up to a few shared reference titles for tooltip explanation */
+  relatedSharedRefTitles?: string[];
+  /** FTR-RELATED-PAPERS: co-citation signal (how many papers cite both seed and this entry) */
+  relatedCoCitationCount?: number;
+  /** FTR-RELATED-PAPERS: normalized co-citation cosine similarity in [0, 1] */
+  relatedCoCitationScore?: number;
+  /** FTR-RELATED-PAPERS: normalized coupling score in [0, 1] */
+  relatedCouplingScore?: number;
+  /** FTR-RELATED-PAPERS: combined score used for ranking (coupling + co-citation) */
+  relatedCombinedScore?: number;
   citationCount?: number;
   citationCountWithoutSelf?: number; // Citation count excluding self-citations
+  /** INSPIRE document types (e.g., article, review) */
+  documentType?: string[];
   publicationInfo?: any;
   publicationInfoErrata?: Array<{ info: any; label: string; doi?: string }>;
   arxivDetails?: InspireArxivDetails | string | null;
@@ -159,6 +173,87 @@ export interface ChartBin {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Citation Graph Types (FTR-CITATION-GRAPH)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type CitationGraphSortMode = "relevance" | "mostrecent" | "mostcited";
+
+export interface CitationGraphNode {
+  recid: string;
+  title: string;
+  inspireUrl: string;
+  authorLabel?: string; // "Author et al. (Year)" format
+  year?: string;
+  citationCount?: number;
+  localItemID?: number;
+  isSeed: boolean;
+}
+
+export interface SeedEdge {
+  source: string; // recid of the citing seed
+  target: string; // recid of the referenced seed
+  type: "seed-to-seed";
+}
+
+export interface MultiSeedGraphResult {
+  seeds: CitationGraphNode[];
+  seedEdges: SeedEdge[];
+  references: InspireReferenceEntry[];
+  citedBy: InspireReferenceEntry[];
+  totals: { references: number; citedBy: number };
+  shown: { references: number; citedBy: number };
+  sort: CitationGraphSortMode;
+  /**
+   * Optional per-seed breakdown for UI rendering (edges, seed list stats).
+   * Keys are seed recids.
+   */
+  bySeed?: Record<
+    string,
+    {
+      references: string[]; // recids (shown)
+      citedBy: string[]; // recids (shown)
+      totals: { references: number; citedBy: number };
+      shown: { references: number; citedBy: number };
+    }
+  >;
+}
+
+export type CitationGraphNodeKind = "seed" | "reference" | "citedBy";
+
+export type CitationGraphEdgeType =
+  | "seed-to-seed"
+  | "seed-to-reference"
+  | "cited-by-to-seed";
+
+export interface CitationGraphNodeData {
+  recid: string;
+  kind: CitationGraphNodeKind;
+  title?: string;
+  authorLabel?: string;
+  year?: string;
+  citationCount?: number;
+  localItemID?: number;
+  inspireUrl?: string;
+  arxivId?: string;
+  doi?: string;
+}
+
+export interface CitationGraphEdgeData {
+  source: string;
+  target: string;
+  type: CitationGraphEdgeType;
+}
+
+export interface CitationGraphSaveData {
+  version: string;
+  createdAt: string;
+  seeds: { recid: string; title: string; localItemID?: number }[];
+  graph: { nodes: CitationGraphNodeData[]; edges: CitationGraphEdgeData[] };
+  viewState?: { panX: number; panY: number; scale: number };
+  settings: { sort: CitationGraphSortMode };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // View Mode Types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -166,6 +261,7 @@ export type InspireViewMode =
   | "references"
   | "citedBy"
   | "entryCited"
+  | "related"
   | "search";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -253,6 +349,7 @@ export type LocalCacheType =
   | "refs"
   | "cited"
   | "author"
+  | "related"
   | "preprint"
   | "preprintCandidates"
   | "crossref"

@@ -109,3 +109,6 @@ export {
   type AuthorPreviewCallbacks,
   type AuthorPreviewControllerOptions,
 } from "./AuthorPreviewController";
+
+// Re-export CitationGraphDialog (FTR-CITATION-GRAPH)
+export { CitationGraphDialog } from "./CitationGraphDialog";
