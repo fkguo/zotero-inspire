@@ -80,6 +80,17 @@ function stripYamlFrontMatter(markdown: string): string {
   return after >= 0 ? src.slice(after + 1) : "";
 }
 
+function fnv1a32Hex(input: string): string {
+  let hash = 0x811c9dc5;
+  const str = String(input ?? "");
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    // FNV-1a 32-bit prime: 16777619
+    hash = (hash * 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
 function buildZoteroSelectLink(item: Zotero.Item): string | undefined {
   try {
     const library = Zotero.Libraries.get(item.libraryID);
@@ -144,11 +155,46 @@ function buildMarkdownExport(params: {
   myNotesMarkdown: string;
   provider?: string;
   model?: string;
+  baseURL?: string;
+  settings?: {
+    temperature?: number;
+    maxOutputTokens?: number;
+    outputLanguage?: string;
+    style?: string;
+    citationFormat?: string;
+    includeSeedAbstract?: boolean;
+    includeRefAbstracts?: boolean;
+    maxRefs?: number;
+    userGoal?: string;
+    refsRecids?: string[];
+  };
   promptVersion?: number;
 }): string {
-  const { meta, summaryMarkdown, myNotesMarkdown, provider, model, promptVersion } =
-    params;
+  const {
+    meta,
+    summaryMarkdown,
+    myNotesMarkdown,
+    provider,
+    model,
+    baseURL,
+    settings,
+    promptVersion,
+  } = params;
   const createdAt = new Date().toISOString();
+
+  const refsRecids = Array.isArray(settings?.refsRecids) ? settings?.refsRecids : [];
+  const refsHash = refsRecids.length ? fnv1a32Hex(refsRecids.join(",")) : "";
+  const inputsHash = fnv1a32Hex(
+    JSON.stringify({
+      seed: { recid: meta.recid || "", citekey: meta.citekey || "" },
+      provider: provider || "",
+      model: model || "",
+      baseURL: baseURL || "",
+      settings: settings || {},
+      refsHash,
+      refsCount: refsRecids.length,
+    }),
+  );
 
   const frontMatterObj: Record<string, any> = {
     source: "zotero-inspire",
@@ -167,8 +213,21 @@ function buildMarkdownExport(params: {
     created_at: createdAt,
     provider: provider || "",
     model: model || "",
+    base_url: baseURL || "",
     addon_version: version,
     prompt_version: promptVersion ?? 1,
+    temperature: settings?.temperature ?? "",
+    max_output_tokens: settings?.maxOutputTokens ?? "",
+    output_language: settings?.outputLanguage ?? "",
+    style: settings?.style ?? "",
+    citation_format: settings?.citationFormat ?? "",
+    include_seed_abstract: settings?.includeSeedAbstract ?? "",
+    include_ref_abstracts: settings?.includeRefAbstracts ?? "",
+    max_refs: settings?.maxRefs ?? "",
+    user_goal: settings?.userGoal ?? "",
+    summary_refs_count: refsRecids.length || "",
+    summary_refs_hash: refsHash || "",
+    inputs_hash: inputsHash,
     zotero_item_key: meta.zoteroItemKey || "",
     zotero_link: meta.zoteroLink || "",
     inspire_url: meta.inspireUrl || "",
@@ -416,6 +475,7 @@ export class AIDialog {
   private recommendResultsEl?: HTMLDivElement;
   private recommendIncludeRelatedCheckbox?: HTMLInputElement;
   private recommendPerQueryInput?: HTMLInputElement;
+  private followUpInput?: HTMLInputElement;
 
   private userGoalInput?: HTMLInputElement;
   private outputLangSelect?: HTMLSelectElement;
@@ -437,6 +497,18 @@ export class AIDialog {
   private summaryMarkdown = "";
   private myNotesMarkdown = "";
   private seedMeta?: SeedMeta;
+  private lastSummaryInputs?: {
+    refsRecids: string[];
+    temperature: number;
+    maxOutputTokens: number;
+    outputLanguage: string;
+    style: string;
+    citationFormat: string;
+    includeSeedAbstract: boolean;
+    includeRefAbstracts: boolean;
+    maxRefs: number;
+    userGoal: string;
+  };
   private readonly onImportRecid?: (recid: string, anchor: HTMLElement) => Promise<void>;
 
   constructor(
@@ -882,6 +954,18 @@ export class AIDialog {
     genBtn.addEventListener("click", () => void this.generateSummary());
     wrap.appendChild(genBtn);
 
+    const batchBtn = doc.createElement("button");
+    batchBtn.textContent = "AutoPilot";
+    batchBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    batchBtn.style.background = "transparent";
+    batchBtn.style.borderRadius = "6px";
+    batchBtn.style.padding = "6px 10px";
+    batchBtn.style.fontSize = "12px";
+    batchBtn.style.cursor = "pointer";
+    batchBtn.title = "Batch-generate notes for selected items";
+    batchBtn.addEventListener("click", () => void this.runAutoPilotForSelection());
+    wrap.appendChild(batchBtn);
+
     return wrap;
   }
 
@@ -946,6 +1030,35 @@ export class AIDialog {
     });
     this.summaryTextarea = ta;
     left.appendChild(ta);
+
+    const followRow = doc.createElement("div");
+    followRow.style.display = "flex";
+    followRow.style.gap = "8px";
+    followRow.style.alignItems = "center";
+
+    const followInput = doc.createElement("input");
+    followInput.type = "text";
+    followInput.placeholder = "Follow-up question…";
+    followInput.style.flex = "1";
+    followInput.style.minWidth = "0";
+    followInput.style.padding = "6px 8px";
+    followInput.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    followInput.style.borderRadius = "6px";
+    followInput.style.fontSize = "12px";
+    this.followUpInput = followInput;
+    followRow.appendChild(followInput);
+
+    const askBtn = doc.createElement("button");
+    askBtn.textContent = "Ask";
+    askBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    askBtn.style.borderRadius = "6px";
+    askBtn.style.padding = "6px 10px";
+    askBtn.style.fontSize = "12px";
+    askBtn.style.cursor = "pointer";
+    askBtn.addEventListener("click", () => void this.askFollowUp());
+    followRow.appendChild(askBtn);
+
+    left.appendChild(followRow);
 
     const right = doc.createElement("div");
     right.style.flex = "1";
@@ -1307,7 +1420,7 @@ Generate queries now.`;
     userGoal: string,
     signal: AbortSignal,
   ): Promise<RecommendGroup[]> {
-    const safeCandidates = candidates
+    const allCandidates = candidates
       .filter((e) => e.recid)
       .slice(0, 200)
       .map((e) => ({
@@ -1326,7 +1439,9 @@ Return STRICT JSON only (no Markdown fences).
 Schema:
 {"groups":[{"name":"...","items":[{"recid":"...","texkey":"...","reason":"1-2 sentences"}]}],"notes":["..."]}`;
 
-    const user = `Seed: ${meta.title} (${meta.authorYear || ""})
+    const run = async (candidateBudget: number, maxTokens: number) => {
+      const safeCandidates = allCandidates.slice(0, candidateBudget);
+      const user = `Seed: ${meta.title} (${meta.authorYear || ""})
 User goal: ${userGoal || "(none)"}
 
 Candidates JSON:
@@ -1336,17 +1451,26 @@ ${JSON.stringify(safeCandidates, null, 2)}
 
 Group into 3-8 topical groups and pick 3-8 items per group.`;
 
-    const res = await llmComplete({
-      profile,
-      apiKey,
-      system,
-      user,
-      temperature: 0.2,
-      maxOutputTokens: 900,
-      signal,
-      expectJson: true,
+      const res = await llmComplete({
+        profile,
+        apiKey,
+        system,
+        user,
+        temperature: 0.2,
+        maxOutputTokens: maxTokens,
+        signal,
+        expectJson: true,
+      });
+      return extractJsonFromModelOutput(res.text);
+    };
+
+    let parsed = await run(200, 900).catch(async (err: any) => {
+      if (String(err?.code || "") === "rate_limited") {
+        this.setStatus("Rate limited; rerank retry in smaller budget…");
+        return run(120, 650);
+      }
+      throw err;
     });
-    const parsed = extractJsonFromModelOutput(res.text);
     const groupsRaw = (parsed as any)?.groups;
     if (!Array.isArray(groupsRaw)) {
       return [];
@@ -1386,18 +1510,48 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
       return;
     }
 
+    const chips = this.doc.createElement("div");
+    chips.style.display = "flex";
+    chips.style.flexWrap = "wrap";
+    chips.style.gap = "6px";
+    chips.style.marginBottom = "8px";
+    container.appendChild(chips);
+
+    const createChip = (label: string) => {
+      const btn = this.doc.createElement("button");
+      btn.textContent = label;
+      btn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+      btn.style.borderRadius = "999px";
+      btn.style.padding = "4px 10px";
+      btn.style.fontSize = "12px";
+      btn.style.cursor = "pointer";
+      btn.style.background = "transparent";
+      return btn;
+    };
+
+    const sections: Array<{ name: string; el: HTMLDivElement }> = [];
+
+    const allChip = createChip("All");
+    allChip.style.background = "var(--material-mix-quinary, #f1f5f9)";
+    chips.appendChild(allChip);
+
     for (const group of groups) {
+      const chip = createChip(group.name);
+      chips.appendChild(chip);
+
+      const section = this.doc.createElement("div");
+      section.dataset.groupName = group.name;
+      sections.push({ name: group.name, el: section });
+
       const gHeader = this.doc.createElement("div");
       gHeader.textContent = group.name;
       gHeader.style.fontWeight = "700";
-      gHeader.style.margin = "6px 0";
-      container.appendChild(gHeader);
+      gHeader.style.margin = "10px 0 6px";
+      section.appendChild(gHeader);
 
       for (const item of group.items) {
         const candidate = candidateMap.get(item.recid);
-        if (!candidate) {
-          continue;
-        }
+        if (!candidate) continue;
         const entry = candidate.entry;
 
         const card = this.doc.createElement("div");
@@ -1415,11 +1569,8 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
         link.style.color = "var(--zotero-link, #2563eb)";
         link.addEventListener("click", (e) => {
           e.preventDefault();
-          if (entry.inspireUrl) {
-            Zotero.launchURL(entry.inspireUrl);
-          } else if (entry.fallbackUrl) {
-            Zotero.launchURL(entry.fallbackUrl);
-          }
+          const url = entry.inspireUrl || entry.fallbackUrl;
+          if (url) Zotero.launchURL(url);
         });
         titleRow.appendChild(link);
         card.appendChild(titleRow);
@@ -1471,9 +1622,36 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
         actions.appendChild(importBtn);
 
         card.appendChild(actions);
-        container.appendChild(card);
+        section.appendChild(card);
       }
+
+      container.appendChild(section);
+
+      chip.addEventListener("click", () => {
+        allChip.style.background = "transparent";
+        for (const b of Array.from(chips.querySelectorAll("button"))) {
+          if (b !== chip && b !== allChip) {
+            (b as HTMLButtonElement).style.background = "transparent";
+          }
+        }
+        chip.style.background = "var(--material-mix-quinary, #f1f5f9)";
+        for (const s of sections) {
+          s.el.style.display = s.name === group.name ? "block" : "none";
+        }
+      });
     }
+
+    allChip.addEventListener("click", () => {
+      allChip.style.background = "var(--material-mix-quinary, #f1f5f9)";
+      for (const b of Array.from(chips.querySelectorAll("button"))) {
+        if (b !== allChip) {
+          (b as HTMLButtonElement).style.background = "transparent";
+        }
+      }
+      for (const s of sections) {
+        s.el.style.display = "block";
+      }
+    });
   }
 
   private createNotesPanel(): HTMLDivElement {
@@ -1672,6 +1850,9 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
     const style = String(getPref("ai_summary_style") || "academic");
     const citationFormat = String(getPref("ai_summary_citation_format") || "latex");
     const userGoal = String(this.userGoalInput?.value || "").trim();
+    const refsRecids = picked
+      .map((e) => (typeof e.recid === "string" ? e.recid : ""))
+      .filter((r) => r);
 
     const built = buildSummaryPrompt({
       meta,
@@ -1685,6 +1866,20 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
 
     const streaming = getPref("ai_summary_streaming") !== false;
     const maxOutput = Math.max(200, Number(getPref("ai_summary_max_output_tokens") || 1200));
+    const temperature = Number(getPref("ai_summary_temperature") || 0.2);
+
+    this.lastSummaryInputs = {
+      refsRecids,
+      temperature,
+      maxOutputTokens: maxOutput,
+      outputLanguage,
+      style,
+      citationFormat,
+      includeSeedAbstract: includeSeedAbs,
+      includeRefAbstracts: includeRefAbs,
+      maxRefs,
+      userGoal,
+    };
 
     this.setStatus(streaming ? "Generating (streaming)…" : "Generating…");
     let full = "";
@@ -1717,7 +1912,7 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
           apiKey,
           system: built.system,
           user: built.user,
-          temperature: Number(getPref("ai_summary_temperature") || 0.2),
+          temperature,
           maxOutputTokens: maxOutput,
           signal,
           onDelta: (d) => {
@@ -1732,7 +1927,7 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
           apiKey,
           system: built.system,
           user: built.user,
-          temperature: Number(getPref("ai_summary_temperature") || 0.2),
+          temperature,
           maxOutputTokens: maxOutput,
           signal,
         });
@@ -1741,6 +1936,129 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
         await this.renderSummaryPreview();
       }
       this.setStatus("Done");
+    } catch (err: any) {
+      if (err?.name === "AbortError") return;
+      // Failure auto-downgrade: if rate-limited, retry once in fast mode.
+      if (String(err?.code || "") === "rate_limited") {
+        this.setStatus("Rate limited; retrying in fast mode…");
+        try {
+          const out = await this.generateSummaryMarkdownForSeed({
+            seedItem: this.seedItem,
+            seedRecid,
+            profile,
+            apiKey,
+            signal,
+            mode: "fast",
+          });
+          full = out.markdown || "";
+          applyToTextarea();
+          this.lastSummaryInputs = out.inputs;
+          await this.renderSummaryPreview();
+          this.setStatus("Done (fast mode)");
+          return;
+        } catch (retryErr: any) {
+          if (retryErr?.name === "AbortError") return;
+        }
+      }
+      this.setStatus(`AI error: ${String(err?.message || err)}`);
+    }
+  }
+
+  private async askFollowUp(): Promise<void> {
+    const question = String(this.followUpInput?.value || "").trim();
+    if (!question) {
+      this.setStatus("Enter a follow-up question");
+      return;
+    }
+
+    this.abort?.abort();
+    this.abort = new AbortController();
+    const signal = this.abort.signal;
+
+    const profile = getActiveAIProfile();
+    const { apiKey } = await getAIProviderApiKey(`profile:${profile.id}`);
+    if (!isNonEmptyString(apiKey)) {
+      this.setStatus("Missing API key for current profile");
+      return;
+    }
+
+    const meta = await this.ensureSeedMeta();
+    const system = `You answer follow-up questions about a literature review summary.
+Rules:
+- Use ONLY the provided summary/context.
+- Do not invent papers. If you refer to papers, cite using texkey/recid already present in the context.
+- Output Markdown only (no code fences).`;
+
+    const user = `Seed: ${meta.title} (${meta.authorYear || ""})
+
+Context (existing summary):
+\`\`\`markdown
+${(this.summaryMarkdown || "").slice(0, 12000)}
+\`\`\`
+
+Question: ${question}
+Answer in Markdown.`;
+
+    const streaming = getPref("ai_summary_streaming") !== false;
+    const maxOutput = Math.max(200, Math.min(900, Number(getPref("ai_summary_max_output_tokens") || 800)));
+    const temperature = 0.2;
+
+    const header = `\n\n## Follow-up\n\n**Q:** ${question}\n\n**A:**\n\n`;
+    let full = this.summaryMarkdown || "";
+    full += header;
+
+    const apply = () => {
+      this.summaryMarkdown = full;
+      if (this.summaryTextarea) {
+        this.summaryTextarea.value = full;
+      }
+    };
+
+    const win = this.doc.defaultView || Zotero.getMainWindow();
+    let t: number | undefined;
+    const updatePreview = () => {
+      if (t) win.clearTimeout(t);
+      t = win.setTimeout(() => {
+        void this.renderSummaryPreview();
+        t = undefined;
+      }, 120);
+    };
+
+    this.setStatus(streaming ? "Asking (streaming)…" : "Asking…");
+    try {
+      if (streaming && profile.provider === "openaiCompatible") {
+        await llmStream({
+          profile,
+          apiKey,
+          system,
+          user,
+          temperature,
+          maxOutputTokens: maxOutput,
+          signal,
+          onDelta: (d) => {
+            full += d;
+            apply();
+            updatePreview();
+          },
+        });
+      } else {
+        const res = await llmComplete({
+          profile,
+          apiKey,
+          system,
+          user,
+          temperature,
+          maxOutputTokens: maxOutput,
+          signal,
+        });
+        full += res.text || "";
+        apply();
+        await this.renderSummaryPreview();
+      }
+      this.setStatus("Done");
+      if (this.followUpInput) {
+        this.followUpInput.value = "";
+      }
     } catch (err: any) {
       if (err?.name === "AbortError") return;
       this.setStatus(`AI error: ${String(err?.message || err)}`);
@@ -1763,8 +2081,10 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
 
   private async buildExportMarkdown(): Promise<string> {
     const meta = await this.ensureSeedMeta();
-    const provider = this.currentProfile.provider;
-    const model = this.currentProfile.model;
+    const active = getActiveAIProfile();
+    const provider = active.provider;
+    const model = active.model;
+    const baseURL = active.baseURL;
     const promptVersion = 1;
     return buildMarkdownExport({
       meta,
@@ -1772,6 +2092,8 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
       myNotesMarkdown: this.myNotesMarkdown,
       provider,
       model,
+      baseURL,
+      settings: this.lastSummaryInputs,
       promptVersion,
     });
   }
@@ -1810,6 +2132,291 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
     newNote.libraryID = item.libraryID;
     await newNote.saveTx();
     this.setStatus("Note saved");
+  }
+
+  private async upsertAiNoteForItem(
+    item: Zotero.Item,
+    markdownExport: string,
+  ): Promise<void> {
+    if (!item?.id) {
+      return;
+    }
+    const html = buildAiNoteHtml(markdownExport);
+    const noteIDs = item.getNotes();
+    let targetNote: Zotero.Item | undefined;
+    for (const id of noteIDs) {
+      const note = Zotero.Items.get(id);
+      const body = note?.getNote?.() || "";
+      if (
+        typeof body === "string" &&
+        body.includes('data-zoteroinspire-ai-note="true"')
+      ) {
+        targetNote = note;
+        break;
+      }
+    }
+
+    if (targetNote) {
+      targetNote.setNote(html);
+      await targetNote.saveTx();
+      return;
+    }
+
+    const newNote = new Zotero.Item("note");
+    newNote.setNote(html);
+    newNote.parentID = item.id;
+    newNote.libraryID = item.libraryID;
+    await newNote.saveTx();
+  }
+
+  private async buildSeedMetaForItem(
+    item: Zotero.Item,
+    recid: string,
+    signal?: AbortSignal,
+  ): Promise<SeedMeta> {
+    const title = String(item.getField("title") || "").trim() || "Untitled";
+    const year = buildYearFromItem(item);
+    const authorPart = buildAuthorLabel(item);
+    const authorYear =
+      authorPart && year
+        ? `${authorPart} (${year})`
+        : authorPart || (year ? String(year) : undefined);
+    const journalInfo = buildJournalInfo(item);
+
+    const doiRaw = item.getField("DOI") as string;
+    const doi = typeof doiRaw === "string" && doiRaw.trim() ? doiRaw.trim() : undefined;
+    const arxiv = extractArxivIdFromItem(item);
+
+    const zoteroLink = buildZoteroSelectLink(item);
+    const inspireUrl = recid
+      ? `${INSPIRE_LITERATURE_URL}/${encodeURIComponent(recid)}`
+      : undefined;
+    const doiUrl = doi ? `${DOI_ORG_URL}/${encodeURIComponent(doi)}` : undefined;
+    const arxivUrl = arxiv ? `${ARXIV_ABS_URL}/${encodeURIComponent(arxiv)}` : undefined;
+
+    let citekey: string | undefined;
+    if (recid) {
+      citekey =
+        (await fetchInspireTexkey(recid, signal).catch(() => null)) || undefined;
+    }
+
+    return {
+      title,
+      authors: authorPart,
+      authorYear,
+      year,
+      journal: journalInfo.journal,
+      volume: journalInfo.volume,
+      issue: journalInfo.issue,
+      pages: journalInfo.pages,
+      recid: recid || undefined,
+      citekey,
+      doi,
+      arxiv,
+      zoteroItemKey: item.key,
+      zoteroLink,
+      inspireUrl,
+      doiUrl,
+      arxivUrl,
+    };
+  }
+
+  private async generateSummaryMarkdownForSeed(options: {
+    seedItem: Zotero.Item;
+    seedRecid: string;
+    profile: AIProfile;
+    apiKey: string;
+    signal: AbortSignal;
+    mode?: "full" | "fast";
+  }): Promise<{ markdown: string; inputs: AIDialog["lastSummaryInputs"] }> {
+    const { seedItem, seedRecid, profile, apiKey, signal } = options;
+    const mode = options.mode || "full";
+
+    const meta = await this.buildSeedMetaForItem(seedItem, seedRecid, signal);
+    const refs = await fetchReferencesEntries(seedRecid, { signal }).catch(() => []);
+
+    const prefMaxRefs = Math.max(5, Number(getPref("ai_summary_max_refs") || 40));
+    const maxRefs = mode === "fast" ? Math.min(25, prefMaxRefs) : prefMaxRefs;
+    const picked = selectReferencesForSummary(refs, maxRefs);
+
+    const includeSeedAbs = mode === "fast" ? false : getPref("ai_summary_include_seed_abstract") === true;
+    const includeRefAbs = mode === "fast" ? false : getPref("ai_summary_include_abstracts") === true;
+    const absLimit = Math.max(0, Number(getPref("ai_summary_abstract_char_limit") || 800));
+
+    let seedAbstract: string | undefined;
+    if (includeSeedAbs && seedRecid) {
+      seedAbstract = (await fetchInspireAbstract(seedRecid, signal).catch(() => null)) || undefined;
+      if (seedAbstract && absLimit > 0) seedAbstract = seedAbstract.slice(0, absLimit);
+    }
+
+    if (includeRefAbs) {
+      await enrichAbstractsForEntries(picked, {
+        maxChars: absLimit,
+        signal,
+        concurrency: 4,
+      }).catch(() => null);
+    }
+
+    const outputLanguage = String(getPref("ai_summary_output_language") || "auto");
+    const style = String(getPref("ai_summary_style") || "academic");
+    const citationFormat = String(getPref("ai_summary_citation_format") || "latex");
+    const userGoal = String(this.userGoalInput?.value || "").trim();
+    const temperature = Number(getPref("ai_summary_temperature") || 0.2);
+    const maxOutput = Math.max(
+      200,
+      mode === "fast"
+        ? Math.min(900, Number(getPref("ai_summary_max_output_tokens") || 900))
+        : Number(getPref("ai_summary_max_output_tokens") || 1200),
+    );
+
+    const refsRecids = picked
+      .map((e) => (typeof e.recid === "string" ? e.recid : ""))
+      .filter((r) => r);
+
+    const built = buildSummaryPrompt({
+      meta,
+      seedAbstract,
+      references: includeRefAbs
+        ? picked
+        : picked.map((e) => ({ ...e, abstract: undefined })),
+      outputLanguage,
+      style,
+      citationFormat,
+      userGoal,
+    });
+
+    const inputs = {
+      refsRecids,
+      temperature,
+      maxOutputTokens: maxOutput,
+      outputLanguage,
+      style,
+      citationFormat,
+      includeSeedAbstract: includeSeedAbs,
+      includeRefAbstracts: includeRefAbs,
+      maxRefs,
+      userGoal,
+    } as AIDialog["lastSummaryInputs"];
+
+    // Failure auto-downgrade: if rate-limited, retry once in fast mode.
+    try {
+      const res = await llmComplete({
+        profile,
+        apiKey,
+        system: built.system,
+        user: built.user,
+        temperature,
+        maxOutputTokens: maxOutput,
+        signal,
+      });
+      return { markdown: res.text || "", inputs };
+    } catch (err: any) {
+      if (err?.name === "AbortError") throw err;
+      const isRateLimited = typeof err?.code === "string" && err.code === "rate_limited";
+      if (isRateLimited && mode !== "fast") {
+        const retry = await this.generateSummaryMarkdownForSeed({
+          seedItem,
+          seedRecid,
+          profile,
+          apiKey,
+          signal,
+          mode: "fast",
+        });
+        return retry;
+      }
+      throw err;
+    }
+  }
+
+  private async runAutoPilotForSelection(): Promise<void> {
+    const pane = Zotero.getActiveZoteroPane?.();
+    const selected = (pane?.getSelectedItems?.() as Zotero.Item[]) || [];
+    const regular = selected.filter((it) => it && it.isRegularItem());
+    const maxItems = Math.max(1, Number(getPref("ai_batch_max_items") || 50));
+    const rpm = Math.max(1, Number(getPref("ai_batch_requests_per_minute") || 12));
+    const intervalMs = Math.round(60000 / rpm);
+
+    const seeds: Array<{ item: Zotero.Item; recid: string }> = [];
+    const seen = new Set<string>();
+    for (const item of regular) {
+      const recid = deriveRecidFromItem(item);
+      if (!recid) continue;
+      if (seen.has(recid)) continue;
+      seen.add(recid);
+      seeds.push({ item, recid });
+      if (seeds.length >= maxItems) break;
+    }
+
+    if (!seeds.length) {
+      this.setStatus("AutoPilot: no selected items with INSPIRE recid");
+      return;
+    }
+
+    const win = Zotero.getMainWindow();
+    const ok = win.confirm(
+      `AutoPilot will generate and save AI notes for ${seeds.length} item(s).\nThis will call external LLM APIs and may cost money. Continue?`,
+    );
+    if (!ok) {
+      this.setStatus("AutoPilot cancelled");
+      return;
+    }
+
+    this.abort?.abort();
+    this.abort = new AbortController();
+    const signal = this.abort.signal;
+
+    const profile = getActiveAIProfile();
+    const { apiKey } = await getAIProviderApiKey(`profile:${profile.id}`);
+    if (!isNonEmptyString(apiKey)) {
+      this.setStatus("Missing API key for current profile");
+      return;
+    }
+
+    let done = 0;
+    let failed = 0;
+    for (let i = 0; i < seeds.length; i++) {
+      if (signal.aborted) break;
+      const { item, recid } = seeds[i];
+      const title = String(item.getField("title") || "").trim();
+      this.setStatus(`AutoPilot ${i + 1}/${seeds.length}: ${title || recid}`);
+
+      try {
+        const out = await this.generateSummaryMarkdownForSeed({
+          seedItem: item,
+          seedRecid: recid,
+          profile,
+          apiKey,
+          signal,
+          mode: "fast",
+        });
+        const meta = await this.buildSeedMetaForItem(item, recid, signal);
+        const md = buildMarkdownExport({
+          meta,
+          summaryMarkdown: out.markdown,
+          myNotesMarkdown: "",
+          provider: profile.provider,
+          model: profile.model,
+          baseURL: profile.baseURL,
+          settings: out.inputs || undefined,
+          promptVersion: 1,
+        });
+        await this.upsertAiNoteForItem(item, md);
+        done++;
+      } catch (err: any) {
+        if (err?.name === "AbortError") break;
+        failed++;
+      }
+
+      if (i < seeds.length - 1) {
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
+    }
+
+    this.setStatus(
+      signal.aborted
+        ? `AutoPilot cancelled (${done} done, ${failed} failed)`
+        : `AutoPilot finished (${done} done, ${failed} failed)`,
+    );
   }
 
   private async promptSaveFile(defaultFilename: string): Promise<string | null> {
