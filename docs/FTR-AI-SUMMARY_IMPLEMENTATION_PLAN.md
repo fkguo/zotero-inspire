@@ -265,6 +265,14 @@ Claude（Anthropic）与 Gemini 协议不同，建议单独适配：
 
 ## 9. 分阶段里程碑（建议）
 
+### Phase 0（已完成：基础设施）
+
+- ✅ `AI Secret Store`（优先 LoginManager，降级 prefs fallback）
+- ✅ 偏好项（`ai_summary_*`）骨架
+- ✅ 本文档初版（含 10.3(B) 与 12.2 增强点）
+
+> 已对应本仓库提交：`e91376d`（不影响 `dev-inspire_refs` 分支；后续开发继续在当前分支按里程碑本地 commit，不 push）。
+
 ### Phase 1（MVP，~1 天）
 
 - Provider：OpenAI-Compatible + Claude + Gemini（非流式）
@@ -288,6 +296,22 @@ Claude（Anthropic）与 Gemini 协议不同，建议单独适配：
 ### Phase 4 (增强)
 
 - 12.2 节中各项
+
+---
+
+## 9.1 可跟踪实施里程碑（按你选择：实现 10.3(B) + 12.2 增强 + 11.5 方案 B）
+
+> 说明：每个里程碑完成后都做一次安全/漏洞检查（重点：密钥泄露、XSS/HTML 注入、URL 拼接、文件导出路径、安全日志），并本地 `git commit`（不 push），然后进入下一个里程碑。
+
+| Milestone | Scope | Done Definition（可验收点） |
+| --- | --- | --- |
+| M1 | **AI Profiles + Quick Actions** | `ai_profiles/ai_active_profile_id/ai_prompt_templates` 生效；对话框内可选 profile；API key 通过 secretStore 保存/清除；提供“Test Connection”。 |
+| M2 | **LLM Client（多 provider + streaming）** | OpenAI-Compatible/Claude/Gemini 统一接口；支持非流式与（至少 OpenAI-Compatible）流式；错误归一化（401/429/timeout）；不在日志输出 key。 |
+| M3 | **AI… 对话框 + 方案 B 内置 Markdown 编辑器** | header 栏新增 `AI…`；对话框支持 Summary/Recommend/My Notes；支持 Copy Markdown / Save as Note / Export `.md…`；My Notes 可写 Markdown + 预览（含数学渲染）。 |
+| M4 | **10.3(B) Query Expansion Recommend** | AI 生成 INSPIRE queries → 插件 Search API 拉取 → 与 Related 合并去重 → AI grounded rerank 分组；UI 展示分组 + 解释；推荐条目可点击打开/导入。 |
+| M5 | **12.2 增强（完整实现）** | Streaming UI、userGoal、Follow-ups、AutoPilot（多条目队列 + throttle）、失败自动降级、可复现记录（front matter/hash）、主题 chips 过滤；提供“Copy debug info”（不含敏感）。 |
+
+实现顺序建议：`M1 → M2 → M3 → M4 → M5`（M4 依赖 M2/M3；M5 依赖全部）。
 
 ---
 
