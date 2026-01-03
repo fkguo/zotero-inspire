@@ -41,6 +41,9 @@ pref("__prefsPrefix__.ai_summary_cache_ttl_hours", 168); // 7 days
 pref("__prefsPrefix__.ai_summary_streaming", true); // Stream responses when supported
 pref("__prefsPrefix__.ai_batch_requests_per_minute", 12); // Batch/autopilot throttle
 pref("__prefsPrefix__.ai_batch_max_items", 50); // Safety cap
+pref("__prefsPrefix__.ai_profiles", "[]"); // JSON array of AI profiles (provider/baseURL/model; no API keys)
+pref("__prefsPrefix__.ai_active_profile_id", ""); // Active profile id (empty = use first/default)
+pref("__prefsPrefix__.ai_prompt_templates", "[]"); // JSON array of user-defined prompt templates/buttons
 // Developer/debug toggles
 pref("__prefsPrefix__.debug_panel_layout", false); // Enable panel layout debug logs/UI
 // Local cache settings

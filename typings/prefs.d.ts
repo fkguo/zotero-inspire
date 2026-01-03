@@ -48,6 +48,9 @@ declare namespace _ZoteroTypes {
       "ai_summary_streaming": boolean;
       "ai_batch_requests_per_minute": number;
       "ai_batch_max_items": number;
+      "ai_profiles": string;
+      "ai_active_profile_id": string;
+      "ai_prompt_templates": string;
       "debug_panel_layout": boolean;
       "local_cache_enable": boolean;
       "local_cache_ttl_hours": number;
