@@ -63,6 +63,16 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function normalizeTemperaturePref(value: unknown): number {
+  const raw =
+    typeof value === "number"
+      ? value
+      : Number.parseFloat(String(value ?? "").trim());
+  if (!Number.isFinite(raw)) return 0.2;
+  const temp = raw <= 2 ? raw : Number.isInteger(raw) ? raw / 100 : 2;
+  return Math.max(0, Math.min(2, temp));
+}
+
 function sanitizeFilenamePart(input: string): string {
   return String(input || "")
     .trim()
@@ -1866,7 +1876,7 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
 
     const streaming = getPref("ai_summary_streaming") !== false;
     const maxOutput = Math.max(200, Number(getPref("ai_summary_max_output_tokens") || 1200));
-    const temperature = Number(getPref("ai_summary_temperature") || 0.2);
+    const temperature = normalizeTemperaturePref(getPref("ai_summary_temperature"));
 
     this.lastSummaryInputs = {
       refsRecids,
@@ -2261,7 +2271,7 @@ Answer in Markdown.`;
     const style = String(getPref("ai_summary_style") || "academic");
     const citationFormat = String(getPref("ai_summary_citation_format") || "latex");
     const userGoal = String(this.userGoalInput?.value || "").trim();
-    const temperature = Number(getPref("ai_summary_temperature") || 0.2);
+    const temperature = normalizeTemperaturePref(getPref("ai_summary_temperature"));
     const maxOutput = Math.max(
       200,
       mode === "fast"

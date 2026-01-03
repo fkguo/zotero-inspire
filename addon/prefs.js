@@ -28,7 +28,7 @@ pref("__prefsPrefix__.ai_summary_provider", "openaiCompatible"); // openaiCompat
 pref("__prefsPrefix__.ai_summary_preset", "openai"); // openai | deepseek | kimi | qwen | zhipu | ollama | lmstudio | custom
 pref("__prefsPrefix__.ai_summary_base_url", "https://api.openai.com/v1"); // OpenAI-compatible base URL (or full /chat/completions endpoint)
 pref("__prefsPrefix__.ai_summary_model", "gpt-4o-mini");
-pref("__prefsPrefix__.ai_summary_temperature", 0.2);
+pref("__prefsPrefix__.ai_summary_temperature", 20);
 pref("__prefsPrefix__.ai_summary_max_output_tokens", 1200);
 pref("__prefsPrefix__.ai_summary_output_language", "auto"); // auto | en | zh-CN
 pref("__prefsPrefix__.ai_summary_style", "academic"); // academic | bullet | grant-report | slides
