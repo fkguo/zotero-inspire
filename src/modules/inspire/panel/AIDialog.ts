@@ -18,7 +18,10 @@ import { renderLatexInElement } from "../mathRenderer";
 import {
   ARXIV_ABS_URL,
   DOI_ORG_URL,
+  INSPIRE_API_BASE,
   INSPIRE_LITERATURE_URL,
+  API_FIELDS_LIST_DISPLAY,
+  buildFieldsParam,
 } from "../constants";
 import {
   copyToClipboard,
@@ -26,9 +29,13 @@ import {
   extractArxivIdFromItem,
 } from "../apiUtils";
 import { fetchInspireAbstract, fetchInspireTexkey } from "../metadataService";
+import { inspireFetch } from "../rateLimiter";
+import { getCachedStrings } from "../formatters";
 import type { InspireReferenceEntry } from "../types";
 import { fetchReferencesEntries } from "../referencesService";
+import { fetchRelatedPapersEntries } from "../relatedPapersService";
 import { dump as yamlDump } from "js-yaml";
+import { buildEntryFromSearchHit } from "./SearchService";
 
 type AITabId = "summary" | "recommend" | "notes";
 
@@ -350,6 +357,44 @@ Now write the literature review summary.`;
   return { system, user };
 }
 
+function extractJsonFromModelOutput(text: string): unknown | null {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Try to extract first JSON object/array block.
+    const objStart = raw.indexOf("{");
+    const objEnd = raw.lastIndexOf("}");
+    if (objStart >= 0 && objEnd > objStart) {
+      const slice = raw.slice(objStart, objEnd + 1);
+      try {
+        return JSON.parse(slice);
+      } catch {
+        // fall through
+      }
+    }
+    const arrStart = raw.indexOf("[");
+    const arrEnd = raw.lastIndexOf("]");
+    if (arrStart >= 0 && arrEnd > arrStart) {
+      const slice = raw.slice(arrStart, arrEnd + 1);
+      try {
+        return JSON.parse(slice);
+      } catch {
+        // fall through
+      }
+    }
+  }
+  return null;
+}
+
+type InspireQuerySuggestion = { intent: string; query: string };
+
+type RecommendGroup = {
+  name: string;
+  items: Array<{ recid: string; texkey?: string; reason?: string }>;
+};
+
 export class AIDialog {
   private readonly doc: Document;
   private readonly seedItem: Zotero.Item;
@@ -366,6 +411,11 @@ export class AIDialog {
   private summaryPreview?: HTMLDivElement;
   private notesTextarea?: HTMLTextAreaElement;
   private notesPreview?: HTMLDivElement;
+
+  private recommendQueryTextarea?: HTMLTextAreaElement;
+  private recommendResultsEl?: HTMLDivElement;
+  private recommendIncludeRelatedCheckbox?: HTMLInputElement;
+  private recommendPerQueryInput?: HTMLInputElement;
 
   private userGoalInput?: HTMLInputElement;
   private outputLangSelect?: HTMLSelectElement;
@@ -387,11 +437,20 @@ export class AIDialog {
   private summaryMarkdown = "";
   private myNotesMarkdown = "";
   private seedMeta?: SeedMeta;
+  private readonly onImportRecid?: (recid: string, anchor: HTMLElement) => Promise<void>;
 
-  constructor(doc: Document, options: { seedItem: Zotero.Item; seedRecid: string }) {
+  constructor(
+    doc: Document,
+    options: {
+      seedItem: Zotero.Item;
+      seedRecid: string;
+      onImportRecid?: (recid: string, anchor: HTMLElement) => Promise<void>;
+    },
+  ) {
     this.doc = doc;
     this.seedItem = options.seedItem;
     this.seedRecid = options.seedRecid;
+    this.onImportRecid = options.onImportRecid;
     this.currentProfile = getActiveAIProfile();
     this.buildUI();
     void this.refreshApiKeyStatus();
@@ -917,16 +976,504 @@ export class AIDialog {
     panel.style.display = "none";
     panel.style.flexDirection = "column";
     panel.style.padding = "12px";
-    panel.style.gap = "8px";
+    panel.style.gap = "10px";
 
-    const msg = this.doc.createElement("div");
-    msg.textContent = "Recommendation UI will be enabled in the next milestone (10.3(B)).";
-    msg.style.fontSize = "12px";
-    msg.style.color = "var(--fill-secondary, #666)";
-    panel.appendChild(msg);
+    const controls = this.doc.createElement("div");
+    controls.style.display = "flex";
+    controls.style.flexWrap = "wrap";
+    controls.style.gap = "8px";
+    controls.style.alignItems = "center";
+
+    const genQueriesBtn = this.doc.createElement("button");
+    genQueriesBtn.textContent = "Generate Queries";
+    genQueriesBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    genQueriesBtn.style.borderRadius = "6px";
+    genQueriesBtn.style.padding = "6px 10px";
+    genQueriesBtn.style.fontSize = "12px";
+    genQueriesBtn.style.cursor = "pointer";
+    genQueriesBtn.addEventListener("click", () => void this.generateQueriesToTextarea());
+    controls.appendChild(genQueriesBtn);
+
+    const runBtn = this.doc.createElement("button");
+    runBtn.textContent = "Search + Rerank";
+    runBtn.style.border = "1px solid var(--zotero-blue-5, #0060df)";
+    runBtn.style.background = "var(--zotero-blue-5, #0060df)";
+    runBtn.style.color = "#ffffff";
+    runBtn.style.borderRadius = "6px";
+    runBtn.style.padding = "6px 10px";
+    runBtn.style.fontSize = "12px";
+    runBtn.style.cursor = "pointer";
+    runBtn.addEventListener("click", () => void this.runRecommendFromTextarea());
+    controls.appendChild(runBtn);
+
+    const includeRelatedLabel = this.doc.createElement("label");
+    includeRelatedLabel.style.display = "inline-flex";
+    includeRelatedLabel.style.alignItems = "center";
+    includeRelatedLabel.style.gap = "6px";
+    includeRelatedLabel.style.fontSize = "12px";
+    const includeRelated = this.doc.createElement("input");
+    includeRelated.type = "checkbox";
+    includeRelated.checked = true;
+    this.recommendIncludeRelatedCheckbox = includeRelated;
+    includeRelatedLabel.appendChild(includeRelated);
+    includeRelatedLabel.appendChild(this.doc.createTextNode("Include Related"));
+    controls.appendChild(includeRelatedLabel);
+
+    const perQuery = this.doc.createElement("input");
+    perQuery.type = "number";
+    perQuery.min = "5";
+    perQuery.max = "50";
+    perQuery.value = "20";
+    perQuery.style.width = "64px";
+    perQuery.style.padding = "4px 6px";
+    perQuery.style.borderRadius = "6px";
+    perQuery.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    perQuery.title = "Top N per query";
+    this.recommendPerQueryInput = perQuery;
+    controls.appendChild(perQuery);
+
+    panel.appendChild(controls);
+
+    const queryBox = this.doc.createElement("textarea");
+    queryBox.placeholder =
+      "INSPIRE queries (one per line). You can edit before running.\nExample: t:\"pentaquark\" and date:2022->2026";
+    queryBox.style.width = "100%";
+    queryBox.style.height = "110px";
+    queryBox.style.resize = "vertical";
+    queryBox.style.fontFamily =
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    queryBox.style.fontSize = "12px";
+    queryBox.style.padding = "10px";
+    queryBox.style.border = "1px solid var(--fill-quinary, #e0e0e0)";
+    queryBox.style.borderRadius = "8px";
+    this.recommendQueryTextarea = queryBox;
+    panel.appendChild(queryBox);
+
+    const hint = this.doc.createElement("div");
+    hint.textContent =
+      "Grounded mode: AI can only recommend papers that exist in the fetched candidates (recid verified).";
+    hint.style.fontSize = "11px";
+    hint.style.color = "var(--fill-secondary, #666)";
+    panel.appendChild(hint);
+
+    const results = this.doc.createElement("div");
+    results.style.flex = "1";
+    results.style.minHeight = "0";
+    results.style.overflow = "auto";
+    results.style.border = "1px solid var(--fill-quinary, #e0e0e0)";
+    results.style.borderRadius = "8px";
+    results.style.padding = "10px";
+    this.recommendResultsEl = results;
+    panel.appendChild(results);
 
     this.tabPanels.set("recommend", panel);
     return panel;
+  }
+
+  private async generateQueriesToTextarea(): Promise<void> {
+    this.abort?.abort();
+    this.abort = new AbortController();
+    const signal = this.abort.signal;
+
+    const profile = getActiveAIProfile();
+    const { apiKey } = await getAIProviderApiKey(`profile:${profile.id}`);
+    if (!isNonEmptyString(apiKey)) {
+      this.setStatus("Missing API key for current profile");
+      return;
+    }
+
+    const meta = await this.ensureSeedMeta();
+    const seedRecid = meta.recid || this.seedRecid;
+    if (!seedRecid) {
+      this.setStatus("Missing INSPIRE recid");
+      return;
+    }
+
+    this.setStatus("Loading references…");
+    const refs = await fetchReferencesEntries(seedRecid, { signal }).catch(() => []);
+    const picked = selectReferencesForSummary(refs, Math.min(30, refs.length));
+
+    const userGoal = String(this.userGoalInput?.value || "").trim();
+    const refTitles = picked
+      .map((e) => e.title)
+      .filter((t) => typeof t === "string" && t.trim())
+      .slice(0, 30);
+
+    const system = `You generate INSPIRE-HEP search queries.
+Return STRICT JSON only. Do not include Markdown fences.
+Schema: {"queries":[{"intent":"...","query":"..."}]}.
+Rules:
+- 3 to 8 queries.
+- Use valid INSPIRE syntax (t:, a:, fulltext:, date:YYYY->YYYY, refersto:recid:...).
+- Prefer queries that expand beyond the existing citation network.`;
+
+    const user = `Seed:
+- title: ${meta.title}
+- recid: ${meta.recid || ""}
+- citekey: ${meta.citekey || ""}
+- authorYear: ${meta.authorYear || ""}
+
+User goal: ${userGoal || "(none)"}
+
+Some reference titles:
+${refTitles.map((t) => `- ${t}`).join("\n")}
+
+Generate queries now.`;
+
+    try {
+      const res = await llmComplete({
+        profile,
+        apiKey,
+        system,
+        user,
+        temperature: 0.2,
+        maxOutputTokens: 500,
+        signal,
+        expectJson: true,
+      });
+      const parsed = extractJsonFromModelOutput(res.text);
+      const queriesRaw = (parsed as any)?.queries;
+      const queries: InspireQuerySuggestion[] = Array.isArray(queriesRaw)
+        ? queriesRaw
+            .map((q: any) => ({
+              intent: String(q?.intent || "").trim(),
+              query: String(q?.query || "").trim(),
+            }))
+            .filter((q: any) => q.query)
+        : [];
+
+      if (!queries.length) {
+        this.setStatus("No queries generated (invalid JSON)");
+        return;
+      }
+
+      if (this.recommendQueryTextarea) {
+        this.recommendQueryTextarea.value = queries
+          .map((q) => (q.intent ? `${q.intent}\t${q.query}` : q.query))
+          .join("\n");
+      }
+      this.setStatus(`Generated ${queries.length} queries`);
+    } catch (err: any) {
+      if (err?.name === "AbortError") return;
+      this.setStatus(`AI error: ${String(err?.message || err)}`);
+    }
+  }
+
+  private parseQueriesFromTextarea(): InspireQuerySuggestion[] {
+    const raw = String(this.recommendQueryTextarea?.value || "");
+    const lines = raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l);
+
+    const out: InspireQuerySuggestion[] = [];
+    for (const line of lines) {
+      if (line.includes("\t")) {
+        const [intent, query] = line.split("\t");
+        const q = String(query || "").trim();
+        if (q) out.push({ intent: String(intent || "").trim(), query: q });
+        continue;
+      }
+      const idx = line.indexOf(": ");
+      if (idx > 0 && idx < 40) {
+        const intent = line.slice(0, idx).trim();
+        const query = line.slice(idx + 2).trim();
+        if (query) out.push({ intent, query });
+        continue;
+      }
+      out.push({ intent: "", query: line });
+    }
+    return out.slice(0, 12);
+  }
+
+  private async runRecommendFromTextarea(): Promise<void> {
+    this.abort?.abort();
+    this.abort = new AbortController();
+    const signal = this.abort.signal;
+
+    const profile = getActiveAIProfile();
+    const { apiKey } = await getAIProviderApiKey(`profile:${profile.id}`);
+    if (!isNonEmptyString(apiKey)) {
+      this.setStatus("Missing API key for current profile");
+      return;
+    }
+
+    const meta = await this.ensureSeedMeta();
+    const seedRecid = meta.recid || this.seedRecid;
+    if (!seedRecid) {
+      this.setStatus("Missing INSPIRE recid");
+      return;
+    }
+
+    const queries = this.parseQueriesFromTextarea();
+    if (!queries.length) {
+      this.setStatus("No queries to run");
+      return;
+    }
+
+    const perQuery = Math.min(
+      50,
+      Math.max(5, Number(this.recommendPerQueryInput?.value || 20)),
+    );
+    const includeRelated = this.recommendIncludeRelatedCheckbox?.checked !== false;
+
+    this.setStatus(`Searching ${queries.length} queries…`);
+    const candidates = await this.fetchCandidatesFromQueries(queries, perQuery, signal);
+
+    if (includeRelated) {
+      this.setStatus("Fetching Related…");
+      const refs = await fetchReferencesEntries(seedRecid, { signal }).catch(() => []);
+      const related = await fetchRelatedPapersEntries(seedRecid, refs, {
+        signal,
+        params: { maxResults: 50, excludeReviewArticles: true },
+      }).catch(() => []);
+      for (const e of related) {
+        if (e.recid) {
+          const existing = candidates.get(e.recid);
+          if (existing) {
+            existing.sources.add("related");
+            existing.entry.relatedCombinedScore = e.relatedCombinedScore;
+          } else {
+            candidates.set(e.recid, { entry: e, sources: new Set(["related"]) });
+          }
+        }
+      }
+    }
+
+    const candidateList = Array.from(candidates.values())
+      .map((c) => c.entry)
+      .filter((e) => e.recid)
+      .slice(0, 200);
+
+    if (!candidateList.length) {
+      this.setStatus("No candidates found");
+      return;
+    }
+
+    this.setStatus(`Reranking ${candidateList.length} candidates…`);
+    const groups = await this.rerankCandidatesWithAI(
+      profile,
+      apiKey,
+      meta,
+      candidateList,
+      String(this.userGoalInput?.value || "").trim(),
+      signal,
+    );
+
+    this.renderRecommendationGroups(groups, candidates);
+    this.setStatus("Done");
+  }
+
+  private async fetchCandidatesFromQueries(
+    queries: InspireQuerySuggestion[],
+    perQuery: number,
+    signal: AbortSignal,
+  ): Promise<Map<string, { entry: InspireReferenceEntry; sources: Set<string> }>> {
+    const strings = getCachedStrings();
+    const fieldsParam = buildFieldsParam(API_FIELDS_LIST_DISPLAY);
+    const map = new Map<string, { entry: InspireReferenceEntry; sources: Set<string> }>();
+
+    for (const q of queries) {
+      if (signal.aborted) break;
+      const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(q.query)}&size=${perQuery}&page=1&sort=mostrecent${fieldsParam}`;
+      const res = await inspireFetch(url, { signal }).catch(() => null);
+      if (!res || !res.ok) {
+        continue;
+      }
+      const payload = (await res.json()) as any;
+      const hits = Array.isArray(payload?.hits?.hits) ? payload.hits.hits : [];
+      for (const hit of hits) {
+        const entry = buildEntryFromSearchHit(hit, map.size, strings);
+        if (!entry.recid) continue;
+        const existing = map.get(entry.recid);
+        if (existing) {
+          existing.sources.add(q.intent || q.query);
+        } else {
+          map.set(entry.recid, {
+            entry,
+            sources: new Set([q.intent || q.query]),
+          });
+        }
+      }
+    }
+    return map;
+  }
+
+  private async rerankCandidatesWithAI(
+    profile: AIProfile,
+    apiKey: string,
+    meta: SeedMeta,
+    candidates: InspireReferenceEntry[],
+    userGoal: string,
+    signal: AbortSignal,
+  ): Promise<RecommendGroup[]> {
+    const safeCandidates = candidates
+      .filter((e) => e.recid)
+      .slice(0, 200)
+      .map((e) => ({
+        recid: e.recid,
+        texkey: e.texkey || "",
+        title: e.title,
+        authors: e.authorText || e.authors.join(", "),
+        year: e.year,
+        citationCount: e.citationCount ?? null,
+        documentType: e.documentType ?? [],
+      }));
+
+    const system = `You are a scientific assistant.
+You MUST only recommend papers that appear in the provided candidates list.
+Return STRICT JSON only (no Markdown fences).
+Schema:
+{"groups":[{"name":"...","items":[{"recid":"...","texkey":"...","reason":"1-2 sentences"}]}],"notes":["..."]}`;
+
+    const user = `Seed: ${meta.title} (${meta.authorYear || ""})
+User goal: ${userGoal || "(none)"}
+
+Candidates JSON:
+\`\`\`json
+${JSON.stringify(safeCandidates, null, 2)}
+\`\`\`
+
+Group into 3-8 topical groups and pick 3-8 items per group.`;
+
+    const res = await llmComplete({
+      profile,
+      apiKey,
+      system,
+      user,
+      temperature: 0.2,
+      maxOutputTokens: 900,
+      signal,
+      expectJson: true,
+    });
+    const parsed = extractJsonFromModelOutput(res.text);
+    const groupsRaw = (parsed as any)?.groups;
+    if (!Array.isArray(groupsRaw)) {
+      return [];
+    }
+    const groups: RecommendGroup[] = [];
+    for (const g of groupsRaw) {
+      const name = String(g?.name || "").trim() || "Group";
+      const itemsRaw = Array.isArray(g?.items) ? g.items : [];
+      const items = itemsRaw
+        .map((it: any) => ({
+          recid: String(it?.recid || "").trim(),
+          texkey: String(it?.texkey || "").trim() || undefined,
+          reason: String(it?.reason || "").trim() || undefined,
+        }))
+        .filter((it: any) => it.recid);
+      if (items.length) {
+        groups.push({ name, items });
+      }
+    }
+    return groups;
+  }
+
+  private renderRecommendationGroups(
+    groups: RecommendGroup[],
+    candidateMap: Map<string, { entry: InspireReferenceEntry; sources: Set<string> }>,
+  ): void {
+    const container = this.recommendResultsEl;
+    if (!container) return;
+    container.innerHTML = "";
+
+    if (!groups.length) {
+      const msg = this.doc.createElement("div");
+      msg.textContent = "No recommendation groups (AI returned invalid JSON?)";
+      msg.style.fontSize = "12px";
+      msg.style.color = "var(--fill-secondary, #666)";
+      container.appendChild(msg);
+      return;
+    }
+
+    for (const group of groups) {
+      const gHeader = this.doc.createElement("div");
+      gHeader.textContent = group.name;
+      gHeader.style.fontWeight = "700";
+      gHeader.style.margin = "6px 0";
+      container.appendChild(gHeader);
+
+      for (const item of group.items) {
+        const candidate = candidateMap.get(item.recid);
+        if (!candidate) {
+          continue;
+        }
+        const entry = candidate.entry;
+
+        const card = this.doc.createElement("div");
+        card.style.border = "1px solid var(--fill-quinary, #e0e0e0)";
+        card.style.borderRadius = "8px";
+        card.style.padding = "8px 10px";
+        card.style.marginBottom = "8px";
+
+        const titleRow = this.doc.createElement("div");
+        const link = this.doc.createElement("a");
+        link.href = entry.inspireUrl || entry.fallbackUrl || "#";
+        link.textContent = entry.title;
+        link.style.fontWeight = "600";
+        link.style.textDecoration = "none";
+        link.style.color = "var(--zotero-link, #2563eb)";
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (entry.inspireUrl) {
+            Zotero.launchURL(entry.inspireUrl);
+          } else if (entry.fallbackUrl) {
+            Zotero.launchURL(entry.fallbackUrl);
+          }
+        });
+        titleRow.appendChild(link);
+        card.appendChild(titleRow);
+
+        const metaRow = this.doc.createElement("div");
+        metaRow.style.fontSize = "11px";
+        metaRow.style.color = "var(--fill-secondary, #666)";
+        metaRow.textContent = `${entry.authorText || entry.authors.join(", ")} · ${entry.year || ""}`.trim();
+        card.appendChild(metaRow);
+
+        if (item.reason) {
+          const reason = this.doc.createElement("div");
+          reason.style.marginTop = "6px";
+          reason.style.fontSize = "12px";
+          reason.textContent = item.reason;
+          card.appendChild(reason);
+        }
+
+        const actions = this.doc.createElement("div");
+        actions.style.display = "flex";
+        actions.style.gap = "8px";
+        actions.style.marginTop = "8px";
+
+        const openBtn = this.doc.createElement("button");
+        openBtn.textContent = "Open";
+        openBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+        openBtn.style.borderRadius = "6px";
+        openBtn.style.padding = "4px 8px";
+        openBtn.style.fontSize = "12px";
+        openBtn.style.cursor = "pointer";
+        openBtn.addEventListener("click", () => {
+          const url = entry.inspireUrl || entry.fallbackUrl;
+          if (url) Zotero.launchURL(url);
+        });
+        actions.appendChild(openBtn);
+
+        const importBtn = this.doc.createElement("button");
+        importBtn.textContent = "Import";
+        importBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+        importBtn.style.borderRadius = "6px";
+        importBtn.style.padding = "4px 8px";
+        importBtn.style.fontSize = "12px";
+        importBtn.style.cursor = "pointer";
+        importBtn.disabled = !this.onImportRecid || !entry.recid;
+        importBtn.addEventListener("click", async () => {
+          if (!this.onImportRecid || !entry.recid) return;
+          await this.onImportRecid(entry.recid, importBtn);
+        });
+        actions.appendChild(importBtn);
+
+        card.appendChild(actions);
+        container.appendChild(card);
+      }
+    }
   }
 
   private createNotesPanel(): HTMLDivElement {

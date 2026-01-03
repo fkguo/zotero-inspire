@@ -8278,9 +8278,35 @@ class InspireReferencePanelController {
         existing.remove();
       }
 
-      new AIDialog(doc, { seedItem: item, seedRecid: recid });
+      new AIDialog(doc, {
+        seedItem: item,
+        seedRecid: recid,
+        onImportRecid: async (targetRecid: string, anchor: HTMLElement) => {
+          await this.importRecidFromAI(targetRecid, anchor);
+        },
+      });
     } catch (err) {
       Zotero.debug(`[${config.addonName}] showAIDialog error: ${err}`);
+    }
+  }
+
+  /**
+   * Import an INSPIRE recid into Zotero via the same save-target picker flow.
+   * Exposed for AI recommendation UI.
+   */
+  async importRecidFromAI(recid: string, anchor: HTMLElement): Promise<void> {
+    try {
+      const normalized = String(recid || "").trim();
+      if (!normalized) {
+        return;
+      }
+      const selection = await this.promptForSaveTarget(anchor || this.body);
+      if (!selection) {
+        return;
+      }
+      await this.importReference(normalized, selection);
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] importRecidFromAI error: ${err}`);
     }
   }
 
