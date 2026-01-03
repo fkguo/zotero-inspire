@@ -18,6 +18,8 @@ export interface AIProfile {
 
 export type AIProfilePresetId =
   | "openai"
+  | "claude"
+  | "gemini"
   | "deepseek"
   | "kimi"
   | "qwen"
@@ -39,6 +41,20 @@ export const AI_PROFILE_PRESETS: Array<{
     provider: "openaiCompatible",
     baseURL: "https://api.openai.com/v1",
     defaultModel: "gpt-4o-mini",
+  },
+  {
+    id: "claude",
+    label: "Claude / Anthropic",
+    provider: "anthropic",
+    baseURL: "https://api.anthropic.com",
+    defaultModel: "claude-3-5-sonnet-latest",
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    provider: "gemini",
+    baseURL: "https://generativelanguage.googleapis.com",
+    defaultModel: "gemini-1.5-flash",
   },
   {
     id: "deepseek",
@@ -265,4 +281,3 @@ export function deleteAIProfile(profileId: string): AIProfile[] {
   }
   return next;
 }
-
