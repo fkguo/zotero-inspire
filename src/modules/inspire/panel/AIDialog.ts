@@ -4,6 +4,16 @@ import { getPref, setPref } from "../../../utils/prefs";
 import { markdownToSafeHtml } from "../llm/markdown";
 import { getAIProviderApiKey, setAIProviderApiKey } from "../llm/secretStore";
 import {
+  BUILTIN_PROMPT_TEMPLATES,
+  createTemplateId,
+  deleteUserPromptTemplate,
+  getUserPromptTemplates,
+  upsertUserPromptTemplate,
+  type AIPromptContextScope,
+  type AIPromptOutputFormat,
+  type AIPromptTemplate,
+} from "../llm/templateStore";
+import {
   AI_PROFILE_PRESETS,
   createAIProfileId,
   deleteAIProfile,
@@ -38,7 +48,7 @@ import { localCache } from "../localCache";
 import { dump as yamlDump } from "js-yaml";
 import { buildEntryFromSearchHit } from "./SearchService";
 
-type AITabId = "summary" | "recommend" | "notes";
+type AITabId = "summary" | "recommend" | "notes" | "templates";
 
 type SeedMeta = {
   title: string;
@@ -93,6 +103,14 @@ function normalizeTemperaturePref(value: unknown): number {
   if (!Number.isFinite(raw)) return 0.2;
   const temp = raw <= 2 ? raw : Number.isInteger(raw) ? raw / 100 : 2;
   return Math.max(0, Math.min(2, temp));
+}
+
+function renderTemplateString(template: string, vars: Record<string, string>): string {
+  const src = String(template ?? "");
+  return src.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key) => {
+    const k = String(key || "");
+    return Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k] ?? "") : `{${k}}`;
+  });
 }
 
 function sanitizeFilenamePart(input: string): string {
@@ -537,6 +555,8 @@ export class AIDialog {
   private recommendResultsEl?: HTMLDivElement;
   private recommendIncludeRelatedCheckbox?: HTMLInputElement;
   private recommendPerQueryInput?: HTMLInputElement;
+  private recommendQueryTemplateSelect?: HTMLSelectElement;
+  private recommendRerankTemplateSelect?: HTMLSelectElement;
   private followUpInput?: HTMLInputElement;
 
   private userGoalInput?: HTMLInputElement;
@@ -685,6 +705,7 @@ export class AIDialog {
     tabs.appendChild(this.createTabButton("summary", "Summary"));
     tabs.appendChild(this.createTabButton("recommend", "Recommend"));
     tabs.appendChild(this.createTabButton("notes", "My Notes"));
+    tabs.appendChild(this.createTabButton("templates", "Templates"));
 
     const body = doc.createElement("div");
     body.className = "zinspire-ai-dialog__body";
@@ -695,6 +716,7 @@ export class AIDialog {
     body.appendChild(this.createSummaryPanel());
     body.appendChild(this.createRecommendPanel());
     body.appendChild(this.createNotesPanel());
+    body.appendChild(this.createTemplatesPanel());
 
     const footer = doc.createElement("div");
     footer.className = "zinspire-ai-dialog__footer";
@@ -793,6 +815,7 @@ export class AIDialog {
 
     // Append to the panel document (covers the whole window via fixed positioning).
     this.doc.documentElement.appendChild(overlay);
+    this.refreshPromptTemplateSelects();
     this.switchTab("summary");
   }
 
@@ -1049,6 +1072,84 @@ export class AIDialog {
     return wrap;
   }
 
+  private getAllPromptTemplates(): {
+    builtins: AIPromptTemplate[];
+    users: AIPromptTemplate[];
+    all: AIPromptTemplate[];
+  } {
+    const builtins = Array.isArray(BUILTIN_PROMPT_TEMPLATES)
+      ? BUILTIN_PROMPT_TEMPLATES.slice()
+      : [];
+    const users = getUserPromptTemplates();
+    return { builtins, users, all: [...builtins, ...users] };
+  }
+
+  private isBuiltinPromptTemplate(id: string): boolean {
+    return BUILTIN_PROMPT_TEMPLATES.some((t) => t.id === id);
+  }
+
+  private findPromptTemplateById(id: string): AIPromptTemplate | null {
+    const tplId = String(id || "").trim();
+    if (!tplId) return null;
+    const { all } = this.getAllPromptTemplates();
+    return all.find((t) => t.id === tplId) || null;
+  }
+
+  private fillPromptTemplateSelect(params: {
+    select?: HTMLSelectElement;
+    scope: AIPromptContextScope;
+    output: AIPromptOutputFormat;
+    defaultId: string;
+  }): void {
+    const { select, scope, output, defaultId } = params;
+    if (!select) return;
+
+    const prev = String(select.value || "");
+    const { builtins, users } = this.getAllPromptTemplates();
+    const builtinList = builtins.filter((t) => t.scope === scope && t.output === output);
+    const userList = users.filter((t) => t.scope === scope && t.output === output);
+
+    select.innerHTML = "";
+
+    const addOption = (tpl: AIPromptTemplate, prefix: string) => {
+      const opt = this.doc.createElement("option");
+      opt.value = tpl.id;
+      opt.textContent = `${prefix}${tpl.name}`;
+      select.appendChild(opt);
+    };
+
+    for (const t of builtinList) addOption(t, "★ ");
+    for (const t of userList) addOption(t, "");
+
+    const allIds = new Set([...builtinList, ...userList].map((t) => t.id));
+    if (prev && allIds.has(prev)) {
+      select.value = prev;
+      return;
+    }
+    if (defaultId && allIds.has(defaultId)) {
+      select.value = defaultId;
+      return;
+    }
+    if (select.options.length) {
+      select.value = select.options[0].value;
+    }
+  }
+
+  private refreshPromptTemplateSelects(): void {
+    this.fillPromptTemplateSelect({
+      select: this.recommendQueryTemplateSelect,
+      scope: "inspireQuery",
+      output: "json",
+      defaultId: "builtin_inspire_query_expand",
+    });
+    this.fillPromptTemplateSelect({
+      select: this.recommendRerankTemplateSelect,
+      scope: "recommend",
+      output: "json",
+      defaultId: "builtin_recommend_rerank",
+    });
+  }
+
   private createTabButton(id: AITabId, label: string): HTMLButtonElement {
     const btn = this.doc.createElement("button");
     btn.textContent = label;
@@ -1187,6 +1288,15 @@ export class AIDialog {
     genQueriesBtn.addEventListener("click", () => void this.generateQueriesToTextarea());
     controls.appendChild(genQueriesBtn);
 
+    const queryTpl = this.doc.createElement("select");
+    queryTpl.style.fontSize = "12px";
+    queryTpl.style.padding = "4px 6px";
+    queryTpl.style.borderRadius = "6px";
+    queryTpl.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    queryTpl.title = "Query template";
+    this.recommendQueryTemplateSelect = queryTpl;
+    controls.appendChild(queryTpl);
+
     const runBtn = this.doc.createElement("button");
     runBtn.textContent = "Search + Rerank";
     runBtn.style.border = "1px solid var(--zotero-blue-5, #0060df)";
@@ -1198,6 +1308,26 @@ export class AIDialog {
     runBtn.style.cursor = "pointer";
     runBtn.addEventListener("click", () => void this.runRecommendFromTextarea());
     controls.appendChild(runBtn);
+
+    const rerankTpl = this.doc.createElement("select");
+    rerankTpl.style.fontSize = "12px";
+    rerankTpl.style.padding = "4px 6px";
+    rerankTpl.style.borderRadius = "6px";
+    rerankTpl.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    rerankTpl.title = "Rerank template";
+    this.recommendRerankTemplateSelect = rerankTpl;
+    controls.appendChild(rerankTpl);
+
+    const templatesBtn = this.doc.createElement("button");
+    templatesBtn.textContent = "Templates…";
+    templatesBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    templatesBtn.style.background = "transparent";
+    templatesBtn.style.borderRadius = "6px";
+    templatesBtn.style.padding = "6px 10px";
+    templatesBtn.style.fontSize = "12px";
+    templatesBtn.style.cursor = "pointer";
+    templatesBtn.addEventListener("click", () => this.switchTab("templates"));
+    controls.appendChild(templatesBtn);
 
     const includeRelatedLabel = this.doc.createElement("label");
     includeRelatedLabel.style.display = "inline-flex";
@@ -1292,13 +1422,34 @@ export class AIDialog {
       .filter((t) => typeof t === "string" && t.trim())
       .slice(0, 30);
 
-    const system = `You generate INSPIRE-HEP search queries.
+    const templateId = String(this.recommendQueryTemplateSelect?.value || "builtin_inspire_query_expand");
+    const tpl = this.findPromptTemplateById(templateId);
+    const outputLanguage = String(getPref("ai_summary_output_language") || "auto");
+    const style = String(getPref("ai_summary_style") || "academic");
+    const citationFormat = String(getPref("ai_summary_citation_format") || "latex");
+    const vars: Record<string, string> = {
+      seedTitle: meta.title || "",
+      seedRecid: meta.recid || "",
+      seedCitekey: meta.citekey || "",
+      seedAuthorYear: meta.authorYear || "",
+      userGoal,
+      outputLanguage,
+      style,
+      citationFormat,
+    };
+    const instructions = tpl ? renderTemplateString(tpl.prompt, vars).trim() : "";
+
+    const baseSystem = `You generate INSPIRE-HEP search queries.
 Return STRICT JSON only. Do not include Markdown fences.
 Schema: {"queries":[{"intent":"...","query":"..."}]}.
 Rules:
 - 3 to 8 queries.
 - Use valid INSPIRE syntax (t:, a:, fulltext:, date:YYYY->YYYY, refersto:recid:...).
 - Prefer queries that expand beyond the existing citation network.`;
+
+    const system = tpl?.system && tpl.system.trim()
+      ? `${tpl.system.trim()}\n\n${baseSystem}`
+      : baseSystem;
 
     const user = `Seed:
 - title: ${meta.title}
@@ -1311,7 +1462,8 @@ User goal: ${userGoal || "(none)"}
 Some reference titles:
 ${refTitles.map((t) => `- ${t}`).join("\n")}
 
-Generate queries now.`;
+Instructions:
+${instructions || "Generate queries now."}`;
 
     try {
       const res = await llmComplete({
@@ -1513,11 +1665,32 @@ Generate queries now.`;
         documentType: e.documentType ?? [],
       }));
 
-    const system = `You are a scientific assistant.
+    const templateId = String(this.recommendRerankTemplateSelect?.value || "builtin_recommend_rerank");
+    const tpl = this.findPromptTemplateById(templateId);
+    const outputLanguage = String(getPref("ai_summary_output_language") || "auto");
+    const style = String(getPref("ai_summary_style") || "academic");
+    const citationFormat = String(getPref("ai_summary_citation_format") || "latex");
+    const vars: Record<string, string> = {
+      seedTitle: meta.title || "",
+      seedRecid: meta.recid || "",
+      seedCitekey: meta.citekey || "",
+      seedAuthorYear: meta.authorYear || "",
+      userGoal,
+      outputLanguage,
+      style,
+      citationFormat,
+    };
+    const instructions = tpl ? renderTemplateString(tpl.prompt, vars).trim() : "";
+
+    const baseSystem = `You are a scientific assistant.
 You MUST only recommend papers that appear in the provided candidates list.
 Return STRICT JSON only (no Markdown fences).
 Schema:
 {"groups":[{"name":"...","items":[{"recid":"...","texkey":"...","reason":"1-2 sentences"}]}],"notes":["..."]}`;
+
+    const system = tpl?.system && tpl.system.trim()
+      ? `${tpl.system.trim()}\n\n${baseSystem}`
+      : baseSystem;
 
     const run = async (candidateBudget: number, maxTokens: number) => {
       const safeCandidates = allCandidates.slice(0, candidateBudget);
@@ -1529,7 +1702,8 @@ Candidates JSON:
 ${JSON.stringify(safeCandidates, null, 2)}
 \`\`\`
 
-Group into 3-8 topical groups and pick 3-8 items per group.`;
+Instructions:
+${instructions || "Group into 3-8 topical groups and pick 3-8 items per group."}`;
 
       const res = await llmComplete({
         profile,
@@ -1797,6 +1971,358 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
     panel.appendChild(right);
 
     this.tabPanels.set("notes", panel);
+    return panel;
+  }
+
+  private createTemplatesPanel(): HTMLDivElement {
+    const doc = this.doc;
+    const panel = doc.createElement("div");
+    panel.style.flex = "1";
+    panel.style.minWidth = "0";
+    panel.style.display = "none";
+    panel.style.flexDirection = "column";
+    panel.style.padding = "12px";
+    panel.style.gap = "10px";
+
+    const hint = doc.createElement("div");
+    hint.textContent =
+      "Prompt templates: Built-ins are read-only. User templates are stored locally (no API keys). Placeholders: {seedTitle} {seedRecid} {seedCitekey} {seedAuthorYear} {userGoal} {outputLanguage} {style} {citationFormat}.";
+    hint.style.fontSize = "11px";
+    hint.style.color = "var(--fill-secondary, #666)";
+    panel.appendChild(hint);
+
+    const topRow = doc.createElement("div");
+    topRow.style.display = "flex";
+    topRow.style.flexWrap = "wrap";
+    topRow.style.gap = "8px";
+    topRow.style.alignItems = "center";
+
+    const sel = doc.createElement("select");
+    sel.style.fontSize = "12px";
+    sel.style.padding = "4px 6px";
+    sel.style.borderRadius = "6px";
+    sel.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    sel.style.minWidth = "280px";
+    topRow.appendChild(sel);
+
+    const mkBtn = (label: string) => {
+      const b = doc.createElement("button");
+      b.textContent = label;
+      b.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+      b.style.background = "transparent";
+      b.style.borderRadius = "6px";
+      b.style.padding = "6px 10px";
+      b.style.fontSize = "12px";
+      b.style.cursor = "pointer";
+      return b;
+    };
+
+    const newBtn = mkBtn("New");
+    const dupBtn = mkBtn("Duplicate");
+    const delBtn = mkBtn("Delete");
+    const saveBtn = mkBtn("Save");
+    saveBtn.style.border = "1px solid var(--zotero-blue-5, #0060df)";
+    saveBtn.style.background = "var(--zotero-blue-5, #0060df)";
+    saveBtn.style.color = "#ffffff";
+    const runBtn = mkBtn("Run");
+
+    topRow.appendChild(newBtn);
+    topRow.appendChild(dupBtn);
+    topRow.appendChild(delBtn);
+    topRow.appendChild(saveBtn);
+    topRow.appendChild(runBtn);
+
+    panel.appendChild(topRow);
+
+    const form = doc.createElement("div");
+    form.style.display = "grid";
+    form.style.gridTemplateColumns = "1fr 1fr";
+    form.style.gap = "10px";
+    form.style.minHeight = "0";
+    panel.appendChild(form);
+
+    const left = doc.createElement("div");
+    left.style.display = "flex";
+    left.style.flexDirection = "column";
+    left.style.gap = "8px";
+    left.style.minWidth = "0";
+    form.appendChild(left);
+
+    const right = doc.createElement("div");
+    right.style.display = "flex";
+    right.style.flexDirection = "column";
+    right.style.gap = "8px";
+    right.style.minWidth = "0";
+    form.appendChild(right);
+
+    const nameInput = doc.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "Template name";
+    nameInput.style.padding = "6px 8px";
+    nameInput.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    nameInput.style.borderRadius = "6px";
+    nameInput.style.fontSize = "12px";
+    left.appendChild(nameInput);
+
+    const scopeSelect = doc.createElement("select");
+    scopeSelect.style.fontSize = "12px";
+    scopeSelect.style.padding = "4px 6px";
+    scopeSelect.style.borderRadius = "6px";
+    scopeSelect.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    for (const s of ["summary", "inspireQuery", "recommend", "followup"]) {
+      const opt = doc.createElement("option");
+      opt.value = s;
+      opt.textContent = s;
+      scopeSelect.appendChild(opt);
+    }
+    left.appendChild(scopeSelect);
+
+    const outputSelect = doc.createElement("select");
+    outputSelect.style.fontSize = "12px";
+    outputSelect.style.padding = "4px 6px";
+    outputSelect.style.borderRadius = "6px";
+    outputSelect.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    for (const o of ["markdown", "json"]) {
+      const opt = doc.createElement("option");
+      opt.value = o;
+      opt.textContent = o;
+      outputSelect.appendChild(opt);
+    }
+    left.appendChild(outputSelect);
+
+    const systemBox = doc.createElement("textarea");
+    systemBox.placeholder = "System prompt (optional)…";
+    systemBox.style.width = "100%";
+    systemBox.style.height = "120px";
+    systemBox.style.resize = "vertical";
+    systemBox.style.fontFamily =
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    systemBox.style.fontSize = "12px";
+    systemBox.style.padding = "10px";
+    systemBox.style.border = "1px solid var(--fill-quinary, #e0e0e0)";
+    systemBox.style.borderRadius = "8px";
+    left.appendChild(systemBox);
+
+    const promptBox = doc.createElement("textarea");
+    promptBox.placeholder = "Prompt…";
+    promptBox.style.width = "100%";
+    promptBox.style.flex = "1";
+    promptBox.style.minHeight = "160px";
+    promptBox.style.resize = "vertical";
+    promptBox.style.fontFamily =
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    promptBox.style.fontSize = "12px";
+    promptBox.style.padding = "10px";
+    promptBox.style.border = "1px solid var(--fill-quinary, #e0e0e0)";
+    promptBox.style.borderRadius = "8px";
+    right.appendChild(promptBox);
+
+    const preview = doc.createElement("div");
+    preview.style.flex = "1";
+    preview.style.minHeight = "0";
+    preview.style.overflow = "auto";
+    preview.style.border = "1px solid var(--fill-quinary, #e0e0e0)";
+    preview.style.borderRadius = "8px";
+    preview.style.padding = "10px";
+    preview.style.fontSize = "12px";
+    preview.style.lineHeight = "1.4";
+    preview.style.whiteSpace = "pre-wrap";
+    right.appendChild(preview);
+
+    let current: AIPromptTemplate | null = null;
+
+    const refreshList = () => {
+      const prev = String(sel.value || "");
+      sel.innerHTML = "";
+
+      const builtinGroup = doc.createElement("optgroup");
+      builtinGroup.label = "Built-in";
+      for (const t of BUILTIN_PROMPT_TEMPLATES) {
+        const opt = doc.createElement("option");
+        opt.value = t.id;
+        opt.textContent = `${t.name} (${t.scope}/${t.output})`;
+        builtinGroup.appendChild(opt);
+      }
+      sel.appendChild(builtinGroup);
+
+      const user = getUserPromptTemplates();
+      const userGroup = doc.createElement("optgroup");
+      userGroup.label = "User";
+      for (const t of user) {
+        const opt = doc.createElement("option");
+        opt.value = t.id;
+        opt.textContent = `${t.name} (${t.scope}/${t.output})`;
+        userGroup.appendChild(opt);
+      }
+      sel.appendChild(userGroup);
+
+      if (prev && this.findPromptTemplateById(prev)) {
+        sel.value = prev;
+      } else if (BUILTIN_PROMPT_TEMPLATES.length) {
+        sel.value = BUILTIN_PROMPT_TEMPLATES[0].id;
+      } else if (sel.options.length) {
+        sel.value = sel.options[0].value;
+      }
+      current = this.findPromptTemplateById(sel.value);
+    };
+
+    const setReadOnly = (ro: boolean) => {
+      nameInput.disabled = ro;
+      scopeSelect.disabled = ro;
+      outputSelect.disabled = ro;
+      systemBox.disabled = ro;
+      promptBox.disabled = ro;
+      saveBtn.disabled = ro;
+      delBtn.disabled = ro;
+    };
+
+    const refreshForm = () => {
+      current = this.findPromptTemplateById(sel.value);
+      if (!current) return;
+      const ro = this.isBuiltinPromptTemplate(current.id);
+      setReadOnly(ro);
+      nameInput.value = current.name || "";
+      scopeSelect.value = current.scope;
+      outputSelect.value = current.output;
+      systemBox.value = current.system || "";
+      promptBox.value = current.prompt || "";
+      preview.textContent = `${current.scope}/${current.output}\n\n${current.system ? `[system]\n${current.system}\n\n` : ""}${current.prompt}`;
+    };
+
+    sel.addEventListener("change", () => {
+      refreshForm();
+    });
+
+    const updatePreview = () => {
+      preview.textContent = `${scopeSelect.value}/${outputSelect.value}\n\n${systemBox.value.trim() ? `[system]\n${systemBox.value.trim()}\n\n` : ""}${promptBox.value}`;
+    };
+    nameInput.addEventListener("input", updatePreview);
+    scopeSelect.addEventListener("change", updatePreview);
+    outputSelect.addEventListener("change", updatePreview);
+    systemBox.addEventListener("input", updatePreview);
+    promptBox.addEventListener("input", updatePreview);
+
+    newBtn.addEventListener("click", () => {
+      const tpl: AIPromptTemplate = {
+        id: createTemplateId("tpl"),
+        name: "New Template",
+        scope: "summary",
+        output: "markdown",
+        prompt: "",
+        createdAt: Date.now(),
+      };
+      upsertUserPromptTemplate(tpl);
+      refreshList();
+      sel.value = tpl.id;
+      refreshForm();
+      this.refreshPromptTemplateSelects();
+    });
+
+    dupBtn.addEventListener("click", () => {
+      const cur = this.findPromptTemplateById(sel.value);
+      if (!cur) return;
+      const tpl: AIPromptTemplate = {
+        id: createTemplateId("tpl"),
+        name: `${cur.name} (copy)`,
+        scope: cur.scope,
+        output: cur.output,
+        prompt: cur.prompt,
+        system: cur.system,
+        createdAt: Date.now(),
+      };
+      upsertUserPromptTemplate(tpl);
+      refreshList();
+      sel.value = tpl.id;
+      refreshForm();
+      this.refreshPromptTemplateSelects();
+    });
+
+    delBtn.addEventListener("click", () => {
+      const cur = this.findPromptTemplateById(sel.value);
+      if (!cur) return;
+      if (this.isBuiltinPromptTemplate(cur.id)) return;
+      const win = doc.defaultView || Zotero.getMainWindow();
+      if (!win.confirm(`Delete template \"${cur.name}\"?`)) return;
+      deleteUserPromptTemplate(cur.id);
+      refreshList();
+      refreshForm();
+      this.refreshPromptTemplateSelects();
+    });
+
+    saveBtn.addEventListener("click", () => {
+      const cur = this.findPromptTemplateById(sel.value);
+      if (!cur) return;
+      if (this.isBuiltinPromptTemplate(cur.id)) return;
+      const scope = scopeSelect.value as AIPromptContextScope;
+      const output = outputSelect.value as AIPromptOutputFormat;
+      const next: AIPromptTemplate = {
+        id: cur.id,
+        name: nameInput.value.trim() || cur.name,
+        scope,
+        output,
+        prompt: promptBox.value,
+        system: systemBox.value.trim() || undefined,
+        createdAt: cur.createdAt || Date.now(),
+      };
+      upsertUserPromptTemplate(next);
+      refreshList();
+      sel.value = next.id;
+      refreshForm();
+      this.refreshPromptTemplateSelects();
+      this.setStatus("Template saved");
+    });
+
+    runBtn.addEventListener("click", async () => {
+      const tpl = this.findPromptTemplateById(sel.value);
+      if (!tpl) return;
+      const meta = await this.ensureSeedMeta();
+      const vars: Record<string, string> = {
+        seedTitle: meta.title || "",
+        seedRecid: meta.recid || "",
+        seedCitekey: meta.citekey || "",
+        seedAuthorYear: meta.authorYear || "",
+        userGoal: String(this.userGoalInput?.value || "").trim(),
+        outputLanguage: String(getPref("ai_summary_output_language") || "auto"),
+        style: String(getPref("ai_summary_style") || "academic"),
+        citationFormat: String(getPref("ai_summary_citation_format") || "latex"),
+      };
+      const rendered = renderTemplateString(tpl.prompt, vars).trim();
+
+      if (tpl.scope === "summary") {
+        if (this.userGoalInput) this.userGoalInput.value = rendered;
+        this.switchTab("summary");
+        await this.generateSummary();
+        return;
+      }
+
+      if (tpl.scope === "inspireQuery") {
+        if (this.recommendQueryTemplateSelect) {
+          this.recommendQueryTemplateSelect.value = tpl.id;
+        }
+        this.switchTab("recommend");
+        await this.generateQueriesToTextarea();
+        return;
+      }
+
+      if (tpl.scope === "recommend") {
+        if (this.recommendRerankTemplateSelect) {
+          this.recommendRerankTemplateSelect.value = tpl.id;
+        }
+        this.switchTab("recommend");
+        this.setStatus("Template selected. Run “Search + Rerank”.");
+        return;
+      }
+
+      if (tpl.scope === "followup") {
+        if (this.followUpInput) this.followUpInput.value = rendered;
+        this.switchTab("summary");
+        await this.askFollowUp();
+      }
+    });
+
+    refreshList();
+    refreshForm();
+    this.tabPanels.set("templates", panel);
     return panel;
   }
 
