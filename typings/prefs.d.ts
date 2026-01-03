@@ -44,6 +44,7 @@ declare namespace _ZoteroTypes {
       "ai_summary_include_abstracts": boolean;
       "ai_summary_max_refs": number;
       "ai_summary_abstract_char_limit": number;
+      "ai_summary_cache_enable": boolean;
       "ai_summary_cache_ttl_hours": number;
       "ai_summary_streaming": boolean;
       "ai_batch_requests_per_minute": number;

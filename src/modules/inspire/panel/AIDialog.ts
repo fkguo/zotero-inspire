@@ -34,6 +34,7 @@ import { getCachedStrings } from "../formatters";
 import type { InspireReferenceEntry } from "../types";
 import { fetchReferencesEntries } from "../referencesService";
 import { fetchRelatedPapersEntries } from "../relatedPapersService";
+import { localCache } from "../localCache";
 import { dump as yamlDump } from "js-yaml";
 import { buildEntryFromSearchHit } from "./SearchService";
 
@@ -57,6 +58,27 @@ type SeedMeta = {
   inspireUrl?: string;
   doiUrl?: string;
   arxivUrl?: string;
+};
+
+type AISummaryInputs = {
+  refsRecids: string[];
+  temperature: number;
+  maxOutputTokens: number;
+  outputLanguage: string;
+  style: string;
+  citationFormat: string;
+  includeSeedAbstract: boolean;
+  includeRefAbstracts: boolean;
+  maxRefs: number;
+  userGoal: string;
+};
+
+type AISummaryCacheData = {
+  markdown: string;
+  inputs: AISummaryInputs;
+  provider: string;
+  model: string;
+  baseURL?: string;
 };
 
 function isNonEmptyString(value: unknown): value is string {
@@ -99,6 +121,36 @@ function fnv1a32Hex(input: string): string {
     hash = (hash * 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, "0");
+}
+
+function buildAiSummaryCacheKey(params: {
+  seedRecid: string;
+  profile: AIProfile;
+  inputs: AISummaryInputs;
+}): string {
+  const refsHash = params.inputs.refsRecids.length
+    ? fnv1a32Hex(params.inputs.refsRecids.join(","))
+    : "00000000";
+  const settingsHash = fnv1a32Hex(
+    JSON.stringify({
+      seedRecid: params.seedRecid,
+      refsHash,
+      refsCount: params.inputs.refsRecids.length,
+      provider: params.profile.provider,
+      model: params.profile.model,
+      baseURL: params.profile.baseURL || "",
+      temperature: params.inputs.temperature,
+      maxOutputTokens: params.inputs.maxOutputTokens,
+      outputLanguage: params.inputs.outputLanguage,
+      style: params.inputs.style,
+      citationFormat: params.inputs.citationFormat,
+      includeSeedAbstract: params.inputs.includeSeedAbstract,
+      includeRefAbstracts: params.inputs.includeRefAbstracts,
+      maxRefs: params.inputs.maxRefs,
+      userGoal: params.inputs.userGoal,
+    }),
+  );
+  return `${params.seedRecid}_${refsHash}_${settingsHash}`;
 }
 
 function buildZoteroSelectLink(item: Zotero.Item): string | undefined {
@@ -507,18 +559,7 @@ export class AIDialog {
   private summaryMarkdown = "";
   private myNotesMarkdown = "";
   private seedMeta?: SeedMeta;
-  private lastSummaryInputs?: {
-    refsRecids: string[];
-    temperature: number;
-    maxOutputTokens: number;
-    outputLanguage: string;
-    style: string;
-    citationFormat: string;
-    includeSeedAbstract: boolean;
-    includeRefAbstracts: boolean;
-    maxRefs: number;
-    userGoal: string;
-  };
+  private lastSummaryInputs?: AISummaryInputs;
   private readonly onImportRecid?: (recid: string, anchor: HTMLElement) => Promise<void>;
 
   constructor(
@@ -951,6 +992,35 @@ export class AIDialog {
     const refAbs = mkCheck("Ref abstracts", "ai_summary_include_abstracts");
     this.includeRefAbsCheckbox = refAbs.cb;
     wrap.appendChild(refAbs.boxWrap);
+
+    const cacheWrap = doc.createElement("label");
+    cacheWrap.style.display = "inline-flex";
+    cacheWrap.style.alignItems = "center";
+    cacheWrap.style.gap = "6px";
+    cacheWrap.style.fontSize = "12px";
+    const cacheCb = doc.createElement("input");
+    cacheCb.type = "checkbox";
+    cacheCb.checked = getPref("ai_summary_cache_enable") === true;
+    cacheCb.addEventListener("change", () => setPref("ai_summary_cache_enable", cacheCb.checked as any));
+    const ttl = Number(getPref("ai_summary_cache_ttl_hours") || 168);
+    cacheWrap.title = `Cache AI outputs locally (no API keys). TTL: ${ttl}h`;
+    cacheWrap.appendChild(cacheCb);
+    cacheWrap.appendChild(doc.createTextNode("Cache"));
+    wrap.appendChild(cacheWrap);
+
+    const clearCacheBtn = doc.createElement("button");
+    clearCacheBtn.textContent = "Clear cache";
+    clearCacheBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    clearCacheBtn.style.background = "transparent";
+    clearCacheBtn.style.borderRadius = "6px";
+    clearCacheBtn.style.padding = "6px 10px";
+    clearCacheBtn.style.fontSize = "12px";
+    clearCacheBtn.style.cursor = "pointer";
+    clearCacheBtn.addEventListener("click", async () => {
+      const deleted = await localCache.clearType("ai_summary").catch(() => 0);
+      this.setStatus(`AI cache cleared (${deleted} file(s))`);
+    });
+    wrap.appendChild(clearCacheBtn);
 
     const genBtn = doc.createElement("button");
     genBtn.textContent = "Generate";
@@ -1878,7 +1948,7 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
     const maxOutput = Math.max(200, Number(getPref("ai_summary_max_output_tokens") || 1200));
     const temperature = normalizeTemperaturePref(getPref("ai_summary_temperature"));
 
-    this.lastSummaryInputs = {
+    const inputs: AISummaryInputs = {
       refsRecids,
       temperature,
       maxOutputTokens: maxOutput,
@@ -1890,8 +1960,8 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
       maxRefs,
       userGoal,
     };
+    this.lastSummaryInputs = inputs;
 
-    this.setStatus(streaming ? "Generating (streaming)…" : "Generating…");
     let full = "";
 
     const applyToTextarea = () => {
@@ -1914,6 +1984,30 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
         }, 120);
       };
     })();
+
+    const cacheEnabled =
+      getPref("ai_summary_cache_enable") === true && localCache.isEnabled();
+    const cacheKey = cacheEnabled
+      ? buildAiSummaryCacheKey({ seedRecid, profile, inputs })
+      : null;
+
+    if (cacheEnabled && cacheKey) {
+      this.setStatus("Checking cache…");
+      const cached = await localCache
+        .get<AISummaryCacheData>("ai_summary", cacheKey)
+        .catch(() => null);
+      if (cached && isNonEmptyString(cached.data.markdown)) {
+        const cachedData = cached.data;
+        full = cachedData.markdown;
+        applyToTextarea();
+        this.lastSummaryInputs = cachedData.inputs || inputs;
+        await this.renderSummaryPreview();
+        this.setStatus(`Done (cache, ${cached.ageHours}h)`);
+        return;
+      }
+    }
+
+    this.setStatus(streaming ? "Generating (streaming)…" : "Generating…");
 
     try {
       if (streaming && profile.provider === "openaiCompatible") {
@@ -1944,6 +2038,16 @@ Group into 3-8 topical groups and pick 3-8 items per group.`;
         full = res.text || "";
         applyToTextarea();
         await this.renderSummaryPreview();
+      }
+
+      if (cacheEnabled && cacheKey && isNonEmptyString(full)) {
+        void localCache.set("ai_summary", cacheKey, {
+          markdown: full,
+          inputs,
+          provider: profile.provider,
+          model: profile.model,
+          baseURL: profile.baseURL,
+        });
       }
       this.setStatus("Done");
     } catch (err: any) {
@@ -2238,7 +2342,7 @@ Answer in Markdown.`;
     apiKey: string;
     signal: AbortSignal;
     mode?: "full" | "fast";
-  }): Promise<{ markdown: string; inputs: AIDialog["lastSummaryInputs"] }> {
+  }): Promise<{ markdown: string; inputs: AISummaryInputs }> {
     const { seedItem, seedRecid, profile, apiKey, signal } = options;
     const mode = options.mode || "full";
 
@@ -2306,7 +2410,23 @@ Answer in Markdown.`;
       includeRefAbstracts: includeRefAbs,
       maxRefs,
       userGoal,
-    } as AIDialog["lastSummaryInputs"];
+    } as AISummaryInputs;
+
+    const cacheEnabled =
+      getPref("ai_summary_cache_enable") === true && localCache.isEnabled();
+    const cacheKey = cacheEnabled
+      ? buildAiSummaryCacheKey({ seedRecid, profile, inputs })
+      : null;
+
+    if (cacheEnabled && cacheKey) {
+      const cached = await localCache
+        .get<AISummaryCacheData>("ai_summary", cacheKey)
+        .catch(() => null);
+      if (cached && isNonEmptyString(cached.data.markdown)) {
+        const cachedData = cached.data;
+        return { markdown: cachedData.markdown, inputs: cachedData.inputs || inputs };
+      }
+    }
 
     // Failure auto-downgrade: if rate-limited, retry once in fast mode.
     try {
@@ -2319,7 +2439,17 @@ Answer in Markdown.`;
         maxOutputTokens: maxOutput,
         signal,
       });
-      return { markdown: res.text || "", inputs };
+      const markdown = res.text || "";
+      if (cacheEnabled && cacheKey && isNonEmptyString(markdown)) {
+        void localCache.set("ai_summary", cacheKey, {
+          markdown,
+          inputs,
+          provider: profile.provider,
+          model: profile.model,
+          baseURL: profile.baseURL,
+        });
+      }
+      return { markdown, inputs };
     } catch (err: any) {
       if (err?.name === "AbortError") throw err;
       const isRateLimited = typeof err?.code === "string" && err.code === "rate_limited";

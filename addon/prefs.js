@@ -37,6 +37,7 @@ pref("__prefsPrefix__.ai_summary_include_seed_abstract", false);
 pref("__prefsPrefix__.ai_summary_include_abstracts", false);
 pref("__prefsPrefix__.ai_summary_max_refs", 40);
 pref("__prefsPrefix__.ai_summary_abstract_char_limit", 800);
+pref("__prefsPrefix__.ai_summary_cache_enable", false);
 pref("__prefsPrefix__.ai_summary_cache_ttl_hours", 168); // 7 days
 pref("__prefsPrefix__.ai_summary_streaming", true); // Stream responses when supported
 pref("__prefsPrefix__.ai_batch_requests_per_minute", 12); // Batch/autopilot throttle
