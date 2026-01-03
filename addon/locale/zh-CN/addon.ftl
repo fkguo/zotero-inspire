@@ -38,8 +38,60 @@ pane-item-references-sidenav = INSPIRE 引用
     .tooltiptext = INSPIRE 引用
 references-panel-tab-references = 引用
 references-panel-tab-cited = 被引
+references-panel-tab-related = 相关
 references-panel-tab-entry-cited = 引用...
 references-panel-tab-author-papers = 作者
+references-panel-citation-graph-button = 引用关系图…
+references-panel-citation-graph-tooltip = 显示引用关系图（左键打开，右键展开）
+references-panel-citation-graph-title = 引用关系图
+references-panel-citation-graph-hint = 左键打开 · 右键展开
+references-panel-citation-graph-title-multi = 引用关系图：{ $count } 个种子
+references-panel-citation-graph-hint-multi = 左键打开 · 右键添加种子
+references-panel-citation-graph-close = 关闭
+references-panel-citation-graph-disabled-pdg = 已为 PDG《Review of Particle Physics》禁用引用关系图
+references-panel-citation-graph-add-seed = + 添加种子
+references-panel-citation-graph-seeds-title = 种子（{ $count }）
+references-panel-citation-graph-seeds-hint = 点击 × 移除种子
+references-panel-citation-graph-seed-remove = 移除种子
+references-panel-citation-graph-seed-already-added = 该种子已添加
+references-panel-citation-graph-add-seed-title = 添加种子论文
+references-panel-citation-graph-add-seed-search-placeholder = 搜索 INSPIRE…
+references-panel-citation-graph-add-seed-zotero-search-placeholder = 搜索 Zotero…
+references-panel-citation-graph-add-seed-search = 搜索
+references-panel-citation-graph-add-seed-add = 添加
+references-panel-citation-graph-add-seed-from-zotero = 来自 Zotero
+references-panel-citation-graph-add-seed-no-zotero = 请选择带有 INSPIRE ID 的 Zotero 条目作为种子。
+references-panel-citation-graph-add-seed-zotero-search-hint = 输入以搜索 Zotero…
+references-panel-citation-graph-add-seed-zotero-no-results = 未找到包含 INSPIRE ID 的 Zotero 条目。
+references-panel-citation-graph-add-seed-from-inspire = 来自 INSPIRE 搜索
+references-panel-citation-graph-add-seed-search-hint = 输入以搜索 INSPIRE…
+references-panel-citation-graph-add-seed-no-results = 无结果
+references-panel-citation-graph-save = 💾 保存▼
+references-panel-citation-graph-export = 📤 导出▼
+references-panel-citation-graph-load = 📥 加载
+references-panel-citation-graph-save-to-data-dir = 保存到 Zotero 数据目录
+references-panel-citation-graph-save-as = 另存为…
+references-panel-citation-graph-save-file-title = 保存引用关系图
+references-panel-citation-graph-save-no-data = 暂无可保存的数据
+references-panel-citation-graph-save-dir-failed = 无法访问 Zotero 数据目录
+references-panel-citation-graph-save-success = 已保存
+references-panel-citation-graph-export-json = 导出 JSON（完整数据）…
+references-panel-citation-graph-export-csv = 导出 CSV（节点）…
+references-panel-citation-graph-export-svg = 导出 SVG…
+references-panel-citation-graph-export-png = 导出 PNG…
+references-panel-citation-graph-export-bibtex = 导出 BibTeX…
+references-panel-citation-graph-export-file-title = 导出引用关系图
+references-panel-citation-graph-export-success = 已导出
+references-panel-citation-graph-export-failed = 导出失败
+references-panel-citation-graph-export-bibtex-no-recid = 没有可导出的 INSPIRE recid
+references-panel-citation-graph-load-from-file = 从文件加载…
+references-panel-citation-graph-load-recent = 最近保存
+references-panel-citation-graph-load-file-title = 加载引用关系图
+references-panel-citation-graph-load-success = 已加载
+references-panel-citation-graph-load-failed = 加载失败
+
+citation-graph-merge-no-selection = 请选择至少两条带有 INSPIRE ID 的条目以合并引用关系图。
+citation-graph-merge-truncated = 选择条目过多；仅使用前 { $count } 个种子。
 references-panel-status-empty = 选择一条条目以加载 INSPIRE 数据
 references-panel-reader-mode = 阅读器视图中不支持 INSPIRE 数据
 references-panel-select-item = 请选择单个常规条目以查看 INSPIRE 数据
@@ -47,12 +99,17 @@ references-panel-no-recid = 未找到此条目的 INSPIRE 记录
 references-panel-recid-found = INSPIRE 记录发现！正在加载引用...
 references-panel-status-loading = 正在加载引用...
 references-panel-status-loading-cited = 正在加载被引记录...
+references-panel-status-loading-related = 正在发现相关论文...
+references-panel-status-loading-related-progress = 正在发现相关论文... { $done }/{ $total }
+references-panel-status-related-disabled-pdg = 已为 PDG《Review of Particle Physics》禁用“相关论文”
 references-panel-status-loading-entry = 正在加载所选引用的被引记录...
 references-panel-status-loading-author = 正在加载作者论文...
 references-panel-status-error = 从 INSPIRE 加载数据失败
 references-panel-status-stale-cache = 使用离线缓存（{ $hours }小时前）- 数据可能已过期
 references-panel-empty-list = 暂无引用
 references-panel-empty-cited = 未找到被引记录
+references-panel-empty-related = 未找到相关论文
+references-panel-empty-related-disabled-pdg = PDG《Review of Particle Physics》过于通用，已禁用“相关论文”推荐。
 references-panel-entry-empty = 选择一条引用以查看被引记录
 references-panel-author-empty = 未找到该作者的论文
 references-panel-no-match = 没有条目符合当前筛选条件
@@ -91,6 +148,8 @@ references-panel-quick-filter-recent-5y = 近 5 年
 references-panel-quick-filter-recent-5y-tooltip = 仅显示最近 5 个日历年发表的论文
 references-panel-quick-filter-recent-1y = 近 1 年
 references-panel-quick-filter-recent-1y-tooltip = 仅显示当前日历年发表的论文
+references-panel-quick-filter-non-review = 非综述论文
+references-panel-quick-filter-non-review-tooltip = 隐藏综述论文（INSPIRE document_type 包含 review，或发表于 RMP / Phys. Rep. / PPNP / Rep. Prog. Phys. / Annual Reviews 等综述期刊）
 references-panel-quick-filter-published = 已发表
 references-panel-quick-filter-published-tooltip = 显示有期刊信息的论文（正式发表）
 references-panel-quick-filter-preprint = 仅 arXiv
@@ -102,6 +161,7 @@ references-panel-quick-filter-local-items-tooltip = 显示已存在于 Zotero �
 references-panel-quick-filter-online-items = 在线条目
 references-panel-quick-filter-online-items-tooltip = 显示尚未存入 Zotero 文库的引用
 references-panel-sort-label = 排序方式
+references-panel-sort-related = 相关度
 references-panel-sort-default = INSPIRE 顺序
 references-panel-sort-mostrecent = 最新发表
 references-panel-sort-mostcited = 最多引用
@@ -114,6 +174,11 @@ references-panel-count-cited =
   { $count ->
     [one] 1 条被引记录
    *[other] { $count } 条被引记录
+  }
+references-panel-count-related =
+  { $count ->
+    [one] 1 篇相关论文
+   *[other] { $count } 篇相关论文
   }
 references-panel-count-entry =
   { $count ->
@@ -129,12 +194,15 @@ references-panel-filter-count =
   { $visible } / { $total } 条引用
 references-panel-filter-count-cited =
   { $visible } / { $total } 条被引记录
+references-panel-filter-count-related =
+  { $visible } / { $total } 篇相关论文
 references-panel-filter-count-entry =
   引用 "{ $label }" 的 { $visible } / { $total } 条记录
 references-panel-filter-count-author =
   { $label } 的 { $visible } / { $total } 篇论文
 references-panel-dot-local = 条目已存在于文库中
 references-panel-dot-add = 添加此引用到文库
+references-panel-related-badge-tooltip = 与当前论文共享 { $count } 条参考文献
 references-panel-link-existing = 点击取消关联条目
 references-panel-link-missing = 关联为相关条目
 references-panel-toast-linked = 相关条目已关联

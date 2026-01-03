@@ -46,6 +46,26 @@
     type="bool"
   />
   <preference
+    id="pref-related_papers_enable"
+    name="__prefsPrefix__.related_papers_enable"
+    type="bool"
+  />
+  <preference
+    id="pref-related_papers_exclude_reviews"
+    name="__prefsPrefix__.related_papers_exclude_reviews"
+    type="bool"
+  />
+  <preference
+    id="pref-related_papers_max_results"
+    name="__prefsPrefix__.related_papers_max_results"
+    type="int"
+  />
+  <preference
+    id="pref-citation_graph_max_results"
+    name="__prefsPrefix__.citation_graph_max_results"
+    type="int"
+  />
+  <preference
     id="pref-search_history_days"
     name="__prefsPrefix__.search_history_days"
     type="int"
@@ -370,6 +390,66 @@
           data-l10n-id="pref-chart-default-collapsed"
         />
       </vbox>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-related_papers_enable"
+        preference="extensions.zotero.inspiremeta.related_papers_enable"
+        data-l10n-id="pref-related-papers-enable"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-related-papers-enable-desc"
+      ></html:p>
+      <vbox style="margin-left: 20px; margin-top: 6px">
+        <checkbox
+          id="zotero-prefpane-__addonRef__-related_papers_exclude_reviews"
+          preference="extensions.zotero.inspiremeta.related_papers_exclude_reviews"
+          data-l10n-id="pref-related-papers-exclude-reviews"
+        />
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-related-papers-exclude-reviews-desc"
+        ></html:p>
+      </vbox>
+      <vbox style="margin-left: 20px; margin-top: 6px">
+        <hbox align="center">
+          <label data-l10n-id="pref-related-papers-max-results-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-related_papers_max_results"
+            preference="extensions.zotero.inspiremeta.related_papers_max_results"
+            value="50"
+            min="10"
+            max="200"
+            class="zinspire-pref-input"
+            style="width: 60px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-related-papers-max-results-desc"
+        ></html:p>
+      </vbox>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <hbox align="center">
+        <label data-l10n-id="pref-citation-graph-max-results-label" />
+        <html:input
+          type="number"
+          id="zotero-prefpane-__addonRef__-citation_graph_max_results"
+          preference="extensions.zotero.inspiremeta.citation_graph_max_results"
+          value="25"
+          min="5"
+          max="200"
+          class="zinspire-pref-input"
+          style="width: 60px; margin-left: 8px"
+        />
+      </hbox>
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-citation-graph-max-results-desc"
+      ></html:p>
     </vbox>
     <vbox class="zinspire-pref-row" style="margin-top: 12px">
       <html:h4

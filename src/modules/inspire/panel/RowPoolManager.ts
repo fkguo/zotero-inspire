@@ -218,6 +218,7 @@ export class RowPoolManager {
             <span class="zinspire-ref-entry__label"></span>
             <span class="zinspire-ref-entry__authors"></span><span class="zinspire-ref-entry__separator">: </span>
             <a class="zinspire-ref-entry__title-link" href="#"></a>
+            <span class="zinspire-ref-entry__related-badge"></span>
           </div>
           <div class="zinspire-ref-entry__meta"></div>
         </div>

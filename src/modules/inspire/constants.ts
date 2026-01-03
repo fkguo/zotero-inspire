@@ -20,8 +20,16 @@ export const REFERENCE_SORT_OPTIONS = [
 export type ReferenceSortOption = (typeof REFERENCE_SORT_OPTIONS)[number];
 export const INSPIRE_SORT_OPTIONS = ["mostrecent", "mostcited"] as const;
 export type InspireSortOption = (typeof INSPIRE_SORT_OPTIONS)[number];
+export const RELATED_SORT_OPTIONS = [
+  "relevance",
+  "mostrecent",
+  "mostcited",
+] as const;
+export type RelatedSortOption = (typeof RELATED_SORT_OPTIONS)[number];
 export const DEFAULT_REFERENCE_SORT: ReferenceSortOption = "default";
 export const DEFAULT_CITED_BY_SORT: InspireSortOption = "mostrecent";
+export const DEFAULT_RELATED_SORT: RelatedSortOption = "relevance";
+export const DEFAULT_CITATION_GRAPH_SORT: InspireSortOption = "mostcited";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pagination and Limits
@@ -37,6 +45,24 @@ export const RENDER_PAGE_SIZE = 100; // Number of entries to render per "page"
 export const NAVIGATION_STACK_LIMIT = 20;
 // Large collaboration threshold: if authors > this, only show first author + et al.
 export const LARGE_COLLABORATION_THRESHOLD = 20;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Related Papers - Co-citation (FTR-RELATED-PAPERS / Phase 2)
+// ─────────────────────────────────────────────────────────────────────────────
+// Co-citation signal is only reliable when seed has enough citations.
+// Use a sigmoid to smoothly increase weight up to 50%.
+export const RELATED_COCITATION_MIN_CITATIONS = 5;
+export const RELATED_COCITATION_MAX_WEIGHT = 0.5;
+export const RELATED_COCITATION_SIGMOID_CENTER_CITATIONS = 30;
+export const RELATED_COCITATION_SIGMOID_SLOPE = 0.15;
+// Compute co-citation only for top-N coupling candidates (budget control).
+export const RELATED_COCITATION_TOP_N = 25;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Citation Graph (FTR-CITATION-GRAPH)
+// ─────────────────────────────────────────────────────────────────────────────
+export const CITATION_GRAPH_MAX_REFERENCES = 25;
+export const CITATION_GRAPH_MAX_CITED_BY = 25;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI Timing Constants
@@ -71,6 +97,8 @@ export const ENTRY_CITED_CACHE_SIZE = 50;
 export const METADATA_CACHE_SIZE = 500;
 /** LRU cache size for search results */
 export const SEARCH_CACHE_SIZE = 50;
+/** LRU cache size for related papers results (FTR-RELATED-PAPERS) */
+export const RELATED_CACHE_SIZE = 50;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cache TTL Constants (FTR-REFACTOR: Centralized TTL values)
@@ -157,6 +185,11 @@ export const isInspireSortOption = (
 ): value is InspireSortOption =>
   (INSPIRE_SORT_OPTIONS as readonly string[]).includes(value);
 
+export const isRelatedSortOption = (
+  value: string,
+): value is RelatedSortOption =>
+  (RELATED_SORT_OPTIONS as readonly string[]).includes(value);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Author Processing Constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,6 +246,7 @@ export type QuickFilterType =
   | "highCitations"
   | "recent5Years"
   | "recent1Year"
+  | "nonReviewOnly"
   | "publishedOnly"
   | "preprintOnly"
   | "relatedOnly"
@@ -223,6 +257,7 @@ export const QUICK_FILTER_TYPES: QuickFilterType[] = [
   "highCitations",
   "recent5Years",
   "recent1Year",
+  "nonReviewOnly",
   "publishedOnly",
   "preprintOnly",
   "relatedOnly",
@@ -260,19 +295,25 @@ export const API_FIELDS_CITATIONS =
   "control_number,citation_count,citation_count_without_self_citations";
 
 /**
+ * Minimal fields for queries where only hits.total is needed.
+ * Still include control_number to keep payload shape stable.
+ */
+export const API_FIELDS_CONTROL_NUMBER = "control_number";
+
+/**
  * Fields for reference list display (panel entries).
  * Includes basic metadata for display and filtering.
  * Includes authors.record for direct recid lookup (faster author profile fetch).
  */
 export const API_FIELDS_LIST_DISPLAY =
-  "control_number,titles.title,authors.full_name,authors.ids,authors.record,author_count,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations";
+  "control_number,titles.title,authors.full_name,authors.ids,authors.record,author_count,publication_info,earliest_date,dois,arxiv_eprints,citation_count,citation_count_without_self_citations,document_type";
 
 /**
  * Fields for reference enrichment (batch metadata fetch).
  * Includes author IDs (ids, record) for author profile lookup in References tab.
  */
 export const API_FIELDS_ENRICHMENT =
-  "control_number,citation_count,citation_count_without_self_citations,titles.title,authors.full_name,authors.ids,authors.record,author_count,publication_info,earliest_date,arxiv_eprints,dois,texkeys";
+  "control_number,citation_count,citation_count_without_self_citations,titles.title,authors.full_name,authors.ids,authors.record,author_count,publication_info,earliest_date,arxiv_eprints,dois,texkeys,document_type";
 
 /**
  * Fields for abstract tooltip fetch.
@@ -360,6 +401,12 @@ export const QUICK_FILTER_CONFIGS: QuickFilterConfig[] = [
     emoji: "📅",
     labelKey: "references-panel-quick-filter-recent-1y",
     tooltipKey: "references-panel-quick-filter-recent-1y-tooltip",
+  },
+  {
+    type: "nonReviewOnly",
+    emoji: "🧹",
+    labelKey: "references-panel-quick-filter-non-review",
+    tooltipKey: "references-panel-quick-filter-non-review-tooltip",
   },
   {
     type: "publishedOnly",

@@ -6,6 +6,7 @@ menuitem-submenulabel0 = With abstracts
 menuitem-submenulabel1 = Without abstracts
 menuitem-submenulabel2 = Citation counts only
 menuitem-download-cache = Download references cache
+menuitem-citation-graph-merge = Combined Citation Graph…
 menuitem-cancel-update = Cancel update
 
 download-cache-progress-title = Downloading references cache
@@ -38,8 +39,60 @@ pane-item-references-sidenav = INSPIRE References
     .tooltiptext = INSPIRE References
 references-panel-tab-references = Refs.
 references-panel-tab-cited = Cited by
+references-panel-tab-related = Related
 references-panel-tab-entry-cited = Citing...
 references-panel-tab-author-papers = Author
+references-panel-citation-graph-button = Citation Graph…
+references-panel-citation-graph-tooltip = Show citation graph (click: open, right-click: expand)
+references-panel-citation-graph-title = Citation Graph
+references-panel-citation-graph-hint = Click to open · Right-click to expand
+references-panel-citation-graph-title-multi = Citation Graph: { $count } Seeds
+references-panel-citation-graph-hint-multi = Click to open · Right-click to add seed
+references-panel-citation-graph-close = Close
+references-panel-citation-graph-disabled-pdg = Citation graph is disabled for Review of Particle Physics (PDG)
+references-panel-citation-graph-add-seed = + Add Seed
+references-panel-citation-graph-seeds-title = Seeds ({ $count })
+references-panel-citation-graph-seeds-hint = Click × to remove a seed
+references-panel-citation-graph-seed-remove = Remove seed
+references-panel-citation-graph-seed-already-added = Seed already added
+references-panel-citation-graph-add-seed-title = Add Seed Paper
+references-panel-citation-graph-add-seed-search-placeholder = Search INSPIRE...
+references-panel-citation-graph-add-seed-zotero-search-placeholder = Search Zotero...
+references-panel-citation-graph-add-seed-search = Search
+references-panel-citation-graph-add-seed-add = Add
+references-panel-citation-graph-add-seed-from-zotero = From Zotero
+references-panel-citation-graph-add-seed-no-zotero = Select Zotero items with INSPIRE IDs to add them as seeds.
+references-panel-citation-graph-add-seed-zotero-search-hint = Type to search Zotero...
+references-panel-citation-graph-add-seed-zotero-no-results = No Zotero items with INSPIRE IDs found.
+references-panel-citation-graph-add-seed-from-inspire = From INSPIRE search
+references-panel-citation-graph-add-seed-search-hint = Type to search INSPIRE...
+references-panel-citation-graph-add-seed-no-results = No results
+references-panel-citation-graph-save = 💾 Save▼
+references-panel-citation-graph-export = 📤 Export▼
+references-panel-citation-graph-load = 📥 Load
+references-panel-citation-graph-save-to-data-dir = Save to Zotero data directory
+references-panel-citation-graph-save-as = Save as…
+references-panel-citation-graph-save-file-title = Save Citation Graph
+references-panel-citation-graph-save-no-data = Nothing to save yet
+references-panel-citation-graph-save-dir-failed = Unable to access Zotero data directory
+references-panel-citation-graph-save-success = Saved
+references-panel-citation-graph-export-json = Export JSON (full data)…
+references-panel-citation-graph-export-csv = Export CSV (nodes)…
+references-panel-citation-graph-export-svg = Export SVG…
+references-panel-citation-graph-export-png = Export PNG…
+references-panel-citation-graph-export-bibtex = Export BibTeX…
+references-panel-citation-graph-export-file-title = Export Citation Graph
+references-panel-citation-graph-export-success = Exported
+references-panel-citation-graph-export-failed = Export failed
+references-panel-citation-graph-export-bibtex-no-recid = No INSPIRE recids to export
+references-panel-citation-graph-load-from-file = Load from file…
+references-panel-citation-graph-load-recent = Recent saves
+references-panel-citation-graph-load-file-title = Load Citation Graph
+references-panel-citation-graph-load-success = Loaded
+references-panel-citation-graph-load-failed = Load failed
+
+citation-graph-merge-no-selection = Select at least two items with INSPIRE IDs to merge citation graphs.
+citation-graph-merge-truncated = Selection is large; using the first { $count } seeds.
 references-panel-status-empty = Select an item to load INSPIRE data
 references-panel-reader-mode = INSPIRE data is unavailable in the reader view
 references-panel-select-item = Select a single regular item to view INSPIRE data
@@ -47,12 +100,17 @@ references-panel-no-recid = INSPIRE record not found for this item
 references-panel-recid-found = INSPIRE record found! Loading references...
 references-panel-status-loading = Loading references...
 references-panel-status-loading-cited = Loading citing records...
+references-panel-status-loading-related = Discovering related papers...
+references-panel-status-loading-related-progress = Discovering related papers... { $done }/{ $total }
+references-panel-status-related-disabled-pdg = Related is disabled for Review of Particle Physics (PDG)
 references-panel-status-loading-entry = Loading citing records for the selected reference...
 references-panel-status-loading-author = Loading papers by the author...
 references-panel-status-error = Failed to load data from INSPIRE
 references-panel-status-stale-cache = Using offline cache ({ $hours }h old) - data may be outdated
 references-panel-empty-list = No references available
 references-panel-empty-cited = No citing records found
+references-panel-empty-related = No related papers found
+references-panel-empty-related-disabled-pdg = Related recommendations are disabled for Review of Particle Physics (PDG) because it is too generic.
 references-panel-entry-empty = Select a reference to view citing records
 references-panel-author-empty = No papers found for this author
 references-panel-no-match = No entries match the current filter
@@ -91,6 +149,8 @@ references-panel-quick-filter-recent-5y = Recent 5 years
 references-panel-quick-filter-recent-5y-tooltip = Only show papers published within the last 5 calendar years
 references-panel-quick-filter-recent-1y = Recent 1 year
 references-panel-quick-filter-recent-1y-tooltip = Only show papers published in the current calendar year
+references-panel-quick-filter-non-review = Non-review articles
+references-panel-quick-filter-non-review-tooltip = Hide review articles (document type: review, or major review journals like RMP/Phys. Rep./PPNP/Rep. Prog. Phys./Annual Reviews)
 references-panel-quick-filter-published = Published
 references-panel-quick-filter-published-tooltip = Show papers with journal information (formally published)
 references-panel-quick-filter-preprint = arXiv only
@@ -102,6 +162,7 @@ references-panel-quick-filter-local-items-tooltip = Show references that already
 references-panel-quick-filter-online-items = Online items
 references-panel-quick-filter-online-items-tooltip = Show references not yet in your Zotero library
 references-panel-sort-label = Sort entries
+references-panel-sort-related = Relevance
 references-panel-sort-default = INSPIRE order
 references-panel-sort-mostrecent = Most recent
 references-panel-sort-mostcited = Most cited
@@ -114,6 +175,11 @@ references-panel-count-cited =
   { $count ->
     [one] 1 citing record
    *[other] { $count } citing records
+  }
+references-panel-count-related =
+  { $count ->
+    [one] 1 related paper
+   *[other] { $count } related papers
   }
 references-panel-count-entry =
   { $count ->
@@ -129,12 +195,15 @@ references-panel-filter-count =
   { $visible } / { $total } references
 references-panel-filter-count-cited =
   { $visible } / { $total } citing records
+references-panel-filter-count-related =
+  { $visible } / { $total } related papers
 references-panel-filter-count-entry =
   { $visible } / { $total } citing records for "{ $label }"
 references-panel-filter-count-author =
   { $visible } / { $total } papers by { $label }
 references-panel-dot-local = Item exists in your library
 references-panel-dot-add = Add this reference to your library
+references-panel-related-badge-tooltip = Shares { $count } references with the current paper
 references-panel-link-existing = Click to unlink the related item
 references-panel-link-missing = Link as related item
 references-panel-toast-linked = Related item linked successfully

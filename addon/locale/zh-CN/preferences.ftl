@@ -54,6 +54,20 @@ pref-chart-enable-desc = 在面板顶部显示交互式统计图表（按年份/
 pref-chart-default-collapsed =
     .label = 默认折叠
 
+pref-related-papers-enable =
+    .label = 启用“相关论文”标签页
+pref-related-papers-enable-desc = 在面板中显示“相关”标签页，推荐与当前论文共享参考文献的论文。
+
+pref-related-papers-exclude-reviews =
+    .label = 排除综述论文
+pref-related-papers-exclude-reviews-desc = 在“相关”推荐中隐藏综述论文（INSPIRE document_type 包含 review，或发表于 RMP / Phys. Rep. / PPNP / Rep. Prog. Phys. / Annual Reviews 等综述期刊）。
+
+pref-related-papers-max-results-label = 相关论文显示数量：
+pref-related-papers-max-results-desc = “相关”标签页最多显示多少条（默认：50）。
+
+pref-citation-graph-max-results-label = 引用关系图显示数量：
+pref-citation-graph-max-results-desc = 引用关系图中参考文献/被引文献最多显示多少条（默认：25）。
+
 pref-keyboard-shortcuts-title = 键盘快捷键
 pref-keyboard-shortcuts-desc = 使用键盘导航和操作条目
 pref-keyboard-shortcuts-nav = ↑/↓ 或 j/k：导航条目 · Home/End：跳转到首项/末项 · ←/→：后退/前进
