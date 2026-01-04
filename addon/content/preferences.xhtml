@@ -218,6 +218,117 @@
     name="__prefsPrefix__.funding_china_only"
     type="bool"
   />
+  <!-- AI Settings (FTR-AI-SUMMARY / AI tools) -->
+  <preference
+    id="pref-ai_summary_output_language"
+    name="__prefsPrefix__.ai_summary_output_language"
+    type="string"
+  />
+  <preference
+    id="pref-ai_summary_style"
+    name="__prefsPrefix__.ai_summary_style"
+    type="string"
+  />
+  <preference
+    id="pref-ai_summary_citation_format"
+    name="__prefsPrefix__.ai_summary_citation_format"
+    type="string"
+  />
+  <preference
+    id="pref-ai_summary_temperature"
+    name="__prefsPrefix__.ai_summary_temperature"
+    type="int"
+  />
+  <preference
+    id="pref-ai_summary_max_output_tokens"
+    name="__prefsPrefix__.ai_summary_max_output_tokens"
+    type="int"
+  />
+  <preference
+    id="pref-ai_summary_max_refs"
+    name="__prefsPrefix__.ai_summary_max_refs"
+    type="int"
+  />
+  <preference
+    id="pref-ai_summary_abstract_char_limit"
+    name="__prefsPrefix__.ai_summary_abstract_char_limit"
+    type="int"
+  />
+  <preference
+    id="pref-ai_summary_include_seed_abstract"
+    name="__prefsPrefix__.ai_summary_include_seed_abstract"
+    type="bool"
+  />
+  <preference
+    id="pref-ai_summary_include_abstracts"
+    name="__prefsPrefix__.ai_summary_include_abstracts"
+    type="bool"
+  />
+  <preference
+    id="pref-ai_summary_streaming"
+    name="__prefsPrefix__.ai_summary_streaming"
+    type="bool"
+  />
+  <preference
+    id="pref-ai_summary_cache_enable"
+    name="__prefsPrefix__.ai_summary_cache_enable"
+    type="bool"
+  />
+  <preference
+    id="pref-ai_summary_cache_ttl_hours"
+    name="__prefsPrefix__.ai_summary_cache_ttl_hours"
+    type="int"
+  />
+  <preference
+    id="pref-ai_batch_requests_per_minute"
+    name="__prefsPrefix__.ai_batch_requests_per_minute"
+    type="int"
+  />
+  <preference
+    id="pref-ai_batch_max_items"
+    name="__prefsPrefix__.ai_batch_max_items"
+    type="int"
+  />
+  <preference
+    id="pref-ai_library_qa_scope"
+    name="__prefsPrefix__.ai_library_qa_scope"
+    type="string"
+  />
+  <preference
+    id="pref-ai_library_qa_include_titles"
+    name="__prefsPrefix__.ai_library_qa_include_titles"
+    type="bool"
+  />
+  <preference
+    id="pref-ai_library_qa_include_abstracts"
+    name="__prefsPrefix__.ai_library_qa_include_abstracts"
+    type="bool"
+  />
+  <preference
+    id="pref-ai_library_qa_include_notes"
+    name="__prefsPrefix__.ai_library_qa_include_notes"
+    type="bool"
+  />
+  <preference
+    id="pref-ai_library_qa_include_fulltext_snippets"
+    name="__prefsPrefix__.ai_library_qa_include_fulltext_snippets"
+    type="bool"
+  />
+  <preference
+    id="pref-ai_library_qa_top_k"
+    name="__prefsPrefix__.ai_library_qa_top_k"
+    type="int"
+  />
+  <preference
+    id="pref-ai_library_qa_snippets_per_item"
+    name="__prefsPrefix__.ai_library_qa_snippets_per_item"
+    type="int"
+  />
+  <preference
+    id="pref-ai_library_qa_snippet_chars"
+    name="__prefsPrefix__.ai_library_qa_snippet_chars"
+    type="int"
+  />
 </preferences>
 <groupbox
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
@@ -549,6 +660,387 @@
         class="zinspire-pref-desc"
         data-l10n-id="pref-reader-auto-reopen-desc"
       ></html:p>
+    </vbox>
+  </vbox>
+
+  <!-- AI Settings (FTR-AI-SUMMARY / AI tools) -->
+  <vbox class="zinspire-pref-section">
+    <html:h3 class="zinspire-pref-title" data-l10n-id="pref-ai"></html:h3>
+    <html:p
+      class="zinspire-pref-desc"
+      style="margin-left: 0"
+      data-l10n-id="pref-ai-desc"
+    ></html:p>
+
+    <!-- Summary -->
+    <vbox class="zinspire-pref-row" style="margin-top: 12px">
+      <html:h4 style="margin: 4px 0" data-l10n-id="pref-ai-summary-title"></html:h4>
+
+      <vbox style="margin-left: 20px; margin-top: 6px">
+        <hbox align="center">
+          <label data-l10n-id="pref-ai-output-language-label" />
+          <menulist
+            id="zotero-prefpane-__addonRef__-ai_summary_output_language"
+            preference="extensions.zotero.inspiremeta.ai_summary_output_language"
+            style="min-width: 150px; margin-left: 8px"
+          >
+            <menupopup>
+              <menuitem
+                value="auto"
+                label="Auto"
+                data-l10n-id="pref-ai-output-language-auto"
+              />
+              <menuitem
+                value="en"
+                label="English"
+                data-l10n-id="pref-ai-output-language-en"
+              />
+              <menuitem
+                value="zh-CN"
+                label="Chinese (zh-CN)"
+                data-l10n-id="pref-ai-output-language-zh"
+              />
+            </menupopup>
+          </menulist>
+        </hbox>
+        <hbox align="center" style="margin-top: 8px">
+          <label data-l10n-id="pref-ai-style-label" />
+          <menulist
+            id="zotero-prefpane-__addonRef__-ai_summary_style"
+            preference="extensions.zotero.inspiremeta.ai_summary_style"
+            style="min-width: 200px; margin-left: 8px"
+          >
+            <menupopup>
+              <menuitem
+                value="academic"
+                label="Academic"
+                data-l10n-id="pref-ai-style-academic"
+              />
+              <menuitem
+                value="bullet"
+                label="Bullet points"
+                data-l10n-id="pref-ai-style-bullet"
+              />
+              <menuitem
+                value="grant-report"
+                label="Grant report"
+                data-l10n-id="pref-ai-style-grant-report"
+              />
+              <menuitem
+                value="slides"
+                label="Slides"
+                data-l10n-id="pref-ai-style-slides"
+              />
+            </menupopup>
+          </menulist>
+        </hbox>
+        <hbox align="center" style="margin-top: 8px">
+          <label data-l10n-id="pref-ai-citation-format-label" />
+          <menulist
+            id="zotero-prefpane-__addonRef__-ai_summary_citation_format"
+            preference="extensions.zotero.inspiremeta.ai_summary_citation_format"
+            style="min-width: 200px; margin-left: 8px"
+          >
+            <menupopup>
+              <menuitem
+                value="latex"
+                label="LaTeX (\\cite{...})"
+                data-l10n-id="pref-ai-citation-format-latex"
+              />
+              <menuitem
+                value="markdown"
+                label="Markdown ([key](url))"
+                data-l10n-id="pref-ai-citation-format-markdown"
+              />
+              <menuitem
+                value="inspire-url"
+                label="INSPIRE URL"
+                data-l10n-id="pref-ai-citation-format-inspire-url"
+              />
+              <menuitem
+                value="zotero-link"
+                label="Zotero link"
+                data-l10n-id="pref-ai-citation-format-zotero-link"
+              />
+            </menupopup>
+          </menulist>
+        </hbox>
+      </vbox>
+
+      <vbox style="margin-left: 20px; margin-top: 10px">
+        <hbox align="center">
+          <label data-l10n-id="pref-ai-max-output-tokens-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_summary_max_output_tokens"
+            preference="extensions.zotero.inspiremeta.ai_summary_max_output_tokens"
+            min="200"
+            max="8000"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-max-output-tokens-desc"
+        ></html:p>
+      </vbox>
+
+      <vbox style="margin-left: 20px; margin-top: 8px">
+        <hbox align="center">
+          <label data-l10n-id="pref-ai-temperature-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_summary_temperature"
+            preference="extensions.zotero.inspiremeta.ai_summary_temperature"
+            min="0"
+            max="200"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-temperature-desc"
+        ></html:p>
+      </vbox>
+
+      <vbox style="margin-left: 20px; margin-top: 8px">
+        <hbox align="center">
+          <label data-l10n-id="pref-ai-max-refs-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_summary_max_refs"
+            preference="extensions.zotero.inspiremeta.ai_summary_max_refs"
+            min="5"
+            max="120"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-max-refs-desc"
+        ></html:p>
+      </vbox>
+
+      <vbox style="margin-left: 20px; margin-top: 8px">
+        <hbox align="center">
+          <label data-l10n-id="pref-ai-abstract-char-limit-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_summary_abstract_char_limit"
+            preference="extensions.zotero.inspiremeta.ai_summary_abstract_char_limit"
+            min="0"
+            max="2000"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-abstract-char-limit-desc"
+        ></html:p>
+      </vbox>
+
+      <vbox style="margin-left: 20px; margin-top: 10px">
+        <checkbox
+          id="zotero-prefpane-__addonRef__-ai_summary_include_seed_abstract"
+          preference="extensions.zotero.inspiremeta.ai_summary_include_seed_abstract"
+          data-l10n-id="pref-ai-include-seed-abstract"
+        />
+        <checkbox
+          id="zotero-prefpane-__addonRef__-ai_summary_include_abstracts"
+          preference="extensions.zotero.inspiremeta.ai_summary_include_abstracts"
+          data-l10n-id="pref-ai-include-ref-abstracts"
+          style="margin-top: 6px"
+        />
+        <checkbox
+          id="zotero-prefpane-__addonRef__-ai_summary_streaming"
+          preference="extensions.zotero.inspiremeta.ai_summary_streaming"
+          data-l10n-id="pref-ai-streaming"
+          style="margin-top: 6px"
+        />
+      </vbox>
+
+      <vbox style="margin-left: 20px; margin-top: 10px">
+        <checkbox
+          id="zotero-prefpane-__addonRef__-ai_summary_cache_enable"
+          preference="extensions.zotero.inspiremeta.ai_summary_cache_enable"
+          data-l10n-id="pref-ai-cache-enable"
+        />
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-cache-enable-desc"
+        ></html:p>
+        <hbox align="center" style="margin-top: 6px">
+          <label data-l10n-id="pref-ai-cache-ttl-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_summary_cache_ttl_hours"
+            preference="extensions.zotero.inspiremeta.ai_summary_cache_ttl_hours"
+            min="1"
+            max="720"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+          <label style="margin-left: 8px" data-l10n-id="pref-local-cache-ttl-unit" />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-cache-ttl-desc"
+        ></html:p>
+      </vbox>
+    </vbox>
+
+    <!-- AutoPilot -->
+    <vbox class="zinspire-pref-row" style="margin-top: 12px">
+      <html:h4 style="margin: 4px 0" data-l10n-id="pref-ai-autopilot-title"></html:h4>
+      <vbox style="margin-left: 20px; margin-top: 6px">
+        <hbox align="center">
+          <label data-l10n-id="pref-ai-autopilot-rpm-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_batch_requests_per_minute"
+            preference="extensions.zotero.inspiremeta.ai_batch_requests_per_minute"
+            min="1"
+            max="60"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-autopilot-rpm-desc"
+        ></html:p>
+
+        <hbox align="center" style="margin-top: 8px">
+          <label data-l10n-id="pref-ai-autopilot-max-items-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_batch_max_items"
+            preference="extensions.zotero.inspiremeta.ai_batch_max_items"
+            min="1"
+            max="200"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-autopilot-max-items-desc"
+        ></html:p>
+      </vbox>
+    </vbox>
+
+    <!-- Library Q&A -->
+    <vbox class="zinspire-pref-row" style="margin-top: 12px">
+      <html:h4 style="margin: 4px 0" data-l10n-id="pref-ai-library-qa-title"></html:h4>
+      <vbox style="margin-left: 20px; margin-top: 6px">
+        <hbox align="center">
+          <label data-l10n-id="pref-ai-library-qa-scope-label" />
+          <menulist
+            id="zotero-prefpane-__addonRef__-ai_library_qa_scope"
+            preference="extensions.zotero.inspiremeta.ai_library_qa_scope"
+            style="min-width: 200px; margin-left: 8px"
+          >
+            <menupopup>
+              <menuitem
+                value="current_item"
+                label="Current item"
+                data-l10n-id="pref-ai-library-qa-scope-current-item"
+              />
+              <menuitem
+                value="current_collection"
+                label="Current collection"
+                data-l10n-id="pref-ai-library-qa-scope-current-collection"
+              />
+              <menuitem
+                value="library"
+                label="My library"
+                data-l10n-id="pref-ai-library-qa-scope-library"
+              />
+            </menupopup>
+          </menulist>
+        </hbox>
+
+        <vbox style="margin-top: 10px">
+          <checkbox
+            id="zotero-prefpane-__addonRef__-ai_library_qa_include_titles"
+            preference="extensions.zotero.inspiremeta.ai_library_qa_include_titles"
+            data-l10n-id="pref-ai-library-qa-include-titles"
+          />
+          <checkbox
+            id="zotero-prefpane-__addonRef__-ai_library_qa_include_abstracts"
+            preference="extensions.zotero.inspiremeta.ai_library_qa_include_abstracts"
+            data-l10n-id="pref-ai-library-qa-include-abstracts"
+            style="margin-top: 6px"
+          />
+          <checkbox
+            id="zotero-prefpane-__addonRef__-ai_library_qa_include_notes"
+            preference="extensions.zotero.inspiremeta.ai_library_qa_include_notes"
+            data-l10n-id="pref-ai-library-qa-include-notes"
+            style="margin-top: 6px"
+          />
+          <checkbox
+            id="zotero-prefpane-__addonRef__-ai_library_qa_include_fulltext_snippets"
+            preference="extensions.zotero.inspiremeta.ai_library_qa_include_fulltext_snippets"
+            data-l10n-id="pref-ai-library-qa-include-fulltext-snippets"
+            style="margin-top: 6px"
+          />
+        </vbox>
+
+        <hbox align="center" style="margin-top: 10px">
+          <label data-l10n-id="pref-ai-library-qa-top-k-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_library_qa_top_k"
+            preference="extensions.zotero.inspiremeta.ai_library_qa_top_k"
+            min="1"
+            max="30"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-library-qa-top-k-desc"
+        ></html:p>
+
+        <hbox align="center" style="margin-top: 8px">
+          <label data-l10n-id="pref-ai-library-qa-snippets-per-item-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_library_qa_snippets_per_item"
+            preference="extensions.zotero.inspiremeta.ai_library_qa_snippets_per_item"
+            min="1"
+            max="3"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-library-qa-snippets-per-item-desc"
+        ></html:p>
+
+        <hbox align="center" style="margin-top: 8px">
+          <label data-l10n-id="pref-ai-library-qa-snippet-chars-label" />
+          <html:input
+            type="number"
+            id="zotero-prefpane-__addonRef__-ai_library_qa_snippet_chars"
+            preference="extensions.zotero.inspiremeta.ai_library_qa_snippet_chars"
+            min="100"
+            max="2000"
+            class="zinspire-pref-input"
+            style="width: 90px; margin-left: 8px"
+          />
+        </hbox>
+        <html:p
+          class="zinspire-pref-desc"
+          data-l10n-id="pref-ai-library-qa-snippet-chars-desc"
+        ></html:p>
+      </vbox>
     </vbox>
   </vbox>
 

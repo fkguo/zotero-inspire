@@ -141,9 +141,13 @@ function normalizeProfile(input: unknown): AIProfile | null {
   if (!id || !name || !provider || !model) return null;
 
   const baseURL =
-    typeof obj?.baseURL === "string" ? obj.baseURL.trim() || undefined : undefined;
+    typeof obj?.baseURL === "string"
+      ? obj.baseURL.trim() || undefined
+      : undefined;
   const preset =
-    typeof obj?.preset === "string" ? obj.preset.trim() || undefined : undefined;
+    typeof obj?.preset === "string"
+      ? obj.preset.trim() || undefined
+      : undefined;
   const updatedAt =
     typeof obj?.updatedAt === "number" && Number.isFinite(obj.updatedAt)
       ? obj.updatedAt
@@ -198,7 +202,9 @@ function buildDefaultProfileFromLegacyPrefs(): AIProfile | null {
   try {
     const legacyProvider = normalizeProvider(getPref("ai_summary_provider"));
     const legacyModelRaw = getPref("ai_summary_model");
-    const legacyModel = isNonEmptyString(legacyModelRaw) ? legacyModelRaw : null;
+    const legacyModel = isNonEmptyString(legacyModelRaw)
+      ? legacyModelRaw
+      : null;
 
     if (!legacyProvider || !legacyModel) return null;
 
@@ -248,9 +254,7 @@ export function ensureAIProfilesInitialized(): AIProfile[] {
 export function getActiveAIProfile(): AIProfile {
   const profiles = ensureAIProfilesInitialized();
   const activeId = getActiveAIProfileId();
-  const match = activeId
-    ? profiles.find((p) => p.id === activeId)
-    : undefined;
+  const match = activeId ? profiles.find((p) => p.id === activeId) : undefined;
   return match ?? profiles[0] ?? buildDefaultOpenAIProfile();
 }
 

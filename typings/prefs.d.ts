@@ -52,6 +52,14 @@ declare namespace _ZoteroTypes {
       "ai_profiles": string;
       "ai_active_profile_id": string;
       "ai_prompt_templates": string;
+      "ai_library_qa_scope": string;
+      "ai_library_qa_include_titles": boolean;
+      "ai_library_qa_include_abstracts": boolean;
+      "ai_library_qa_include_notes": boolean;
+      "ai_library_qa_include_fulltext_snippets": boolean;
+      "ai_library_qa_top_k": number;
+      "ai_library_qa_snippets_per_item": number;
+      "ai_library_qa_snippet_chars": number;
       "debug_panel_layout": boolean;
       "local_cache_enable": boolean;
       "local_cache_ttl_hours": number;

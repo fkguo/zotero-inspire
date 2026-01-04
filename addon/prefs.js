@@ -33,8 +33,8 @@ pref("__prefsPrefix__.ai_summary_max_output_tokens", 1200);
 pref("__prefsPrefix__.ai_summary_output_language", "auto"); // auto | en | zh-CN
 pref("__prefsPrefix__.ai_summary_style", "academic"); // academic | bullet | grant-report | slides
 pref("__prefsPrefix__.ai_summary_citation_format", "latex"); // latex | markdown | inspire-url | zotero-link
-pref("__prefsPrefix__.ai_summary_include_seed_abstract", false);
-pref("__prefsPrefix__.ai_summary_include_abstracts", false);
+pref("__prefsPrefix__.ai_summary_include_seed_abstract", true);
+pref("__prefsPrefix__.ai_summary_include_abstracts", true);
 pref("__prefsPrefix__.ai_summary_max_refs", 40);
 pref("__prefsPrefix__.ai_summary_abstract_char_limit", 800);
 pref("__prefsPrefix__.ai_summary_cache_enable", false);
@@ -45,6 +45,15 @@ pref("__prefsPrefix__.ai_batch_max_items", 50); // Safety cap
 pref("__prefsPrefix__.ai_profiles", "[]"); // JSON array of AI profiles (provider/baseURL/model; no API keys)
 pref("__prefsPrefix__.ai_active_profile_id", ""); // Active profile id (empty = use first/default)
 pref("__prefsPrefix__.ai_prompt_templates", "[]"); // JSON array of user-defined prompt templates/buttons
+// AI Library Q&A settings (FTR-AI-SUMMARY / Library Q&A)
+pref("__prefsPrefix__.ai_library_qa_scope", "current_collection"); // current_item | current_collection | library
+pref("__prefsPrefix__.ai_library_qa_include_titles", true);
+pref("__prefsPrefix__.ai_library_qa_include_abstracts", false);
+pref("__prefsPrefix__.ai_library_qa_include_notes", false);
+pref("__prefsPrefix__.ai_library_qa_include_fulltext_snippets", false);
+pref("__prefsPrefix__.ai_library_qa_top_k", 12);
+pref("__prefsPrefix__.ai_library_qa_snippets_per_item", 1);
+pref("__prefsPrefix__.ai_library_qa_snippet_chars", 800);
 // Developer/debug toggles
 pref("__prefsPrefix__.debug_panel_layout", false); // Enable panel layout debug logs/UI
 // Local cache settings

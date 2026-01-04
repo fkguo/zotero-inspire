@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { normalizeOpenAICompatibleEndpoint, openaiCompatibleComplete, openaiCompatibleStream } from "../src/modules/inspire/llm/providers/openaiCompatible";
+import {
+  normalizeOpenAICompatibleEndpoint,
+  openaiCompatibleComplete,
+  openaiCompatibleStream,
+} from "../src/modules/inspire/llm/providers/openaiCompatible";
+import { geminiStream } from "../src/modules/inspire/llm/providers/gemini";
 import type { AIProfile } from "../src/modules/inspire/llm/profileStore";
 import { LLMError } from "../src/modules/inspire/llm/types";
 
@@ -9,6 +14,15 @@ const dummyProfile: AIProfile = {
   provider: "openaiCompatible",
   baseURL: "https://api.example.com/v1",
   model: "test-model",
+  createdAt: Date.now(),
+};
+
+const geminiProfile: AIProfile = {
+  id: "g1",
+  name: "Gemini",
+  provider: "gemini",
+  baseURL: "https://generativelanguage.googleapis.com",
+  model: "gemini-1.5-flash",
   createdAt: Date.now(),
 };
 
@@ -76,6 +90,42 @@ describe("openaiCompatibleComplete", () => {
   });
 });
 
+describe("geminiStream", () => {
+  it("streams delta content and returns full text", async () => {
+    const chunks = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"lo"}]}}]}\n',
+      "data: [DONE]\n",
+    ];
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      },
+    });
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch" as any)
+      .mockResolvedValue(new Response(stream, { status: 200 }));
+
+    const deltas: string[] = [];
+    const res = await geminiStream({
+      profile: geminiProfile,
+      apiKey: "key-test",
+      user: "hi",
+      onDelta: (d) => deltas.push(d),
+      maxOutputTokens: 10,
+    });
+
+    expect(deltas.join("")).toBe("Hello");
+    expect(res.text).toBe("Hello");
+    fetchMock.mockRestore();
+  });
+});
+
 describe("openaiCompatibleStream", () => {
   it("streams delta content and returns full text", async () => {
     const chunks = [
@@ -111,4 +161,3 @@ describe("openaiCompatibleStream", () => {
     fetchMock.mockRestore();
   });
 });
-

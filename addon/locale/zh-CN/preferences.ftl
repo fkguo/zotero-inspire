@@ -94,6 +94,89 @@ pref-reader-auto-reopen =
     .label = 前进/后退导航时重新打开阅读器标签页
 pref-reader-auto-reopen-desc = 启用后，如果阅读器标签页已关闭，在使用前进或后退导航时将自动重新打开。
 
+pref-ai = AI
+pref-ai-desc = 配置 AI Summary 与 Library Q&A 的行为。API key 请在 AI 对话框中管理。
+
+pref-ai-summary-title = Summary（综述）
+pref-ai-output-language-label = 输出语言：
+pref-ai-output-language-auto =
+    .label = 自动
+pref-ai-output-language-en =
+    .label = 英文
+pref-ai-output-language-zh =
+    .label = 中文（zh-CN）
+
+pref-ai-style-label = 风格：
+pref-ai-style-academic =
+    .label = 学术
+pref-ai-style-bullet =
+    .label = 要点列表
+pref-ai-style-grant-report =
+    .label = 基金/项目报告
+pref-ai-style-slides =
+    .label = 幻灯片
+
+pref-ai-citation-format-label = 引用格式：
+pref-ai-citation-format-latex =
+    .label = LaTeX（\\cite{"{"}...{"}"}）
+pref-ai-citation-format-markdown =
+    .label = Markdown（[key](url)）
+pref-ai-citation-format-inspire-url =
+    .label = INSPIRE 链接
+pref-ai-citation-format-zotero-link =
+    .label = Zotero 链接
+
+pref-ai-max-output-tokens-label = 最大输出 tokens：
+pref-ai-max-output-tokens-desc = 值越大输出越长，但更慢也更贵。
+pref-ai-temperature-label = 温度：
+pref-ai-temperature-desc = 为兼容 Zotero prefs 用百分比存储：20=0.2（范围 0–200 → 0.00–2.00）。
+pref-ai-max-refs-label = 最大参考文献数：
+pref-ai-max-refs-desc = 从 References 列表中采样进入 prompt 的条目数。
+pref-ai-abstract-char-limit-label = 摘要截断长度：
+pref-ai-abstract-char-limit-desc = 每条摘要在发送给模型前会截断到该字符数。
+
+pref-ai-include-seed-abstract =
+    .label = 包含 seed 摘要
+pref-ai-include-ref-abstracts =
+    .label = 包含参考文献摘要
+pref-ai-streaming =
+    .label = 流式输出（若支持）
+
+pref-ai-cache-enable =
+    .label = 本地缓存 AI 输出
+pref-ai-cache-enable-desc = 使用“本地缓存”目录；不会保存 API key。
+pref-ai-cache-ttl-label = 缓存有效期：
+pref-ai-cache-ttl-desc = 缓存 AI 输出在过期前保留的时长。
+
+pref-ai-autopilot-title = AutoPilot（批量）
+pref-ai-autopilot-rpm-label = 每分钟请求数：
+pref-ai-autopilot-rpm-desc = 批量生成时限速以减少 429/成本。
+pref-ai-autopilot-max-items-label = 每次最大条目数：
+pref-ai-autopilot-max-items-desc = 批量生成的安全上限。
+
+pref-ai-library-qa-title = Library Q&A（库内问答）
+pref-ai-library-qa-scope-label = 范围：
+pref-ai-library-qa-scope-current-item =
+    .label = 当前条目
+pref-ai-library-qa-scope-current-collection =
+    .label = 当前集合
+pref-ai-library-qa-scope-library =
+    .label = 我的文库
+pref-ai-library-qa-include-titles =
+    .label = 标题
+pref-ai-library-qa-include-abstracts =
+    .label = 摘要
+pref-ai-library-qa-include-notes =
+    .label = 我的笔记
+pref-ai-library-qa-include-fulltext-snippets =
+    .label = 全文片段
+pref-ai-library-qa-top-k-label = Top K 条目：
+pref-ai-library-qa-top-k-desc = 最多纳入上下文的条目数（最大 30）。
+pref-ai-library-qa-snippets-per-item-label = 每条目片段数：
+pref-ai-library-qa-snippets-per-item-desc = 每个条目最多加入多少片段（最大 3）。
+pref-ai-library-qa-snippet-chars-label = 片段长度：
+pref-ai-library-qa-snippet-chars-desc = 每个片段的字符上限。
+
 pref-nofound-enable =
     .label = 为没有 INSPIRE 记录的条目添加标签
 pref-nofound-tag-label = 标签名称：

@@ -620,6 +620,7 @@ export class ZInspireReferencePane {
   // Search bar listener for `inspire:` prefix detection
   private static searchBarListener?: (event: Event) => void;
   private static searchBarElement?: HTMLInputElement;
+  private static aiToolbarButton?: XUL.ToolBarButton | null;
 
   /**
    * Register a listener on Zotero's main search bar to detect `inspire:` prefix.
@@ -638,6 +639,62 @@ export class ZInspireReferencePane {
     }
 
     this.searchBarElement = searchBar;
+
+    // Add a main-toolbar AI entry button next to the Search box.
+    try {
+      const doc = mainWindow.document as any;
+      const quickSearchComponent = doc.getElementById("zotero-tb-search") as Element | null;
+      if (quickSearchComponent?.parentElement) {
+        const existing =
+          doc.getElementById("zinspire-main-toolbar-ai") ??
+          (this.aiToolbarButton as any);
+        if (!existing) {
+          const btn = (doc.createXULElement
+            ? doc.createXULElement("toolbarbutton")
+            : doc.createElement("toolbarbutton")) as XUL.ToolBarButton;
+          btn.id = "zinspire-main-toolbar-ai";
+          btn.classList.add("toolbarbutton-1");
+          btn.setAttribute("tooltiptext", "AI tools (INSPIRE)");
+          const icon = `chrome://${config.addonRef}/content/icons/ai.svg`;
+          btn.setAttribute("image", icon);
+          (btn.style as any).listStyleImage = `url(${icon})`;
+          btn.style.marginInlineEnd = "4px";
+
+          btn.addEventListener("command", () => {
+            try {
+              const pane = Zotero.getActiveZoteroPane?.();
+              const selected = (pane?.getSelectedItems?.() as Zotero.Item[]) || [];
+              const item = selected.find((it) => it && it.isRegularItem()) || null;
+              if (!item) {
+                Zotero.alert?.(mainWindow, "AI", "Select a regular item first.");
+                return;
+              }
+              const recid = deriveRecidFromItem(item);
+              if (!recid) {
+                Zotero.alert?.(mainWindow, "AI", "Selected item has no INSPIRE recid.");
+                return;
+              }
+
+              const existingDialog =
+                mainWindow.document.querySelector(".zinspire-ai-dialog") as HTMLElement | null;
+              existingDialog?.remove();
+
+              new AIDialog(mainWindow.document, {
+                seedItem: item,
+                seedRecid: recid,
+              });
+            } catch (e) {
+              Zotero.debug?.(`[${config.addonName}] toolbar AI open error: ${e}`);
+            }
+          });
+
+          quickSearchComponent.parentElement.insertBefore(btn, quickSearchComponent);
+          this.aiToolbarButton = btn;
+        }
+      }
+    } catch (e) {
+      Zotero.debug?.(`[${config.addonName}] toolbar AI button init error: ${e}`);
+    }
 
     // Disable native browser autocomplete and Zotero's history dropdown
     // Try multiple attributes to ensure history dropdown is disabled
@@ -1126,6 +1183,14 @@ export class ZInspireReferencePane {
       if (hintOverlay && hintOverlay.parentElement) {
         hintOverlay.parentElement.removeChild(hintOverlay);
         (this as any)._searchBarHintOverlay = undefined;
+      }
+      if (this.aiToolbarButton) {
+        try {
+          this.aiToolbarButton.remove();
+        } catch {
+          // ignore
+        }
+        this.aiToolbarButton = undefined;
       }
       // Restore original autocomplete attributes
       this.searchBarElement.removeAttribute("autocomplete");

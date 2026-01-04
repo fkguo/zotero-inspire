@@ -106,7 +106,24 @@ export async function anthropicComplete(req: LLMCompleteRequest): Promise<LLMCom
   }
 
   const data = await readResponseJsonSafe(res);
-  return { text: extractAnthropicText(data), raw: data };
+  const usage = (data as any)?.usage;
+  const inputTokens = typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined;
+  const outputTokens = typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined;
+  const totalTokens =
+    typeof usage?.total_tokens === "number"
+      ? usage.total_tokens
+      : typeof inputTokens === "number" && typeof outputTokens === "number"
+        ? inputTokens + outputTokens
+        : undefined;
+
+  return {
+    text: extractAnthropicText(data),
+    usage:
+      typeof inputTokens === "number" || typeof outputTokens === "number" || typeof totalTokens === "number"
+        ? { inputTokens, outputTokens, totalTokens }
+        : undefined,
+    raw: data,
+  };
 }
 
 // Optional: streaming support (SSE). Not all environments/providers support readable streams.
@@ -196,4 +213,3 @@ export async function anthropicStream(req: LLMStreamRequest): Promise<LLMComplet
 
   return { text: fullText };
 }
-

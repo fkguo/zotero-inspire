@@ -58,6 +58,15 @@ function extractTextFromChatCompletions(payload: unknown): { text: string; usage
   return { text, usage };
 }
 
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
 async function readResponseJsonSafe(res: Response): Promise<unknown> {
   try {
     return await res.json();
@@ -166,14 +175,21 @@ export async function openaiCompatibleComplete(
 
   const data = await readResponseJsonSafe(res);
   const { text, usage } = extractTextFromChatCompletions(data);
+  const inputTokens = toFiniteNumber(usage?.prompt_tokens ?? usage?.input_tokens);
+  const outputTokens = toFiniteNumber(usage?.completion_tokens ?? usage?.output_tokens);
+  const totalTokens =
+    toFiniteNumber(usage?.total_tokens ?? usage?.totalTokens) ??
+    (typeof inputTokens === "number" && typeof outputTokens === "number"
+      ? inputTokens + outputTokens
+      : undefined);
   return {
     text,
     usage: usage
-      ? {
-          inputTokens: usage?.prompt_tokens,
-          outputTokens: usage?.completion_tokens,
-          totalTokens: usage?.total_tokens,
-        }
+      ? typeof inputTokens === "number" ||
+        typeof outputTokens === "number" ||
+        typeof totalTokens === "number"
+        ? { inputTokens, outputTokens, totalTokens }
+        : undefined
       : undefined,
     raw: data,
   };
@@ -248,4 +264,3 @@ export async function openaiCompatibleStream(
 
   return { text: fullText };
 }
-

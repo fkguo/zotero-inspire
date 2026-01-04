@@ -3,7 +3,7 @@
   "version": "2.5.0",
   "description": "Bridge between Zotero and INSPIRE for high energy physics and related fields",
   "config": {
-    "addonName": "zotero-inspire",
+    "addonName": "zotero-inspire_dev",
     "addonID": "zoteroinspire@itp.ac.cn",
     "addonRef": "zoteroinspire",
     "addonInstance": "ZoteroInspire",

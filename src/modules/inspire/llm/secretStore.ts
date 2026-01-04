@@ -19,6 +19,146 @@ function getLoginManager(): any | null {
   }
 }
 
+async function ensureLoginManagerReady(loginManager: any): Promise<void> {
+  try {
+    const p = loginManager?.initializationPromise;
+    if (p && typeof p.then === "function") {
+      await p;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function findLoginPassword(
+  loginManager: any,
+  username: string,
+): Promise<string | null> {
+  try {
+    await ensureLoginManagerReady(loginManager);
+
+    if (typeof loginManager?.searchLoginsAsync === "function") {
+      const logins: any[] = await loginManager.searchLoginsAsync({
+        origin: LOGIN_HOSTNAME,
+        httpRealm: LOGIN_REALM,
+      });
+      const match = Array.isArray(logins)
+        ? logins.find((l) => l?.username === username)
+        : null;
+      const password = match?.password;
+      return typeof password === "string" && password ? password : null;
+    }
+
+    if (typeof loginManager?.findLogins === "function") {
+      const logins: any[] = loginManager.findLogins(
+        LOGIN_HOSTNAME,
+        null,
+        LOGIN_REALM,
+      );
+      const match = Array.isArray(logins)
+        ? logins.find((l) => l?.username === username)
+        : null;
+      const password = match?.password;
+      return typeof password === "string" && password ? password : null;
+    }
+  } catch (err) {
+    Zotero.debug(
+      `[${config.addonName}] AI secretStore: read via LoginManager failed: ${err}`,
+    );
+  }
+  return null;
+}
+
+async function upsertLoginPassword(
+  loginManager: any,
+  username: string,
+  password: string,
+): Promise<boolean> {
+  try {
+    await ensureLoginManagerReady(loginManager);
+    const next = createLoginInfo(username, password);
+    if (!next) {
+      throw new Error("loginInfo ctor unavailable");
+    }
+
+    let existing: any | null = null;
+    if (typeof loginManager?.searchLoginsAsync === "function") {
+      const logins: any[] = await loginManager.searchLoginsAsync({
+        origin: LOGIN_HOSTNAME,
+        httpRealm: LOGIN_REALM,
+      });
+      existing = Array.isArray(logins)
+        ? logins.find((l) => l?.username === username)
+        : null;
+    } else if (typeof loginManager?.findLogins === "function") {
+      const logins: any[] = loginManager.findLogins(
+        LOGIN_HOSTNAME,
+        null,
+        LOGIN_REALM,
+      );
+      existing = Array.isArray(logins)
+        ? logins.find((l) => l?.username === username)
+        : null;
+    }
+
+    if (existing && typeof loginManager?.modifyLogin === "function") {
+      loginManager.modifyLogin(existing, next);
+      return true;
+    }
+
+    if (typeof loginManager?.addLoginAsync === "function") {
+      await loginManager.addLoginAsync(next);
+      return true;
+    }
+
+    if (typeof loginManager?.addLogin === "function") {
+      loginManager.addLogin(next);
+      return true;
+    }
+  } catch (err) {
+    Zotero.debug(
+      `[${config.addonName}] AI secretStore: set via LoginManager failed: ${err}`,
+    );
+  }
+  return false;
+}
+
+async function removeLoginPassword(loginManager: any, username: string): Promise<boolean> {
+  try {
+    await ensureLoginManagerReady(loginManager);
+
+    let existing: any | null = null;
+    if (typeof loginManager?.searchLoginsAsync === "function") {
+      const logins: any[] = await loginManager.searchLoginsAsync({
+        origin: LOGIN_HOSTNAME,
+        httpRealm: LOGIN_REALM,
+      });
+      existing = Array.isArray(logins)
+        ? logins.find((l) => l?.username === username)
+        : null;
+    } else if (typeof loginManager?.findLogins === "function") {
+      const logins: any[] = loginManager.findLogins(
+        LOGIN_HOSTNAME,
+        null,
+        LOGIN_REALM,
+      );
+      existing = Array.isArray(logins)
+        ? logins.find((l) => l?.username === username)
+        : null;
+    }
+
+    if (existing && typeof loginManager?.removeLogin === "function") {
+      loginManager.removeLogin(existing);
+      return true;
+    }
+  } catch (err) {
+    Zotero.debug(
+      `[${config.addonName}] AI secretStore: clear via LoginManager failed: ${err}`,
+    );
+  }
+  return false;
+}
+
 function createLoginInfo(username: string, password: string): any | null {
   try {
     const ctor =
@@ -44,32 +184,30 @@ function getFallbackPrefKey(providerId: string): string {
 
 export type AISecretStorageType = "loginManager" | "prefsFallback" | "none";
 
+export function getAIProviderStorageDebugInfo(providerId: string): {
+  loginHostname: string;
+  loginRealm: string;
+  loginUsername: string;
+  prefsKey: string;
+} {
+  return {
+    loginHostname: LOGIN_HOSTNAME,
+    loginRealm: LOGIN_REALM,
+    loginUsername: sanitizeProviderId(providerId),
+    prefsKey: getFallbackPrefKey(providerId),
+  };
+}
+
 export async function getAIProviderApiKey(
   providerId: string,
 ): Promise<{ apiKey: string | null; storage: AISecretStorageType }> {
   const username = sanitizeProviderId(providerId);
 
   const loginManager = getLoginManager();
-  if (loginManager?.findLogins) {
-    try {
-      const logins: any[] = loginManager.findLogins(
-        LOGIN_HOSTNAME,
-        null,
-        LOGIN_REALM,
-      );
-      const match = Array.isArray(logins)
-        ? logins.find((l) => l?.username === username)
-        : null;
-      const password = match?.password;
-      if (typeof password === "string" && password) {
-        return { apiKey: password, storage: "loginManager" };
-      }
-      return { apiKey: null, storage: "loginManager" };
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] AI secretStore: findLogins failed: ${err}`,
-      );
-      // Fall through to prefs fallback.
+  if (loginManager) {
+    const password = await findLoginPassword(loginManager, username);
+    if (typeof password === "string" && password) {
+      return { apiKey: password, storage: "loginManager" };
     }
   }
 
@@ -79,7 +217,7 @@ export async function getAIProviderApiKey(
     if (typeof value === "string" && value.trim()) {
       return { apiKey: value.trim(), storage: "prefsFallback" };
     }
-    return { apiKey: null, storage: "prefsFallback" };
+    return { apiKey: null, storage: "none" };
   } catch (_err) {
     return { apiKey: null, storage: "none" };
   }
@@ -96,32 +234,15 @@ export async function setAIProviderApiKey(
   }
 
   const loginManager = getLoginManager();
-  if (loginManager?.findLogins && (loginManager?.addLogin || loginManager?.modifyLogin)) {
-    try {
-      const logins: any[] = loginManager.findLogins(
-        LOGIN_HOSTNAME,
-        null,
-        LOGIN_REALM,
-      );
-      const existing = Array.isArray(logins)
-        ? logins.find((l) => l?.username === username)
-        : null;
-      const next = createLoginInfo(username, password);
-      if (!next) {
-        throw new Error("loginInfo ctor unavailable");
-      }
-
-      if (existing && loginManager.modifyLogin) {
-        loginManager.modifyLogin(existing, next);
-      } else {
-        loginManager.addLogin(next);
+  if (loginManager) {
+    const ok = await upsertLoginPassword(loginManager, username, password);
+    if (ok) {
+      try {
+        Zotero.Prefs.clear(getFallbackPrefKey(providerId), true);
+      } catch {
+        // ignore
       }
       return { ok: true, storage: "loginManager" };
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] AI secretStore: set via LoginManager failed: ${err}`,
-      );
-      // Fall through to prefs fallback.
     }
   }
 
@@ -144,34 +265,17 @@ export async function clearAIProviderApiKey(
   const username = sanitizeProviderId(providerId);
 
   const loginManager = getLoginManager();
-  if (loginManager?.findLogins && loginManager?.removeLogin) {
-    try {
-      const logins: any[] = loginManager.findLogins(
-        LOGIN_HOSTNAME,
-        null,
-        LOGIN_REALM,
-      );
-      const existing = Array.isArray(logins)
-        ? logins.find((l) => l?.username === username)
-        : null;
-      if (existing) {
-        loginManager.removeLogin(existing);
-      }
-      return { ok: true, storage: "loginManager" };
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] AI secretStore: clear via LoginManager failed: ${err}`,
-      );
-      // Fall through to prefs fallback.
-    }
-  }
-
+  const okLogin = loginManager
+    ? await removeLoginPassword(loginManager, username)
+    : false;
   try {
     const key = getFallbackPrefKey(providerId);
     Zotero.Prefs.clear(key, true);
-    return { ok: true, storage: "prefsFallback" };
+    return {
+      ok: true,
+      storage: okLogin ? "loginManager" : "prefsFallback",
+    };
   } catch (_err) {
-    return { ok: false, storage: "none" };
+    return { ok: okLogin, storage: okLogin ? "loginManager" : "none" };
   }
 }
-
