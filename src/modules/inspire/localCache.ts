@@ -551,7 +551,7 @@ class InspireLocalCache {
 
     // Determine TTL based on type
     let ttl: number;
-    if (type === "refs" || type === "preprintCandidates") {
+    if (type === "refs" || type === "preprintCandidates" || type === "citation_graph") {
       ttl = DEFAULT_TTL_REFS; // keep indefinitely for refs and candidate list
     } else if (type === "author_profile") {
       ttl = DEFAULT_TTL_AUTHOR_PROFILE; // 2 hours for author profiles (offline fallback)

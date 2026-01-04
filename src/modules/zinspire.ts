@@ -491,6 +491,25 @@ export class ZInspireReferencePane {
     InspireReferencePanelController
   >();
   private static registrationKey?: string | false;
+  private static mainToolbarGraphButton?: HTMLButtonElement;
+  private static mainToolbarGraphButtonCleanup?: () => void;
+  private static mainToolbarGraphDialog?: CitationGraphDialog;
+
+  static buildCitationGraphIconSvg(isDark: boolean): string {
+    const green = isDark ? "#059669" : "#10b981";
+    const purple = isDark ? "#7c3aed" : "#8b5cf6";
+    const gray = isDark ? "#64748b" : "#94a3b8";
+    const alpha = isDark ? "0.85" : "1";
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true" focusable="false">
+  <rect x="5" y="3" width="6" height="2" fill="currentColor" rx="1" />
+  <rect x="11" y="5" width="2" height="6" fill="currentColor" rx="1" />
+  <circle cx="4" cy="4" r="2.2" fill="${green}" fill-opacity="${alpha}" />
+  <circle cx="12" cy="4" r="2.2" fill="${purple}" fill-opacity="${alpha}" />
+  <polygon points="12,9.59 14.3,11.25 13.41,13.96 10.59,13.96 9.7,11.25" fill="${gray}" fill-opacity="${alpha}" />
+</svg>
+`.trim();
+  }
 
   static registerPanel() {
     if (!("ItemPaneManager" in Zotero)) {
@@ -580,6 +599,8 @@ export class ZInspireReferencePane {
 
     // Register search bar listener for inspire: prefix
     this.registerSearchBarListener();
+    // Main toolbar button (left of search box)
+    this.registerMainToolbarCitationGraphButton();
   }
 
   static unregisterPanel() {
@@ -588,6 +609,146 @@ export class ZInspireReferencePane {
       this.registrationKey = undefined;
     }
     this.unregisterSearchBarListener();
+    this.unregisterMainToolbarCitationGraphButton();
+  }
+
+  private static buildSeedSnapshotFromItem(
+    item: Zotero.Item,
+  ): { recid: string; title?: string; authorLabel?: string } | null {
+    const recid = deriveRecidFromItem(item);
+    if (!recid) return null;
+    const rawTitle = item.getField("title");
+    const title = typeof rawTitle === "string" ? rawTitle : undefined;
+    const authorLabel = (() => {
+      try {
+        const creators: any[] = (item as any)?.getCreators?.() ?? [];
+        const first = Array.isArray(creators) ? creators[0] : undefined;
+        const lastNameRaw =
+          (first?.lastName as string | undefined) ??
+          (first?.name as string | undefined) ??
+          "";
+        const lastName =
+          typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
+        const authorPart = lastName
+          ? creators.length > 1
+            ? `${lastName} et al.`
+            : lastName
+          : "";
+        const dateRaw = item.getField("date");
+        const match =
+          typeof dateRaw === "string"
+            ? dateRaw.match(/(19|20)\d{2}/)
+            : null;
+        const year = match ? match[0] : "";
+        if (year) {
+          return authorPart ? `${authorPart} (${year})` : year;
+        }
+        return authorPart || undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    return { recid, title, authorLabel };
+  }
+
+  static registerMainToolbarCitationGraphButton(): void {
+    const mainWindow = Zotero.getMainWindow?.();
+    if (!mainWindow) return;
+    const doc = mainWindow.document;
+
+    const existing = doc.getElementById(
+      "zinspire-main-toolbar-citation-graph",
+    ) as HTMLButtonElement | null;
+    if (existing) {
+      this.mainToolbarGraphButton = existing;
+      return;
+    }
+
+    const searchEl = doc.getElementById("zotero-tb-search");
+    const parent = searchEl?.parentElement;
+    if (!searchEl || !parent) {
+      return;
+    }
+
+    const btn = doc.createElement("button");
+    btn.id = "zinspire-main-toolbar-citation-graph";
+    btn.type = "button";
+    const dark = isDarkMode();
+    const label =
+      getString("references-panel-citation-graph-title") || "Citation Graph";
+    btn.setAttribute("aria-label", label);
+    btn.title =
+      getString("references-panel-citation-graph-tooltip") ||
+      "Open citation graph";
+    btn.innerHTML = this.buildCitationGraphIconSvg(dark);
+    btn.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 24px;
+      margin-right: 6px;
+      border: 1px solid ${dark ? "var(--fill-quinary, #3f3f46)" : "var(--fill-quinary, #d1d5db)"};
+      background: ${dark ? "var(--material-sidepane, #1f1f22)" : "var(--material-background, #fff)"};
+      color: ${dark ? "var(--fill-secondary, #9ca3af)" : "var(--fill-secondary, #64748b)"};
+      border-radius: 6px;
+      cursor: pointer;
+      user-select: none;
+      flex: 0 0 auto;
+    `;
+
+    const onClick = () => {
+      try {
+        const pane = Zotero.getActiveZoteroPane?.();
+        const selected = pane?.getSelectedItems?.() ?? [];
+        const regularItems = selected.filter((item: any) =>
+          typeof item?.isRegularItem === "function" ? item.isRegularItem() : true,
+        );
+
+        const seeds: Array<{ recid: string; title?: string; authorLabel?: string }> =
+          [];
+        const seen = new Set<string>();
+        const MAX_SEEDS = 10;
+
+        for (const item of regularItems) {
+          const snapshot = this.buildSeedSnapshotFromItem(item);
+          if (!snapshot || seen.has(snapshot.recid)) continue;
+          seen.add(snapshot.recid);
+          seeds.push(snapshot);
+          if (seeds.length >= MAX_SEEDS) break;
+        }
+
+        this.mainToolbarGraphDialog?.dispose();
+        const dialog = new CitationGraphDialog(doc, seeds, {
+          onDispose: () => {
+            if (this.mainToolbarGraphDialog === dialog) {
+              this.mainToolbarGraphDialog = undefined;
+            }
+          },
+        });
+        this.mainToolbarGraphDialog = dialog;
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] Main toolbar citation graph error: ${err}`,
+        );
+      }
+    };
+
+    btn.addEventListener("click", onClick);
+    parent.insertBefore(btn, searchEl);
+    this.mainToolbarGraphButton = btn;
+    this.mainToolbarGraphButtonCleanup = () => {
+      btn.removeEventListener("click", onClick);
+      btn.remove();
+    };
+  }
+
+  static unregisterMainToolbarCitationGraphButton(): void {
+    this.mainToolbarGraphDialog?.dispose();
+    this.mainToolbarGraphDialog = undefined;
+    this.mainToolbarGraphButtonCleanup?.();
+    this.mainToolbarGraphButtonCleanup = undefined;
+    this.mainToolbarGraphButton = undefined;
   }
 
   /**
@@ -1674,19 +1835,26 @@ class InspireReferencePanelController {
     // Citation Graph button (FTR-CITATION-GRAPH)
     const graphBtn = body.ownerDocument.createElement("button");
     graphBtn.type = "button";
-    graphBtn.textContent =
-      getString("references-panel-citation-graph-button") || "Graph…";
+    const graphBtnDark = isDarkMode();
+    graphBtn.innerHTML = ZInspireReferencePane.buildCitationGraphIconSvg(graphBtnDark);
+    const graphLabel =
+      getString("references-panel-citation-graph-button") || "Citation Graph";
+    graphBtn.setAttribute("aria-label", graphLabel);
     graphBtn.title =
       getString("references-panel-citation-graph-tooltip") ||
       "Open citation graph";
     graphBtn.style.cssText = `
       flex-shrink: 0;
-      border: 1px solid var(--fill-quinary, #d1d5db);
-      background: var(--material-background, #fff);
-      color: var(--fill-secondary, #64748b);
+      width: 28px;
+      height: 24px;
+      border: 1px solid ${graphBtnDark ? "var(--fill-quinary, #3f3f46)" : "var(--fill-quinary, #d1d5db)"};
+      background: ${graphBtnDark ? "var(--material-sidepane, #1f1f22)" : "var(--material-background, #fff)"};
+      color: ${graphBtnDark ? "var(--fill-secondary, #9ca3af)" : "var(--fill-secondary, #64748b)"};
       border-radius: 6px;
-      padding: 2px 8px;
-      font-size: 11px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       cursor: pointer;
       user-select: none;
     `;
@@ -7736,20 +7904,41 @@ class InspireReferencePanelController {
     // Check if any newly added items match any reference entries
     for (const itemID of itemIDs) {
       const item = Zotero.Items.get(itemID);
-      if (!item || !item.isRegularItem()) {
+      if (!item) {
         continue;
       }
-      // Get recid from the new item
-      const recid = deriveRecidFromItem(item);
-      if (!recid) {
+
+      // Regular item added: update local status markers (●/⊕) in the current list.
+      if (item.isRegularItem?.()) {
+        const recid = deriveRecidFromItem(item);
+        if (!recid) {
+          continue;
+        }
+        for (const entry of this.allEntries) {
+          if (entry.recid === recid && !entry.localItemID) {
+            entry.localItemID = itemID;
+            entry.isRelated = this.isCurrentItemRelated(item);
+            this.updateRowStatus(entry);
+          }
+        }
         continue;
       }
-      // Check if this recid matches any entry in the current reference list
+
+      // PDF attachment added: refresh PDF button state for entries pointing to its parent item.
+      // This covers PDFs added outside the panel (or with delayed notifier timing).
+      const parentItemID = (item as any)?.parentItemID as number | undefined;
+      if (typeof parentItemID !== "number" || parentItemID <= 0) {
+        continue;
+      }
+      if (!item.isPDFAttachment?.()) {
+        continue;
+      }
+      const hasPdf = this.getFirstPdfAttachmentID(parentItemID) !== null;
       for (const entry of this.allEntries) {
-        if (entry.recid === recid && !entry.localItemID) {
-          entry.localItemID = itemID;
-          entry.isRelated = this.isCurrentItemRelated(item);
-          this.updateRowStatus(entry);
+        if (entry.localItemID !== parentItemID) continue;
+        const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
+        if (row) {
+          this.entryRenderer?.updatePdfState(row, hasPdf ? "has-pdf" : "find-pdf");
         }
       }
     }
@@ -13549,8 +13738,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    */
   private getPreviewCallbacks(): PreviewActionCallbacks {
     return {
-      onAdd: async (entry) => {
-        await this.handleAddAction(entry, this.body);
+      onAdd: async (entry, anchor) => {
+        await this.handleAddAction(entry, anchor ?? this.body);
         // handleAddAction already calls renderReferenceList internally
         // Use targeted update for the row if still visible
         const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
@@ -13593,11 +13782,26 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       onSelectInLibrary: (entry) => {
         if (entry.localItemID) {
           // Push current state to navigation history
-          this.rememberCurrentItemForNavigation();
+          try {
+            this.rememberCurrentItemForNavigation();
+          } catch (err) {
+            Zotero.debug(
+              `[${config.addonName}] rememberCurrentItemForNavigation failed: ${err}`,
+            );
+          }
           InspireReferencePanelController.forwardStack = [];
-          const pane = Zotero.getActiveZoteroPane();
-          pane?.selectItems([entry.localItemID]);
-          this.showToast(getString("references-panel-toast-selected"));
+          const pane: any =
+            Zotero.getActiveZoteroPane?.() ||
+            (Zotero.getMainWindow?.() as any)?.ZoteroPane ||
+            (globalThis as any).ZoteroPane;
+          try {
+            pane?.selectItems?.([entry.localItemID]);
+            this.showToast(getString("references-panel-toast-selected"));
+          } catch (err) {
+            Zotero.debug(
+              `[${config.addonName}] selectItems failed for ${entry.localItemID}: ${err}`,
+            );
+          }
           InspireReferencePanelController.syncBackButtonStates();
         }
       },
@@ -14345,16 +14549,25 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.markerClickTimer = undefined;
 
     if (entry.localItemID) {
-      const pane = Zotero.getActiveZoteroPane();
-      if (
-        pane &&
-        this.currentItemID &&
-        entry.localItemID !== this.currentItemID
-      ) {
-        this.rememberCurrentItemForNavigation();
-        pane.selectItems([entry.localItemID]);
-      } else {
-        pane?.selectItems([entry.localItemID]);
+      const pane: any =
+        Zotero.getActiveZoteroPane?.() ||
+        (Zotero.getMainWindow?.() as any)?.ZoteroPane ||
+        (globalThis as any).ZoteroPane;
+      if (pane && this.currentItemID && entry.localItemID !== this.currentItemID) {
+        try {
+          this.rememberCurrentItemForNavigation();
+        } catch (err) {
+          Zotero.debug(
+            `[${config.addonName}] rememberCurrentItemForNavigation failed: ${err}`,
+          );
+        }
+      }
+      try {
+        pane?.selectItems?.([entry.localItemID]);
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] selectItems failed for ${entry.localItemID}: ${err}`,
+        );
       }
       return;
     }
@@ -14380,6 +14593,54 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       }
     }
     return null;
+  }
+
+  private async waitForFirstPdfAttachmentID(
+    parentItemID: number,
+    options: { timeoutMs?: number; intervalMs?: number } = {},
+  ): Promise<number | null> {
+    const timeoutMs =
+      typeof options.timeoutMs === "number" && options.timeoutMs > 0
+        ? options.timeoutMs
+        : 4000;
+    const intervalMs =
+      typeof options.intervalMs === "number" && options.intervalMs > 0
+        ? options.intervalMs
+        : 200;
+
+    const deadline = Date.now() + timeoutMs;
+    let pdfID = this.getFirstPdfAttachmentID(parentItemID);
+    while (!pdfID && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+      pdfID = this.getFirstPdfAttachmentID(parentItemID);
+    }
+    return pdfID;
+  }
+
+  private notifyItemModifiedForUI(itemID: number): void {
+    try {
+      const notifier: any = Zotero.Notifier as any;
+      if (typeof notifier?.trigger === "function") {
+        notifier.trigger("modify", "item", [itemID], {});
+      } else if (typeof notifier?.notify === "function") {
+        notifier.notify("modify", "item", [itemID], {});
+      }
+    } catch {
+      // ignore
+    }
+
+    // Best-effort UI refresh fallback (some Zotero builds cache attachment state in views).
+    try {
+      const pane: any =
+        Zotero.getActiveZoteroPane?.() ||
+        (Zotero.getMainWindow?.() as any)?.ZoteroPane ||
+        (globalThis as any).ZoteroPane;
+      pane?.itemPane?.refresh?.();
+      pane?.itemsView?.refresh?.();
+      pane?.itemsView?.invalidate?.();
+    } catch {
+      // ignore
+    }
   }
 
   /**
@@ -16592,11 +16853,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       }
     })();
 
-    if (isPdgReviewOfParticlePhysicsTitle(seedTitle)) {
-      this.showToast(getString("references-panel-citation-graph-disabled-pdg"));
-      return;
-    }
-
     this.citationGraphDialog?.dispose();
     const dialog = new CitationGraphDialog(
       this.body.ownerDocument,
@@ -17024,11 +17280,14 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         if (item && Zotero.Attachments?.addAvailableFiles) {
           // addAvailableFiles takes an array of items and shows a progress dialog
           await Zotero.Attachments.addAvailableFiles([item]);
-          // Check if PDF was found after the operation completes
-          const pdfID = this.getFirstPdfAttachmentID(entry.localItemID);
+          // Some environments update attachments asynchronously after the promise resolves.
+          // Poll briefly to make PDF detection robust.
+          const pdfID = await this.waitForFirstPdfAttachmentID(entry.localItemID);
           if (pdfID) {
             // Success - render PDF icon
             renderPdfButtonIcon(doc, button, PdfButtonState.HAS_PDF, pdfStrings);
+            // Force UI refresh for the parent item so the main window reflects the new attachment.
+            this.notifyItemModifiedForUI(entry.localItemID);
           } else {
             // Not found - restore original state
             renderPdfButtonIcon(doc, button, PdfButtonState.FIND_PDF, pdfStrings);

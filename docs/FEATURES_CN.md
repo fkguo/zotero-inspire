@@ -16,6 +16,16 @@
 
 ---
 
+## 截图
+
+### 文献面板
+
+![INSPIRE References panel screenshot](../images/screenshot1.png)
+
+### 引用关系图
+
+![Citation graph screenshot](../images/citation_graph.png)
+
 ## 快速开始
 
 ### 元数据更新
@@ -53,7 +63,7 @@
 | **合作组标签** | Add Collaboration Tags       | 为大型合作组论文添加合作组标签                                |
 | **预印本**     | Check Preprint Status        | 检查预印本是否已正式发表                                      |
 | **操作**       | Cancel update                | 取消正在进行的更新操作                                        |
-| **收藏**       | Toggle Favorite Paper        | 切换当前条目的收藏状态                 |
+| **收藏**       | Toggle Favorite Paper        | 切换当前条目的收藏状态                                        |
 
 ### 合集菜单
 
@@ -76,14 +86,34 @@
 
 ### 标签页
 
-| 标签页                  | 功能描述                                 |
-| ----------------------- | ---------------------------------------- |
-| **References**    | 显示当前文献的参考文献列表               |
-| **Cited by**      | 显示引用当前文献的所有论文               |
-| **Entry Cited**   | 查看某条参考文献的被引记录（点击引用数） |
-| **Author Papers** | 查看某位作者的所有论文（点击作者名）     |
-| **🔍 Search**     | INSPIRE 搜索结果                         |
-| **⭐ Favorites**   | 收藏的作者和论文                         |
+| 标签页                  | 功能描述                                                        |
+| ----------------------- | --------------------------------------------------------------- |
+| **References**    | 显示当前文献的参考文献列表                                      |
+| **Cited by**      | 显示引用当前文献的所有论文                                      |
+| **Related**       | 基于混合相似度（共享参考文献 + 共引）推荐相关论文（相关性排序） |
+| **Entry Cited**   | 查看某条参考文献的被引记录（点击引用数）                        |
+| **Author Papers** | 查看某位作者的所有论文（点击作者名）                            |
+| **🔍 Search**     | INSPIRE 搜索结果                                                |
+| **⭐ Favorites**  | 收藏的作者和论文                                                |
+
+### Related（相关论文推荐）
+
+**Related** 标签页会基于当前论文的参考文献，采用“共享参考文献 + 共引（co-citation）”的混合算法推荐可能相关的论文：
+
+- **阶段 1：书目耦合（shared references）**：从当前论文的参考文献中选取一组“锚点参考文献”，抓取引用这些锚点的论文作为候选，并按共享锚点（带权重）聚合得到 `couplingScore`。
+- **阶段 2：共引重排（co-citation）**：对 top `T=25` 的候选，查询“同时引用 seed 与 candidate”的论文数 `co`，并计算 `coCitationScore = co / sqrt(seedCites * candCites)`（归一化余弦相似度，截断到 `[0,1]`）。共引权重 `α` 随 seed 被引数 sigmoid 增长，上限 50%（`seedCites < 5` 时 `α=0`）。
+- **最终得分**：`combinedScore = (1-α) * couplingScore + α * coCitationScore`。其中 anchor 权重实现为 `w_r = 1 / (1 + log1p(c_r))`（高被引、过于通用的参考文献贡献更小）。
+- **默认过滤**：默认会避开 PDG 的 *Review of Particle Physics*（过于通用，容易破坏相关性），并可在偏好设置中选择是否排除综述类文章。
+- **缓存**：推荐结果会写入本地缓存，便于重复打开时快速加载。
+
+### Citation Graph（引用图）
+
+**Citation Graph** 提供 1-hop 的引用关系可视化：左侧为 References，右侧为 Cited-by，中间为 Seeds（支持多 seed 合并）。
+
+- **打开方式**：面板工具栏按钮（以当前条目为 seed）；主工具栏搜索框旁的按钮（无 seed 时可在空画布中添加）；右键菜单可打开 Combined Citation Graph（多 seed）。
+- **交互**：单击节点（若已在库中则可跳转）；右键节点可重置 seed；Cmd/Ctrl+单击节点可添加为 seed；拖拽平移；Cmd/Ctrl+滚轮缩放。
+- **时间窗口**：每侧 x 轴下方都有时间范围 slider（左右独立），可缩放时间窗口，窗口外节点会隐藏以减少拥挤。
+- **综述开关**：Incl./Excl. reviews 可控制是否纳入综述文章（包括 PDG RPP）。
 
 ### INSPIRE 搜索
 
@@ -287,7 +317,10 @@
 
 ### 悬浮预览
 
-悬浮在查找按钮上可预览条目详情（标题、作者、摘要、出版信息），导入按钮，关联按钮等。
+悬浮在查找按钮上可预览条目详情（标题、作者、摘要、出版信息等）。
+
+- 状态按钮：点击“本地库中”可在 Zotero 中定位该条目；点击“在线”可在浏览器中打开该条目页面（优先 INSPIRE）
+- 常用操作：导入、打开 PDF（如有）、关联/取消关联、复制 BibTeX/texkey、收藏
 
 ### 面板联动
 

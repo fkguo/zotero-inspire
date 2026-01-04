@@ -453,6 +453,7 @@ export async function findItemsByRecids(
       for (let i = 0; i < urlPatterns.length; i += 100) {
         const chunk = urlPatterns.slice(i, i + 100);
         const recidChunk = remainingRecids.slice(i, i + 100);
+        const targetRecids = new Set(recidChunk);
         const conditions = chunk.map(() => "value LIKE ?").join(" OR ");
         const sql = `
           SELECT itemID, value
@@ -466,7 +467,7 @@ export async function findItemsByRecids(
             for (const row of rows) {
               const url = row.value as string;
               const match = url.match(/inspirehep\.net\/literature\/(\d+)/);
-              if (match) {
+              if (match && targetRecids.has(match[1])) {
                 result.set(match[1], Number(row.itemID));
               }
             }

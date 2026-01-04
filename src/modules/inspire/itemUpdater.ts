@@ -57,7 +57,7 @@ import {
 } from "./collabTagService";
 import { createAbortController } from "./utils";
 import { copyFundingInfo } from "./funding";
-import { CitationGraphDialog } from "./panel/CitationGraphDialog";
+// NOTE: CitationGraphDialog is imported lazily to avoid circular dependencies.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
@@ -324,7 +324,15 @@ export class ZInspire {
         return;
       }
 
-      new CitationGraphDialog(doc, seeds);
+      void import("./panel/CitationGraphDialog")
+        .then(({ CitationGraphDialog }) => {
+          new CitationGraphDialog(doc, seeds);
+        })
+        .catch((err) => {
+          Zotero.debug(
+            `[${config.addonName}] Failed to load CitationGraphDialog: ${err}`,
+          );
+        });
     } catch (err) {
       Zotero.debug(
         `[${config.addonName}] openCombinedCitationGraphFromSelection error: ${err}`,
@@ -383,7 +391,15 @@ export class ZInspire {
         return;
       }
 
-      new CitationGraphDialog(doc, seeds);
+      void import("./panel/CitationGraphDialog")
+        .then(({ CitationGraphDialog }) => {
+          new CitationGraphDialog(doc, seeds);
+        })
+        .catch((err) => {
+          Zotero.debug(
+            `[${config.addonName}] Failed to load CitationGraphDialog: ${err}`,
+          );
+        });
     } catch (err) {
       Zotero.debug(
         `[${config.addonName}] openCombinedCitationGraphFromCollection error: ${err}`,
@@ -1720,11 +1736,13 @@ export class ZInspire {
         border-bottom: 1px solid var(--fill-quinary, #eee);
         display: flex; gap: 16px;
       `;
-      summaryBar.innerHTML = `
-        <span>${getString("preprint-results-published")}: ${summary.published}</span>
-        <span>${getString("preprint-results-unpublished")}: ${summary.unpublished}</span>
-        <span>${getString("preprint-results-errors")}: ${summary.errors}</span>
-      `;
+      const publishedSpan = doc.createElement("span");
+      publishedSpan.textContent = `${getString("preprint-results-published")}: ${summary.published}`;
+      const unpublishedSpan = doc.createElement("span");
+      unpublishedSpan.textContent = `${getString("preprint-results-unpublished")}: ${summary.unpublished}`;
+      const errorsSpan = doc.createElement("span");
+      errorsSpan.textContent = `${getString("preprint-results-errors")}: ${summary.errors}`;
+      summaryBar.append(publishedSpan, unpublishedSpan, errorsSpan);
       panel.appendChild(summaryBar);
 
       // List container
@@ -1896,10 +1914,17 @@ export class ZInspire {
         .filter(Boolean)
         .join(" ");
 
-      infoDiv.innerHTML = `
-        <div style="color: #16a34a; margin-bottom: 2px;">\u2192 ${journalInfo}</div>
-        ${pubInfo.doi ? `<div>DOI: ${pubInfo.doi}</div>` : ""}
-      `;
+      const journalLine = doc.createElement("div");
+      journalLine.style.color = "#16a34a";
+      journalLine.style.marginBottom = "2px";
+      journalLine.textContent = `\u2192 ${journalInfo}`;
+      infoDiv.appendChild(journalLine);
+
+      if (pubInfo.doi) {
+        const doiLine = doc.createElement("div");
+        doiLine.textContent = `DOI: ${pubInfo.doi}`;
+        infoDiv.appendChild(doiLine);
+      }
       content.appendChild(infoDiv);
     }
 

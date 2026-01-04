@@ -37,6 +37,44 @@ import { LRUCache } from "./utils";
 // ─────────────────────────────────────────────────────────────────────────────
 const enrichmentMetadataCache = new LRUCache<string, any>(500);
 
+function normalizeTitleToken(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function isPlaceholderEntryTitle(
+  entry: Pick<InspireReferenceEntry, "title" | "authorText" | "year" | "summary">,
+  strings: ReturnType<typeof getCachedStrings>,
+): boolean {
+  const title = typeof entry.title === "string" ? entry.title.trim() : "";
+  if (!title || title === strings.noTitle) return true;
+
+  const year = typeof entry.year === "string" ? entry.year.trim() : "";
+  const authorText =
+    typeof entry.authorText === "string" ? entry.authorText.trim() : "";
+  if (authorText && year && year !== strings.yearUnknown) {
+    const fallback = `${authorText} (${year})`;
+    if (title === fallback) return true;
+  }
+
+  const summary = typeof entry.summary === "string" ? entry.summary.trim() : "";
+  if (summary) {
+    const nTitle = normalizeTitleToken(title);
+    const nSummary = normalizeTitleToken(summary);
+    if (nTitle && nSummary.includes(nTitle)) {
+      // Heuristic: INSPIRE references API sometimes provides journal/volume/page in `reference.title`.
+      // If the title is short and looks like publication info, treat it as a placeholder and prefer metadata.titles.
+      if (/\d/.test(title) && title.length <= 80) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
  * PERF-FIX-9: Check if cached metadata is complete enough to skip fetching.
  * Returns true if metadata has title, authors, and citation count.
@@ -145,7 +183,16 @@ export function buildReferenceEntry(
       ? reference.texkeys[0]
       : undefined;
 
-  const cleanedTitle = cleanMathTitle(reference?.title?.title);
+  const rawTitle =
+    typeof reference?.title === "string"
+      ? reference.title
+      : typeof reference?.title?.title === "string"
+        ? reference.title.title
+        : Array.isArray(reference?.titles) &&
+            typeof reference.titles[0]?.title === "string"
+          ? reference.titles[0].title
+          : undefined;
+  const cleanedTitle = cleanMathTitle(rawTitle);
 
   const entry: InspireReferenceEntry = {
     id: `${index}-${recid ?? reference?.label ?? Date.now()}`,
@@ -154,6 +201,7 @@ export function buildReferenceEntry(
     inspireUrl: buildReferenceUrl(reference, recid),
     fallbackUrl: buildFallbackUrl(reference, arxivDetails),
     title: cleanedTitle || strings.noTitle,
+    titleOriginal: cleanedTitle,
     summary,
     year: resolvedYear ?? strings.yearUnknown,
     authors,
@@ -227,6 +275,7 @@ export async function enrichReferencesEntries(
       typeof entry.citationCount === "number" &&
       entry.title &&
       entry.title !== strings.noTitle &&
+      !isPlaceholderEntryTitle(entry, strings) &&
       entry.authors.length > 0 &&
       !(entry.authors.length === 1 && entry.authors[0] === strings.unknownAuthor) &&
       Array.isArray(entry.authorSearchInfos) && entry.authorSearchInfos.length > 0;
@@ -414,9 +463,11 @@ function applyMetadataToEntry(
      entry.title.endsWith("-") ||
      entry.title.endsWith("—") ||
      entry.title.length < 20);
-  const shouldUpdateTitle = !entry.title ||
+  const shouldUpdateTitle =
+    !entry.title ||
     entry.title === strings.noTitle ||
-    currentTitleTruncated;
+    currentTitleTruncated ||
+    isPlaceholderEntryTitle(entry, strings);
 
   if (shouldUpdateTitle && Array.isArray(metadata.titles)) {
     const titleObj = metadata.titles.find(
@@ -424,11 +475,8 @@ function applyMetadataToEntry(
     );
     if (titleObj?.title) {
       const newTitle = cleanMathTitle(titleObj.title);
-      // Only update if new title is longer (more complete)
-      if (!entry.title || entry.title === strings.noTitle ||
-          newTitle.length > entry.title.length) {
-        entry.title = newTitle;
-      }
+      entry.title = newTitle;
+      entry.titleOriginal = newTitle;
     }
   }
 
@@ -506,6 +554,9 @@ function applyMetadataToEntry(
     metadata.earliest_date
   ) {
     entry.year = `${metadata.earliest_date}`.slice(0, 4);
+  }
+  if (!entry.earliestDate && typeof metadata.earliest_date === "string") {
+    entry.earliestDate = metadata.earliest_date;
   }
 
   // Extract arXiv details from metadata if not already present

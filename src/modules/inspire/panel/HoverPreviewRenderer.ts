@@ -37,6 +37,8 @@ import {
   applyPreviewCardIdentifiersStyle,
   applyPreviewCardAbstractStyle,
   applyMetaLinkStyle,
+  applyRefEntryMarkerColor,
+  applyRefEntryMarkerStyle,
 } from "../../pickerUI";
 
 // XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
@@ -67,7 +69,7 @@ export interface PreviewRenderContext {
   isFavorite?: boolean;
 
   // Action callbacks (async to support state refresh after completion)
-  onAdd?: (entry: InspireReferenceEntry) => void | Promise<void>;
+  onAdd?: (entry: InspireReferenceEntry, anchor?: HTMLElement) => void | Promise<void>;
   onLink?: (entry: InspireReferenceEntry) => void | Promise<void>;
   onUnlink?: (entry: InspireReferenceEntry) => void | Promise<void>;
   onOpenPdf?: (entry: InspireReferenceEntry) => void | Promise<void>;
@@ -149,6 +151,81 @@ export class HoverPreviewRenderer {
   // Content Building
   // ─────────────────────────────────────────────────────────────────────────────
 
+  private renderSupSubText(container: HTMLElement, text: string): void {
+    container.replaceChildren();
+
+    const value = text ?? "";
+    if (!value) return;
+
+    const lower = value.toLowerCase();
+    const hasSupSub =
+      lower.includes("<sup>") ||
+      lower.includes("</sup>") ||
+      lower.includes("<sub>") ||
+      lower.includes("</sub>");
+    if (!hasSupSub) {
+      container.textContent = value;
+      return;
+    }
+
+    const stack: HTMLElement[] = [];
+    let current: HTMLElement = container;
+    let buffer = "";
+
+    const flush = (): void => {
+      if (!buffer) return;
+      current.appendChild(this.doc.createTextNode(buffer));
+      buffer = "";
+    };
+
+    let i = 0;
+    while (i < value.length) {
+      if (lower.startsWith("<sup>", i)) {
+        flush();
+        const sup = this.doc.createElement("sup");
+        current.appendChild(sup);
+        stack.push(current);
+        current = sup;
+        i += "<sup>".length;
+        continue;
+      }
+      if (lower.startsWith("</sup>", i)) {
+        flush();
+        if (current.tagName.toLowerCase() === "sup" && stack.length) {
+          current = stack.pop()!;
+        } else {
+          buffer += value.slice(i, i + "</sup>".length);
+        }
+        i += "</sup>".length;
+        continue;
+      }
+      if (lower.startsWith("<sub>", i)) {
+        flush();
+        const sub = this.doc.createElement("sub");
+        current.appendChild(sub);
+        stack.push(current);
+        current = sub;
+        i += "<sub>".length;
+        continue;
+      }
+      if (lower.startsWith("</sub>", i)) {
+        flush();
+        if (current.tagName.toLowerCase() === "sub" && stack.length) {
+          current = stack.pop()!;
+        } else {
+          buffer += value.slice(i, i + "</sub>".length);
+        }
+        i += "</sub>".length;
+        continue;
+      }
+
+      buffer += value[i];
+      i += 1;
+    }
+
+    flush();
+  }
+
   /**
    * Build the preview card content.
    * Clears existing content and rebuilds with entry data.
@@ -165,8 +242,10 @@ export class HoverPreviewRenderer {
     const titleEl = this.doc.createElement("div");
     titleEl.classList.add("zinspire-preview-card__title");
     applyPreviewCardTitleStyle(titleEl);
-    const cleanedTitle = cleanMathTitle(entry.title || "");
-    titleEl.innerHTML = cleanedTitle || s.noTitle;
+    const titleCandidate =
+      entry.titleOriginal !== undefined ? entry.titleOriginal : entry.title || "";
+    const cleanedTitle = cleanMathTitle(titleCandidate);
+    this.renderSupSubText(titleEl, cleanedTitle || s.noTitle);
     card.appendChild(titleEl);
 
     // Authors
@@ -308,7 +387,7 @@ export class HoverPreviewRenderer {
         );
         addButton.addEventListener("click", (e) => {
           e.stopPropagation();
-          ctx.onAdd!(entry);
+          void ctx.onAdd!(entry, addButton);
         });
         actionRow.appendChild(addButton);
       }
@@ -326,19 +405,6 @@ export class HoverPreviewRenderer {
           ctx.onOpenPdf!(entry);
         });
         actionRow.appendChild(pdfButton);
-      }
-
-      // Select in Library button
-      if (ctx.onSelectInLibrary) {
-        const selectButton = this.createActionButton(
-          getString("references-panel-button-select"),
-          "select",
-        );
-        selectButton.addEventListener("click", (e) => {
-          e.stopPropagation();
-          ctx.onSelectInLibrary!(entry);
-        });
-        actionRow.appendChild(selectButton);
       }
 
       // Link/Unlink button
@@ -388,17 +454,48 @@ export class HoverPreviewRenderer {
     spacer.style.flex = "1";
     actionRow.appendChild(spacer);
 
+    // Import marker (right side) for online entries, consistent with list marker (⊕)
+    if (!isLocal && entry.recid && ctx.onAdd) {
+      const importBtn = this.doc.createElementNS(
+        XHTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      importBtn.type = "button";
+      importBtn.textContent = "⊕";
+      importBtn.title = s.dotAdd || getString("references-panel-button-add") || "";
+      importBtn.setAttribute("aria-label", importBtn.title);
+      applyRefEntryMarkerStyle(importBtn);
+      applyRefEntryMarkerColor(importBtn, false);
+      importBtn.style.border = "none";
+      importBtn.style.background = "transparent";
+      importBtn.style.padding = "0";
+      importBtn.style.cursor = "pointer";
+      importBtn.style.flexShrink = "0";
+      importBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void ctx.onAdd?.(entry, importBtn);
+      });
+      actionRow.appendChild(importBtn);
+    }
+
     // Local status indicator (right side)
-    const statusEl = this.doc.createElement("span");
+    const statusEl = this.doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+    statusEl.type = "button";
     statusEl.classList.add("zinspire-preview-card__status");
     Object.assign(statusEl.style, {
       display: "inline-flex",
       alignItems: "center",
       gap: "4px",
       fontSize: "12px",
+      padding: "2px 8px",
+      borderRadius: "999px",
+      border: "1px solid var(--fill-quinary, #d1d5db)",
+      background: "var(--material-background, #ffffff)",
       color: isLocal
         ? "var(--accent-green, #10b981)"
         : "var(--fill-secondary, #6b7280)",
+      cursor: "pointer",
     });
 
     const statusIcon = this.doc.createElement("span");
@@ -411,6 +508,55 @@ export class HoverPreviewRenderer {
       ? getString("references-panel-status-local")
       : getString("references-panel-status-online");
     statusEl.appendChild(statusText);
+
+    const resolveOnlineUrl = (): string | null => {
+      const inspireUrl =
+        typeof entry.inspireUrl === "string" ? entry.inspireUrl.trim() : "";
+      if (inspireUrl) return inspireUrl;
+      const fallbackUrl =
+        typeof entry.fallbackUrl === "string" ? entry.fallbackUrl.trim() : "";
+      if (fallbackUrl) return fallbackUrl;
+
+      const arxivDetails = formatArxivDetails(entry.arxivDetails);
+      if (arxivDetails?.id) {
+        return `${ARXIV_ABS_URL}/${arxivDetails.id}`;
+      }
+      if (entry.doi) {
+        return `${DOI_ORG_URL}/${entry.doi}`;
+      }
+      return null;
+    };
+
+    const canSelect = isLocal && typeof ctx.onSelectInLibrary === "function";
+    const onlineUrl = !isLocal ? resolveOnlineUrl() : null;
+    const canOpenOnline = !isLocal && Boolean(onlineUrl);
+
+    statusEl.title = isLocal
+      ? (getString("references-panel-button-select") || "")
+      : (getString("references-panel-open-link") || "");
+    statusEl.disabled = !(canSelect || canOpenOnline);
+    if (statusEl.disabled) {
+      statusEl.style.opacity = "0.55";
+      statusEl.style.cursor = "default";
+    } else {
+      statusEl.addEventListener("mouseenter", () => {
+        statusEl.style.background = "var(--fill-quinary, #f3f4f6)";
+      });
+      statusEl.addEventListener("mouseleave", () => {
+        statusEl.style.background = "var(--material-background, #ffffff)";
+      });
+      statusEl.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (canSelect) {
+          ctx.onSelectInLibrary?.(entry);
+          return;
+        }
+        if (canOpenOnline && onlineUrl) {
+          Zotero.launchURL(onlineUrl);
+        }
+      });
+    }
 
     actionRow.appendChild(statusEl);
 
@@ -693,10 +839,17 @@ export class HoverPreviewRenderer {
     const gap = 8;
 
     // Horizontal position
-    const left = Math.max(
-      gap,
-      Math.min(rect.left, viewportWidth - this.cardMaxWidth - gap),
-    );
+    const rightSpace = viewportWidth - rect.right - gap;
+    const leftSpace = rect.left - gap;
+    const left =
+      rightSpace >= this.cardMaxWidth
+        ? rect.right + gap
+        : leftSpace >= this.cardMaxWidth
+          ? rect.left - this.cardMaxWidth - gap
+          : Math.max(
+              gap,
+              Math.min(rect.left, viewportWidth - this.cardMaxWidth - gap),
+            );
 
     // Vertical position using bottom anchor
     const spaceAbove = rect.top - gap;

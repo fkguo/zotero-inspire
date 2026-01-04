@@ -36,7 +36,7 @@ import {
  */
 export interface PreviewActionCallbacks {
   /** Add entry to library */
-  onAdd?: (entry: InspireReferenceEntry) => Promise<void>;
+  onAdd?: (entry: InspireReferenceEntry, anchor?: HTMLElement) => Promise<void>;
   /** Link entry as related item */
   onLink?: (entry: InspireReferenceEntry) => Promise<void>;
   /** Unlink related item */
@@ -73,6 +73,8 @@ export interface HoverPreviewControllerOptions {
   container: HTMLElement;
   /** Action callbacks */
   callbacks?: PreviewActionCallbacks;
+  /** Allow clicking through the card unless pointer is inside */
+  clickThrough?: boolean;
   /** Show delay in ms (default: 250) */
   showDelay?: number;
   /** Hide delay in ms (default: 100) */
@@ -111,9 +113,11 @@ export class HoverPreviewController {
   private readonly showDelay: number;
   private readonly hideDelay: number;
   private readonly maxEntries: number;
+  private readonly clickThrough: boolean;
 
   // Preview card element
   private previewCard?: HTMLDivElement;
+  private clickThroughMoveHandler?: (e: MouseEvent) => void;
 
   // State
   private currentEntryId?: string;
@@ -134,6 +138,9 @@ export class HoverPreviewController {
   // Context menu flag
   private contextMenuOpen = false;
 
+  // Prevent repeated add actions while picker/import is in flight
+  private addActionInFlight = false;
+
   // Keyboard handler reference (for cleanup)
   private keydownHandler?: (e: KeyboardEvent) => void;
 
@@ -144,6 +151,7 @@ export class HoverPreviewController {
     this.showDelay = options.showDelay ?? 250;
     this.hideDelay = options.hideDelay ?? 100;
     this.maxEntries = options.maxEntries ?? 20;
+    this.clickThrough = options.clickThrough === true;
 
     this.renderer = new HoverPreviewRenderer({
       document: this.doc,
@@ -330,6 +338,9 @@ export class HoverPreviewController {
     this.renderer.positionRelativeToRow(card, row);
 
     // Show
+    if (this.clickThrough) {
+      card.style.pointerEvents = "none";
+    }
     card.style.display = "block";
 
     // Fetch abstract
@@ -377,6 +388,9 @@ export class HoverPreviewController {
     this.renderer.positionRelativeToRect(card, options.buttonRect);
 
     // Show
+    if (this.clickThrough) {
+      card.style.pointerEvents = "none";
+    }
     card.style.display = "block";
 
     // Fetch abstract
@@ -407,6 +421,30 @@ export class HoverPreviewController {
       this.previewCard.addEventListener("mouseleave", () => {
         this.scheduleHide();
       });
+
+      // Click-through mode: don't block underlying UI unless pointer is inside the card.
+      if (this.clickThrough) {
+        this.previewCard.style.pointerEvents = "none";
+        this.clickThroughMoveHandler = (e: MouseEvent) => {
+          if (!this.previewCard || this.previewCard.style.display === "none") {
+            return;
+          }
+          const rect = this.previewCard.getBoundingClientRect();
+          const inside =
+            e.clientX >= rect.left &&
+            e.clientX <= rect.right &&
+            e.clientY >= rect.top &&
+            e.clientY <= rect.bottom;
+          const next = inside ? "auto" : "none";
+          if (this.previewCard.style.pointerEvents !== next) {
+            this.previewCard.style.pointerEvents = next;
+          }
+          if (inside) {
+            this.cancelHide();
+          }
+        };
+        this.doc.addEventListener("mousemove", this.clickThroughMoveHandler, true);
+      }
 
       // Keyboard copy handler
       this.keydownHandler = async (e: KeyboardEvent) => {
@@ -444,7 +482,44 @@ export class HoverPreviewController {
         ? this.callbacks.isFavorite(entry)
         : undefined,
       onAdd: this.callbacks.onAdd
-        ? (e) => this.callbacks.onAdd!(e)
+        ? async (e, anchor) => {
+            if (this.addActionInFlight) {
+              return;
+            }
+            this.addActionInFlight = true;
+            // Save rendered abstract before rebuilding card
+            const oldAbstractEl = card.querySelector(
+              ".zinspire-preview-card__abstract",
+            ) as HTMLElement | null;
+            const savedAbstractEl = oldAbstractEl ?? undefined;
+            const savedLatexSource = oldAbstractEl?.dataset.latexSource;
+
+            try {
+              await this.callbacks.onAdd!(e, anchor);
+              // Refresh card to reflect local status changes
+              this.buildContent(card, e);
+
+              // Restore abstract content if unchanged (skip expensive re-render)
+              if (
+                savedAbstractEl &&
+                savedLatexSource &&
+                e.abstract === savedLatexSource
+              ) {
+                const newAbstractEl = card.querySelector(
+                  ".zinspire-preview-card__abstract",
+                ) as HTMLElement | null;
+                if (newAbstractEl) {
+                  newAbstractEl.replaceWith(savedAbstractEl);
+                  savedAbstractEl.dataset.latexSource = savedLatexSource;
+                  return;
+                }
+              }
+              // Otherwise fetch/render abstract normally
+              this.fetchAbstract(e, card);
+            } finally {
+              this.addActionInFlight = false;
+            }
+          }
         : undefined,
       // Wrap link callback to refresh content after completion
       onLink: this.callbacks.onLink
@@ -453,7 +528,7 @@ export class HoverPreviewController {
             const oldAbstractEl = card.querySelector(
               ".zinspire-preview-card__abstract",
             ) as HTMLElement | null;
-            const savedAbstractHTML = oldAbstractEl?.innerHTML;
+            const savedAbstractEl = oldAbstractEl ?? undefined;
             const savedLatexSource = oldAbstractEl?.dataset.latexSource;
 
             await this.callbacks.onLink!(e);
@@ -462,13 +537,13 @@ export class HoverPreviewController {
             this.buildContent(card, e);
 
             // Restore abstract content if unchanged (skip expensive re-render)
-            if (savedLatexSource && e.abstract === savedLatexSource) {
+            if (savedAbstractEl && savedLatexSource && e.abstract === savedLatexSource) {
               const newAbstractEl = card.querySelector(
                 ".zinspire-preview-card__abstract",
               ) as HTMLElement | null;
-              if (newAbstractEl && savedAbstractHTML) {
-                newAbstractEl.innerHTML = savedAbstractHTML;
-                newAbstractEl.dataset.latexSource = savedLatexSource;
+              if (newAbstractEl) {
+                newAbstractEl.replaceWith(savedAbstractEl);
+                savedAbstractEl.dataset.latexSource = savedLatexSource;
                 return;
               }
             }
@@ -483,7 +558,7 @@ export class HoverPreviewController {
             const oldAbstractEl = card.querySelector(
               ".zinspire-preview-card__abstract",
             ) as HTMLElement | null;
-            const savedAbstractHTML = oldAbstractEl?.innerHTML;
+            const savedAbstractEl = oldAbstractEl ?? undefined;
             const savedLatexSource = oldAbstractEl?.dataset.latexSource;
 
             await this.callbacks.onUnlink!(e);
@@ -492,13 +567,13 @@ export class HoverPreviewController {
             this.buildContent(card, e);
 
             // Restore abstract content if unchanged (skip expensive re-render)
-            if (savedLatexSource && e.abstract === savedLatexSource) {
+            if (savedAbstractEl && savedLatexSource && e.abstract === savedLatexSource) {
               const newAbstractEl = card.querySelector(
                 ".zinspire-preview-card__abstract",
               ) as HTMLElement | null;
-              if (newAbstractEl && savedAbstractHTML) {
-                newAbstractEl.innerHTML = savedAbstractHTML;
-                newAbstractEl.dataset.latexSource = savedLatexSource;
+              if (newAbstractEl) {
+                newAbstractEl.replaceWith(savedAbstractEl);
+                savedAbstractEl.dataset.latexSource = savedLatexSource;
                 return;
               }
             }
@@ -518,24 +593,24 @@ export class HoverPreviewController {
       onCopyTexkey: this.callbacks.onCopyTexkey
         ? (e) => this.callbacks.onCopyTexkey!(e)
         : undefined,
-      onToggleFavorite: this.callbacks.onToggleFavorite
+          onToggleFavorite: this.callbacks.onToggleFavorite
         ? async (e) => {
             const oldAbstractEl = card.querySelector(
               ".zinspire-preview-card__abstract",
             ) as HTMLElement | null;
-            const savedAbstractHTML = oldAbstractEl?.innerHTML;
+            const savedAbstractEl = oldAbstractEl ?? undefined;
             const savedLatexSource = oldAbstractEl?.dataset.latexSource;
 
             await this.callbacks.onToggleFavorite!(e);
             this.buildContent(card, e);
 
-            if (savedLatexSource && e.abstract === savedLatexSource) {
+            if (savedAbstractEl && savedLatexSource && e.abstract === savedLatexSource) {
               const newAbstractEl = card.querySelector(
                 ".zinspire-preview-card__abstract",
               ) as HTMLElement | null;
-              if (newAbstractEl && savedAbstractHTML) {
-                newAbstractEl.innerHTML = savedAbstractHTML;
-                newAbstractEl.dataset.latexSource = savedLatexSource;
+              if (newAbstractEl) {
+                newAbstractEl.replaceWith(savedAbstractEl);
+                savedAbstractEl.dataset.latexSource = savedLatexSource;
                 return;
               }
             }
@@ -646,6 +721,11 @@ export class HoverPreviewController {
     if (this.keydownHandler) {
       this.doc.removeEventListener("keydown", this.keydownHandler, true);
       this.keydownHandler = undefined;
+    }
+
+    if (this.clickThroughMoveHandler) {
+      this.doc.removeEventListener("mousemove", this.clickThroughMoveHandler, true);
+      this.clickThroughMoveHandler = undefined;
     }
 
     if (this.previewCard) {
