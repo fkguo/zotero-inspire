@@ -20,12 +20,14 @@ import {
 import { fetchReferencesEntries, enrichReferencesEntries } from "./referencesService";
 import { isInspireLiteratureSearchResponse } from "./apiTypes";
 import { inspireFetch } from "./rateLimiter";
+import { localCache } from "./localCache";
 import type {
   CitationGraphNode,
   CitationGraphSortMode,
   InspireReferenceEntry,
 } from "./types";
-import { isPdgReviewOfParticlePhysicsTitle } from "./reviewUtils";
+import { isPdgOrReviewArticleEntry } from "./reviewUtils";
+import { LRUCache } from "./utils";
 
 export type { CitationGraphNode, CitationGraphSortMode } from "./types";
 
@@ -37,7 +39,10 @@ export interface CitationGraphOneHopResult {
   shown: { references: number; citedBy: number };
   sort: CitationGraphSortMode;
   // Extra fields for multi-seed graph aggregation and edge detection.
+  /** All reference recids (unfiltered; used for seed-to-seed edge detection). */
   referencesAllRecids?: string[];
+  /** Reference recids after applying review filtering (used for union totals/connection counts). */
+  referencesFilteredRecids?: string[];
   citedByRecids?: string[];
 }
 
@@ -47,6 +52,10 @@ export interface FetchCitationGraphOptions {
   seedTitle?: string;
   maxReferences?: number;
   maxCitedBy?: number;
+  /** Ignore local cache and force network refresh (still falls back to cache on failure). */
+  forceRefresh?: boolean;
+  /** Include review articles (including PDG RPP) in references/cited-by lists. */
+  includeReviews?: boolean;
 }
 
 function getCitationValue(entry: InspireReferenceEntry): number {
@@ -57,6 +66,17 @@ function getCitationValue(entry: InspireReferenceEntry): number {
 function getYearValue(entry: InspireReferenceEntry): number {
   const y = Number(entry.year);
   return Number.isFinite(y) ? y : -Infinity;
+}
+
+const citationGraphResultCache = new LRUCache<string, CitationGraphOneHopResult>(100);
+
+const CITATION_GRAPH_CACHE_MAX_PER_SIDE = 200;
+const CITATION_GRAPH_LEGACY_MAX_CANDIDATES = [200, 100, 50, 25] as const;
+
+function isReviewLikeEntry(
+  entry: Pick<InspireReferenceEntry, "title" | "documentType" | "publicationInfo">,
+): boolean {
+  return isPdgOrReviewArticleEntry(entry);
 }
 
 function sortEntries(entries: InspireReferenceEntry[], sort: CitationGraphSortMode) {
@@ -111,6 +131,128 @@ function sortEntries(entries: InspireReferenceEntry[], sort: CitationGraphSortMo
     if (byCites) return byCites;
     return getYearValue(b) - getYearValue(a);
   });
+}
+
+function buildCitationGraphCacheSuffix(
+  sort: CitationGraphSortMode,
+  includeReviews: boolean,
+): string {
+  // NOTE: Intentionally does NOT include max-per-side.
+  // The cached payload stores up to the largest max requested so far.
+  return `cg_${sort}_rv${includeReviews ? 1 : 0}`;
+}
+
+function buildCitationGraphLegacyCacheSuffix(
+  sort: CitationGraphSortMode,
+  includeReviews: boolean,
+  maxReferences: number,
+  maxCitedBy: number,
+): string {
+  return `cg_${sort}_rv${includeReviews ? 1 : 0}_r${maxReferences}_c${maxCitedBy}`;
+}
+
+function sliceCitationGraphResult(
+  result: CitationGraphOneHopResult,
+  maxReferences: number,
+  maxCitedBy: number,
+): CitationGraphOneHopResult {
+  const references = result.references.slice(0, Math.max(0, maxReferences));
+  const citedBy = result.citedBy.slice(0, Math.max(0, maxCitedBy));
+  const citedByRecids = citedBy
+    .map((e) => e.recid)
+    .filter((r): r is string => typeof r === "string" && r.trim().length > 0);
+
+  return {
+    ...result,
+    references,
+    citedBy,
+    shown: { references: references.length, citedBy: citedBy.length },
+    citedByRecids,
+  };
+}
+
+async function loadCachedCitationGraphOneHopBase(
+  seedRecid: string,
+  sort: CitationGraphSortMode,
+  includeReviews: boolean,
+): Promise<CitationGraphOneHopResult | null> {
+  const cacheSuffix = buildCitationGraphCacheSuffix(sort, includeReviews);
+  const cacheKey = `${seedRecid}|${cacheSuffix}`;
+
+  const mem = citationGraphResultCache.get(cacheKey) ?? null;
+  if (mem) {
+    return mem;
+  }
+
+  const cachedDisk = await localCache.get<CitationGraphOneHopResult>(
+    "citation_graph",
+    seedRecid,
+    cacheSuffix,
+  );
+  if (cachedDisk) {
+    citationGraphResultCache.set(cacheKey, cachedDisk.data);
+    return cachedDisk.data;
+  }
+
+  // Backward-compatible fallback: try legacy cache suffixes that included max-per-side.
+  for (const n of CITATION_GRAPH_LEGACY_MAX_CANDIDATES) {
+    const legacySuffix = buildCitationGraphLegacyCacheSuffix(
+      sort,
+      includeReviews,
+      n,
+      n,
+    );
+    const legacyDisk = await localCache.get<CitationGraphOneHopResult>(
+      "citation_graph",
+      seedRecid,
+      legacySuffix,
+    );
+    if (!legacyDisk) continue;
+    const legacy = legacyDisk.data;
+    citationGraphResultCache.set(cacheKey, legacy);
+    // Opportunistically migrate to the new suffix to avoid repeated legacy lookups.
+    void localCache.set("citation_graph", seedRecid, legacy, cacheSuffix);
+    return legacy;
+  }
+
+  return null;
+}
+
+export async function getCachedCitationGraphOneHop(
+  seedRecid: string,
+  options: FetchCitationGraphOptions = {},
+): Promise<CitationGraphOneHopResult | null> {
+  const sort = options.sort ?? DEFAULT_CITATION_GRAPH_SORT;
+  const includeReviews = options.includeReviews === true;
+  const seedTitleOverride =
+    typeof options.seedTitle === "string" && options.seedTitle.trim()
+      ? options.seedTitle.trim()
+      : undefined;
+  const maxReferences =
+    typeof options.maxReferences === "number" && options.maxReferences > 0
+      ? Math.floor(options.maxReferences)
+      : CITATION_GRAPH_MAX_REFERENCES;
+  const maxCitedBy =
+    typeof options.maxCitedBy === "number" && options.maxCitedBy > 0
+      ? Math.floor(options.maxCitedBy)
+      : CITATION_GRAPH_MAX_CITED_BY;
+
+  const cached = await loadCachedCitationGraphOneHopBase(
+    seedRecid,
+    sort,
+    includeReviews,
+  );
+  if (!cached) return null;
+
+  if (seedTitleOverride) {
+    cached.center.title = cleanMathTitle(seedTitleOverride) || seedTitleOverride;
+  }
+
+  cached.center.localItemID = await getLocalItemIDForRecid(seedRecid);
+  await enrichWithLocalItems(cached.references);
+  await enrichWithLocalItems(cached.citedBy);
+
+  return sliceCitationGraphResult(cached, maxReferences, maxCitedBy);
 }
 
 /**
@@ -274,11 +416,13 @@ function buildEntryFromSearchHit(
     id: `graph-${index}-${recid || Date.now()}`,
     recid,
     title,
+    titleOriginal: title,
     authors: authorNames,
     totalAuthors,
     authorSearchInfos: extractAuthorSearchInfos(authors, 3),
     authorText,
     displayText: "",
+    earliestDate: earliestDate || undefined,
     year: year || strings.yearUnknown,
     summary,
     citationCount,
@@ -310,25 +454,30 @@ async function fetchCitedByEntriesLimited(
   seedRecid: string,
   maxCitedBy: number,
   sort: CitationGraphSortMode,
+  includeReviews: boolean,
   signal?: AbortSignal,
-): Promise<{ entries: InspireReferenceEntry[]; total: number }> {
+): Promise<{ entries: InspireReferenceEntry[]; total: number; ok: boolean }> {
   const strings = getCachedStrings();
   const query = encodeURIComponent(`refersto:recid:${seedRecid}`);
   const sortParam = sort === "relevance" ? "" : `&sort=${sort}`;
   const fieldsParam = buildFieldsParam(API_FIELDS_LIST_DISPLAY);
   const fetchSize =
-    sort === "relevance" ? Math.min(200, Math.max(1, maxCitedBy * 3)) : maxCitedBy;
+    sort === "relevance"
+      ? Math.min(200, Math.max(1, maxCitedBy * 3))
+      : includeReviews
+        ? maxCitedBy
+        : Math.min(200, Math.max(1, maxCitedBy * 5));
   const url = `${INSPIRE_API_BASE}/literature?q=${query}&size=${Math.max(1, fetchSize)}&page=1${sortParam}${fieldsParam}`;
 
   const response = await inspireFetch(url, signal ? { signal } : undefined).catch(
     () => null,
   );
   if (!response || response.status === 404 || !response.ok) {
-    return { entries: [], total: 0 };
+    return { entries: [], total: 0, ok: false };
   }
   const payload = (await response.json()) as unknown;
   if (!isInspireLiteratureSearchResponse(payload)) {
-    return { entries: [], total: 0 };
+    return { entries: [], total: 0, ok: false };
   }
   const total = typeof payload.hits?.total === "number" ? payload.hits.total : 0;
   const hits = Array.isArray(payload.hits?.hits) ? payload.hits.hits : [];
@@ -336,12 +485,12 @@ async function fetchCitedByEntriesLimited(
   const entries: InspireReferenceEntry[] = [];
   for (let i = 0; i < hits.length; i++) {
     const entry = buildEntryFromSearchHit(hits[i], i, strings);
-    if (isPdgReviewOfParticlePhysicsTitle(entry.title)) {
+    if (!includeReviews && isReviewLikeEntry(entry)) {
       continue;
     }
     entries.push(entry);
   }
-  return { entries, total };
+  return { entries, total, ok: true };
 }
 
 export async function fetchCitationGraphOneHop(
@@ -350,6 +499,8 @@ export async function fetchCitationGraphOneHop(
 ): Promise<CitationGraphOneHopResult> {
   const { signal } = options;
   const sort = options.sort ?? DEFAULT_CITATION_GRAPH_SORT;
+  const forceRefresh = options.forceRefresh === true;
+  const includeReviews = options.includeReviews === true;
   const maxReferences =
     typeof options.maxReferences === "number" && options.maxReferences > 0
       ? Math.floor(options.maxReferences)
@@ -364,14 +515,45 @@ export async function fetchCitationGraphOneHop(
       ? options.seedTitle.trim()
       : undefined;
 
+  const cacheSuffix = buildCitationGraphCacheSuffix(sort, includeReviews);
+  const cacheKey = `${seedRecid}|${cacheSuffix}`;
+  const applySeedTitleOverride = (result: CitationGraphOneHopResult) => {
+    if (seedTitleOverride) {
+      result.center.title = cleanMathTitle(seedTitleOverride) || seedTitleOverride;
+    }
+  };
+  const refreshLocalStatus = async (result: CitationGraphOneHopResult) => {
+    result.center.localItemID = await getLocalItemIDForRecid(seedRecid);
+    await enrichWithLocalItems(result.references);
+    await enrichWithLocalItems(result.citedBy);
+  };
+
+  const cachedFallback = await loadCachedCitationGraphOneHopBase(
+    seedRecid,
+    sort,
+    includeReviews,
+  );
+
+  if (cachedFallback && !forceRefresh) {
+    applySeedTitleOverride(cachedFallback);
+    await refreshLocalStatus(cachedFallback);
+    const refsEnough = cachedFallback.references.length >= maxReferences;
+    const citedEnough = cachedFallback.citedBy.length >= maxCitedBy;
+    if (refsEnough && citedEnough) {
+      return sliceCitationGraphResult(cachedFallback, maxReferences, maxCitedBy);
+    }
+  }
+
   // Fetch seed metadata to get author info
   let seedAuthorLabel: string | undefined;
   let seedYear: string | undefined;
   let seedTitleFromApi: string | undefined;
   let seedCitationCount: number | undefined;
   let seedCitationCountWithoutSelf: number | undefined;
+  let refsOk = false;
+  let citedOk = false;
   try {
-    const seedUrl = `${INSPIRE_API_BASE}/literature/${seedRecid}?fields=titles.title,authors,earliest_date,citation_count,citation_count_without_self_citations,citation_count_wo_self_citations`;
+    const seedUrl = `${INSPIRE_API_BASE}/literature/${seedRecid}?fields=titles.title,authors,earliest_date,publication_info.year,citation_count,citation_count_without_self_citations,citation_count_wo_self_citations`;
     const seedResp = await inspireFetch(seedUrl, signal ? { signal } : undefined);
     if (seedResp.ok) {
       const seedData = await seedResp.json() as {
@@ -379,6 +561,7 @@ export async function fetchCitationGraphOneHop(
           titles?: Array<{ title?: string }>;
           authors?: unknown[];
           earliest_date?: string;
+          publication_info?: Array<{ year?: number | string }>;
           citation_count?: number;
           citation_count_without_self_citations?: number;
           citation_count_wo_self_citations?: number;
@@ -398,7 +581,12 @@ export async function fetchCitationGraphOneHop(
           seedAuthorLabel = total > 1 ? `${lastName} et al.` : lastName;
         }
       }
-      seedYear = seedData?.metadata?.earliest_date?.slice(0, 4);
+      seedYear =
+        seedData?.metadata?.earliest_date?.slice(0, 4) ||
+        (Array.isArray(seedData?.metadata?.publication_info) &&
+        seedData.metadata!.publication_info!.length
+          ? String(seedData.metadata!.publication_info![0]?.year ?? "").slice(0, 4)
+          : undefined);
       seedCitationCount =
         typeof seedData?.metadata?.citation_count === "number"
           ? seedData.metadata.citation_count
@@ -439,31 +627,50 @@ export async function fetchCitationGraphOneHop(
   let references: InspireReferenceEntry[] = [];
   let referencesTotal = 0;
   let referencesAllRecids: string[] = [];
+  let referencesFilteredRecids: string[] = [];
   try {
     const allRefs = await fetchReferencesEntries(seedRecid, { signal });
+    refsOk = true;
     // Enrich references to get citation counts
     await enrichReferencesEntries(allRefs, { signal });
-    const filtered = allRefs.filter(
-      (e) => !isPdgReviewOfParticlePhysicsTitle(e.title),
-    );
+    referencesAllRecids = allRefs
+      .map((e) => e.recid)
+      .filter((r): r is string => typeof r === "string" && r.trim().length > 0);
+
+    const filtered = includeReviews ? allRefs : allRefs.filter((e) => !isReviewLikeEntry(e));
     referencesTotal = filtered.length;
-    referencesAllRecids = filtered
+    referencesFilteredRecids = filtered
       .map((e) => e.recid)
       .filter((r): r is string => typeof r === "string" && r.trim().length > 0);
     const sorted = [...filtered];
     sortEntries(sorted, sort);
-    references = sorted.slice(0, Math.max(0, maxReferences));
+    const cachedTarget = Math.min(
+      CITATION_GRAPH_CACHE_MAX_PER_SIDE,
+      Math.max(maxReferences, cachedFallback?.references.length ?? 0),
+    );
+    references = sorted.slice(0, Math.max(0, cachedTarget));
   } catch {
     references = [];
     referencesTotal = 0;
   }
 
-  const { entries: citedByRaw, total: citedByTotal } =
-    await fetchCitedByEntriesLimited(seedRecid, maxCitedBy, sort, signal);
+  const cachedCitedByTarget = Math.min(
+    CITATION_GRAPH_CACHE_MAX_PER_SIDE,
+    Math.max(maxCitedBy, cachedFallback?.citedBy.length ?? 0),
+  );
+  const citedByResponse = await fetchCitedByEntriesLimited(
+    seedRecid,
+    cachedCitedByTarget,
+    sort,
+    includeReviews,
+    signal,
+  );
+  citedOk = citedByResponse.ok;
+  const { entries: citedByRaw, total: citedByTotal } = citedByResponse;
 
   const citedBySorted = [...citedByRaw];
   sortEntries(citedBySorted, sort);
-  const citedBy = citedBySorted.slice(0, Math.max(0, maxCitedBy));
+  const citedBy = citedBySorted.slice(0, Math.max(0, cachedCitedByTarget));
   const citedByRecids = citedBy
     .map((e) => e.recid)
     .filter((r): r is string => typeof r === "string" && r.trim().length > 0);
@@ -472,7 +679,7 @@ export async function fetchCitationGraphOneHop(
   await enrichWithLocalItems(references);
   await enrichWithLocalItems(citedBy);
 
-  return {
+  const resultBase: CitationGraphOneHopResult = {
     center,
     references,
     citedBy,
@@ -480,6 +687,20 @@ export async function fetchCitationGraphOneHop(
     shown: { references: references.length, citedBy: citedBy.length },
     sort,
     referencesAllRecids,
+    referencesFilteredRecids,
     citedByRecids,
   };
+  if ((!refsOk || !citedOk) && cachedFallback) {
+    // Prefer cached data over partially failed fetches to avoid sticky empty sides.
+    applySeedTitleOverride(cachedFallback);
+    await refreshLocalStatus(cachedFallback);
+    return sliceCitationGraphResult(cachedFallback, maxReferences, maxCitedBy);
+  }
+  if (!refsOk || !citedOk) {
+    // Don't cache partial/failed results; they cause sticky empty graphs.
+    return sliceCitationGraphResult(resultBase, maxReferences, maxCitedBy);
+  }
+  citationGraphResultCache.set(cacheKey, resultBase);
+  void localCache.set("citation_graph", seedRecid, resultBase, cacheSuffix);
+  return sliceCitationGraphResult(resultBase, maxReferences, maxCitedBy);
 }

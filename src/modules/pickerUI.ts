@@ -939,7 +939,7 @@ export function showTargetPickerUI(
     overlay.style.left = "0";
     overlay.style.width = "100%";
     overlay.style.height = "100%";
-    overlay.style.zIndex = "10000";
+    overlay.style.zIndex = "2147483600";
     overlay.style.backgroundColor = "rgba(0, 0, 0, 0.3)";
     overlay.style.transition = "background-color 0.2s ease";
 
@@ -1906,11 +1906,21 @@ export function showTargetPickerUI(
         return;
       }
       if (event.key === "ArrowDown") {
+        if (event.target === noteInput) {
+          // In note textarea, ArrowDown should move caret between lines.
+          event.stopPropagation();
+          return;
+        }
         event.preventDefault();
         moveFocus(1);
         return;
       }
       if (event.key === "ArrowUp") {
+        if (event.target === noteInput) {
+          // In note textarea, ArrowUp should move caret between lines.
+          event.stopPropagation();
+          return;
+        }
         event.preventDefault();
         moveFocus(-1);
         return;
@@ -1931,6 +1941,11 @@ export function showTargetPickerUI(
         } else {
           toggleCollectionRow(row.id);
         }
+        return;
+      }
+      if (event.key === "Enter" && event.target === noteInput && event.shiftKey) {
+        // Allow Shift+Enter to insert a newline in the note textarea.
+        event.stopPropagation();
         return;
       }
       if (event.key === "Enter" && event.target !== filterInput) {
@@ -1983,7 +1998,11 @@ export function showTargetPickerUI(
         event.preventDefault();
         finish(null);
       }
-      if (confirmOnEnter && event.key === "Enter") {
+      if (
+        confirmOnEnter &&
+        event.key === "Enter" &&
+        !(event.target === noteInput && event.shiftKey)
+      ) {
         event.preventDefault();
         onConfirm();
       }
@@ -2046,7 +2065,7 @@ export function showAmbiguousCitationPicker(
     overlay.style.left = "0";
     overlay.style.width = "100%";
     overlay.style.height = "100%";
-    overlay.style.zIndex = "10000";
+    overlay.style.zIndex = "2147483600";
     overlay.style.backgroundColor = "rgba(0, 0, 0, 0.3)";
     overlay.style.display = "flex";
     overlay.style.alignItems = "center";

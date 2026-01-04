@@ -13,6 +13,7 @@
 | ----------------------- | ----------------------------------------------------------------------- |
 | **References**    | Shows papers cited by the current item (from INSPIRE's references data) |
 | **Cited By**      | Shows papers that cite the current item                                 |
+| **Related**       | Recommends papers via a hybrid score (shared refs + co-citation)         |
 | **Entry Cited**   | Shows papers citing a specific reference (click citation count)         |
 | **Author Papers** | Shows all papers by a specific author (click author name)               |
 | **Search**        | Shows INSPIRE search results                                            |
@@ -33,6 +34,30 @@
 - **Max results**: Up to 10,000 records (40 pages × 250)
 - **Parallel fetching**: 3 pages fetched in parallel per batch
 - **Sorting options**: Most recent, Most cited
+
+#### Related Mode
+
+The **Related** tab recommends papers using a **hybrid** similarity score that blends:
+
+1) **Weighted bibliographic coupling** (shared references): pick `K` anchor references from the seed paper’s references; for each anchor `r`, fetch the top `N` papers that cite `r`, and aggregate per-candidate shared anchors.
+2) **Co-citation** re-ranking: for the top `T` coupling candidates, query INSPIRE for the number of papers that cite **both** the seed and the candidate, and compute a normalized co-citation cosine similarity.
+
+**Scoring (implementation)**:
+
+- Anchor weight: `w_r = 1 / (1 + log1p(c_r))` where `c_r` is the anchor’s citation count (highly cited “generic” anchors contribute less).
+- Coupling score: `couplingScore = (Σ_{r∈shared} w_r) / (Σ_{r∈anchors} w_r)`.
+- Co-citation score: `coCitationScore = co / sqrt(seedCites * candCites)` (clamped to `[0,1]`).
+- Blend weight: `α = 0` if `seedCites < 5`, else `α = 0.5 * sigmoid(0.15 * (seedCites - 30))`, where `sigmoid(x) = 1 / (1 + exp(-x))` (so `α ∈ [0, 0.5]`).
+- Combined: `combinedScore = (1-α) * couplingScore + α * coCitationScore`.
+
+**Budget control & filtering**:
+
+- Co-citation is computed only for the top `T = 25` coupling candidates.
+- By default it excludes review articles and ignores PDG *Review of Particle Physics* as an anchor (too generic).
+
+**Caching**:
+
+- Stored in `localCache` under a versioned key (includes algorithm version and main preferences) so cached recommendations can be reused.
 
 ### 1.3 Statistics Chart
 
@@ -110,7 +135,19 @@ The **⭐ Favorites** tab provides quick access to favorite authors, papers, and
 | Click copy all BibTeX button   | Copy all visible entries as BibTeX                 |
 | Right-click entry (in panel) | Context menu with favorite option                  |
 
-### 1.8 Author Profile Preview
+### 1.8 Citation Graph
+
+The **Citation Graph** dialog provides a 1-hop visualization of **References** (left) and **Cited-by** (right) for one or multiple seed papers.
+
+- **Open**:
+  - Panel toolbar graph button (uses the current item as seed)
+  - Main toolbar button next to Zotero's search box (opens an empty canvas if no seeds are available)
+  - Right-click menu → **INSPIRE** → **Combined Citation Graph…** (multi-seed)
+- **Interactions**: click node to jump to Zotero item (if present); right-click to re-root; Cmd/Ctrl+click to add as seed; drag to pan; Cmd/Ctrl+wheel to zoom
+- **Time zoom**: drag the range sliders under each x-axis to focus on a time window (left/right independent); nodes outside the window are hidden
+- **Reviews toggle**: include/exclude review articles (including PDG RPP)
+
+### 1.9 Author Profile Preview
 
 When hovering over an author name, a profile preview card appears with the following information:
 
@@ -135,7 +172,7 @@ When hovering over an author name, a profile preview card appears with the follo
 
 ---
 
-## 1.9 Item Tree Custom Columns
+### 1.10 Item Tree Custom Columns
 
 Zotero's main item list (Item Tree) supports two custom columns:
 
@@ -301,6 +338,8 @@ When selecting text containing citation markers in the Zotero PDF Reader, the ad
 Preview card appears when hovering over lookup buttons:
 
 - Contents: Title, authors, abstract, publication info, identifiers
+- Status badge: click **In Library** to select the Zotero item; click **Online** to open the record in your browser (prefers INSPIRE)
+- Actions: Add (if not in library), Open PDF (if available), Link/Unlink, copy BibTeX/texkey, favorite toggle
 - Ambiguous match hint: "Author-year match only; click to select"
 
 ### 5.4 Panel Integration

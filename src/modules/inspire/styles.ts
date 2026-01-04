@@ -10,6 +10,15 @@
 
 type CSSProperties = Partial<CSSStyleDeclaration>;
 
+type RGB = { r: number; g: number; b: number };
+
+let cachedDarkMode: { value: boolean; ts: number } | null = null;
+const DARK_MODE_CACHE_MS = 750;
+
+export function invalidateDarkModeCache(): void {
+  cachedDarkMode = null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Common Style Patterns
 // ─────────────────────────────────────────────────────────────────────────────
@@ -220,9 +229,20 @@ export function toStyleString(styles: CSSProperties): string {
  * Uses multiple detection methods for reliability:
  * 1. Check Zotero's platform-darkmode attribute (most reliable)
  * 2. Check data-color-scheme attribute
- * 3. Fall back to system preference via matchMedia
+ * 3. Infer from CSS variables (--fill-primary / --material-background)
+ * 4. Fall back to system preference via matchMedia
  */
 export function isDarkMode(): boolean {
+  const now = Date.now();
+  if (cachedDarkMode && now - cachedDarkMode.ts < DARK_MODE_CACHE_MS) {
+    return cachedDarkMode.value;
+  }
+
+  const setCache = (value: boolean): boolean => {
+    cachedDarkMode = { value, ts: now };
+    return value;
+  };
+
   try {
     // Try to get the main window document
     const mainWindow = Zotero.getMainWindow?.();
@@ -232,19 +252,82 @@ export function isDarkMode(): boolean {
       // Check Zotero-specific dark mode attribute (most reliable for Zotero 7)
       const platformDarkMode = doc.documentElement.getAttribute("zotero-platform-darkmode");
       if (platformDarkMode === "true") {
-        return true;
+        return setCache(true);
       }
       if (platformDarkMode === "false") {
-        return false;
+        return setCache(false);
       }
 
       // Check data-color-scheme attribute (explicit light/dark)
       const colorScheme = doc.documentElement.getAttribute("data-color-scheme");
       if (colorScheme === "dark") {
-        return true;
+        return setCache(true);
       }
       if (colorScheme === "light") {
-        return false;
+        return setCache(false);
+      }
+
+      // Fallback: infer from CSS variables (works when attributes are not set)
+      const parseCssColor = (input: string): RGB | null => {
+        const s = (input || "").trim().toLowerCase();
+        if (!s || s === "transparent") return null;
+        if (s === "black") return { r: 0, g: 0, b: 0 };
+        if (s === "white") return { r: 255, g: 255, b: 255 };
+
+        if (s.startsWith("#")) {
+          const hex = s.slice(1);
+          const full =
+            hex.length === 3
+              ? hex
+                  .split("")
+                  .map((c) => c + c)
+                  .join("")
+              : hex;
+          if (full.length !== 6) return null;
+          const n = Number.parseInt(full, 16);
+          if (!Number.isFinite(n)) return null;
+          return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+        }
+
+        const rgbMatch = s.match(
+          /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/,
+        );
+        if (rgbMatch) {
+          const r = Math.max(0, Math.min(255, Number(rgbMatch[1])));
+          const g = Math.max(0, Math.min(255, Number(rgbMatch[2])));
+          const b = Math.max(0, Math.min(255, Number(rgbMatch[3])));
+          return { r, g, b };
+        }
+
+        return null;
+      };
+
+      const brightness = (rgb: RGB): number => {
+        // Perceived brightness (0-1)
+        return (rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114) / 255;
+      };
+
+      try {
+        const styles = mainWindow?.getComputedStyle?.(doc.documentElement);
+        if (styles) {
+          const fillPrimary = styles.getPropertyValue("--fill-primary").trim();
+          const fillPrimaryRgb = parseCssColor(fillPrimary);
+          if (fillPrimaryRgb) {
+            // In dark mode, primary text is light.
+            return setCache(brightness(fillPrimaryRgb) > 0.6);
+          }
+
+          const materialBg =
+            styles.getPropertyValue("--material-background").trim() ||
+            styles.getPropertyValue("--material-sidepane").trim();
+          const materialBgRgb = parseCssColor(materialBg);
+          if (materialBgRgb) {
+            // In dark mode, backgrounds are dark.
+            return setCache(brightness(materialBgRgb) < 0.45);
+          }
+        }
+      } catch {
+        // ignore CSS variable inference failures
       }
     }
 
@@ -252,7 +335,7 @@ export function isDarkMode(): boolean {
     if (mainWindow?.matchMedia) {
       const mediaQuery = mainWindow.matchMedia("(prefers-color-scheme: dark)");
       if (mediaQuery) {
-        return mediaQuery.matches;
+        return setCache(mediaQuery.matches);
       }
     }
 
@@ -260,14 +343,14 @@ export function isDarkMode(): boolean {
     if (typeof matchMedia !== "undefined") {
       const globalMediaQuery = matchMedia("(prefers-color-scheme: dark)");
       if (globalMediaQuery) {
-        return globalMediaQuery.matches;
+        return setCache(globalMediaQuery.matches);
       }
     }
   } catch {
     // Ignore errors and return false
   }
 
-  return false;
+  return setCache(false);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

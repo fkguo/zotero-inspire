@@ -89,7 +89,11 @@ export interface InspireReferenceEntry {
   inspireUrl?: string;
   fallbackUrl?: string;
   title: string;
+  /** Original title before smart fallback (may be empty if unavailable). */
+  titleOriginal?: string;
   summary?: string;
+  /** INSPIRE earliest_date (ISO-like string, e.g., 2020-06-15). */
+  earliestDate?: string;
   year: string;
   authors: string[];
   totalAuthors?: number; // Total author count (for detecting "et al." need)
@@ -347,6 +351,7 @@ export type ItemWithPendingInspireNote = Zotero.Item & {
  */
 export type LocalCacheType =
   | "refs"
+  | "citation_graph" // FTR-CITATION-GRAPH: One-hop citation graph snapshots (permanent)
   | "cited"
   | "author"
   | "related"

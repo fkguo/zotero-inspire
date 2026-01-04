@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "related_papers_exclude_reviews": boolean;
       "related_papers_max_results": number;
       "citation_graph_max_results": number;
+      "citation_graph_include_reviews": boolean;
       "external_token": string;
       "latex_render_mode": string;
       "search_history_days": number;

@@ -9,6 +9,16 @@ A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a communi
 
 ---
 
+## Screenshots
+
+### References Panel
+
+![INSPIRE References panel screenshot](images/screenshot1.png)
+
+### Citation Graph
+
+![Citation graph screenshot](images/citation_graph.png)
+
 ## Installation
 
 ### From Release
@@ -61,14 +71,14 @@ Select an item with an INSPIRE record, then find the **INSPIRE** section in the 
 | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **References**    | Papers cited by this item                                                                                  |
 | **Cited by**      | Papers that cite this item                                                                                 |
-| **Related**       | Recommended papers based on shared references (bibliographic coupling)                                     |
+| **Related**       | Recommended papers via a hybrid similarity score (shared references + co-citation)                         |
 | **Entry Cited**   | Papers citing a specific reference, appears only after clicking the `Cited by ...` button below an entry |
 | **Author Papers** | All papers by a clicked author, appears only after clicking an author name                                 |
-| **🔍 Search**     | INSPIRE search results                                                                                     |
+| **🔍**            | INSPIRE search results                                                                                     |
 | **⭐ Favorites**   | Your favorite authors and papers                                                                           |
 
-Note: Related-paper discovery ignores the PDG "Review of Particle Physics" reference as a seed anchor (it is cited by most HEP papers and usually hurts relevance).
-Citation Graph: a 1-hop visualization (refs/cited-by capped at 50); click nodes to open INSPIRE, right-click to expand (re-root).
+- **Related**: hybrid ranking = weighted bibliographic coupling (shared refs) + optional co-citation re-ranking; by default it ignores the PDG *Review of Particle Physics* as a seed anchor (too generic).
+- **Citation Graph**: a 1-hop visualization (refs/cited-by configurable up to 200 per side). Open via the panel button or the main toolbar button next to the search box; with no selection it opens an empty canvas where you can add seeds. Drag the time-range sliders under each x-axis to zoom the time window. Use the Reviews toggle to include/exclude review articles (incl. PDG).
 
 ### Search INSPIRE
 
@@ -174,6 +184,7 @@ When reading a PDF in Zotero:
 
 1. **Select text containing citations** (e.g., "see Refs. [1,2,3]")
 2. **Hover** over the **INSPIRE Refs. [n]** button to preview the reference (title, authors, abstract)
+   - In the preview card: click **In Library** to select the item in Zotero; click **Online** to open the record in your browser (prefers INSPIRE)
 3. **Click** to jump to and highlight the corresponding reference in the panel
 
 **Supported formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, `[arXiv:2301.12345]`, superscripts

@@ -103,3 +103,9 @@ export function isReviewArticleEntry(
 ): boolean {
   return isReviewDocumentType(entry.documentType) || isReviewJournal(entry.publicationInfo);
 }
+
+export function isPdgOrReviewArticleEntry(
+  entry: Pick<InspireReferenceEntry, "title" | "documentType" | "publicationInfo">,
+): boolean {
+  return isPdgReviewOfParticlePhysicsTitle(entry.title) || isReviewArticleEntry(entry);
+}

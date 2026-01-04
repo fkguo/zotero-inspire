@@ -15,6 +15,7 @@ pref("__prefsPrefix__.related_papers_enable", true); // FTR-RELATED-PAPERS: enab
 pref("__prefsPrefix__.related_papers_exclude_reviews", true); // FTR-RELATED-PAPERS: exclude review articles (default on)
 pref("__prefsPrefix__.related_papers_max_results", 50); // FTR-RELATED-PAPERS: max related papers to display
 pref("__prefsPrefix__.citation_graph_max_results", 25); // FTR-CITATION-GRAPH: max references/cited-by shown per side (global across seeds)
+pref("__prefsPrefix__.citation_graph_include_reviews", false); // FTR-CITATION-GRAPH: include review articles (incl. PDG) in graph results
 pref("__prefsPrefix__.external_token", ""); // External integrations: connector auth token (generated on first startup)
 pref("__prefsPrefix__.latex_render_mode", "katex"); // LaTeX rendering: "unicode" | "katex"
 pref("__prefsPrefix__.search_history_days", 30);
