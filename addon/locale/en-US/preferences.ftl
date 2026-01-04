@@ -94,6 +94,89 @@ pref-reader-auto-reopen =
     .label = Reopen reader tab when navigating back/forward
 pref-reader-auto-reopen-desc = When enabled, if the reader tab was closed, it will be reopened automatically when using Back or Forward navigation.
 
+pref-ai = AI
+pref-ai-desc = Configure AI summary and library Q&A behavior. API keys are managed in the AI dialog.
+
+pref-ai-summary-title = Summary
+pref-ai-output-language-label = Output language:
+pref-ai-output-language-auto =
+    .label = Auto
+pref-ai-output-language-en =
+    .label = English
+pref-ai-output-language-zh =
+    .label = Chinese (zh-CN)
+
+pref-ai-style-label = Style:
+pref-ai-style-academic =
+    .label = Academic
+pref-ai-style-bullet =
+    .label = Bullet points
+pref-ai-style-grant-report =
+    .label = Grant report
+pref-ai-style-slides =
+    .label = Slides
+
+pref-ai-citation-format-label = Citation format:
+pref-ai-citation-format-latex =
+    .label = LaTeX (\\cite{"{"}...{"}"})
+pref-ai-citation-format-markdown =
+    .label = Markdown ([key](url))
+pref-ai-citation-format-inspire-url =
+    .label = INSPIRE URL
+pref-ai-citation-format-zotero-link =
+    .label = Zotero link
+
+pref-ai-max-output-tokens-label = Max output tokens:
+pref-ai-max-output-tokens-desc = Higher values produce longer answers but cost more and take longer.
+pref-ai-temperature-label = Temperature:
+pref-ai-temperature-desc = Stored as percent to support Zotero prefs: 20 = 0.2 (range 0–200 → 0.00–2.00).
+pref-ai-max-refs-label = Max references:
+pref-ai-max-refs-desc = Number of references sampled from the References list.
+pref-ai-abstract-char-limit-label = Abstract char limit:
+pref-ai-abstract-char-limit-desc = Truncate each abstract to this many characters before sending to the model.
+
+pref-ai-include-seed-abstract =
+    .label = Include seed abstract
+pref-ai-include-ref-abstracts =
+    .label = Include reference abstracts
+pref-ai-streaming =
+    .label = Stream output (when supported)
+
+pref-ai-cache-enable =
+    .label = Cache AI outputs locally
+pref-ai-cache-enable-desc = Uses the Local Cache storage; API keys are never stored.
+pref-ai-cache-ttl-label = Cache TTL:
+pref-ai-cache-ttl-desc = How long to keep cached AI outputs before expiring.
+
+pref-ai-autopilot-title = AutoPilot
+pref-ai-autopilot-rpm-label = Requests per minute:
+pref-ai-autopilot-rpm-desc = Throttle batch generation to avoid rate limits and high costs.
+pref-ai-autopilot-max-items-label = Max items per run:
+pref-ai-autopilot-max-items-desc = Safety cap for batch generation.
+
+pref-ai-library-qa-title = Library Q&A
+pref-ai-library-qa-scope-label = Scope:
+pref-ai-library-qa-scope-current-item =
+    .label = Current item
+pref-ai-library-qa-scope-current-collection =
+    .label = Current collection
+pref-ai-library-qa-scope-library =
+    .label = My library
+pref-ai-library-qa-include-titles =
+    .label = Titles
+pref-ai-library-qa-include-abstracts =
+    .label = Abstracts
+pref-ai-library-qa-include-notes =
+    .label = My notes
+pref-ai-library-qa-include-fulltext-snippets =
+    .label = Fulltext snippets
+pref-ai-library-qa-top-k-label = Top K items:
+pref-ai-library-qa-top-k-desc = How many items to include in the context (max 30).
+pref-ai-library-qa-snippets-per-item-label = Snippets per item:
+pref-ai-library-qa-snippets-per-item-desc = How many text snippets to include per item (max 3).
+pref-ai-library-qa-snippet-chars-label = Snippet size:
+pref-ai-library-qa-snippet-chars-desc = Character limit per snippet.
+
 pref-nofound-enable =
     .label = Add tag to items without INSPIRE record
 pref-nofound-tag-label = Tag name:

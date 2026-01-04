@@ -437,6 +437,33 @@ function updateLocalCacheControls(doc: Document, syncCheckbox = true) {
   });
 }
 
+function updateAIControls(doc: Document, syncFromPref = true) {
+  const localCacheEnabled = getPref("local_cache_enable") === true;
+
+  const cacheEnableCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-ai_summary_cache_enable",
+  ) as HTMLInputElement | null;
+  const cacheTtlInput = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-ai_summary_cache_ttl_hours",
+  ) as HTMLInputElement | null;
+
+  const aiCacheEnabled = syncFromPref
+    ? getPref("ai_summary_cache_enable") === true
+    : (cacheEnableCheckbox?.checked ?? false);
+
+  if (cacheEnableCheckbox) {
+    if (syncFromPref) {
+      cacheEnableCheckbox.checked = aiCacheEnabled;
+    }
+    // AI cache is implemented on top of Local Cache.
+    cacheEnableCheckbox.disabled = !localCacheEnabled;
+  }
+
+  if (cacheTtlInput) {
+    cacheTtlInput.disabled = !localCacheEnabled || !aiCacheEnabled;
+  }
+}
+
 function updatePDFParseControls(doc: Document, syncCheckbox = true) {
   const parseCheckbox = doc.getElementById(
     "zotero-prefpane-zoteroinspire-pdf_parse_refs_list",
@@ -720,6 +747,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         updateSmartUpdateControls(doc);
         updatePreprintWatchControls(doc);
         updateCollabTagControls(doc);
+        updateAIControls(doc);
         updateLatexOptionsVisibility(doc);
         updateRelatedPapersControls(doc);
         setTimeout(() => updateRelatedPapersControls(doc), 50);
@@ -729,6 +757,13 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         enableCheckbox?.addEventListener("command", () => {
           updateLocalCacheControls(doc, false);
           updateEnrichSettingsDisplay(doc, true);
+          updateAIControls(doc);
+        });
+        const aiCacheCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-ai_summary_cache_enable",
+        ) as HTMLInputElement | null;
+        aiCacheCheckbox?.addEventListener("command", () => {
+          updateAIControls(doc, false);
         });
         const relatedEnableCheckbox = doc.getElementById(
           "zotero-prefpane-zoteroinspire-related_papers_enable",

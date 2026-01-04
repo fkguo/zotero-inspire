@@ -358,6 +358,7 @@ export type LocalCacheType =
   | "preprint"
   | "preprintCandidates"
   | "crossref"
+  | "ai_summary"
   | "author_profile" // FTR-AUTHOR-PROFILE: Author profile cache (permanent)
   | "author_papers"; // FTR-AUTHOR-PROFILE: Author papers list cache (permanent)
 

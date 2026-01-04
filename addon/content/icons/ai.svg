@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
+  <!-- QCD RGB sparkles: centered triangle (middle higher) -->
+  <path
+    d="M0 -1.9l0.5 1.4 1.4 0.5-1.4 0.5-0.5 1.4-0.5-1.4-1.4-0.5 1.4-0.5 0.5-1.4z"
+    transform="translate(8 2.2) scale(1.1)"
+    fill="#15803d"
+    opacity="0.95"
+  />
+  <path
+    d="M0 -1.9l0.5 1.4 1.4 0.5-1.4 0.5-0.5 1.4-0.5-1.4-1.4-0.5 1.4-0.5 0.5-1.4z"
+    transform="translate(5.4 3.6) scale(0.85)"
+    fill="#b91c1c"
+    opacity="0.95"
+  />
+  <path
+    d="M0 -1.9l0.5 1.4 1.4 0.5-1.4 0.5-0.5 1.4-0.5-1.4-1.4-0.5 1.4-0.5 0.5-1.4z"
+    transform="translate(10.6 3.6) scale(0.85)"
+    fill="#1e40af"
+    opacity="0.95"
+  />
+
+  <!-- "AI" letters: bolder + more centered -->
+  <path
+    d="M2.2 15l3.2-8.9h1.3l3.2 8.9H8.3l-.6-1.8H4.4L3.8 15H2.2zm2.7-3.1h2.3L6.05 8.4 4.9 11.9z"
+    fill="context-fill"
+  />
+  <rect x="11.6" y="6.1" width="2.2" height="8.9" rx="0.55" fill="context-fill" />
+</svg>

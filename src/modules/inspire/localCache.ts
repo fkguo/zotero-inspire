@@ -553,6 +553,9 @@ class InspireLocalCache {
     let ttl: number;
     if (type === "refs" || type === "preprintCandidates" || type === "citation_graph") {
       ttl = DEFAULT_TTL_REFS; // keep indefinitely for refs and candidate list
+    } else if (type === "ai_summary") {
+      const aiTTL = getPref("ai_summary_cache_ttl_hours");
+      ttl = typeof aiTTL === "number" && aiTTL > 0 ? aiTTL : 168;
     } else if (type === "author_profile") {
       ttl = DEFAULT_TTL_AUTHOR_PROFILE; // 2 hours for author profiles (offline fallback)
     } else {
@@ -686,6 +689,45 @@ class InspireLocalCache {
       Zotero.debug(`[${config.addonName}] Cache deleted: ${type}/${key}`);
     } catch (e) {
       Zotero.debug(`[${config.addonName}] Cache delete error: ${e}`);
+    }
+  }
+
+  /**
+   * Clear all cache files for a given type (both .json and .json.gz).
+   * Returns number of files deleted.
+   */
+  async clearType(type: LocalCacheType): Promise<number> {
+    await this.flushWrites();
+    await this.init();
+    if (!this.cacheDir) return 0;
+
+    try {
+      const exists = await IOUtils.exists(this.cacheDir);
+      if (!exists) return 0;
+
+      const children = await IOUtils.getChildren(this.cacheDir);
+      const prefix = `${type}_`;
+      const toDelete = children.filter((filePath) => {
+        if (!this.isCacheFile(filePath)) return false;
+        const fileName = filePath.split(/[\\/]/).pop() ?? "";
+        return fileName.startsWith(prefix);
+      });
+
+      const results = await Promise.all(
+        toDelete.map((filePath) =>
+          IOUtils.remove(filePath)
+            .then(() => 1)
+            .catch(() => 0),
+        ),
+      );
+      const deleted = results.reduce((sum, c) => sum + c, 0);
+      Zotero.debug(
+        `[${config.addonName}] Cache cleared (type=${type}): ${deleted} files`,
+      );
+      return deleted;
+    } catch (e) {
+      Zotero.debug(`[${config.addonName}] Cache clearType error: ${e}`);
+      return 0;
     }
   }
 
@@ -839,6 +881,7 @@ class InspireLocalCache {
         "author_papers",
         "preprintCandidates",
         "crossref",
+        "ai_summary",
         "preprint",
         "related",
         "cited",
@@ -856,6 +899,10 @@ class InspireLocalCache {
 
       const getTTLHoursForType = (t: LocalCacheType): number => {
         if (t === "refs" || t === "preprintCandidates") return DEFAULT_TTL_REFS;
+        if (t === "ai_summary") {
+          const aiTTL = getPref("ai_summary_cache_ttl_hours");
+          return typeof aiTTL === "number" && aiTTL > 0 ? aiTTL : 168;
+        }
         if (t === "author_profile") return DEFAULT_TTL_AUTHOR_PROFILE;
         return this.getTTLHours();
       };

@@ -23,6 +23,38 @@ pref("__prefsPrefix__.pdf_fuzzy_citation", false); // Aggressive citation detect
 pref("__prefsPrefix__.pdf_parse_refs_list", false); // Parse PDF reference list to fix label mapping (for multi-citation references)
 pref("__prefsPrefix__.pdf_force_mapping_on_mismatch", true); // When PDF/INSPIRE reference counts diverge, force PDF mapping and skip index fallback
 pref("__prefsPrefix__.quick_filters_last_used", "[]");
+// AI settings (FTR-AI-SUMMARY / AI tools)
+pref("__prefsPrefix__.ai_summary_enable", false);
+pref("__prefsPrefix__.ai_summary_provider", "openaiCompatible"); // openaiCompatible | anthropic | gemini
+pref("__prefsPrefix__.ai_summary_preset", "openai"); // openai | deepseek | kimi | qwen | zhipu | ollama | lmstudio | custom
+pref("__prefsPrefix__.ai_summary_base_url", "https://api.openai.com/v1"); // OpenAI-compatible base URL (or full /chat/completions endpoint)
+pref("__prefsPrefix__.ai_summary_model", "gpt-4o-mini");
+pref("__prefsPrefix__.ai_summary_temperature", 20);
+pref("__prefsPrefix__.ai_summary_max_output_tokens", 1200);
+pref("__prefsPrefix__.ai_summary_output_language", "auto"); // auto | en | zh-CN
+pref("__prefsPrefix__.ai_summary_style", "academic"); // academic | bullet | grant-report | slides
+pref("__prefsPrefix__.ai_summary_citation_format", "latex"); // latex | markdown | inspire-url | zotero-link
+pref("__prefsPrefix__.ai_summary_include_seed_abstract", true);
+pref("__prefsPrefix__.ai_summary_include_abstracts", true);
+pref("__prefsPrefix__.ai_summary_max_refs", 40);
+pref("__prefsPrefix__.ai_summary_abstract_char_limit", 800);
+pref("__prefsPrefix__.ai_summary_cache_enable", false);
+pref("__prefsPrefix__.ai_summary_cache_ttl_hours", 168); // 7 days
+pref("__prefsPrefix__.ai_summary_streaming", true); // Stream responses when supported
+pref("__prefsPrefix__.ai_batch_requests_per_minute", 12); // Batch/autopilot throttle
+pref("__prefsPrefix__.ai_batch_max_items", 50); // Safety cap
+pref("__prefsPrefix__.ai_profiles", "[]"); // JSON array of AI profiles (provider/baseURL/model; no API keys)
+pref("__prefsPrefix__.ai_active_profile_id", ""); // Active profile id (empty = use first/default)
+pref("__prefsPrefix__.ai_prompt_templates", "[]"); // JSON array of user-defined prompt templates/buttons
+// AI Library Q&A settings (FTR-AI-SUMMARY / Library Q&A)
+pref("__prefsPrefix__.ai_library_qa_scope", "current_collection"); // current_item | current_collection | library
+pref("__prefsPrefix__.ai_library_qa_include_titles", true);
+pref("__prefsPrefix__.ai_library_qa_include_abstracts", false);
+pref("__prefsPrefix__.ai_library_qa_include_notes", false);
+pref("__prefsPrefix__.ai_library_qa_include_fulltext_snippets", false);
+pref("__prefsPrefix__.ai_library_qa_top_k", 12);
+pref("__prefsPrefix__.ai_library_qa_snippets_per_item", 1);
+pref("__prefsPrefix__.ai_library_qa_snippet_chars", 800);
 // Developer/debug toggles
 pref("__prefsPrefix__.debug_panel_layout", false); // Enable panel layout debug logs/UI
 // Local cache settings

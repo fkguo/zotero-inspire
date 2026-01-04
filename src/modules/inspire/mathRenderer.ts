@@ -316,6 +316,47 @@ export async function renderMathContent(
 }
 
 /**
+ * Render LaTeX math delimiters inside an existing HTML container.
+ *
+ * Unlike `renderMathContent()`, this function preserves existing HTML structure
+ * (e.g., Markdown-rendered HTML) and only transforms text nodes containing math.
+ */
+export async function renderLatexInElement(
+  container: HTMLElement,
+  forceMode?: RenderMode,
+): Promise<void> {
+  if (!container) return;
+  const mode = forceMode ?? getRenderMode();
+  if (mode !== "katex") {
+    return;
+  }
+
+  const loaded = await ensureKatexLoaded();
+  if (!loaded || !renderMathInElement) {
+    return;
+  }
+
+  try {
+    ensureKatexStyle(container.ownerDocument);
+    renderMathInElement(container, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "$", right: "$", display: false },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false },
+      ],
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"],
+      throwOnError: false,
+      errorColor: "#cc0000",
+      trust: false,
+      macros: CUSTOM_MACROS,
+    });
+  } catch (err) {
+    Zotero.debug(`[${config.addonName}] renderLatexInElement error: ${err}`);
+  }
+}
+
+/**
  * Render a single LaTeX expression to an HTML string.
  */
 export async function renderLatexToString(

@@ -453,6 +453,8 @@ export {
   type SearchFetchOptions,
   // CitationGraphDialog (FTR-CITATION-GRAPH)
   CitationGraphDialog,
+  // AIDialog (FTR-AI-SUMMARY / AI tools)
+  AIDialog,
 } from "./panel";
 
 // Re-export funding module (FTR-FUNDING-EXTRACTION)
