@@ -249,6 +249,8 @@ import {
   type AuthorPreviewCallbacks,
   // Citation graph dialog (FTR-CITATION-GRAPH)
   CitationGraphDialog,
+  // AI dialog (FTR-AI-SUMMARY / AI tools)
+  AIDialog,
 } from "./inspire";
 
 // Re-export for external use
@@ -572,6 +574,19 @@ export class ZInspireReferencePane {
               controller?.showExportMenu(event);
             } catch (e) {
               Zotero.debug(`[${config.addonName}] Export button error: ${e}`);
+            }
+          },
+        },
+        {
+          type: "zinspire-ai",
+          icon: `chrome://${config.addonRef}/content/icons/ai.svg`,
+          l10nID: "zoteroinspire-ai-button",
+          onClick: ({ body }: { body: HTMLDivElement }) => {
+            try {
+              const controller = this.controllers.get(body);
+              controller?.showAIDialog();
+            } catch (e) {
+              Zotero.debug(`[${config.addonName}] AI button error: ${e}`);
             }
           },
         },
@@ -8234,6 +8249,65 @@ class InspireReferencePanelController {
     doc.documentElement.appendChild(popup);
     popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
     popup.openPopup(anchorButton as any, "after_end", 0, 2, false, false);
+  }
+
+  /**
+   * Open AI tools dialog (Summary / Recommend / My Notes).
+   * Button is placed in the pane header next to Refresh/Export.
+   */
+  showAIDialog(): void {
+    try {
+      const item =
+        typeof this.currentItemID === "number"
+          ? Zotero.Items.get(this.currentItemID)
+          : null;
+      if (!item || !item.isRegularItem()) {
+        this.showToast(getString("references-panel-select-item"));
+        return;
+      }
+      const recid = this.currentRecid || deriveRecidFromItem(item);
+      if (!recid) {
+        this.showToast(getString("references-panel-no-recid"));
+        return;
+      }
+
+      const doc = this.body.ownerDocument;
+      // Close existing AI dialogs (avoid multiple overlays).
+      const existing = doc.querySelector(".zinspire-ai-dialog") as HTMLElement | null;
+      if (existing) {
+        existing.remove();
+      }
+
+      new AIDialog(doc, {
+        seedItem: item,
+        seedRecid: recid,
+        onImportRecid: async (targetRecid: string, anchor: HTMLElement) => {
+          await this.importRecidFromAI(targetRecid, anchor);
+        },
+      });
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] showAIDialog error: ${err}`);
+    }
+  }
+
+  /**
+   * Import an INSPIRE recid into Zotero via the same save-target picker flow.
+   * Exposed for AI recommendation UI.
+   */
+  async importRecidFromAI(recid: string, anchor: HTMLElement): Promise<void> {
+    try {
+      const normalized = String(recid || "").trim();
+      if (!normalized) {
+        return;
+      }
+      const selection = await this.promptForSaveTarget(anchor || this.body);
+      if (!selection) {
+        return;
+      }
+      await this.importReference(normalized, selection);
+    } catch (err) {
+      Zotero.debug(`[${config.addonName}] importRecidFromAI error: ${err}`);
+    }
   }
 
   /**

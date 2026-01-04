@@ -112,3 +112,6 @@ export {
 
 // Re-export CitationGraphDialog (FTR-CITATION-GRAPH)
 export { CitationGraphDialog } from "./CitationGraphDialog";
+
+// Re-export AIDialog (FTR-AI-SUMMARY / AI tools)
+export { AIDialog } from "./AIDialog";

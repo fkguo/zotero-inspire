@@ -527,5 +527,6 @@ export type FluentMessageId =
   | 'startup-finish'
   | 'update-cancelled'
   | 'update-cancelled-stats'
+  | 'zoteroinspire-ai-button'
   | 'zoteroinspire-copy-all-button'
   | 'zoteroinspire-refresh-button';
