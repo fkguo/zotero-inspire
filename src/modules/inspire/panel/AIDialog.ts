@@ -186,6 +186,15 @@ function formatMs(ms: number): string {
   return `${(n / 1000).toFixed(n < 10_000 ? 2 : 1)}s`;
 }
 
+function preventDefaultSafe(e: unknown): void {
+  try {
+    (e as any)?.preventDefault?.();
+    (e as any)?.stopPropagation?.();
+  } catch {
+    // ignore
+  }
+}
+
 function renderTemplateString(template: string, vars: Record<string, string>): string {
   const src = String(template ?? "");
   return src.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key) => {
@@ -1920,13 +1929,14 @@ export class AIDialog {
     previewBtn.style.fontSize = "12px";
     previewBtn.style.cursor = "pointer";
     previewBtn.title = "Preview send payload (Ctrl/Cmd+P)";
-    previewBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const onPreview = (e: Event) => {
+      preventDefaultSafe(e);
       void runAction(previewBtn, { busyText: "Preparing…", restoreText: "Preview" }, async () => {
         await this.previewSummarySend();
       });
-    });
+    };
+    previewBtn.addEventListener("click", onPreview as any);
+    previewBtn.addEventListener("command", onPreview as any);
     wrap.appendChild(previewBtn);
     actionButtons.push(previewBtn);
 
@@ -1941,13 +1951,14 @@ export class AIDialog {
     genBtn.style.fontSize = "12px";
     genBtn.style.cursor = "pointer";
     genBtn.title = "Generate (Ctrl/Cmd+Enter)";
-    genBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const onGenerate = (e: Event) => {
+      preventDefaultSafe(e);
       void runAction(genBtn, { busyText: "Generating…", restoreText: "Generate" }, async () => {
         await this.generateSummary("full");
       });
-    });
+    };
+    genBtn.addEventListener("click", onGenerate as any);
+    genBtn.addEventListener("command", onGenerate as any);
     wrap.appendChild(genBtn);
     actionButtons.push(genBtn);
 
@@ -1961,13 +1972,14 @@ export class AIDialog {
     fastBtn.style.fontSize = "12px";
     fastBtn.style.cursor = "pointer";
     fastBtn.title = "Fast mode (Ctrl/Cmd+Shift+Enter)";
-    fastBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const onFast = (e: Event) => {
+      preventDefaultSafe(e);
       void runAction(fastBtn, { busyText: "Fast…", restoreText: "Fast" }, async () => {
         await this.generateSummary("fast");
       });
-    });
+    };
+    fastBtn.addEventListener("click", onFast as any);
+    fastBtn.addEventListener("command", onFast as any);
     wrap.appendChild(fastBtn);
     actionButtons.push(fastBtn);
 
@@ -1981,13 +1993,14 @@ export class AIDialog {
     batchBtn.style.fontSize = "12px";
     batchBtn.style.cursor = "pointer";
     batchBtn.title = "Batch-generate notes for selected items";
-    batchBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const onAutoPilot = (e: Event) => {
+      preventDefaultSafe(e);
       void runAction(batchBtn, { busyText: "Running…", restoreText: "AutoPilot" }, async () => {
         await this.runAutoPilotForSelection();
       });
-    });
+    };
+    batchBtn.addEventListener("click", onAutoPilot as any);
+    batchBtn.addEventListener("command", onAutoPilot as any);
     wrap.appendChild(batchBtn);
     actionButtons.push(batchBtn);
 
@@ -2082,7 +2095,9 @@ export class AIDialog {
     btn.style.fontSize = "12px";
     btn.style.cursor = "pointer";
     btn.style.background = "transparent";
-    btn.addEventListener("click", () => this.switchTab(id));
+    const onTab = () => this.switchTab(id);
+    btn.addEventListener("click", onTab as any);
+    btn.addEventListener("command", onTab as any);
     this.tabButtons.set(id, btn);
     return btn;
   }
@@ -5985,7 +6000,7 @@ Answer in Markdown.`;
     testBtn.style.padding = "4px 8px";
     testBtn.style.fontSize = "12px";
     testBtn.style.cursor = "pointer";
-    testBtn.addEventListener("click", async () => {
+    const runTest = async () => {
       if (testBtn.disabled) return;
       const prevText = testBtn.textContent;
       testBtn.disabled = true;
@@ -6006,7 +6021,9 @@ Answer in Markdown.`;
         testBtn.disabled = false;
         testBtn.textContent = prevText || "Test";
       }
-    });
+    };
+    testBtn.addEventListener("click", () => void runTest());
+    testBtn.addEventListener("command", () => void runTest());
     this.testBtn = testBtn;
 
     wrap.appendChild(base);
