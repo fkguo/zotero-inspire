@@ -695,7 +695,13 @@ export class HoverPreviewRenderer {
     const isDestructive = type === "unlink";
     const isPrimary = type === "add" || type === "link";
 
-    const baseStyle: Partial<CSSStyleDeclaration> = {
+    // FIX-WINDOWS-BUTTON-BG: Use appearance:none and background (not backgroundColor)
+    // Windows uses background-image for form elements, backgroundColor alone won't override it
+    const baseStyle: Partial<CSSStyleDeclaration> & Record<string, string> = {
+      appearance: "none",
+      MozAppearance: "none",
+      webkitAppearance: "none",
+      backgroundImage: "none",
       display: "inline-flex",
       alignItems: "center",
       gap: "4px",
@@ -709,19 +715,19 @@ export class HoverPreviewRenderer {
 
     if (isPrimary) {
       Object.assign(baseStyle, {
-        backgroundColor: "var(--accent-color, #3b82f6)",
+        background: "var(--accent-color, #3b82f6)",
         color: "#fff",
         border: "1px solid var(--accent-color, #3b82f6)",
       });
     } else if (isDestructive) {
       Object.assign(baseStyle, {
-        backgroundColor: "var(--material-background, #fff)",
+        background: "var(--material-background, #fff)",
         color: "var(--accent-red, #ef4444)",
         border: "1px solid var(--accent-red, #ef4444)",
       });
     } else {
       Object.assign(baseStyle, {
-        backgroundColor: "var(--material-background, #fff)",
+        background: "var(--material-background, #fff)",
         color: "var(--fill-primary, #374151)",
         border: "1px solid var(--fill-quinary, #d1d5db)",
       });
@@ -734,14 +740,14 @@ export class HoverPreviewRenderer {
       if (isPrimary) {
         button.style.opacity = "0.9";
       } else {
-        button.style.backgroundColor = "var(--fill-quinary, #f3f4f6)";
+        button.style.background = "var(--fill-quinary, #f3f4f6)";
       }
     });
     button.addEventListener("mouseleave", () => {
       if (isPrimary) {
         button.style.opacity = "1";
       } else {
-        button.style.backgroundColor = "var(--material-background, #fff)";
+        button.style.background = "var(--material-background, #fff)";
       }
     });
 

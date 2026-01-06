@@ -1892,7 +1892,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             return;
           }
           await copyToClipboard(bibtex);
-          this.showToast(getString("copy-success-bibtex") || "Copied BibTeX");
+          this.showToast(getString("references-panel-bibtex-copied") || "BibTeX copied to clipboard");
         },
         onCopyTexkey: async (entry) => {
           const recid = entry.recid;

@@ -42,6 +42,12 @@ export function applyPillButtonStyle(
   isActive: boolean,
   isDark: boolean,
 ): void {
+  // FIX-WINDOWS-APPEARANCE: Disable OS theme to allow custom background on Windows
+  (el.style as any).appearance = "none";
+  (el.style as any).MozAppearance = "none";
+  (el.style as any).webkitAppearance = "none";
+  // FIX-WINDOWS-BACKGROUND: Clear background-image which Windows uses for form elements
+  el.style.backgroundImage = "none";
   // Base styles
   el.style.padding = "3px 10px";
   el.style.fontSize = "12px";
@@ -855,9 +861,12 @@ export function showTargetPickerUI(
 
     // FIX: Use main Zotero window to escape CSS containment context
     // The panel body has `contain: layout` which breaks position:fixed
+    // FIX-PICKER-ZINDEX-ROOT: Use documentElement instead of body to avoid stacking context isolation
+    // In Zotero 7's XUL/XHTML environment, document.body returns an internal html:div with position:relative,
+    // which creates a new stacking context and prevents our overlay from appearing above splitters/sidebars.
     const mainWindow = Zotero.getMainWindow();
     const doc = mainWindow?.document || body.ownerDocument;
-    const appendTarget = mainWindow?.document?.body || body;
+    const appendTarget = mainWindow?.document?.documentElement || body;
     // Use shared color config for dark mode consistency
     const colors = getPickerColors();
 
@@ -939,7 +948,8 @@ export function showTargetPickerUI(
     overlay.style.left = "0";
     overlay.style.width = "100%";
     overlay.style.height = "100%";
-    overlay.style.zIndex = "2147483600";
+    // FIX-PICKER-ZINDEX: Use max z-index to ensure overlay is above all Zotero UI elements
+    overlay.style.zIndex = "2147483647";
     overlay.style.backgroundColor = "rgba(0, 0, 0, 0.3)";
     overlay.style.transition = "background-color 0.2s ease";
 
@@ -1161,13 +1171,13 @@ export function showTargetPickerUI(
     const filterInput = doc.createElement("input");
     filterInput.classList.add("zinspire-collection-picker__filter");
     filterInput.placeholder = getString("references-panel-picker-filter");
-    filterInput.style.margin = "8px 12px";
+    filterInput.style.margin = "8px 8px";
     filterInput.style.padding = "4px 8px";
     filterInput.style.backgroundColor = colors.inputBg;
     filterInput.style.color = colors.textPrimary;
     filterInput.style.border = `1px solid ${colors.inputBorder}`;
     filterInput.style.borderRadius = "4px";
-    filterInput.style.width = "calc(100% - 24px)";
+    filterInput.style.width = "calc(100% - 16px)";
     filterInput.style.boxSizing = "border-box";
     panel.appendChild(filterInput);
 
@@ -1190,7 +1200,7 @@ export function showTargetPickerUI(
 
     const options = doc.createElement("div");
     options.classList.add("zinspire-collection-picker__options");
-    options.style.padding = "8px 12px";
+    options.style.padding = "8px 0";
     options.style.borderTop = `1px solid ${colors.borderColor}`;
     options.style.backgroundColor = colors.sectionBg;
     options.style.display = includeTagsNote ? "flex" : "none";
@@ -1201,16 +1211,21 @@ export function showTargetPickerUI(
     tagsWrapper.classList.add("zinspire-collection-picker__tags-wrapper");
     tagsWrapper.style.position = "relative";
     tagsWrapper.style.width = "100%";
+    // FIX-TAGS-ALIGNMENT: Ensure consistent box sizing and no default margin
+    tagsWrapper.style.boxSizing = "border-box";
+    tagsWrapper.style.margin = "0";
+    tagsWrapper.style.padding = "0";
 
     const tagsInput = doc.createElement("input");
     tagsInput.classList.add("zinspire-collection-picker__tags");
     const tagsPlaceholder = getString("references-panel-picker-tags");
     tagsInput.placeholder = tagsPlaceholder || "Tags (comma separated)";
     tagsInput.title = getString("references-panel-picker-tags-title");
-    tagsInput.style.width = "100%";
+    tagsInput.style.width = "calc(100% - 16px)";
     tagsInput.style.padding = "4px 8px";
     tagsInput.style.fontSize = "13px";
     tagsInput.style.boxSizing = "border-box";
+    tagsInput.style.margin = "0 8px";
     tagsInput.style.backgroundColor = colors.inputBg;
     tagsInput.style.color = colors.textPrimary;
     tagsInput.style.border = `1px solid ${colors.inputBorder}`;
@@ -1529,10 +1544,11 @@ export function showTargetPickerUI(
     const notePlaceholder = getString("references-panel-picker-note");
     noteInput.placeholder = notePlaceholder || "Note";
     noteInput.title = getString("references-panel-picker-note-title");
-    noteInput.style.width = "100%";
+    noteInput.style.width = "calc(100% - 16px)";
     noteInput.style.padding = "4px 8px";
     noteInput.style.fontSize = "13px";
     noteInput.style.boxSizing = "border-box";
+    noteInput.style.margin = "0 8px";
     noteInput.style.resize = "vertical";
     noteInput.rows = 2;
     noteInput.style.fontFamily = "inherit";
@@ -1559,13 +1575,21 @@ export function showTargetPickerUI(
     const cancelBtn = doc.createElement("button");
     cancelBtn.classList.add("zinspire-collection-picker__button");
     cancelBtn.textContent = getString("references-panel-picker-cancel");
-    cancelBtn.style.padding = "4px 12px";
-    cancelBtn.style.minWidth = "60px";
-    cancelBtn.style.backgroundColor = colors.inputBg;
-    cancelBtn.style.color = colors.textPrimary;
-    cancelBtn.style.border = `1px solid ${colors.inputBorder}`;
-    cancelBtn.style.borderRadius = "4px";
-    cancelBtn.style.cursor = "pointer";
+    // FIX-WINDOWS-BUTTON-BG: Use appearance:none and background (not backgroundColor)
+    // Windows uses background-image for form elements, backgroundColor alone won't override it
+    cancelBtn.style.cssText = `
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      padding: 4px 12px;
+      min-width: 60px;
+      background: ${colors.inputBg};
+      background-image: none;
+      color: ${colors.textPrimary};
+      border: 1px solid ${colors.inputBorder};
+      border-radius: 4px;
+      cursor: pointer;
+    `;
 
     const okBtn = doc.createElement("button");
     okBtn.classList.add(
@@ -1573,13 +1597,20 @@ export function showTargetPickerUI(
       "zinspire-collection-picker__button--primary",
     );
     okBtn.textContent = getString("references-panel-picker-confirm");
-    okBtn.style.padding = "4px 12px";
-    okBtn.style.minWidth = "60px";
-    okBtn.style.backgroundColor = colors.accentBlue;
-    okBtn.style.color = "#fff";
-    okBtn.style.border = `1px solid ${colors.accentBlue}`;
-    okBtn.style.borderRadius = "4px";
-    okBtn.style.cursor = "pointer";
+    // FIX-WINDOWS-BUTTON-BG: Use appearance:none and background (not backgroundColor)
+    okBtn.style.cssText = `
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      padding: 4px 12px;
+      min-width: 60px;
+      background: ${colors.accentBlue};
+      background-image: none;
+      color: #fff;
+      border: 1px solid ${colors.accentBlue};
+      border-radius: 4px;
+      cursor: pointer;
+    `;
 
     actions.append(cancelBtn, okBtn);
     panel.appendChild(actions);
@@ -2065,7 +2096,8 @@ export function showAmbiguousCitationPicker(
     overlay.style.left = "0";
     overlay.style.width = "100%";
     overlay.style.height = "100%";
-    overlay.style.zIndex = "2147483600";
+    // FIX-PICKER-ZINDEX: Use max z-index to ensure overlay is above all Zotero UI elements
+    overlay.style.zIndex = "2147483647";
     overlay.style.backgroundColor = "rgba(0, 0, 0, 0.3)";
     overlay.style.display = "flex";
     overlay.style.alignItems = "center";

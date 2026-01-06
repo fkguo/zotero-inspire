@@ -576,9 +576,9 @@ function buildEntryFromLiteratureHit(
   const recid = String(metaObj?.control_number ?? "");
 
   const rawTitle =
-    ((metaObj?.titles as { title?: string }[])?.[0]?.title as string) ??
-    strings.noTitle;
-  const title = cleanMathTitle(rawTitle);
+    ((metaObj?.titles as { title?: string }[])?.[0]?.title as string) || undefined;
+  const cleanedTitle = cleanMathTitle(rawTitle);
+  const title = cleanedTitle || strings.noTitle;
   const authors = (metaObj?.authors as unknown[]) ?? [];
 
   const { primary: publicationInfo, errata } = splitPublicationInfo(
@@ -630,6 +630,7 @@ function buildEntryFromLiteratureHit(
     id: `related-${recid || Date.now()}`,
     recid,
     title,
+    titleOriginal: cleanedTitle,
     authors: authorNames,
     totalAuthors,
     authorSearchInfos: extractAuthorSearchInfos(authors, 3),
