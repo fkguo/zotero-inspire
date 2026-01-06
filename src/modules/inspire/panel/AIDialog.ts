@@ -819,13 +819,21 @@ function getStyleInstruction(style: string): string {
 
 /**
  * Check if the given AI profile supports direct PDF upload.
- * Currently supported: Gemini (inline_data), Anthropic Claude (documents).
+ * Currently supported:
+ * - Gemini (inline_data)
+ * - Anthropic Claude (documents)
+ * - OpenAI Compatible (Responses API with input_file)
  */
 function profileSupportsPdfUpload(profile: AIProfile): boolean {
   const provider = String(profile.provider || "").toLowerCase();
   // Gemini supports inline_data for PDFs
   // Anthropic Claude supports document upload
-  return provider === "gemini" || provider === "anthropic";
+  // OpenAI Compatible uses Responses API with input_file for documents
+  return (
+    provider === "gemini" ||
+    provider === "anthropic" ||
+    provider === "openaicompatible"
+  );
 }
 
 /**
@@ -837,28 +845,83 @@ async function readPdfAsBase64(
 ): Promise<{ data: string; mimeType: string; filename: string } | null> {
   try {
     const att = Zotero.Items.get(attachmentId);
-    if (!att) return null;
+    if (!att) {
+      Zotero.debug(`[zotero-inspire] readPdfAsBase64: attachment ${attachmentId} not found`);
+      return null;
+    }
 
     const contentType = att.attachmentContentType || "application/pdf";
-    if (contentType !== "application/pdf") return null;
+    if (contentType !== "application/pdf") {
+      Zotero.debug(`[zotero-inspire] readPdfAsBase64: not a PDF (${contentType})`);
+      return null;
+    }
 
     const filename = att.attachmentFilename || `attachment_${attachmentId}.pdf`;
     const path = att.getFilePath?.();
-    if (!path) return null;
+    if (!path) {
+      Zotero.debug(`[zotero-inspire] readPdfAsBase64: no file path for ${attachmentId}`);
+      return null;
+    }
 
-    // Read the file as binary
-    const file = Zotero.File.pathToFile?.(path);
-    if (!file?.exists?.()) return null;
+    Zotero.debug(`[zotero-inspire] readPdfAsBase64: reading ${path}`);
 
-    // Use Zotero's file reading utilities
-    const bytes = await Zotero.File.getBinaryContentsAsync?.(path);
-    if (!bytes) return null;
+    // Try multiple methods to read the file as base64
+    let base64: string | null = null;
 
-    // Convert to base64
-    // Zotero uses ChromeWorker environment, we can use btoa with Latin1 encoding
-    const base64 = typeof btoa === "function"
-      ? btoa(bytes)
-      : Buffer.from(bytes, "binary").toString("base64");
+    // Method 1: Use IOUtils.read (Zotero 7+)
+    if (typeof IOUtils !== "undefined" && IOUtils.read) {
+      try {
+        const uint8Array = await IOUtils.read(path);
+        // Convert Uint8Array to base64
+        const binaryStr = Array.from(uint8Array)
+          .map((b) => String.fromCharCode(b))
+          .join("");
+        base64 = btoa(binaryStr);
+        Zotero.debug(`[zotero-inspire] readPdfAsBase64: read ${uint8Array.length} bytes via IOUtils`);
+      } catch (e) {
+        Zotero.debug(`[zotero-inspire] readPdfAsBase64: IOUtils.read failed: ${e}`);
+      }
+    }
+
+    // Method 2: Fallback to Zotero.File methods
+    if (!base64 && Zotero.File) {
+      try {
+        // Try getBinaryContentsAsync if available
+        if (typeof Zotero.File.getBinaryContentsAsync === "function") {
+          const bytes = await Zotero.File.getBinaryContentsAsync(path);
+          if (bytes) {
+            base64 = btoa(bytes);
+            Zotero.debug(`[zotero-inspire] readPdfAsBase64: read via getBinaryContentsAsync`);
+          }
+        }
+      } catch (e) {
+        Zotero.debug(`[zotero-inspire] readPdfAsBase64: Zotero.File method failed: ${e}`);
+      }
+    }
+
+    // Method 3: Use fetch with file:// URL (works in some environments)
+    if (!base64) {
+      try {
+        const fileUrl = PathUtils?.toFileURI?.(path) || `file://${path}`;
+        const response = await fetch(fileUrl);
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const binaryStr = Array.from(uint8Array)
+            .map((b) => String.fromCharCode(b))
+            .join("");
+          base64 = btoa(binaryStr);
+          Zotero.debug(`[zotero-inspire] readPdfAsBase64: read ${uint8Array.length} bytes via fetch`);
+        }
+      } catch (e) {
+        Zotero.debug(`[zotero-inspire] readPdfAsBase64: fetch method failed: ${e}`);
+      }
+    }
+
+    if (!base64) {
+      Zotero.debug(`[zotero-inspire] readPdfAsBase64: all methods failed for ${path}`);
+      return null;
+    }
 
     return {
       data: base64,
