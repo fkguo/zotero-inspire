@@ -1575,7 +1575,10 @@ export class AIDialog {
           select.value = opt.value;
           sync();
           close();
-          select.dispatchEvent(new Event("change", { bubbles: true }));
+          // Use createEvent for XUL compatibility (new Event() doesn't work in Zotero)
+          const evt = doc.createEvent("Event");
+          evt.initEvent("change", true, true);
+          select.dispatchEvent(evt);
         });
         menu.appendChild(item);
       }
@@ -2768,8 +2771,9 @@ export class AIDialog {
             deleteProfileBtn.disabled = true;
             try {
               await clearAIProfileApiKey(profile).catch(() => null);
-              deleteAIProfile(profile.id);
-              this.currentProfile = getActiveAIProfile();
+              const remaining = deleteAIProfile(profile.id);
+              // Use first remaining profile directly to ensure consistency
+              this.currentProfile = remaining[0];
               this.refreshProfileSelectOptions();
               this.syncLegacyPrefsFromProfile(this.currentProfile);
               this.fillProfileForm(this.currentProfile);
@@ -3003,7 +3007,6 @@ export class AIDialog {
     header.appendChild(title);
 
     header.appendChild(this.buildProfileControls());
-    header.appendChild(this.buildProfileKeyUI());
 
     const closeBtn = doc.createElement("button");
     closeBtn.className = "zinspire-ai-dialog__close";
@@ -3258,6 +3261,7 @@ export class AIDialog {
     wrap.className = "zinspire-ai-dialog__profile";
     wrap.style.display = "flex";
     wrap.style.alignItems = "center";
+    wrap.style.flexWrap = "wrap";
     wrap.style.gap = "8px";
 
     // Current profile selector with label
@@ -3275,13 +3279,52 @@ export class AIDialog {
     this.refreshProfileSelectOptions();
 
     sel.addEventListener("change", async () => {
-      setActiveAIProfileId(sel.value);
-      this.currentProfile = getActiveAIProfile();
-      this.syncLegacyPrefsFromProfile(this.currentProfile);
-      this.fillProfileForm(this.currentProfile);
-      await this.refreshApiKeyStatus();
+      const profileId = sel.value;
+      setActiveAIProfileId(profileId);
+      // Find selected profile directly from profiles list to avoid prefs read delay
+      const profiles = ensureAIProfilesInitialized();
+      const selected = profiles.find((p) => p.id === profileId);
+      if (selected) {
+        this.currentProfile = selected;
+        this.syncLegacyPrefsFromProfile(this.currentProfile);
+        this.fillProfileForm(this.currentProfile);
+        await this.refreshApiKeyStatus();
+      }
     });
     wrap.appendChild(profileWrap);
+
+    // Badge showing current profile info (right after dropdown)
+    const badge = doc.createElement("div");
+    badge.style.display = "inline-flex";
+    badge.style.alignItems = "center";
+    badge.style.gap = "4px";
+    badge.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    badge.style.borderRadius = "999px";
+    badge.style.padding = "3px 8px";
+    badge.style.fontSize = "11px";
+    badge.style.fontFamily =
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    badge.style.color = "var(--fill-secondary, #666)";
+    badge.style.background = "transparent";
+    badge.style.maxWidth = "220px";
+    badge.style.overflow = "hidden";
+    badge.style.textOverflow = "ellipsis";
+    badge.style.whiteSpace = "nowrap";
+    badge.title = "Current model / base URL";
+    this.profileBadgeEl = badge;
+    wrap.appendChild(badge);
+
+    // Edit button (right after badge)
+    const toggleBtn = doc.createElement("button");
+    toggleBtn.textContent = "Edit…";
+    toggleBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    toggleBtn.style.borderRadius = "6px";
+    toggleBtn.style.padding = "4px 8px";
+    toggleBtn.style.fontSize = "12px";
+    toggleBtn.style.cursor = "pointer";
+    toggleBtn.title = "Edit current profile settings (name/base URL/model/key)";
+    this.profileSettingsToggleBtn = toggleBtn;
+    wrap.appendChild(toggleBtn);
 
     // Visual separator
     const sep = doc.createElement("span");
@@ -3307,6 +3350,8 @@ export class AIDialog {
         title: "Select a preset to create a new profile",
       },
     );
+    // Ensure preset dropdown is wide enough to show full labels
+    presetWrap.style.minWidth = "140px";
     this.presetSelect = presetSel;
     wrap.appendChild(presetWrap);
 
@@ -3334,7 +3379,8 @@ export class AIDialog {
       };
       upsertAIProfile(profile);
       setActiveAIProfileId(id);
-      this.currentProfile = getActiveAIProfile();
+      // Use the just-created profile directly to ensure consistency
+      this.currentProfile = profile;
       this.refreshProfileSelectOptions();
       this.syncLegacyPrefsFromProfile(this.currentProfile);
       this.fillProfileForm(this.currentProfile);
@@ -3352,15 +3398,16 @@ export class AIDialog {
     delBtn.style.cursor = "pointer";
     delBtn.title = "Delete current profile";
     bindButtonAction(delBtn, async () => {
-      const current = getActiveAIProfile();
+      const current = this.currentProfile;
       const win = Zotero.getMainWindow();
       const ok = win.confirm(
         `Delete profile "${current.name}"? This will also delete its stored API key.`,
       );
       if (!ok) return;
       await clearAIProfileApiKey(current).catch(() => null);
-      deleteAIProfile(current.id);
-      this.currentProfile = getActiveAIProfile();
+      const remaining = deleteAIProfile(current.id);
+      // Use first remaining profile directly to ensure consistency
+      this.currentProfile = remaining[0];
       this.refreshProfileSelectOptions();
       this.syncLegacyPrefsFromProfile(this.currentProfile);
       this.fillProfileForm(this.currentProfile);
@@ -3377,6 +3424,213 @@ export class AIDialog {
     keysBtn.style.cursor = "pointer";
     bindButtonAction(keysBtn, () => this.openApiKeyManagerDialog());
     wrap.appendChild(keysBtn);
+
+    // Details panel (expands below the first row)
+    const details = doc.createElement("div");
+    details.style.flexBasis = "100%";
+    details.style.display = "none";
+    details.style.alignItems = "center";
+    details.style.flexWrap = "wrap";
+    details.style.gap = "8px";
+    this.profileSettingsDetailsEl = details;
+
+    let expanded = false;
+    const setExpanded = (next: boolean) => {
+      expanded = next;
+      details.style.display = expanded ? "flex" : "none";
+      toggleBtn.textContent = expanded ? "Hide" : "Edit…";
+      toggleBtn.title = expanded
+        ? "Hide profile settings"
+        : "Edit current profile settings (name/base URL/model/key)";
+    };
+    bindButtonAction(toggleBtn, () => setExpanded(!expanded));
+    setExpanded(false);
+
+    const name = doc.createElement("input");
+    name.type = "text";
+    name.placeholder = "Profile name";
+    name.title = "Display name for this profile (only local)";
+    name.style.width = "120px";
+    name.style.padding = "4px 6px";
+    name.style.borderRadius = "6px";
+    name.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    name.value = String(this.currentProfile.name || "");
+    this.profileNameInput = name;
+
+    const base = doc.createElement("input");
+    base.type = "text";
+    base.placeholder = "Base URL";
+    base.title =
+      "OpenAI-compatible: usually ends with /v1 (e.g. https://api.openai.com/v1). You may also paste a full endpoint ending with /chat/completions.";
+    base.style.width = "200px";
+    base.style.padding = "4px 6px";
+    base.style.borderRadius = "6px";
+    base.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    base.value = String(this.currentProfile.baseURL || "");
+    this.baseUrlInput = base;
+
+    const model = doc.createElement("input");
+    model.type = "text";
+    model.placeholder = "Model";
+    model.style.width = "140px";
+    model.style.padding = "4px 6px";
+    model.style.borderRadius = "6px";
+    model.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    model.value = String(this.currentProfile.model || "");
+    this.modelInput = model;
+
+    const key = doc.createElement("input");
+    key.type = "password";
+    key.placeholder = "API key";
+    key.style.width = "180px";
+    key.style.padding = "4px 6px";
+    key.style.borderRadius = "6px";
+    key.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    key.title =
+      "Saved to Zotero secure storage when available, otherwise to Preferences (Config Editor). Input clears after successful save.";
+    this.apiKeyInput = key;
+
+    const clearBtn = doc.createElement("button");
+    clearBtn.textContent = "Clear Key";
+    clearBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    clearBtn.style.borderRadius = "6px";
+    clearBtn.style.padding = "4px 8px";
+    clearBtn.style.fontSize = "12px";
+    clearBtn.style.cursor = "pointer";
+    clearBtn.addEventListener("click", async () => {
+      const profile = this.currentProfile;
+      const win = Zotero.getMainWindow();
+      const ok = win.confirm(`Delete API key for profile "${profile.name}"?`);
+      if (!ok) return;
+      const cleared = await clearAIProfileApiKey(profile);
+      const dbg = getAIProfileStorageDebugInfo(profile);
+      const where =
+        cleared.storage === "loginManager"
+          ? "Secure Storage"
+          : cleared.storage === "prefsFallback"
+            ? `Preferences (Config Editor: ${dbg.prefsKey})`
+            : "unknown";
+      await this.refreshApiKeyStatus();
+      this.setStatus(`API key cleared (${where})`);
+    });
+
+    const saveBtn = doc.createElement("button");
+    saveBtn.textContent = "Save";
+    saveBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    saveBtn.style.borderRadius = "6px";
+    saveBtn.style.padding = "4px 8px";
+    saveBtn.style.fontSize = "12px";
+    saveBtn.style.cursor = "pointer";
+    saveBtn.addEventListener("click", async () => {
+      const next = { ...this.currentProfile };
+      if (this.profileNameInput) {
+        const v = this.profileNameInput.value.trim();
+        if (v) next.name = v;
+      }
+      if (this.baseUrlInput) {
+        const raw = this.baseUrlInput.value.trim() || undefined;
+        if (raw && !/^https?:\/\//i.test(raw)) {
+          this.setStatus("Invalid Base URL (must start with http:// or https://)");
+          return;
+        }
+        next.baseURL = raw;
+      }
+      if (this.modelInput && this.modelInput.value.trim())
+        next.model = this.modelInput.value.trim();
+      upsertAIProfile(next);
+      setActiveAIProfileId(next.id);
+      // Use the just-saved profile directly to ensure consistency
+      this.currentProfile = next;
+      this.refreshProfileSelectOptions();
+      this.syncLegacyPrefsFromProfile(this.currentProfile);
+
+      const keyValue = this.apiKeyInput?.value || "";
+      let keyStatus = "";
+      if (keyValue.trim()) {
+        const stored = await setAIProfileApiKey(this.currentProfile, keyValue);
+        if (stored.ok) {
+          if (this.apiKeyInput) this.apiKeyInput.value = "";
+          const where =
+            stored.storage === "loginManager"
+              ? "Secure Storage"
+              : stored.storage === "prefsFallback"
+                ? "Preferences"
+                : "unknown";
+          keyStatus = `API key saved (${where}); input cleared.`;
+        } else {
+          keyStatus = "API key save failed (not cleared).";
+        }
+      }
+
+      await this.refreshApiKeyStatus();
+      this.fillProfileForm(this.currentProfile);
+      const p = this.currentProfile;
+      this.setStatus(
+        keyStatus
+          ? `Profile saved (${p.name} / ${p.provider}). ${keyStatus}`
+          : `Profile saved (${p.name} / ${p.provider})`,
+      );
+    });
+    this.saveProfileBtn = saveBtn;
+
+    const testBtn = doc.createElement("button");
+    testBtn.textContent = "Test";
+    testBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
+    testBtn.style.borderRadius = "6px";
+    testBtn.style.padding = "4px 8px";
+    testBtn.style.fontSize = "12px";
+    testBtn.style.cursor = "pointer";
+    const runTest = async () => {
+      if (testBtn.disabled) return;
+      const prevText = testBtn.textContent;
+      testBtn.disabled = true;
+      testBtn.textContent = "Testing…";
+      this.setStatus("Testing…");
+      try {
+        // Use this.currentProfile to ensure we test the profile shown in UI
+        const profile = this.currentProfile;
+        const { apiKey } = await getAIProfileApiKey(profile);
+        if (!apiKey) {
+          this.setStatus("API key not set — enter and Save first");
+          return;
+        }
+        const t0 = Date.now();
+        const r = await testLLMConnection({ profile, apiKey });
+        const ms = Date.now() - t0;
+        this.setStatus(
+          r.ok
+            ? `Test OK (${formatMs(ms)})`
+            : `Test failed: ${r.message} (${formatMs(ms)})`,
+        );
+      } finally {
+        testBtn.disabled = false;
+        testBtn.textContent = prevText || "Test";
+      }
+    };
+    testBtn.addEventListener("click", () => void runTest());
+    testBtn.addEventListener("command", () => void runTest());
+    this.testBtn = testBtn;
+
+    details.appendChild(name);
+    details.appendChild(base);
+    details.appendChild(model);
+    details.appendChild(key);
+    details.appendChild(clearBtn);
+    details.appendChild(saveBtn);
+    details.appendChild(testBtn);
+    wrap.appendChild(details);
+
+    // Info line showing API key status
+    const info = doc.createElement("div");
+    info.style.flexBasis = "100%";
+    info.style.fontSize = "11px";
+    info.style.color = "var(--fill-secondary, #666)";
+    info.style.paddingTop = "2px";
+    this.apiKeyInfoEl = info;
+    wrap.appendChild(info);
+
+    // Initialize badge with current profile
+    this.fillProfileForm(this.currentProfile);
 
     return wrap;
   }
@@ -5702,7 +5956,8 @@ ${instructions || "Group into 3-8 topical groups and pick 3-8 items per group."}
       opt.textContent = prof.name;
       sel.appendChild(opt);
     }
-    sel.value = getActiveAIProfile().id;
+    // Use this.currentProfile.id to ensure consistency with badge
+    sel.value = this.currentProfile.id;
     this.syncCustomSelect(sel);
   }
 
@@ -5722,7 +5977,7 @@ ${instructions || "Group into 3-8 topical groups and pick 3-8 items per group."}
   }
 
   private async refreshApiKeyStatus(): Promise<void> {
-    const profile = getActiveAIProfile();
+    const profile = this.currentProfile;
     const { apiKey, storage, migratedFromLegacy } =
       await getAIProfileApiKey(profile);
     const hasKey = isNonEmptyString(apiKey);
@@ -8813,242 +9068,5 @@ Answer in Markdown.`;
     } catch (err: any) {
       this.setStatus(`Import failed: ${String(err?.message || err)}`);
     }
-  }
-
-  private buildProfileKeyUI(): HTMLElement {
-    const doc = this.doc;
-    const wrap = doc.createElement("div");
-    wrap.style.display = "flex";
-    wrap.style.alignItems = "center";
-    wrap.style.flexWrap = "wrap";
-    wrap.style.gap = "8px";
-
-    const badge = doc.createElement("div");
-    badge.style.display = "inline-flex";
-    badge.style.alignItems = "center";
-    badge.style.gap = "6px";
-    badge.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    badge.style.borderRadius = "999px";
-    badge.style.padding = "4px 10px";
-    badge.style.fontSize = "12px";
-    badge.style.fontFamily =
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-    badge.style.color = "var(--fill-secondary, #666)";
-    badge.style.background = "transparent";
-    badge.title = "Current model / base URL";
-    this.profileBadgeEl = badge;
-    wrap.appendChild(badge);
-
-    const toggleBtn = doc.createElement("button");
-    toggleBtn.textContent = "Edit…";
-    toggleBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    toggleBtn.style.borderRadius = "6px";
-    toggleBtn.style.padding = "4px 8px";
-    toggleBtn.style.fontSize = "12px";
-    toggleBtn.style.cursor = "pointer";
-    toggleBtn.title = "Edit current profile settings (name/base URL/model/key)";
-    this.profileSettingsToggleBtn = toggleBtn;
-    wrap.appendChild(toggleBtn);
-
-    const details = doc.createElement("div");
-    details.style.flexBasis = "100%";
-    details.style.display = "none";
-    details.style.alignItems = "center";
-    details.style.flexWrap = "wrap";
-    details.style.gap = "8px";
-    this.profileSettingsDetailsEl = details;
-
-    let expanded = false;
-    const setExpanded = (next: boolean) => {
-      expanded = next;
-      details.style.display = expanded ? "flex" : "none";
-      toggleBtn.textContent = expanded ? "Hide" : "Edit…";
-      toggleBtn.title = expanded
-        ? "Hide profile settings"
-        : "Edit current profile settings (name/base URL/model/key)";
-    };
-    bindButtonAction(toggleBtn, () => setExpanded(!expanded));
-    setExpanded(false);
-
-    const name = doc.createElement("input");
-    name.type = "text";
-    name.placeholder = "Profile name";
-    name.title = "Display name for this profile (only local)";
-    name.style.width = "120px";
-    name.style.padding = "4px 6px";
-    name.style.borderRadius = "6px";
-    name.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    name.value = String(this.currentProfile.name || "");
-    this.profileNameInput = name;
-
-    const base = doc.createElement("input");
-    base.type = "text";
-    base.placeholder = "Base URL";
-    base.title =
-      "OpenAI-compatible: usually ends with /v1 (e.g. https://api.openai.com/v1). You may also paste a full endpoint ending with /chat/completions.";
-    base.style.width = "200px";
-    base.style.padding = "4px 6px";
-    base.style.borderRadius = "6px";
-    base.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    base.value = String(this.currentProfile.baseURL || "");
-    this.baseUrlInput = base;
-
-    const model = doc.createElement("input");
-    model.type = "text";
-    model.placeholder = "Model";
-    model.style.width = "140px";
-    model.style.padding = "4px 6px";
-    model.style.borderRadius = "6px";
-    model.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    model.value = String(this.currentProfile.model || "");
-    this.modelInput = model;
-
-    const key = doc.createElement("input");
-    key.type = "password";
-    key.placeholder = "API key";
-    key.style.width = "180px";
-    key.style.padding = "4px 6px";
-    key.style.borderRadius = "6px";
-    key.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    key.title =
-      "Saved to Zotero secure storage when available, otherwise to Preferences (Config Editor). Input clears after successful save.";
-    this.apiKeyInput = key;
-
-    const clearBtn = doc.createElement("button");
-    clearBtn.textContent = "Clear Key";
-    clearBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    clearBtn.style.borderRadius = "6px";
-    clearBtn.style.padding = "4px 8px";
-    clearBtn.style.fontSize = "12px";
-    clearBtn.style.cursor = "pointer";
-    clearBtn.addEventListener("click", async () => {
-      const profile = getActiveAIProfile();
-      const win = Zotero.getMainWindow();
-      const ok = win.confirm(`Delete API key for profile "${profile.name}"?`);
-      if (!ok) return;
-      const cleared = await clearAIProfileApiKey(profile);
-      const dbg = getAIProfileStorageDebugInfo(profile);
-      const where =
-        cleared.storage === "loginManager"
-          ? "Secure Storage"
-          : cleared.storage === "prefsFallback"
-            ? `Preferences (Config Editor: ${dbg.prefsKey})`
-            : "unknown";
-      await this.refreshApiKeyStatus();
-      this.setStatus(`API key cleared (${where})`);
-    });
-
-    const saveBtn = doc.createElement("button");
-    saveBtn.textContent = "Save";
-    saveBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    saveBtn.style.borderRadius = "6px";
-    saveBtn.style.padding = "4px 8px";
-    saveBtn.style.fontSize = "12px";
-    saveBtn.style.cursor = "pointer";
-    saveBtn.addEventListener("click", async () => {
-      const next = { ...this.currentProfile };
-      if (this.profileNameInput) {
-        const v = this.profileNameInput.value.trim();
-        if (v) next.name = v;
-      }
-      if (this.baseUrlInput) {
-        const raw = this.baseUrlInput.value.trim() || undefined;
-        if (raw && !/^https?:\/\//i.test(raw)) {
-          this.setStatus("Invalid Base URL (must start with http:// or https://)");
-          return;
-        }
-        next.baseURL = raw;
-      }
-      if (this.modelInput && this.modelInput.value.trim())
-        next.model = this.modelInput.value.trim();
-      upsertAIProfile(next);
-      setActiveAIProfileId(next.id);
-      this.currentProfile = getActiveAIProfile();
-      this.refreshProfileSelectOptions();
-      this.syncLegacyPrefsFromProfile(this.currentProfile);
-
-      const keyValue = this.apiKeyInput?.value || "";
-      let keyStatus = "";
-      if (keyValue.trim()) {
-        const stored = await setAIProfileApiKey(this.currentProfile, keyValue);
-        if (stored.ok) {
-          if (this.apiKeyInput) this.apiKeyInput.value = "";
-          const where =
-            stored.storage === "loginManager"
-              ? "Secure Storage"
-              : stored.storage === "prefsFallback"
-                ? "Preferences"
-                : "unknown";
-          keyStatus = `API key saved (${where}); input cleared.`;
-        } else {
-          keyStatus = "API key save failed (not cleared).";
-        }
-      }
-
-      await this.refreshApiKeyStatus();
-      const p = this.currentProfile;
-      this.setStatus(
-        keyStatus
-          ? `Profile saved (${p.name} / ${p.provider}). ${keyStatus}`
-          : `Profile saved (${p.name} / ${p.provider})`,
-      );
-    });
-    this.saveProfileBtn = saveBtn;
-
-    const testBtn = doc.createElement("button");
-    testBtn.textContent = "Test";
-    testBtn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-    testBtn.style.borderRadius = "6px";
-    testBtn.style.padding = "4px 8px";
-    testBtn.style.fontSize = "12px";
-    testBtn.style.cursor = "pointer";
-    const runTest = async () => {
-      if (testBtn.disabled) return;
-      const prevText = testBtn.textContent;
-      testBtn.disabled = true;
-      testBtn.textContent = "Testing…";
-      this.setStatus("Testing…");
-      try {
-        const profile = getActiveAIProfile();
-        const { apiKey } = await getAIProfileApiKey(profile);
-        if (!apiKey) {
-          this.setStatus("API key not set — enter and Save first");
-          return;
-        }
-        const t0 = Date.now();
-        const r = await testLLMConnection({ profile, apiKey });
-        const ms = Date.now() - t0;
-        this.setStatus(
-          r.ok
-            ? `Test OK (${formatMs(ms)})`
-            : `Test failed: ${r.message} (${formatMs(ms)})`,
-        );
-      } finally {
-        testBtn.disabled = false;
-        testBtn.textContent = prevText || "Test";
-      }
-    };
-    testBtn.addEventListener("click", () => void runTest());
-    testBtn.addEventListener("command", () => void runTest());
-    this.testBtn = testBtn;
-
-    details.appendChild(name);
-    details.appendChild(base);
-    details.appendChild(model);
-    details.appendChild(key);
-    details.appendChild(clearBtn);
-    details.appendChild(saveBtn);
-    details.appendChild(testBtn);
-    wrap.appendChild(details);
-
-    const info = doc.createElement("div");
-    info.style.flexBasis = "100%";
-    info.style.fontSize = "11px";
-    info.style.color = "var(--fill-secondary, #666)";
-    info.style.paddingTop = "2px";
-    this.apiKeyInfoEl = info;
-    wrap.appendChild(info);
-    this.fillProfileForm(this.currentProfile);
-    return wrap;
   }
 }
