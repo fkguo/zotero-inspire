@@ -1911,7 +1911,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           }
           await copyToClipboard(resolved);
           this.showToast(
-            getString("copy-success-citation-key") || "Copied citation key",
+            getString("references-panel-texkey-copied") ||
+              "TeX key copied to clipboard",
           );
         },
         isFavorite: (entry) =>
