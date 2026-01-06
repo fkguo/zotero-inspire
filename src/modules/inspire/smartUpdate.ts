@@ -1398,17 +1398,25 @@ export function showUpdateNotification(
   notification.style.display = "flex";
   notification.style.alignItems = "center";
   notification.style.justifyContent = "space-between";
-  notification.style.padding = "8px 12px";
+  // FIX-ALIGNMENT: Use 8px horizontal padding to align with chart vertical line (matching 8px border-radius)
+  notification.style.padding = "8px 8px"; 
   notification.style.marginBottom = "8px";
   notification.style.backgroundColor = "#e0f2fe";
-  notification.style.border = "1px solid #7dd3fc";
-  notification.style.borderRadius = "6px";
+  // FIX-STYLE: Full-width style as requested by user
+  notification.style.borderTop = "1px solid #7dd3fc";
+  notification.style.borderBottom = "1px solid #7dd3fc";
+  notification.style.borderLeft = "none";
+  notification.style.borderRight = "none";
+  notification.style.borderRadius = "0";
   notification.style.fontSize = "13px";
   notification.style.color = "#0369a1";
-  notification.style.gap = "12px";
-  // FIX-PANEL-WIDTH-OVERFLOW: Constrain notification to container width
-  notification.style.width = "100%";
+  notification.style.gap = "8px";
+  // FIX-PANEL-WIDTH-OVERFLOW: Full width constraints
+  notification.style.width = "100%"; 
   notification.style.maxWidth = "100%";
+  notification.style.minWidth = "0";
+  notification.style.flexShrink = "0"; 
+  notification.style.flexWrap = "wrap"; 
   notification.style.boxSizing = "border-box";
   notification.style.overflow = "hidden";
 
@@ -1428,9 +1436,13 @@ export function showUpdateNotification(
 
   // Text
   const text = doc.createElement("span");
+  // FIX-PANEL-WIDTH-OVERFLOW: Add min-width: 0 to allow text to shrink in flex container
+  // This is critical for ellipsis to work properly in flex layouts
+  text.style.minWidth = "0";
   text.style.overflow = "hidden";
   text.style.textOverflow = "ellipsis";
   text.style.whiteSpace = "nowrap";
+  text.style.flex = "1"; // Allow text to take available space and shrink
   text.textContent = getString("smart-update-auto-check-changes", {
     args: { count: allowedChanges.length },
   });
@@ -1442,11 +1454,17 @@ export function showUpdateNotification(
   const buttonContainer = doc.createElement("div");
   buttonContainer.style.display = "flex";
   buttonContainer.style.gap = "8px";
+  buttonContainer.style.justifyContent = "flex-end"; // Align buttons to right when wrapped
+  buttonContainer.style.flex = "0 1 auto"; // Don't force growth, but allow shrink if needed
+  // FIX-PANEL-WIDTH-OVERFLOW: Buttons should not shrink, but container needs min-width: 0
   buttonContainer.style.flexShrink = "0";
+  buttonContainer.style.minWidth = "0";
 
   // View Changes button
   const viewBtn = doc.createElement("button");
   viewBtn.textContent = getString("smart-update-auto-check-view");
+  // FIX-PANEL-WIDTH-OVERFLOW: Add box-sizing to ensure padding is included in width calculation
+  viewBtn.style.boxSizing = "border-box";
   viewBtn.style.padding = "4px 10px";
   viewBtn.style.fontSize = "12px";
   viewBtn.style.border = "none";
@@ -1455,6 +1473,8 @@ export function showUpdateNotification(
   viewBtn.style.color = "#fff";
   viewBtn.style.cursor = "pointer";
   viewBtn.style.fontWeight = "500";
+  viewBtn.style.flexShrink = "0"; // Buttons should not shrink
+  viewBtn.style.whiteSpace = "nowrap"; // Prevent button text from wrapping
   viewBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1465,6 +1485,8 @@ export function showUpdateNotification(
   // Dismiss button
   const dismissBtn = doc.createElement("button");
   dismissBtn.textContent = getString("smart-update-auto-check-dismiss");
+  // FIX-PANEL-WIDTH-OVERFLOW: Add box-sizing to ensure padding and border are included in width calculation
+  dismissBtn.style.boxSizing = "border-box";
   dismissBtn.style.padding = "4px 10px";
   dismissBtn.style.fontSize = "12px";
   dismissBtn.style.border = "1px solid #7dd3fc";
@@ -1472,6 +1494,8 @@ export function showUpdateNotification(
   dismissBtn.style.backgroundColor = "transparent";
   dismissBtn.style.color = "#0369a1";
   dismissBtn.style.cursor = "pointer";
+  dismissBtn.style.flexShrink = "0"; // Buttons should not shrink
+  dismissBtn.style.whiteSpace = "nowrap"; // Prevent button text from wrapping
   dismissBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();

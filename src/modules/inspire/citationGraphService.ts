@@ -256,41 +256,6 @@ export async function getCachedCitationGraphOneHop(
 }
 
 /**
- * Build smart title with fallback logic when title is unavailable.
- * Priority: title > author+year > arXiv > DOI > summary > recid
- */
-export function buildSmartTitle(entry: InspireReferenceEntry, strings: ReturnType<typeof getCachedStrings>): string {
-  // 1. Use title if available
-  if (entry.title && entry.title !== strings.noTitle) {
-    return entry.title;
-  }
-
-  // 2. Use author + year
-  if (entry.authorText && entry.year && entry.year !== strings.yearUnknown) {
-    return `${entry.authorText} (${entry.year})`;
-  }
-
-  // 3. Use arXiv ID
-  if (entry.arxivDetails && typeof entry.arxivDetails !== 'string' && entry.arxivDetails.id) {
-    return `arXiv:${entry.arxivDetails.id}`;
-  }
-
-  // 4. Use DOI
-  if (entry.doi) {
-    const shortDoi = entry.doi.length > 25 ? `${entry.doi.slice(0, 25)}...` : entry.doi;
-    return `DOI: ${shortDoi}`;
-  }
-
-  // 5. Use publication summary
-  if (entry.summary) {
-    return entry.summary;
-  }
-
-  // 6. Last resort: use recid
-  return `INSPIRE:${entry.recid}`;
-}
-
-/**
  * Enrich entries with localItemID by batch querying Zotero database.
  * Reuses the same SQL query pattern as References panel for consistency.
  */
@@ -364,9 +329,9 @@ function buildEntryFromSearchHit(
 
   const recid = String(metaObj?.control_number ?? "");
   const rawTitle =
-    ((metaObj?.titles as { title?: string }[])?.[0]?.title as string) ??
-    strings.noTitle;
-  const title = cleanMathTitle(rawTitle);
+    ((metaObj?.titles as { title?: string }[])?.[0]?.title as string) || undefined;
+  const cleanedTitle = cleanMathTitle(rawTitle);
+  const title = cleanedTitle || strings.noTitle;
   const authors = (metaObj?.authors as unknown[]) ?? [];
 
   const { primary: publicationInfo, errata } = splitPublicationInfo(
@@ -416,7 +381,7 @@ function buildEntryFromSearchHit(
     id: `graph-${index}-${recid || Date.now()}`,
     recid,
     title,
-    titleOriginal: title,
+    titleOriginal: cleanedTitle,
     authors: authorNames,
     totalAuthors,
     authorSearchInfos: extractAuthorSearchInfos(authors, 3),
@@ -440,9 +405,6 @@ function buildEntryFromSearchHit(
       ? (metaObj.document_type as string[])
       : undefined,
   };
-
-  // Apply smart title fallback if title is unavailable
-  entry.title = buildSmartTitle(entry, strings);
 
   entry.displayText = buildDisplayText(entry);
   entry.searchText = "";

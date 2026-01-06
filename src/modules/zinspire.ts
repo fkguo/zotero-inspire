@@ -500,10 +500,11 @@ export class ZInspireReferencePane {
     const purple = isDark ? "#7c3aed" : "#8b5cf6";
     const gray = isDark ? "#64748b" : "#94a3b8";
     const alpha = isDark ? "0.85" : "1";
+    const lineAlpha = isDark ? "0.55" : "0.5";
     return `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true" focusable="false">
-  <rect x="5" y="3" width="6" height="2" fill="currentColor" rx="1" />
-  <rect x="11" y="5" width="2" height="6" fill="currentColor" rx="1" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="20" height="20" fill="none" aria-hidden="true" focusable="false">
+  <rect x="5" y="3.25" width="6" height="1.5" fill="currentColor" fill-opacity="${lineAlpha}" rx="0.75" />
+  <rect x="11.25" y="5" width="1.5" height="6" fill="currentColor" fill-opacity="${lineAlpha}" rx="0.75" />
   <circle cx="4" cy="4" r="2.2" fill="${green}" fill-opacity="${alpha}" />
   <circle cx="12" cy="4" r="2.2" fill="${purple}" fill-opacity="${alpha}" />
   <polygon points="12,9.59 14.3,11.25 13.41,13.96 10.59,13.96 9.7,11.25" fill="${gray}" fill-opacity="${alpha}" />
@@ -681,15 +682,22 @@ export class ZInspireReferencePane {
       getString("references-panel-citation-graph-tooltip") ||
       "Open citation graph";
     btn.innerHTML = this.buildCitationGraphIconSvg(dark);
+    // FIX-WINDOWS-TOOLBAR-GRAPH-BUTTON: Add appearance:none to disable OS theme padding on Windows
+    // Same fix as panel graphBtn (line ~1846)
     btn.style.cssText = `
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
+      width: 24px;
       height: 24px;
       margin-right: 6px;
+      padding: 0;
       border: 1px solid ${dark ? "var(--fill-quinary, #3f3f46)" : "var(--fill-quinary, #d1d5db)"};
       background: ${dark ? "var(--material-sidepane, #1f1f22)" : "var(--material-background, #fff)"};
+      background-image: none;
       color: ${dark ? "var(--fill-secondary, #9ca3af)" : "var(--fill-secondary, #64748b)"};
       border-radius: 6px;
       cursor: pointer;
@@ -1760,12 +1768,15 @@ class InspireReferencePanelController {
     // FTR-PANEL-WIDTH-FIX: Add min-width handling for narrow sidebars
     // FIX-PANEL-WIDTH-OVERFLOW: Use overflow:hidden to prevent horizontal overflow
     // Note: Quick filters popup uses position:fixed so it won't be clipped
+    // FIX-ALIGNMENT-v2: Set padding to 8px 0px to align toolbar content with chart left border
+    // (chart has no margin, so its left border is at body.left; toolbar content should also start there)
     toolbar.style.cssText = `
       display: flex;
       flex-direction: column;
       gap: 6px;
-      padding: 8px 10px;
-      border-bottom: 1px solid var(--fill-quinary, #e2e8f0);
+      padding: 8px 0px;
+      /* FIX-CHART-TOP-LINE: Avoid duplicate/protruding line above rounded chart */
+      border-bottom: none;
       background: var(--material-sidepane, #f8fafc);
       width: 100%;
       max-width: 100%;
@@ -1843,12 +1854,17 @@ class InspireReferencePanelController {
     graphBtn.title =
       getString("references-panel-citation-graph-tooltip") ||
       "Open citation graph";
+    // FIX-WINDOWS-GRAPH-BUTTON: Add appearance:none to disable OS theme padding on Windows
     graphBtn.style.cssText = `
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
       flex-shrink: 0;
-      width: 28px;
+      width: 24px;
       height: 24px;
       border: 1px solid ${graphBtnDark ? "var(--fill-quinary, #3f3f46)" : "var(--fill-quinary, #d1d5db)"};
       background: ${graphBtnDark ? "var(--material-sidepane, #1f1f22)" : "var(--material-background, #fff)"};
+      background-image: none;
       color: ${graphBtnDark ? "var(--fill-secondary, #9ca3af)" : "var(--fill-secondary, #64748b)"};
       border-radius: 6px;
       padding: 0;
@@ -1904,6 +1920,7 @@ class InspireReferencePanelController {
       display: flex;
       align-items: center;
       gap: 6px;
+      padding: 0;
       flex-wrap: wrap;
       width: 100%;
       max-width: 100%;
@@ -2174,6 +2191,7 @@ class InspireReferencePanelController {
       display: flex;
       align-items: center;
       gap: 6px;
+      padding: 4px 0px;
       width: 100%;
       max-width: 100%;
       min-width: 0;
@@ -6415,6 +6433,7 @@ class InspireReferencePanelController {
     // FTR-DARK-MODE-AUTO: Use CSS variables for automatic theme adaptation (like author card)
     // FIX-ZINDEX: Use position:relative and z-index:1 so quick filters popup (z-index:1000) stays on top
     // FIX-PANEL-WIDTH-OVERFLOW: Add width: 100% and min-width: 0 to allow shrinking
+    // FIX-CHART-TOP-LINE: Keep rounded corners and full border; toolbar separator is disabled while chart is shown
     container.style.cssText = `
       display: flex;
       flex-direction: column;
@@ -6719,6 +6738,7 @@ class InspireReferencePanelController {
     container.appendChild(svgWrapper);
 
     this.chartContainer = container;
+
     return container;
   }
 
@@ -12322,7 +12342,15 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     // When chart container changes from display:none to display:"", clientWidth is 0 until reflow
     if (wasInFavoritesView && this.chartContainer) {
       await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => resolve());
+        // IMPORTANT: Use the real window's requestAnimationFrame.
+        // In Zotero plugin sandbox, the global requestAnimationFrame may never fire.
+        const win =
+          this.body?.ownerDocument?.defaultView || Zotero.getMainWindow?.();
+        if (win && typeof win.requestAnimationFrame === "function") {
+          win.requestAnimationFrame(() => resolve());
+        } else {
+          resolve();
+        }
       });
     }
 
@@ -15645,6 +15673,13 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (this.sortRow) {
       this.sortRow.style.display = "none";
     }
+    // Restore toolbar divider when chart is hidden
+    const toolbarEl = this.body.querySelector(
+      ".zinspire-ref-panel__toolbar",
+    ) as HTMLElement | null;
+    if (toolbarEl) {
+      toolbarEl.style.borderBottom = "1px solid var(--fill-quinary, #e2e8f0)";
+    }
     this.renderFavoriteAuthorsList();
   }
 
@@ -15670,6 +15705,13 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       }
       if (this.sortRow) {
         this.sortRow.style.display = "";
+      }
+      // Hide toolbar divider when chart is shown (chart border provides separation)
+      const toolbarEl = this.body.querySelector(
+        ".zinspire-ref-panel__toolbar",
+      ) as HTMLElement | null;
+      if (toolbarEl) {
+        toolbarEl.style.borderBottom = "none";
       }
     }
   }

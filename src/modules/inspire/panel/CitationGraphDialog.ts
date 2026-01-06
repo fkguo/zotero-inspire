@@ -1892,17 +1892,14 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             return;
           }
           await copyToClipboard(bibtex);
-          this.showToast(getString("copy-success-bibtex") || "Copied BibTeX");
+          this.showToast(getString("references-panel-bibtex-copied") || "BibTeX copied to clipboard");
         },
         onCopyTexkey: async (entry) => {
-          const recid = entry.recid;
-          const texkey =
-            typeof entry.texkey === "string" && entry.texkey.trim()
-              ? entry.texkey.trim()
-              : undefined;
           const resolved =
-            texkey ||
-            (recid ? await fetchInspireTexkey(recid).catch(() => null) : null);
+            (typeof entry.texkey === "string" ? entry.texkey.trim() : "") ||
+            (entry.recid
+              ? await fetchInspireTexkey(entry.recid).catch(() => null)
+              : null);
           if (!resolved) {
             this.showToast(
               getString("copy-error-no-citation-key") || "No citation key",
@@ -1911,7 +1908,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           }
           await copyToClipboard(resolved);
           this.showToast(
-            getString("copy-success-citation-key") || "Copied citation key",
+            getString("references-panel-texkey-copied") ||
+              "TeX key copied to clipboard",
           );
         },
         isFavorite: (entry) =>

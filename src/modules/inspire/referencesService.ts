@@ -28,7 +28,6 @@ import type {
   InspireReference,
 } from "./apiTypes";
 import { inspireFetch } from "./rateLimiter";
-import { buildSmartTitle } from "./citationGraphService";
 import { LRUCache } from "./utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,9 +222,6 @@ export function buildReferenceEntry(
     doi,
     texkey,
   };
-
-  // Apply smart title fallback if title is unavailable
-  entry.title = buildSmartTitle(entry, strings);
 
   entry.displayText = buildDisplayText(entry);
   return entry;
