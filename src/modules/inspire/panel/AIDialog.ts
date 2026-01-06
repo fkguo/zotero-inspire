@@ -807,9 +807,9 @@ async function enrichAbstractsForEntries(
  * These are injected into the system prompt to guide the LLM's output format.
  */
 const STYLE_INSTRUCTIONS: Record<string, string> = {
-  academic: `Write in formal academic prose with complete sentences and flowing paragraphs. Avoid bullet points unless absolutely necessary for clarity (e.g., listing specific papers). Use scholarly language suitable for a peer-reviewed literature review.`,
+  academic: `CRITICAL: Write in formal academic prose using ONLY complete sentences and flowing paragraphs. DO NOT use bullet points, numbered lists, or any list formatting. Even when discussing multiple contributions or points, integrate them into connected prose paragraphs. Each section heading should be followed by well-developed paragraphs, NOT lists. Use transitions like "Furthermore," "Additionally," "In particular," to connect ideas. This style should read like a peer-reviewed journal article or literature review.`,
   bullet: `Use concise bullet points for most content. Each bullet should be a self-contained statement. Group related bullets under clear headings. Prioritize scannability over narrative flow.`,
-  "grant-report": `Use a structured format suitable for grant reports. Include clear objectives, methods, and outcomes. Balance conciseness with comprehensiveness. Use a professional but accessible tone.`,
+  "grant-report": `Use a structured format suitable for grant reports. Include clear objectives, methods, and outcomes. Balance conciseness with comprehensiveness. Use a professional but accessible tone. Short paragraphs and occasional bullet points are acceptable.`,
   slides: `Use very short, punchy statements optimized for presentation slides. Focus only on key takeaways. Each point should be immediately understandable at a glance. Avoid long paragraphs.`,
 };
 
@@ -6553,9 +6553,19 @@ ${instructions || "Group into 3-8 topical groups and pick 3-8 items per group."}
       .map((e) => (typeof e.recid === "string" ? e.recid : ""))
       .filter((r) => r);
 
+    // Check if we should use direct PDF upload instead of local snippets
+    const profile = getActiveAIProfile();
+    const usePdfUpload =
+      mode !== "fast" &&
+      this.selectedPdfAttachments.length > 0 &&
+      profileSupportsPdfUpload(profile);
+
+    // Only use local snippets if we're NOT using direct PDF upload
     const deepReadEnabled =
-      mode !== "fast" && getPref("ai_summary_deep_read") === true;
-    const deepReadMode = "local";
+      mode !== "fast" &&
+      !usePdfUpload &&
+      getPref("ai_summary_deep_read") === true;
+    const deepReadMode = usePdfUpload ? "pdf_upload" : "local";
     let deepReadUsed = false;
     let deepReadPrompt = "";
     let deepReadItemKeys: string[] = [];
@@ -6613,7 +6623,11 @@ ${instructions || "Group into 3-8 topical groups and pick 3-8 items per group."}
       let system = builtBase.system;
       let user = builtBase.user;
 
-      if (deepReadUsed && deepReadPrompt) {
+      if (usePdfUpload) {
+        // When using PDF upload, tell the LLM to use the attached PDF documents
+        system += `\n- PDF document(s) are attached. Use the FULL content of the PDF(s) for your analysis, not just metadata or abstracts.`;
+        system += `\n- Extract and reference specific equations, figures, methodology details, and results from the PDF(s).`;
+      } else if (deepReadUsed && deepReadPrompt) {
         system += `\n- If Deep Read evidence excerpts are provided, use them for grounded details when possible.`;
         const idx = user.lastIndexOf("Now write");
         user =
@@ -6797,25 +6811,22 @@ ${instructions || "Group into 3-8 topical groups and pick 3-8 items per group."}
 
     // Load selected PDFs as documents (for providers that support PDF upload)
     let documents: Array<{ data: string; mimeType: string; filename?: string }> | undefined;
-    if (this.selectedPdfAttachments.length > 0 && mode !== "fast") {
-      const profile = getActiveAIProfile();
-      if (profileSupportsPdfUpload(profile)) {
-        this.setStatus(`Loading ${this.selectedPdfAttachments.length} PDF(s)…`);
-        const loadedDocs: Array<{ data: string; mimeType: string; filename?: string }> = [];
-        for (const pdf of this.selectedPdfAttachments) {
-          throwIfAborted(signal);
-          const doc = await readPdfAsBase64(pdf.attachmentId);
-          if (doc) {
-            loadedDocs.push({
-              data: doc.data,
-              mimeType: doc.mimeType,
-              filename: doc.filename,
-            });
-          }
+    if (usePdfUpload) {
+      this.setStatus(`Loading ${this.selectedPdfAttachments.length} PDF(s) for direct upload…`);
+      const loadedDocs: Array<{ data: string; mimeType: string; filename?: string }> = [];
+      for (const pdf of this.selectedPdfAttachments) {
+        throwIfAborted(signal);
+        const doc = await readPdfAsBase64(pdf.attachmentId);
+        if (doc) {
+          loadedDocs.push({
+            data: doc.data,
+            mimeType: doc.mimeType,
+            filename: doc.filename,
+          });
         }
-        if (loadedDocs.length > 0) {
-          documents = loadedDocs;
-        }
+      }
+      if (loadedDocs.length > 0) {
+        documents = loadedDocs;
       }
     }
 
