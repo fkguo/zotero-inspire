@@ -1196,7 +1196,7 @@ export async function showSmartUpdatePreviewDialog(
     applyBtn.style.minWidth = "80px";
     applyBtn.style.border = "none";
     applyBtn.style.borderRadius = "4px";
-    applyBtn.style.backgroundColor = "#0066cc";
+    applyBtn.style.background = "#0066cc";
     applyBtn.style.color = "#fff";
     applyBtn.style.cursor = "pointer";
     applyBtn.style.fontSize = "13px";

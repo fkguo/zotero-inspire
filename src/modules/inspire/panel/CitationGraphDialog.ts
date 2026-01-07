@@ -639,6 +639,9 @@ export class CitationGraphDialog {
       line-height: 1;
       cursor: pointer;
       user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     `;
     closeBtn.addEventListener("click", () => this.dispose());
     this.closeBtn = closeBtn;
@@ -2919,6 +2922,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         cursor: pointer;
         user-select: none;
         flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       `;
       removeBtn.addEventListener("click", (e) => {
         e.stopPropagation();
