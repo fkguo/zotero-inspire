@@ -38,6 +38,7 @@ declare namespace _ZoteroTypes {
       "ai_summary_model": string;
       "ai_summary_temperature": number;
       "ai_summary_max_output_tokens": number;
+      "ai_summary_output_mode": string;
       "ai_summary_output_language": string;
       "ai_summary_style": string;
       "ai_summary_citation_format": string;
@@ -48,11 +49,14 @@ declare namespace _ZoteroTypes {
       "ai_summary_cache_enable": boolean;
       "ai_summary_cache_ttl_hours": number;
       "ai_summary_streaming": boolean;
+      "ai_summary_deep_read": boolean;
+      "ai_summary_skip_references": boolean;
       "ai_batch_requests_per_minute": number;
       "ai_batch_max_items": number;
       "ai_profiles": string;
       "ai_active_profile_id": string;
       "ai_prompt_templates": string;
+      "ai_deep_read_mode": string;
       "ai_library_qa_scope": string;
       "ai_library_qa_include_titles": boolean;
       "ai_library_qa_include_abstracts": boolean;

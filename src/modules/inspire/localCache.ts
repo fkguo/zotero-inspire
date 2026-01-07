@@ -551,7 +551,12 @@ class InspireLocalCache {
 
     // Determine TTL based on type
     let ttl: number;
-    if (type === "refs" || type === "preprintCandidates" || type === "citation_graph") {
+    if (
+      type === "refs" ||
+      type === "preprintCandidates" ||
+      type === "citation_graph" ||
+      type === "deep_read_doc_index"
+    ) {
       ttl = DEFAULT_TTL_REFS; // keep indefinitely for refs and candidate list
     } else if (type === "ai_summary") {
       const aiTTL = getPref("ai_summary_cache_ttl_hours");

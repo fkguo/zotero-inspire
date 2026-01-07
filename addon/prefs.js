@@ -30,7 +30,8 @@ pref("__prefsPrefix__.ai_summary_preset", "openai"); // openai | deepseek | kimi
 pref("__prefsPrefix__.ai_summary_base_url", "https://api.openai.com/v1"); // OpenAI-compatible base URL (or full /chat/completions endpoint)
 pref("__prefsPrefix__.ai_summary_model", "gpt-4o-mini");
 pref("__prefsPrefix__.ai_summary_temperature", 20);
-pref("__prefsPrefix__.ai_summary_max_output_tokens", 1200);
+pref("__prefsPrefix__.ai_summary_max_output_tokens", 2400);
+pref("__prefsPrefix__.ai_summary_output_mode", "summary"); // summary | deep_read
 pref("__prefsPrefix__.ai_summary_output_language", "auto"); // auto | en | zh-CN
 pref("__prefsPrefix__.ai_summary_style", "academic"); // academic | bullet | grant-report | slides
 pref("__prefsPrefix__.ai_summary_citation_format", "latex"); // latex | markdown | inspire-url | zotero-link
@@ -41,11 +42,14 @@ pref("__prefsPrefix__.ai_summary_abstract_char_limit", 800);
 pref("__prefsPrefix__.ai_summary_cache_enable", false);
 pref("__prefsPrefix__.ai_summary_cache_ttl_hours", 168); // 7 days
 pref("__prefsPrefix__.ai_summary_streaming", true); // Stream responses when supported
+pref("__prefsPrefix__.ai_summary_deep_read", false); // Use local Deep Read snippets during Summary generation
+pref("__prefsPrefix__.ai_summary_skip_references", false); // Seed-only: skip loading references
 pref("__prefsPrefix__.ai_batch_requests_per_minute", 12); // Batch/autopilot throttle
 pref("__prefsPrefix__.ai_batch_max_items", 50); // Safety cap
 pref("__prefsPrefix__.ai_profiles", "[]"); // JSON array of AI profiles (provider/baseURL/model; no API keys)
 pref("__prefsPrefix__.ai_active_profile_id", ""); // Active profile id (empty = use first/default)
 pref("__prefsPrefix__.ai_prompt_templates", "[]"); // JSON array of user-defined prompt templates/buttons
+pref("__prefsPrefix__.ai_deep_read_mode", "local"); // local | pdf_upload
 // AI Library Q&A settings (FTR-AI-SUMMARY / Library Q&A)
 pref("__prefsPrefix__.ai_library_qa_scope", "current_collection"); // current_item | current_collection | library
 pref("__prefsPrefix__.ai_library_qa_include_titles", true);

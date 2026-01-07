@@ -181,6 +181,7 @@ async function onMainWindowLoad(_win: Window): Promise<void> {
 
   ZInsMenu.registerRightClickMenuPopup();
   ZInsMenu.registerRightClickCollectionMenu();
+  ZInsMenu.registerToolsMenu();
 
   // FTR-PDF-ANNOTATE: Initialize Reader integration for citation detection
   getReaderIntegration().initialize();
@@ -637,7 +638,9 @@ function updateRelatedPapersControls(doc: Document, syncFromPref = true) {
   if (syncFromPref) {
     const enabled = getPref("related_papers_enable") !== false;
     const excludeReviews = getPref("related_papers_exclude_reviews") !== false;
-    const maxResults = normalizeMaxResults(getPref("related_papers_max_results"));
+    const maxResults = normalizeMaxResults(
+      getPref("related_papers_max_results"),
+    );
 
     if (enableCheckbox) {
       enableCheckbox.checked = enabled;
@@ -671,7 +674,8 @@ function updateRelatedPapersControls(doc: Document, syncFromPref = true) {
     }
   }
 
-  const enabled = enableCheckbox?.checked ?? getPref("related_papers_enable") !== false;
+  const enabled =
+    enableCheckbox?.checked ?? getPref("related_papers_enable") !== false;
   const disabled = !enabled;
   if (excludeReviewsCheckbox) {
     excludeReviewsCheckbox.disabled = disabled;

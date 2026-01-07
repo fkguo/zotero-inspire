@@ -23,6 +23,9 @@ import {
 import { buildPdfTextCandidatesForReferenceParsing } from "./textSampling";
 import type { InspireReferenceEntry } from "../types";
 import { LRUCache, ReaderTabHelper } from "../utils";
+import { getActiveAIProfile } from "../llm/profileStore";
+import { profileSupportsImageInput } from "../llm/capabilities";
+import type { ReaderSelectionPayload, ReaderSelectionPosition } from "../readerSelection";
 import type {
   ParsedCitation,
   CitationLookupEvent,
@@ -466,11 +469,27 @@ export class ReaderIntegration {
       `[${config.addonName}] [PDF-ANNOTATE] Final selected text: "${selectedText?.substring(0, 50) ?? "(null)"}${selectedText && selectedText.length > 50 ? "..." : ""}"`,
     );
 
-    // Allow longer selections (up to 2000 chars) to capture multiple citations
-    // Regex matching is fast enough for this length, no performance concerns
-    if (!selectedText || selectedText.length > 2000) {
+    if (!selectedText) {
       debugLog(
-        `[${config.addonName}] [PDF-ANNOTATE] Skipping: no selection or too long (len=${selectedText?.length ?? 0})`,
+        `[${config.addonName}] [PDF-ANNOTATE] Skipping: no selection`,
+      );
+      return;
+    }
+
+    // Reader → Ask: always offer AI actions for any selection.
+    try {
+      const askUI = this.createAskSelectionUI(doc, reader, params, selectedText);
+      append(askUI);
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-ANNOTATE] Failed to render Ask UI: ${err}`,
+      );
+    }
+
+    // Citation lookup: only attempt on moderate selections (fast regex matching).
+    if (selectedText.length > 2000) {
+      debugLog(
+        `[${config.addonName}] [PDF-ANNOTATE] Skipping citation detection: selection too long (len=${selectedText.length})`,
       );
       return;
     }
@@ -598,6 +617,212 @@ export class ReaderIntegration {
     debugLog(
       `[${config.addonName}] [PDF-ANNOTATE] Lookup UI appended to popup (${citation.labels.length} label(s))`,
     );
+  }
+
+  private createAskSelectionUI(
+    doc: Document,
+    reader: any,
+    params: { annotation?: any },
+    selectedText: string,
+  ): HTMLElement {
+    const container = doc.createElement("div");
+    container.className = "zinspire-ask-container";
+    Object.assign(container.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "4px",
+      padding: "4px 6px",
+      borderRadius: "4px",
+      border: "1px solid var(--fill-quinary, #d1d1d5)",
+      background: "var(--material-background, #ffffff)",
+      maxWidth: "320px",
+    });
+
+    const row = doc.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: "6px",
+      flexWrap: "wrap",
+    });
+
+    const icon = this.createInlineIcon(doc, 14);
+    row.appendChild(icon);
+
+    const makeBtn = (label: string): HTMLButtonElement => {
+      const btn = doc.createElement("button");
+      btn.className = "toolbarButton zinspire-ask-btn";
+      btn.textContent = label;
+      Object.assign(btn.style, {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "4px 8px",
+        fontSize: "12px",
+        borderRadius: "4px",
+        border: "1px solid var(--fill-quinary, #d1d1d5)",
+        background: "var(--material-background, #ffffff)",
+        cursor: "pointer",
+        transition: "background 120ms ease-in-out",
+      });
+      btn.addEventListener("mouseenter", () => {
+        if (!btn.disabled) {
+          btn.style.background = "var(--fill-quinary, #f0f0f0)";
+        }
+      });
+      btn.addEventListener("mouseleave", () => {
+        btn.style.background = "var(--material-background, #ffffff)";
+      });
+      return btn;
+    };
+
+    const status = doc.createElement("div");
+    status.style.fontSize = "11px";
+    status.style.color = "var(--fill-secondary, #666)";
+    status.style.display = "none";
+    const setStatus = (text: string) => {
+      status.textContent = text;
+      status.style.display = text ? "" : "none";
+    };
+
+    const selectionBtn = makeBtn("Ask Inspire");
+    selectionBtn.title = "Ask AI about the selected text";
+    selectionBtn.addEventListener("click", () => {
+      const payload = this.buildReaderSelectionPayload(reader, params, selectedText);
+      if (!payload) {
+        setStatus("Cannot ask: failed to resolve Zotero item/selection context.");
+        return;
+      }
+      const api = (_globalThis as any)?.inspire;
+      const fn = api?.openAIWindowFromReaderSelection;
+      if (typeof fn !== "function") {
+        setStatus("AI window handler not available (plugin not initialized?).");
+        return;
+      }
+      setStatus("Opening AI window…");
+      try {
+        fn.call(api, { selection: payload, reader, mode: "text" });
+        setStatus("");
+      } catch (err) {
+        setStatus(`Failed to open AI window: ${String(err)}`);
+      }
+    });
+    row.appendChild(selectionBtn);
+
+    const imageBtn = makeBtn("Ask (Image)");
+    imageBtn.title = "Send a screenshot of the selection to a vision model";
+
+    const annotationPosition = params?.annotation?.position as
+      | ReaderSelectionPosition
+      | undefined;
+    const hasRects =
+      Array.isArray(annotationPosition?.rects) && annotationPosition.rects.length > 0;
+    const supportsImage = (() => {
+      try {
+        const profile = getActiveAIProfile();
+        return profileSupportsImageInput(profile);
+      } catch {
+        return false;
+      }
+    })();
+
+    if (!supportsImage) {
+      imageBtn.disabled = true;
+      imageBtn.title = "模型不支持图像输入 (current profile is text-only)";
+      imageBtn.style.opacity = "0.6";
+      imageBtn.style.cursor = "not-allowed";
+    } else if (!hasRects) {
+      imageBtn.disabled = true;
+      imageBtn.title = "Selection image unavailable (no rects)";
+      imageBtn.style.opacity = "0.6";
+      imageBtn.style.cursor = "not-allowed";
+    } else {
+      imageBtn.addEventListener("click", () => {
+        const payload = this.buildReaderSelectionPayload(reader, params, selectedText);
+        if (!payload) {
+          setStatus("Cannot ask (image): failed to resolve Zotero item/selection context.");
+          return;
+        }
+        const api = (_globalThis as any)?.inspire;
+        const fn = api?.openAIWindowFromReaderSelection;
+        if (typeof fn !== "function") {
+          setStatus("AI window handler not available (plugin not initialized?).");
+          return;
+        }
+        setStatus("Capturing selection image…");
+        try {
+          fn.call(api, { selection: payload, reader, mode: "image" });
+          setStatus("");
+        } catch (err) {
+          setStatus(`Failed to open AI window: ${String(err)}`);
+        }
+      });
+    }
+    row.appendChild(imageBtn);
+
+    container.appendChild(row);
+    container.appendChild(status);
+    return container;
+  }
+
+  private buildReaderSelectionPayload(
+    reader: any,
+    params: { annotation?: any },
+    selectedText: string,
+  ): ReaderSelectionPayload | null {
+    try {
+      const attachmentItemID = Number(reader?.itemID);
+      if (!Number.isFinite(attachmentItemID) || attachmentItemID <= 0) {
+        return null;
+      }
+      const att = Zotero.Items.get(attachmentItemID);
+      const parentItemID = att?.parentItemID || attachmentItemID;
+      const parent = Zotero.Items.get(parentItemID);
+
+      const pageIndexRaw = (params as any)?.annotation?.position?.pageIndex;
+      const pageIndex =
+        typeof pageIndexRaw === "number" && Number.isFinite(pageIndexRaw)
+          ? pageIndexRaw
+          : undefined;
+      const pageLabelRaw = (params as any)?.annotation?.pageLabel;
+      const pageLabel =
+        typeof pageLabelRaw === "string" && pageLabelRaw.trim()
+          ? pageLabelRaw.trim()
+          : undefined;
+
+      const position = (params as any)?.annotation?.position as
+        | ReaderSelectionPosition
+        | undefined;
+
+      return {
+        source: "zotero_reader_selection",
+        parentItemID,
+        parentItemKey: parent?.key,
+        attachmentItemID,
+        attachmentItemKey: att?.key,
+        readerTabID: reader?.tabID,
+        pageIndex,
+        pageLabel,
+        text: String(selectedText || "").trim(),
+        position: position
+          ? {
+              pageIndex:
+                typeof position.pageIndex === "number" &&
+                Number.isFinite(position.pageIndex)
+                  ? position.pageIndex
+                  : pageIndex,
+              rects: Array.isArray(position.rects) ? position.rects : undefined,
+              nextPageRects: Array.isArray(position.nextPageRects)
+                ? position.nextPageRects
+                : undefined,
+            }
+          : undefined,
+        createdAt: Date.now(),
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**

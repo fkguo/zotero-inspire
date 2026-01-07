@@ -34,7 +34,7 @@ interface AutoRenderOptions {
 let katexModule: KaTeXModule | null = null;
 let renderMathInElement: ((el: HTMLElement, opts?: AutoRenderOptions) => void) | null =
   null;
-let katexLoadPromise: Promise<boolean> | null = null;
+let katexLoadPromisesByWindow = new WeakMap<Window, Promise<boolean>>();
 
 /**
  * Custom macros for KaTeX to support additional LaTeX commands.
@@ -129,39 +129,37 @@ export function getRenderMode(): RenderMode {
 
 function ensureKatexStyle(doc: Document): void {
   try {
-    // Try to use the main window document which has a proper <head>
     const mainWindow = Zotero.getMainWindow?.();
-    const targetDoc = mainWindow?.document || doc;
+    const docs = [
+      doc,
+      ...(mainWindow?.document && mainWindow.document !== doc
+        ? [mainWindow.document]
+        : []),
+    ].filter(Boolean) as Document[];
 
-    if (!targetDoc) {
-      Zotero.debug(
-        `[${config.addonName}] ensureKatexStyle: no document available`,
-      );
-      return;
-    }
+    for (const targetDoc of docs) {
+      // Check if already loaded in target document
+      if (targetDoc.querySelector('link[href*="katex.min.css"]')) {
+        continue;
+      }
 
-    // Check if already loaded in target document
-    if (targetDoc.querySelector('link[href*="katex.min.css"]')) {
-      return;
-    }
+      // For XUL documents without <head>, append to documentElement
+      const container = targetDoc.head || targetDoc.documentElement;
+      if (!container) {
+        Zotero.debug(
+          `[${config.addonName}] ensureKatexStyle: no container for styles`,
+        );
+        continue;
+      }
 
-    // For XUL documents without <head>, append to documentElement
-    const container = targetDoc.head || targetDoc.documentElement;
-    if (!container) {
-      Zotero.debug(
-        `[${config.addonName}] ensureKatexStyle: no container for styles`,
-      );
-      return;
-    }
+      const link = targetDoc.createElement("link");
+      link.rel = "stylesheet";
+      link.href = `chrome://${config.addonRef}/content/katex/katex.min.css`;
+      container.appendChild(link);
 
-    const link = targetDoc.createElement("link");
-    link.rel = "stylesheet";
-    link.href = `chrome://${config.addonRef}/content/katex/katex.min.css`;
-    container.appendChild(link);
-
-    // Dark mode compatibility and text selection for KaTeX
-    const darkModeStyle = targetDoc.createElement("style");
-    darkModeStyle.textContent = `
+      // Dark mode compatibility and text selection for KaTeX
+      const darkModeStyle = targetDoc.createElement("style");
+      darkModeStyle.textContent = `
       .katex { color: inherit; user-select: text; -webkit-user-select: text; }
       .katex * { user-select: text; -webkit-user-select: text; }
       .katex .mord, .katex .mbin, .katex .mrel,
@@ -172,7 +170,8 @@ function ensureKatexStyle(doc: Document): void {
         cursor: text;
       }
     `;
-    container.appendChild(darkModeStyle);
+      container.appendChild(darkModeStyle);
+    }
 
     Zotero.debug(`[${config.addonName}] ensureKatexStyle: CSS loaded`);
   } catch (err) {
@@ -180,49 +179,59 @@ function ensureKatexStyle(doc: Document): void {
   }
 }
 
-async function ensureKatexLoaded(): Promise<boolean> {
-  if (katexModule && renderMathInElement) {
+function getTargetWindow(doc?: Document | null): Window | null {
+  const w =
+    (doc?.defaultView as unknown as Window | null) || Zotero.getMainWindow?.();
+  return (w as any) || null;
+}
+
+async function ensureKatexLoaded(doc?: Document | null): Promise<boolean> {
+  const win = getTargetWindow(doc);
+  if (!win) return false;
+
+  if ((win as any).katex && (win as any).renderMathInElement) {
+    katexModule = (win as any).katex;
+    renderMathInElement = (win as any).renderMathInElement;
     return true;
   }
-  if (katexLoadPromise) {
-    return katexLoadPromise;
-  }
 
-  katexLoadPromise = (async () => {
+  const existing = katexLoadPromisesByWindow.get(win);
+  if (existing) return existing;
+
+  const promise = (async () => {
     try {
       const katexUrl = `chrome://${config.addonRef}/content/katex/katex.min.js`;
       const autoRenderUrl = `chrome://${config.addonRef}/content/katex/contrib/auto-render.min.js`;
-      const win = Zotero.getMainWindow?.();
-      if (!win) {
-        return false;
-      }
-
-      if ((win as any).katex && (win as any).renderMathInElement) {
-        katexModule = (win as any).katex;
-        renderMathInElement = (win as any).renderMathInElement;
-        return true;
-      }
 
       Services.scriptloader.loadSubScript(katexUrl, win);
       Services.scriptloader.loadSubScript(autoRenderUrl, win);
 
-      katexModule = (win as any).katex;
-      renderMathInElement = (win as any).renderMathInElement;
+      const k = (win as any).katex as KaTeXModule | undefined;
+      const r = (win as any).renderMathInElement as
+        | ((el: HTMLElement, opts?: AutoRenderOptions) => void)
+        | undefined;
 
-      if (!katexModule || !renderMathInElement) {
+      if (!k || !r) {
         throw new Error("KaTeX module missing after load");
       }
 
+      katexModule = k;
+      renderMathInElement = r;
       Zotero.debug(`[${config.addonName}] KaTeX loaded successfully`);
       return true;
     } catch (err) {
       Zotero.debug(`[${config.addonName}] Failed to load KaTeX: ${err}`);
-      katexLoadPromise = null;
       return false;
     }
   })();
 
-  return katexLoadPromise;
+  katexLoadPromisesByWindow.set(win, promise);
+  const ok = await promise;
+  if (!ok) {
+    // Allow retry after failures.
+    katexLoadPromisesByWindow.delete(win);
+  }
+  return ok;
 }
 
 function escapeHtml(text: string): string {
@@ -270,9 +279,13 @@ export async function renderMathContent(
   }
 
   // Try to load KaTeX
-  const loaded = await ensureKatexLoaded();
+  const loaded = await ensureKatexLoaded(container.ownerDocument);
 
-  if (!loaded || !renderMathInElement) {
+  const win = getTargetWindow(container.ownerDocument);
+  const renderer = (win as any)?.renderMathInElement as
+    | ((el: HTMLElement, opts?: AutoRenderOptions) => void)
+    | undefined;
+  if (!loaded || !renderer) {
     // KaTeX not available, fall back to Unicode
     container.textContent = processUnicodeFallback(safeText);
     return;
@@ -290,7 +303,7 @@ export async function renderMathContent(
     container.textContent = processedText;
 
     // Render LaTeX with KaTeX
-    renderMathInElement(container, {
+    renderer(container, {
       delimiters: [
         { left: "$$", right: "$$", display: true },
         { left: "$", right: "$", display: false },
@@ -331,14 +344,19 @@ export async function renderLatexInElement(
     return;
   }
 
-  const loaded = await ensureKatexLoaded();
-  if (!loaded || !renderMathInElement) {
+  const loaded = await ensureKatexLoaded(container.ownerDocument);
+  if (!loaded) {
     return;
   }
 
   try {
     ensureKatexStyle(container.ownerDocument);
-    renderMathInElement(container, {
+    const win = getTargetWindow(container.ownerDocument);
+    const renderer = (win as any)?.renderMathInElement as
+      | ((el: HTMLElement, opts?: AutoRenderOptions) => void)
+      | undefined;
+    if (!renderer) return;
+    renderer(container, {
       delimiters: [
         { left: "$$", right: "$$", display: true },
         { left: "$", right: "$", display: false },
@@ -370,13 +388,15 @@ export async function renderLatexToString(
     return escapeHtml(cleanMathTitle(safeLatex));
   }
 
-  const loaded = await ensureKatexLoaded();
-  if (!loaded || !katexModule) {
+  const win = Zotero.getMainWindow?.();
+  const loaded = await ensureKatexLoaded(win?.document);
+  const km = (win as any)?.katex as KaTeXModule | undefined;
+  if (!loaded || !km) {
     return escapeHtml(cleanMathTitle(safeLatex));
   }
 
   try {
-    return katexModule.renderToString(safeLatex, {
+    return km.renderToString(safeLatex, {
       displayMode,
       throwOnError: false,
       trust: false,
@@ -417,7 +437,7 @@ export function renderMarkdownMath(
 export function resetKatexState(): void {
   katexModule = null;
   renderMathInElement = null;
-  katexLoadPromise = null;
+  katexLoadPromisesByWindow = new WeakMap<Window, Promise<boolean>>();
 }
 
 /**

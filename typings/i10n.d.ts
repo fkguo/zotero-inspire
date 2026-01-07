@@ -43,6 +43,7 @@ export type FluentMessageId =
   | 'funding-no-pdf'
   | 'funding-no-selection'
   | 'funding-some-unlinked'
+  | 'menuitem-ai-window'
   | 'menuitem-cancel-update'
   | 'menuitem-citation-graph-merge'
   | 'menuitem-copy-bibtex'

@@ -8,6 +8,7 @@ menuitem-submenulabel2 = Citation counts only
 menuitem-download-cache = Download references cache
 menuitem-citation-graph-merge = Combined Citation Graph…
 menuitem-cancel-update = Cancel update
+menuitem-ai-window = AI…
 
 download-cache-progress-title = Downloading references cache
 download-cache-start =

@@ -359,6 +359,7 @@ export type LocalCacheType =
   | "preprintCandidates"
   | "crossref"
   | "ai_summary"
+  | "deep_read_doc_index" // FTR-DEEP-READ-LOCAL-CONTEXT: Per-PDF local Deep Read index (permanent)
   | "author_profile" // FTR-AUTHOR-PROFILE: Author profile cache (permanent)
   | "author_papers"; // FTR-AUTHOR-PROFILE: Author papers list cache (permanent)
 
@@ -376,6 +377,37 @@ export interface LocalCacheFile<T> {
   c?: boolean; // complete flag (true = fetch completed successfully)
   n?: number; // total count from API (for smart caching: if n <= limit, data is complete)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deep Read Persistent Index Types (FTR-DEEP-READ-LOCAL-CONTEXT)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type DeepReadDocIndexSource =
+  | "zotero_fulltext_cache"
+  | "pdfworker"
+  | "abstract_fallback";
+
+export type DeepReadDocIndexChunk = {
+  id: string;
+  pageIndex?: number; // 1-based page number if known
+  text: string;
+  mathScore?: number;
+  eqRefs?: string[];
+};
+
+export type DeepReadDocIndex = {
+  version: 1;
+  attachmentId: number;
+  parentItemKey?: string;
+  pdfItemKey?: string;
+  fingerprint: string;
+  builtAt: number;
+  source: DeepReadDocIndexSource;
+  extractedPages?: number;
+  totalPages?: number;
+  rawText?: string;
+  chunks: DeepReadDocIndexChunk[];
+};
 
 /**
  * Cache source indicator for UI display

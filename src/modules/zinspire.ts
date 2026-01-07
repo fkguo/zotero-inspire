@@ -652,9 +652,7 @@ export class ZInspireReferencePane {
           : "";
         const dateRaw = item.getField("date");
         const match =
-          typeof dateRaw === "string"
-            ? dateRaw.match(/(19|20)\d{2}/)
-            : null;
+          typeof dateRaw === "string" ? dateRaw.match(/(19|20)\d{2}/) : null;
         const year = match ? match[0] : "";
         if (year) {
           return authorPart ? `${authorPart} (${year})` : year;
@@ -725,11 +723,16 @@ export class ZInspireReferencePane {
         const pane = Zotero.getActiveZoteroPane?.();
         const selected = pane?.getSelectedItems?.() ?? [];
         const regularItems = selected.filter((item: any) =>
-          typeof item?.isRegularItem === "function" ? item.isRegularItem() : true,
+          typeof item?.isRegularItem === "function"
+            ? item.isRegularItem()
+            : true,
         );
 
-        const seeds: Array<{ recid: string; title?: string; authorLabel?: string }> =
-          [];
+        const seeds: Array<{
+          recid: string;
+          title?: string;
+          authorLabel?: string;
+        }> = [];
         const seen = new Set<string>();
         const MAX_SEEDS = 10;
 
@@ -812,15 +815,19 @@ export class ZInspireReferencePane {
     // Add a main-toolbar AI entry button next to the Search box.
     try {
       const doc = mainWindow.document as any;
-      const quickSearchComponent = doc.getElementById("zotero-tb-search") as Element | null;
+      const quickSearchComponent = doc.getElementById(
+        "zotero-tb-search",
+      ) as Element | null;
       if (quickSearchComponent?.parentElement) {
         const existing =
           doc.getElementById("zinspire-main-toolbar-ai") ??
           (this.aiToolbarButton as any);
         if (!existing) {
-          const btn = (doc.createXULElement
-            ? doc.createXULElement("toolbarbutton")
-            : doc.createElement("toolbarbutton")) as XUL.ToolBarButton;
+          const btn = (
+            doc.createXULElement
+              ? doc.createXULElement("toolbarbutton")
+              : doc.createElement("toolbarbutton")
+          ) as XUL.ToolBarButton;
           btn.id = "zinspire-main-toolbar-ai";
           btn.classList.add("toolbarbutton-1");
           btn.setAttribute("tooltiptext", "AI tools (INSPIRE)");
@@ -832,20 +839,31 @@ export class ZInspireReferencePane {
           btn.addEventListener("command", () => {
             try {
               const pane = Zotero.getActiveZoteroPane?.();
-              const selected = (pane?.getSelectedItems?.() as Zotero.Item[]) || [];
-              const item = selected.find((it) => it && it.isRegularItem()) || null;
+              const selected =
+                (pane?.getSelectedItems?.() as Zotero.Item[]) || [];
+              const item =
+                selected.find((it) => it && it.isRegularItem()) || null;
               if (!item) {
-                Zotero.alert?.(mainWindow, "AI", "Select a regular item first.");
+                Zotero.alert?.(
+                  mainWindow,
+                  "AI",
+                  "Select a regular item first.",
+                );
                 return;
               }
               const recid = deriveRecidFromItem(item);
               if (!recid) {
-                Zotero.alert?.(mainWindow, "AI", "Selected item has no INSPIRE recid.");
+                Zotero.alert?.(
+                  mainWindow,
+                  "AI",
+                  "Selected item has no INSPIRE recid.",
+                );
                 return;
               }
 
-              const existingDialog =
-                mainWindow.document.querySelector(".zinspire-ai-dialog") as HTMLElement | null;
+              const existingDialog = mainWindow.document.querySelector(
+                ".zinspire-ai-dialog",
+              ) as HTMLElement | null;
               existingDialog?.remove();
 
               new AIDialog(mainWindow.document, {
@@ -853,16 +871,23 @@ export class ZInspireReferencePane {
                 seedRecid: recid,
               });
             } catch (e) {
-              Zotero.debug?.(`[${config.addonName}] toolbar AI open error: ${e}`);
+              Zotero.debug?.(
+                `[${config.addonName}] toolbar AI open error: ${e}`,
+              );
             }
           });
 
-          quickSearchComponent.parentElement.insertBefore(btn, quickSearchComponent);
+          quickSearchComponent.parentElement.insertBefore(
+            btn,
+            quickSearchComponent,
+          );
           this.aiToolbarButton = btn;
         }
       }
     } catch (e) {
-      Zotero.debug?.(`[${config.addonName}] toolbar AI button init error: ${e}`);
+      Zotero.debug?.(
+        `[${config.addonName}] toolbar AI button init error: ${e}`,
+      );
     }
 
     // Disable native browser autocomplete and Zotero's history dropdown
@@ -1464,7 +1489,10 @@ class InspireReferencePanelController {
       stats.labelMatcherCacheHits + stats.labelMatcherCacheMisses;
     const hitRate =
       totalLabelMatcherAccess > 0
-        ? ((stats.labelMatcherCacheHits / totalLabelMatcherAccess) * 100).toFixed(1)
+        ? (
+            (stats.labelMatcherCacheHits / totalLabelMatcherAccess) *
+            100
+          ).toFixed(1)
         : "N/A";
     const uptime = Math.round((Date.now() - stats.startTime) / 1000);
 
@@ -1595,8 +1623,7 @@ class InspireReferencePanelController {
     | "targetOverlap"
     | "hitTest"
     | "fallback"
-    | "none" =
-    "none";
+    | "none" = "none";
   private panelLayoutDebugLastSummary = "";
   private panelLayoutDebugLastOverflowAudit = "";
   // LRU caches to prevent unbounded memory growth
@@ -1927,7 +1954,8 @@ class InspireReferencePanelController {
     const graphBtn = body.ownerDocument.createElement("button");
     graphBtn.type = "button";
     const graphBtnDark = isDarkMode();
-    graphBtn.innerHTML = ZInspireReferencePane.buildCitationGraphIconSvg(graphBtnDark);
+    graphBtn.innerHTML =
+      ZInspireReferencePane.buildCitationGraphIconSvg(graphBtnDark);
     const graphLabel =
       getString("references-panel-citation-graph-button") || "Citation Graph";
     graphBtn.setAttribute("aria-label", graphLabel);
@@ -2085,7 +2113,8 @@ class InspireReferencePanelController {
     const filterInputWrapper = filterDoc.createElement("div");
     filterInputWrapper.className = "zinspire-filter-input-wrapper";
     filterInputWrapper.style.cssText =
-      INLINE_HINT_WRAPPER_STYLE + `min-width: 0; flex: 1 1 120px; max-width: 100%;`;
+      INLINE_HINT_WRAPPER_STYLE +
+      `min-width: 0; flex: 1 1 120px; max-width: 100%;`;
 
     // Create filter input using native DOM
     this.filterInput = filterDoc.createElement("input");
@@ -2410,18 +2439,18 @@ class InspireReferencePanelController {
   private applyHostFlexWidthFixes() {
     try {
       // Custom section host (flex item in `.zotero-view-item` flex column)
-      const host = this.body.closest("item-pane-custom-section") as
-        | HTMLElement
-        | null;
+      const host = this.body.closest(
+        "item-pane-custom-section",
+      ) as HTMLElement | null;
       if (host) {
         host.style.minWidth = "0";
         host.style.maxWidth = "100%";
       }
 
       // Collapsible section wrapper (also uses flex layout)
-      const section = this.body.closest("collapsible-section") as
-        | HTMLElement
-        | null;
+      const section = this.body.closest(
+        "collapsible-section",
+      ) as HTMLElement | null;
       if (section) {
         section.style.minWidth = "0";
         section.style.maxWidth = "100%";
@@ -2439,7 +2468,8 @@ class InspireReferencePanelController {
 
     const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
     if (win) {
-      this.panelRightInsetWindowResizeHandler = () => this.updatePanelRightInset();
+      this.panelRightInsetWindowResizeHandler = () =>
+        this.updatePanelRightInset();
       win.addEventListener("resize", this.panelRightInsetWindowResizeHandler, {
         passive: true,
       } as any);
@@ -2525,17 +2555,17 @@ class InspireReferencePanelController {
       ? this.computeRightInsetToTargetLeftEdge(target)
       : 0;
 
-    // If we can locate the rail element and its left edge is already to the right of
-    // our panel, do NOT apply any extra inset. The pointer-based hit-test can produce
-    // small false positives (e.g. due to overlay scrollbars), which would create an
-    // uneven right-side gutter in Citing… compared to other tabs.
-    if (target && byTargetLeftEdge <= 0) {
-      this.panelRightInsetSource = "targetLeft";
-      this.setPanelRightInsetPx(0);
-      return;
+    // Pointer hit-test is a robust fallback when we can't find the rail element,
+    // but it can also help when the detected rail doesn't overlap our panel while
+    // another right-side element does (e.g. custom section icon rails). Filter
+    // tiny values to avoid false positives from overlay scrollbars.
+    let byHitTest = 0;
+    if (!target || byTargetLeftEdge <= 0) {
+      byHitTest = this.computeRightInsetFromHitTest();
+      if (byTargetLeftEdge <= 0 && byHitTest > 0 && byHitTest < 8) {
+        byHitTest = 0;
+      }
     }
-
-    const byHitTest = target ? 0 : this.computeRightInsetFromHitTest();
     const best = Math.max(byTargetLeftEdge, byHitTest);
     if (best > 0) {
       this.panelRightInsetSource =
@@ -2597,7 +2627,10 @@ class InspireReferencePanelController {
     }
 
     const statusRect = this.statusEl?.getBoundingClientRect?.();
-    const rightX = Math.max(0, Math.min(win.innerWidth - 1, Math.round(bodyRect.right - 1)));
+    const rightX = Math.max(
+      0,
+      Math.min(win.innerWidth - 1, Math.round(bodyRect.right - 1)),
+    );
 
     const clampY = (y: number) =>
       Math.max(0, Math.min(win.innerHeight - 1, Math.round(y)));
@@ -2665,7 +2698,9 @@ class InspireReferencePanelController {
         if (!el) return "null";
         const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
         const cls = (el as HTMLElement).className
-          ? `.${String((el as HTMLElement).className).trim().replace(/\s+/g, ".")}`
+          ? `.${String((el as HTMLElement).className)
+              .trim()
+              .replace(/\s+/g, ".")}`
           : "";
         return `${el.tagName.toLowerCase()}${id}${cls}`;
       };
@@ -2997,7 +3032,9 @@ class InspireReferencePanelController {
 
         // Check for in-flight PDF parsing
         // FTR-MULTI-PDF-FIX-V2: Use attachmentItemID for PDF-specific promise lookup
-        const pdfParsePromise = reader.getPdfParsePromise(event.attachmentItemID);
+        const pdfParsePromise = reader.getPdfParsePromise(
+          event.attachmentItemID,
+        );
         if (pdfParsePromise) {
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] Awaiting in-flight PDF parsing for attachment ${event.attachmentItemID}`,
@@ -3122,7 +3159,8 @@ class InspireReferencePanelController {
       // Overlay mapping provides the most accurate citation→reference links for [1], [2], etc.
       // IMPORTANT: Only use for numeric citations; Author-Year uses matchAuthorYear() instead
       // FTR-MULTI-PDF-FIX-V2: Use attachmentItemID for PDF-specific overlay mapping
-      const hasExistingOverlay = labelMatcher.hasReliableOverlayMapping?.() ?? false;
+      const hasExistingOverlay =
+        labelMatcher.hasReliableOverlayMapping?.() ?? false;
       if (
         event.readerTabID &&
         event.citation.type !== "author-year" &&
@@ -3162,7 +3200,9 @@ class InspireReferencePanelController {
       const report = labelMatcher.diagnoseAlignment();
       const pdfParseEnabled = getPref("pdf_parse_refs_list") === true;
       const hasPDFMapping = labelMatcher.hasPDFMapping?.() ?? false;
-      const pdfParseAttempted = this.hasPdfParseBeenAttempted(event.attachmentItemID);
+      const pdfParseAttempted = this.hasPdfParseBeenAttempted(
+        event.attachmentItemID,
+      );
 
       Zotero.debug(
         `[${config.addonName}] [PDF-ANNOTATE] State: pdfParseEnabled=${pdfParseEnabled}, pdfParseAttempted=${pdfParseAttempted}, hasPDFMapping=${hasPDFMapping}, recommendation=${report.recommendation}`,
@@ -3386,9 +3426,7 @@ class InspireReferencePanelController {
                   });
             // Append missing info (first missing author/year) if label had extra PDF refs not found
             if (citation.labels.length === 1) {
-              const miss = labelMatcher.getMismatchForLabel(
-                citation.labels[0],
-              );
+              const miss = labelMatcher.getMismatchForLabel(citation.labels[0]);
               if (miss?.missing?.length) {
                 const firstMissing = miss.missing[0];
                 const missingStr =
@@ -4033,7 +4071,9 @@ class InspireReferencePanelController {
    * @param attachmentItemID - The Zotero attachment item ID (the specific PDF file)
    * @returns true if mapping was successfully applied, false otherwise
    */
-  private async tryParsePDFReferences(attachmentItemID: number): Promise<boolean> {
+  private async tryParsePDFReferences(
+    attachmentItemID: number,
+  ): Promise<boolean> {
     // FTR-MULTI-PDF-FIX-V3: Get labelMatcher from cache for this specific attachment
     const labelMatcher = this.labelMatcherCache.get(attachmentItemID);
     if (!labelMatcher) {
@@ -4088,11 +4128,13 @@ class InspireReferencePanelController {
       }
     }
 
-    const [{ getPDFReferencesParser }, { buildPdfTextCandidatesForReferenceParsing }] =
-      await Promise.all([
-        import("./inspire/pdfAnnotate/pdfReferencesParser"),
-        import("./inspire/pdfAnnotate/textSampling"),
-      ]);
+    const [
+      { getPDFReferencesParser },
+      { buildPdfTextCandidatesForReferenceParsing },
+    ] = await Promise.all([
+      import("./inspire/pdfAnnotate/pdfReferencesParser"),
+      import("./inspire/pdfAnnotate/textSampling"),
+    ]);
 
     // FTR-MULTI-PDF-FIX: Get PDF directly from attachmentItemID instead of finding first PDF
     const attachment = Zotero.Items.get(attachmentItemID);
@@ -4150,8 +4192,9 @@ class InspireReferencePanelController {
 
       // Prefer the smallest tail slice that still captures the beginning of the references list
       // (i.e., includes low labels like 1–5). Fall back to full text to avoid regressions.
-      let mapping: Awaited<ReturnType<typeof parser.parseReferencesSection>> | null =
-        null;
+      let mapping: Awaited<
+        ReturnType<typeof parser.parseReferencesSection>
+      > | null = null;
       for (const candidate of candidates) {
         const candidateMapping = parser.parseReferencesSection(candidate.text);
         if (!candidateMapping || candidateMapping.totalLabels <= 0) {
@@ -4162,7 +4205,9 @@ class InspireReferencePanelController {
           .map((l) => parseInt(l, 10))
           .filter((n) => Number.isFinite(n));
         const minLabel =
-          labelNums.length > 0 ? Math.min(...labelNums) : Number.POSITIVE_INFINITY;
+          labelNums.length > 0
+            ? Math.min(...labelNums)
+            : Number.POSITIVE_INFINITY;
         const hasLowStart =
           candidateMapping.labelCounts.has("1") ||
           (Number.isFinite(minLabel) && minLabel <= 5);
@@ -4182,7 +4227,10 @@ class InspireReferencePanelController {
 
         // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
         // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache
-        getReaderIntegration().setPreloadedPDFMapping(attachmentItemID, mapping);
+        getReaderIntegration().setPreloadedPDFMapping(
+          attachmentItemID,
+          mapping,
+        );
 
         // FTR-PDF-MATCHING: Calculate and store max label for concatenated range detection
         // FTR-MULTI-PDF-FIX: Use attachmentItemID directly
@@ -4220,9 +4268,9 @@ class InspireReferencePanelController {
       );
 
       let appliedAuthorYear = false;
-      let authorYearMapping:
-        | Awaited<ReturnType<typeof parser.parseAuthorYearReferencesSection>>
-        | null = null;
+      let authorYearMapping: Awaited<
+        ReturnType<typeof parser.parseAuthorYearReferencesSection>
+      > | null = null;
       let authorYearCandidate = chosenCandidate;
 
       // Prefer sampling for author-year too (especially when numeric parsing failed).
@@ -4230,14 +4278,18 @@ class InspireReferencePanelController {
         authorYearMapping = parser.parseAuthorYearReferencesSection(chosenText);
       } else {
         for (const candidate of candidates) {
-          const candidateMapping =
-            parser.parseAuthorYearReferencesSection(candidate.text);
+          const candidateMapping = parser.parseAuthorYearReferencesSection(
+            candidate.text,
+          );
           if (!candidateMapping || candidateMapping.authorYearMap.size <= 0) {
             continue;
           }
           authorYearMapping = candidateMapping;
           authorYearCandidate = candidate;
-          if (candidateMapping.authorYearMap.size >= 5 || candidate.kind === "full") {
+          if (
+            candidateMapping.authorYearMap.size >= 5 ||
+            candidate.kind === "full"
+          ) {
             break;
           }
         }
@@ -5203,7 +5255,10 @@ class InspireReferencePanelController {
       this.renderChart();
       this.renderReferenceList();
       // FTR-AUTHOR-CARD-FILTERS: Update author stats when quick filter changes
-      if (this.viewMode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+      if (
+        this.viewMode === "entryCited" &&
+        this.entryCitedSource?.authorSearchInfo
+      ) {
         this.updateAuthorStats(this.getEntriesForAuthorStats());
         this.updateAuthorProfileCard();
       }
@@ -5377,7 +5432,9 @@ class InspireReferencePanelController {
     button.onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
-      Zotero.debug(`[${config.addonName}] Quick filter button clicked, popup visible: ${this.quickFiltersPopupVisible}`);
+      Zotero.debug(
+        `[${config.addonName}] Quick filter button clicked, popup visible: ${this.quickFiltersPopupVisible}`,
+      );
       this.toggleQuickFiltersPopup();
     };
 
@@ -5499,9 +5556,13 @@ class InspireReferencePanelController {
   }
 
   private openQuickFiltersPopup(): void {
-    Zotero.debug(`[${config.addonName}] openQuickFiltersPopup called, popup exists: ${!!this.quickFiltersPopup}`);
+    Zotero.debug(
+      `[${config.addonName}] openQuickFiltersPopup called, popup exists: ${!!this.quickFiltersPopup}`,
+    );
     if (!this.quickFiltersPopup) {
-      Zotero.debug(`[${config.addonName}] quickFiltersPopup is null/undefined, returning early`);
+      Zotero.debug(
+        `[${config.addonName}] quickFiltersPopup is null/undefined, returning early`,
+      );
       return;
     }
 
@@ -6479,7 +6540,9 @@ class InspireReferencePanelController {
         (mediaQuery as any).addListener(this.themeChangeListener);
       }
     } catch (err) {
-      Zotero.debug(`[${config.addonName}] Failed to setup theme listener: ${err}`);
+      Zotero.debug(
+        `[${config.addonName}] Failed to setup theme listener: ${err}`,
+      );
     }
   }
 
@@ -6490,7 +6553,10 @@ class InspireReferencePanelController {
     if (this.themeMediaQuery && this.themeChangeListener) {
       try {
         if (this.themeMediaQuery.removeEventListener) {
-          this.themeMediaQuery.removeEventListener("change", this.themeChangeListener);
+          this.themeMediaQuery.removeEventListener(
+            "change",
+            this.themeChangeListener,
+          );
         } else if (this.themeMediaQuery.removeListener) {
           this.themeMediaQuery.removeListener(this.themeChangeListener);
         }
@@ -6669,7 +6735,10 @@ class InspireReferencePanelController {
       this.renderChart();
       this.renderReferenceList();
       // FTR-AUTHOR-CARD-FILTERS: Update author stats when filter changes
-      if (this.viewMode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+      if (
+        this.viewMode === "entryCited" &&
+        this.entryCitedSource?.authorSearchInfo
+      ) {
         this.updateAuthorStats(this.getEntriesForAuthorStats());
         this.updateAuthorProfileCard();
       }
@@ -6691,7 +6760,11 @@ class InspireReferencePanelController {
     selfCiteBtn.style.fontWeight = "500";
     selfCiteBtn.style.fontSize = "11px";
     const updateSelfCiteStyle = () => {
-      applyPillButtonStyle(selfCiteBtn, this.excludeSelfCitations, isDarkMode());
+      applyPillButtonStyle(
+        selfCiteBtn,
+        this.excludeSelfCitations,
+        isDarkMode(),
+      );
     };
     selfCiteBtn.onclick = () => {
       this.excludeSelfCitations = !this.excludeSelfCitations;
@@ -6710,7 +6783,10 @@ class InspireReferencePanelController {
       }
       this.renderChart();
       this.renderReferenceList();
-      if (this.viewMode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+      if (
+        this.viewMode === "entryCited" &&
+        this.entryCitedSource?.authorSearchInfo
+      ) {
         // FTR-AUTHOR-CARD-FILTERS: Use filtered entries for author stats
         this.updateAuthorStats(this.getEntriesForAuthorStats());
         this.updateAuthorProfileCard();
@@ -7248,7 +7324,8 @@ class InspireReferencePanelController {
     // FIX-PANEL-WIDTH-OVERFLOW: Cap width to body width to prevent overflow
     const wrapperWidth = this.chartSvgWrapper.clientWidth || 0;
     const bodyWidth = this.body.clientWidth || 400;
-    const containerWidth = wrapperWidth > 0 ? Math.min(wrapperWidth, bodyWidth) : bodyWidth;
+    const containerWidth =
+      wrapperWidth > 0 ? Math.min(wrapperWidth, bodyWidth) : bodyWidth;
 
     // Calculate how many bars can fit at max width
     // Formula: containerWidth = n * maxBarWidth + (n-1) * gap + padding
@@ -7412,7 +7489,10 @@ class InspireReferencePanelController {
         countText.setAttribute("y", String(y + 14));
         countText.setAttribute("text-anchor", "middle");
         countText.setAttribute("font-size", "10");
-        countText.setAttribute("fill", isSelected ? countSelectedColor : countUnselectedColor);
+        countText.setAttribute(
+          "fill",
+          isSelected ? countSelectedColor : countUnselectedColor,
+        );
         countText.textContent = String(bin.count);
         g.appendChild(countText);
       }
@@ -7795,8 +7875,12 @@ class InspireReferencePanelController {
       this.panelRightInsetResizeObserver = undefined;
     }
     if (this.panelRightInsetWindowResizeHandler) {
-      const win = this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
-      win?.removeEventListener("resize", this.panelRightInsetWindowResizeHandler);
+      const win =
+        this.body.ownerDocument?.defaultView || Zotero.getMainWindow();
+      win?.removeEventListener(
+        "resize",
+        this.panelRightInsetWindowResizeHandler,
+      );
       this.panelRightInsetWindowResizeHandler = undefined;
     }
     this.panelRightInsetTarget = undefined;
@@ -8038,7 +8122,10 @@ class InspireReferencePanelController {
         if (entry.localItemID !== parentItemID) continue;
         const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
         if (row) {
-          this.entryRenderer?.updatePdfState(row, hasPdf ? "has-pdf" : "find-pdf");
+          this.entryRenderer?.updatePdfState(
+            row,
+            hasPdf ? "has-pdf" : "find-pdf",
+          );
         }
       }
     }
@@ -8545,11 +8632,23 @@ class InspireReferencePanelController {
         return;
       }
 
-      const doc = this.body.ownerDocument;
+      // Prefer main window document so the dialog can remain open across item
+      // pane re-renders / item switches.
+      const mainWindow = Zotero.getMainWindow?.();
+      const doc = mainWindow?.document || this.body.ownerDocument;
+
       // Close existing AI dialogs (avoid multiple overlays).
-      const existing = doc.querySelector(".zinspire-ai-dialog") as HTMLElement | null;
-      if (existing) {
-        existing.remove();
+      const existingMain = doc.querySelector(
+        ".zinspire-ai-dialog",
+      ) as HTMLElement | null;
+      existingMain?.remove();
+
+      // Also clean up any legacy dialog attached to the pane document.
+      if (doc !== this.body.ownerDocument) {
+        const existingPane = this.body.ownerDocument.querySelector(
+          ".zinspire-ai-dialog",
+        ) as HTMLElement | null;
+        existingPane?.remove();
       }
 
       new AIDialog(doc, {
@@ -8866,12 +8965,13 @@ class InspireReferencePanelController {
           const response = await inspireFetch(url, fetchOptions);
           if (!response.ok) continue;
 
-          const payload = (await response.json()) as unknown as
-            | InspireLiteratureSearchResponse
-            | null;
+          const payload =
+            (await response.json()) as unknown as InspireLiteratureSearchResponse | null;
           const hits = payload?.hits?.hits ?? [];
           for (const hit of hits) {
-            const recid = String(hit?.metadata?.control_number || hit?.id || "");
+            const recid = String(
+              hit?.metadata?.control_number || hit?.id || "",
+            );
             const texkeys = hit?.metadata?.texkeys;
             if (!recid || !Array.isArray(texkeys) || !texkeys.length) continue;
             const texkey = texkeys[0];
@@ -9201,8 +9301,7 @@ class InspireReferencePanelController {
     );
     const entriesNeedingImport = entries.filter(
       (e) =>
-        e.recid &&
-        (typeof e.localItemID !== "number" || e.localItemID <= 0),
+        e.recid && (typeof e.localItemID !== "number" || e.localItemID <= 0),
     );
 
     // If all entries have localItemID, proceed directly to bibliography dialog
@@ -10140,7 +10239,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             this.updateCacheSourceDisplay();
             this.renderChart();
             this.renderReferenceList({ preserveScroll: !shouldReset });
-            if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+            if (
+              mode === "entryCited" &&
+              this.entryCitedSource?.authorSearchInfo
+            ) {
               this.updateAuthorStats(entriesForDisplay);
               this.updateAuthorProfileCard();
             }
@@ -10168,15 +10270,13 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
                 recid,
                 mode,
                 sortOption ?? this.entryCitedSort,
-              ).catch(
-                (err) => {
-                  if ((err as any)?.name !== "AbortError") {
-                    Zotero.debug(
-                      `[${config.addonName}] Background refresh failed: ${err}`,
-                    );
-                  }
-                },
-              );
+              ).catch((err) => {
+                if ((err as any)?.name !== "AbortError") {
+                  Zotero.debug(
+                    `[${config.addonName}] Background refresh failed: ${err}`,
+                  );
+                }
+              });
             } else {
               // Local cache data is already enriched (complete with titles, authors, etc.)
               // Only run enrichLocalStatus to update local item status (may have changed since cache)
@@ -10325,7 +10425,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         const currentTitle = currentItem?.getField("title");
         if (isPdgReviewOfParticlePhysicsTitle(currentTitle)) {
           this.relatedDisabledForPdg = true;
-          this.setStatus(getString("references-panel-status-related-disabled-pdg"));
+          this.setStatus(
+            getString("references-panel-status-related-disabled-pdg"),
+          );
           entries = [];
           // Skip network calls and render empty state below.
         } else {
@@ -10334,7 +10436,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             controller?.signal,
           );
           const relatedMaxResults = this.getRelatedPapersMaxResults();
-          const excludeReviewArticles = this.shouldExcludeReviewArticlesInRelated();
+          const excludeReviewArticles =
+            this.shouldExcludeReviewArticlesInRelated();
 
           const relatedOnProgress = (progress: {
             processedAnchors: number;
@@ -10547,12 +10650,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             );
           } else {
             // Try unsorted cache first (if data was complete), then sorted cache
-            const unsortedResult = await localCache.get<InspireReferenceEntry[]>(
-              localCacheType,
-              recid,
-              undefined,
-              { ignoreTTL: true },
-            );
+            const unsortedResult = await localCache.get<
+              InspireReferenceEntry[]
+            >(localCacheType, recid, undefined, { ignoreTTL: true });
             if (
               unsortedResult &&
               unsortedResult.total !== undefined &&
@@ -10595,7 +10695,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
               this.updateCacheSourceDisplay();
               this.renderChart();
               this.renderReferenceList({ preserveScroll: false });
-              if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
+              if (
+                mode === "entryCited" &&
+                this.entryCitedSource?.authorSearchInfo
+              ) {
                 this.updateAuthorStats(entriesForDisplay);
                 this.updateAuthorProfileCard();
               }
@@ -10695,9 +10798,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (!response || response.status === 404) {
         return [];
       }
-      const payload = (await response.json()) as unknown as
-        | InspireLiteratureSearchResponse
-        | null;
+      const payload =
+        (await response.json()) as unknown as InspireLiteratureSearchResponse | null;
       return Array.isArray(payload?.hits?.hits) ? payload.hits.hits : [];
     };
 
@@ -10710,9 +10812,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (!firstResponse || firstResponse.status === 404) {
       throw new Error("Cited-by list not found");
     }
-    const firstPayload = (await firstResponse.json()) as unknown as
-      | InspireLiteratureSearchResponse
-      | null;
+    const firstPayload =
+      (await firstResponse.json()) as unknown as InspireLiteratureSearchResponse | null;
     const totalHits =
       typeof firstPayload?.hits?.total === "number"
         ? firstPayload.hits.total
@@ -10842,9 +10943,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (!response || response.status === 404) {
         return [];
       }
-      const payload = (await response.json()) as unknown as
-        | InspireLiteratureSearchResponse
-        | null;
+      const payload =
+        (await response.json()) as unknown as InspireLiteratureSearchResponse | null;
       return Array.isArray(payload?.hits?.hits) ? payload.hits.hits : [];
     };
 
@@ -10857,9 +10957,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (!firstResponse || firstResponse.status === 404) {
       throw new Error("Author papers not found");
     }
-    const firstPayload = (await firstResponse.json()) as unknown as
-      | InspireLiteratureSearchResponse
-      | null;
+    const firstPayload =
+      (await firstResponse.json()) as unknown as InspireLiteratureSearchResponse | null;
     const totalHits =
       typeof firstPayload?.hits?.total === "number"
         ? firstPayload.hits.total
@@ -11032,9 +11131,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if ((err as any)?.name === "AbortError") {
         throw err;
       }
-      Zotero.debug(
-        `[${config.addonName}] Background refresh error: ${err}`,
-      );
+      Zotero.debug(`[${config.addonName}] Background refresh error: ${err}`);
       // Don't rethrow - background refresh failure is not critical
     }
   }
@@ -11211,7 +11308,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       };
       if (entry.localItemID) {
         const hasPdf = this.getFirstPdfAttachmentID(entry.localItemID) !== null;
-        renderPdfButtonIcon(doc, pdfButton, hasPdf ? PdfButtonState.HAS_PDF : PdfButtonState.FIND_PDF, pdfStrings);
+        renderPdfButtonIcon(
+          doc,
+          pdfButton,
+          hasPdf ? PdfButtonState.HAS_PDF : PdfButtonState.FIND_PDF,
+          pdfStrings,
+        );
       } else {
         renderPdfButtonIcon(doc, pdfButton, PdfButtonState.DISABLED);
       }
@@ -11826,7 +11928,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       this.viewMode === "entryCited"
     ) {
       const win =
-        this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+        this.body.ownerDocument?.defaultView ||
+        Zotero.getMainWindow?.() ||
+        null;
       const raf = (win as any)?.requestAnimationFrame || null;
       if (typeof raf === "function") {
         raf(() => this.debugAuditPanelOverflow("afterRenderReferenceList"));
@@ -11848,7 +11952,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     try {
       const win =
-        this.body.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+        this.body.ownerDocument?.defaultView ||
+        Zotero.getMainWindow?.() ||
+        null;
       if (!win) return;
 
       const bodyRect = this.body.getBoundingClientRect();
@@ -11872,7 +11978,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         if (!el) return "null";
         const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
         const cls = (el as HTMLElement).className
-          ? `.${String((el as HTMLElement).className).trim().replace(/\s+/g, ".")}`
+          ? `.${String((el as HTMLElement).className)
+              .trim()
+              .replace(/\s+/g, ".")}`
           : "";
         return `${el.tagName.toLowerCase()}${id}${cls}`;
       };
@@ -11925,7 +12033,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       for (let i = 0; i < sampleCount; i++) {
         const row = rows[i] as HTMLElement;
         check(row, `row[${i}]`);
-        check(row.querySelector(".zinspire-ref-entry__title"), `row[${i}].title`);
+        check(
+          row.querySelector(".zinspire-ref-entry__title"),
+          `row[${i}].title`,
+        );
         check(
           row.querySelector(".zinspire-ref-entry__title-link"),
           `row[${i}].titleLink`,
@@ -11951,7 +12062,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       const topText = top
         .map((o) => {
           const sw =
-            o.clientWidth > 0 ? ` sw=${o.scrollWidth}px cw=${o.clientWidth}px` : "";
+            o.clientWidth > 0
+              ? ` sw=${o.scrollWidth}px cw=${o.clientWidth}px`
+              : "";
           return `${o.label}:${describe(o.el)} ov=${Math.round(o.overflowPx)}px${sw}`;
         })
         .join(" | ");
@@ -11970,7 +12083,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         `railL=${railRect ? Math.round(railRect.left) : "?"}px railW=${railRect ? Math.round(railRect.width) : "?"}px ` +
         `top=${topText}`;
     } catch (e) {
-      Zotero.debug(`[${config.addonName}] [PANEL-LAYOUT] overflowAudit error: ${e}`);
+      Zotero.debug(
+        `[${config.addonName}] [PANEL-LAYOUT] overflowAudit error: ${e}`,
+      );
     }
   }
 
@@ -12400,11 +12515,16 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     return button;
   }
 
-  private createFavoritesTabButton(container: HTMLDivElement): HTMLButtonElement {
+  private createFavoritesTabButton(
+    container: HTMLDivElement,
+  ): HTMLButtonElement {
     const button = ztoolkit.UI.appendElement(
       {
         tag: "button",
-        classList: ["zinspire-ref-panel__tab", "zinspire-ref-panel__tab--favorites"],
+        classList: [
+          "zinspire-ref-panel__tab",
+          "zinspire-ref-panel__tab--favorites",
+        ],
         properties: { textContent: "⭐" },
         attributes: {
           type: "button",
@@ -12698,7 +12818,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     // The button always occupies space (inline-flex), but becomes invisible when not in entry mode
     // This prevents the navGroup from changing width and causing filterGroup to shrink
     this.entryViewBackButton.style.display = "inline-flex";
-    this.entryViewBackButton.style.visibility = isEntryMode ? "visible" : "hidden";
+    this.entryViewBackButton.style.visibility = isEntryMode
+      ? "visible"
+      : "hidden";
 
     if (isEntryMode) {
       // Update tooltip with target tab name
@@ -13800,7 +13922,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   private getSortedRelated(entries: InspireReferenceEntry[]) {
     // Apply "exclude reviews" at display time as well, so the preference
     // takes effect immediately even for cached results.
-    let filtered = entries.filter((e) => !isPdgReviewOfParticlePhysicsTitle(e.title));
+    let filtered = entries.filter(
+      (e) => !isPdgReviewOfParticlePhysicsTitle(e.title),
+    );
     if (this.shouldExcludeReviewArticlesInRelated()) {
       filtered = filtered.filter((e) => !isReviewArticleEntry(e));
     }
@@ -13913,8 +14037,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         if (row && entry.localItemID) {
           this.entryRenderer?.updateLocalState(row, true);
           // FIX: Also update PDF button state (disabled → find-pdf)
-          const hasPdf = this.getFirstPdfAttachmentID(entry.localItemID) !== null;
-          this.entryRenderer?.updatePdfState(row, hasPdf ? "has-pdf" : "find-pdf");
+          const hasPdf =
+            this.getFirstPdfAttachmentID(entry.localItemID) !== null;
+          this.entryRenderer?.updatePdfState(
+            row,
+            hasPdf ? "has-pdf" : "find-pdf",
+          );
         }
       },
       onLink: async (entry) => {
@@ -14000,7 +14128,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       onHide: () => {
         // Called when preview is hidden
       },
-      isFavorite: (entry) => this.isPaperFavorite(entry.recid, entry.localItemID),
+      isFavorite: (entry) =>
+        this.isPaperFavorite(entry.recid, entry.localItemID),
       onToggleFavorite: async (entry) => {
         this.togglePaperFavorite(entry);
       },
@@ -14024,7 +14153,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       },
       isFavorite: (authorInfo: AuthorSearchInfo) => {
         const favorites = this.getFavoriteAuthors();
-        return favorites.some((f) => this.isSameAuthor(f.authorSearchInfo, authorInfo));
+        return favorites.some((f) =>
+          this.isSameAuthor(f.authorSearchInfo, authorInfo),
+        );
       },
       toggleFavorite: (authorInfo: AuthorSearchInfo) => {
         this.toggleAuthorFavorite(authorInfo);
@@ -14478,7 +14609,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    * Show context menu for abstract with copy options.
    * Provides "Copy" (rendered text) and "Copy as LaTeX" (original source) options.
    */
-  private showAbstractContextMenu(event: MouseEvent, container: HTMLElement): void {
+  private showAbstractContextMenu(
+    event: MouseEvent,
+    container: HTMLElement,
+  ): void {
     const mainWindow = Zotero.getMainWindow();
     const doc = mainWindow?.document || container.ownerDocument;
 
@@ -14499,7 +14633,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       selectedText = this.getCleanKatexText(tempDiv, doc);
     }
 
-    const latexSource = container.dataset.latexSource || container.textContent || "";
+    const latexSource =
+      container.dataset.latexSource || container.textContent || "";
     const hasLatex = containsLatexMath(latexSource);
     const renderMode = getRenderMode();
 
@@ -14720,7 +14855,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         Zotero.getActiveZoteroPane?.() ||
         (Zotero.getMainWindow?.() as any)?.ZoteroPane ||
         (globalThis as any).ZoteroPane;
-      if (pane && this.currentItemID && entry.localItemID !== this.currentItemID) {
+      if (
+        pane &&
+        this.currentItemID &&
+        entry.localItemID !== this.currentItemID
+      ) {
         try {
           this.rememberCurrentItemForNavigation();
         } catch (err) {
@@ -15140,7 +15279,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       const empty = doc.createElement("div");
       empty.style.fontSize = "12px";
       empty.style.color = "var(--fill-secondary, #64748b)";
-      empty.textContent = getString("references-panel-author-profile-unavailable");
+      empty.textContent = getString(
+        "references-panel-author-profile-unavailable",
+      );
       content.appendChild(empty);
     }
 
@@ -15148,7 +15289,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       const loading = doc.createElement("div");
       loading.style.fontSize = "12px";
       loading.style.color = "var(--fill-secondary, #64748b)";
-      loading.textContent = getString("references-panel-author-profile-loading");
+      loading.textContent = getString(
+        "references-panel-author-profile-loading",
+      );
       content.appendChild(loading);
     }
 
@@ -15188,9 +15331,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       const partialEl = doc.createElement("div");
       partialEl.style.fontSize = "11px";
       partialEl.style.color = "var(--fill-secondary, #64748b)";
-      partialEl.textContent = getString("references-panel-author-stats-partial", {
-        args: { count: String(this.allEntries.length) },
-      });
+      partialEl.textContent = getString(
+        "references-panel-author-stats-partial",
+        {
+          args: { count: String(this.allEntries.length) },
+        },
+      );
       content.appendChild(partialEl);
     }
 
@@ -15367,7 +15513,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       const homepageLink = doc.createElement("a");
       applyMetaLinkStyle(homepageLink, dark);
       homepageLink.href = this.authorProfile.homepageUrl;
-      homepageLink.title = getString("references-panel-author-homepage-tooltip");
+      homepageLink.title = getString(
+        "references-panel-author-homepage-tooltip",
+      );
       homepageLink.textContent = "🌐 Home";
       homepageLink.addEventListener("click", (event) => {
         event.preventDefault();
@@ -15418,7 +15566,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (!this.isSameAuthor(currentAuthor, authorInfo)) {
         // Remove any existing occurrence of current author from stack (avoid duplicates)
         this.authorNavigationStack = this.authorNavigationStack.filter(
-          (s) => s.authorSearchInfo && !this.isSameAuthor(s.authorSearchInfo, currentAuthor),
+          (s) =>
+            s.authorSearchInfo &&
+            !this.isSameAuthor(s.authorSearchInfo, currentAuthor),
         );
         this.authorNavigationStack.push(this.entryCitedSource);
       }
@@ -15594,7 +15744,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       }
     }
 
-    const prefKey = isPresentation ? "favorite_presentations" : "favorite_papers";
+    const prefKey = isPresentation
+      ? "favorite_presentations"
+      : "favorite_papers";
     const getFavorites = isPresentation
       ? () => this.getFavoritePresentations()
       : () => this.getFavoritePapers();
@@ -15663,7 +15815,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     const favorites = this.getFavoriteAuthors();
     const current = this.entryCitedSource.authorSearchInfo;
-    return favorites.some((f) => this.isSameAuthor(f.authorSearchInfo, current));
+    return favorites.some((f) =>
+      this.isSameAuthor(f.authorSearchInfo, current),
+    );
   }
 
   private isSameAuthor(a: AuthorSearchInfo, b: AuthorSearchInfo): boolean {
@@ -15777,7 +15931,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.renderFavoriteAuthorsList();
   }
 
-  private reorderFavoritePresentation(fromIndex: number, toIndex: number): void {
+  private reorderFavoritePresentation(
+    fromIndex: number,
+    toIndex: number,
+  ): void {
     const presentations = this.getFavoritePresentations();
     if (
       fromIndex < 0 ||
@@ -15836,8 +15993,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       this.favoritesTabButton.style.background = activeBlue;
       this.favoritesTabButton.style.borderColor = activeBlue;
     } else {
-      this.favoritesTabButton.style.background = "var(--material-background, #fff)";
-      this.favoritesTabButton.style.borderColor = "var(--fill-quinary, #d1d5db)";
+      this.favoritesTabButton.style.background =
+        "var(--material-background, #fff)";
+      this.favoritesTabButton.style.borderColor =
+        "var(--fill-quinary, #d1d5db)";
       // Restore chart and sort row when leaving favorites view
       if (this.chartContainer) {
         this.chartContainer.style.display = "";
@@ -16243,10 +16402,13 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (paper.itemID) {
         const item = Zotero.Items.get(paper.itemID);
         if (item && !item.deleted) {
-          ZoteroPane.selectItem(paper.itemID);
+          const pane = Zotero.getActiveZoteroPane?.();
+          pane?.selectItems?.([paper.itemID]);
         } else if (paper.recid) {
           // Item was deleted, fallback to INSPIRE page
-          Zotero.launchURL?.(`https://inspirehep.net/literature/${paper.recid}`);
+          Zotero.launchURL?.(
+            `https://inspirehep.net/literature/${paper.recid}`,
+          );
         }
       } else if (paper.recid) {
         Zotero.launchURL?.(`https://inspirehep.net/literature/${paper.recid}`);
@@ -16499,7 +16661,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (presentation.itemID) {
         const item = Zotero.Items.get(presentation.itemID);
         if (item && !item.deleted) {
-          ZoteroPane.selectItem(presentation.itemID);
+          const pane = Zotero.getActiveZoteroPane?.();
+          pane?.selectItems?.([presentation.itemID]);
         } else if (presentation.recid) {
           Zotero.launchURL?.(
             `https://inspirehep.net/literature/${presentation.recid}`,
@@ -17013,7 +17176,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           (first?.lastName as string | undefined) ??
           (first?.name as string | undefined) ??
           "";
-        const lastName = typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
+        const lastName =
+          typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
         const authorPart = lastName
           ? creators.length > 1
             ? `${lastName} et al.`
@@ -17021,9 +17185,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           : "";
         const dateRaw = item.getField("date");
         const match =
-          typeof dateRaw === "string"
-            ? dateRaw.match(/(19|20)\d{2}/)
-            : null;
+          typeof dateRaw === "string" ? dateRaw.match(/(19|20)\d{2}/) : null;
         const year = match ? match[0] : "";
         if (year) {
           return authorPart ? `${authorPart} (${year})` : year;
@@ -17115,7 +17277,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       // Use document-level listener since XUL elements may not receive keyboard events reliably
       const handleCopyShortcut = async (e: KeyboardEvent) => {
         // Only handle if tooltip is visible and has selected text
-        if (!this.abstractTooltip || this.abstractTooltip.style.display === "none") {
+        if (
+          !this.abstractTooltip ||
+          this.abstractTooltip.style.display === "none"
+        ) {
           return;
         }
         if ((e.ctrlKey || e.metaKey) && e.key === "c") {
@@ -17463,15 +17628,27 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           await Zotero.Attachments.addAvailableFiles([item]);
           // Some environments update attachments asynchronously after the promise resolves.
           // Poll briefly to make PDF detection robust.
-          const pdfID = await this.waitForFirstPdfAttachmentID(entry.localItemID);
+          const pdfID = await this.waitForFirstPdfAttachmentID(
+            entry.localItemID,
+          );
           if (pdfID) {
             // Success - render PDF icon
-            renderPdfButtonIcon(doc, button, PdfButtonState.HAS_PDF, pdfStrings);
+            renderPdfButtonIcon(
+              doc,
+              button,
+              PdfButtonState.HAS_PDF,
+              pdfStrings,
+            );
             // Force UI refresh for the parent item so the main window reflects the new attachment.
             this.notifyItemModifiedForUI(entry.localItemID);
           } else {
             // Not found - restore original state
-            renderPdfButtonIcon(doc, button, PdfButtonState.FIND_PDF, pdfStrings);
+            renderPdfButtonIcon(
+              doc,
+              button,
+              PdfButtonState.FIND_PDF,
+              pdfStrings,
+            );
           }
         } else {
           renderPdfButtonIcon(doc, button, PdfButtonState.FIND_PDF, pdfStrings);
@@ -17548,7 +17725,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     return success;
   }
-
 
   /**
    * Immediately hide the abstract tooltip without delay (FTR-HOVER-PREVIEW)

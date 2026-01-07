@@ -8,11 +8,29 @@ export interface LLMUsage {
   totalTokens?: number;
 }
 
+export interface LLMDocumentInput {
+  /** MIME type, e.g. application/pdf */
+  mimeType: string;
+  /** Base64 payload (no data: prefix) */
+  data: string;
+  filename?: string;
+}
+
+export interface LLMImageInput {
+  /** MIME type, e.g. image/png */
+  mimeType: string;
+  /** Base64 payload (no data: prefix) */
+  data: string;
+  filename?: string;
+}
+
 export interface LLMCompleteRequest {
   profile: AIProfile;
   apiKey: string;
   system?: string;
   user: string;
+  documents?: LLMDocumentInput[];
+  images?: LLMImageInput[];
   temperature?: number;
   maxOutputTokens?: number;
   /**
@@ -49,7 +67,10 @@ export class LLMError extends Error {
   status?: number;
   provider?: AIProviderId;
 
-  constructor(message: string, options?: { code?: LLMErrorCode; status?: number; provider?: AIProviderId }) {
+  constructor(
+    message: string,
+    options?: { code?: LLMErrorCode; status?: number; provider?: AIProviderId },
+  ) {
     super(message);
     this.name = "LLMError";
     this.code = options?.code ?? "unknown";
@@ -57,4 +78,3 @@ export class LLMError extends Error {
     this.provider = options?.provider;
   }
 }
-

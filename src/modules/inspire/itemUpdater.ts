@@ -17,7 +17,11 @@ const PLUGIN_ICON = `chrome://${config.addonRef}/content/icons/inspire-icon.png`
 // ─────────────────────────────────────────────────────────────────────────────
 const ARXIV_EXTRA_LINE_REGEX = /^.*(arXiv:|_eprint:).*$(\n|)/gim;
 
-import type { jsobject, ItemWithPendingInspireNote, FavoritePaper } from "./types";
+import type {
+  jsobject,
+  ItemWithPendingInspireNote,
+  FavoritePaper,
+} from "./types";
 import {
   getInspireMeta,
   getCrossrefCount,
@@ -57,6 +61,11 @@ import {
 } from "./collabTagService";
 import { createAbortController } from "./utils";
 import { copyFundingInfo } from "./funding";
+import { AIDialog } from "./panel/AIDialog";
+import type { ReaderSelectionPayload } from "./readerSelection";
+import { captureSelectionImagesFromReader } from "./readerSelectionImage";
+import { profileSupportsImageInput } from "./llm/capabilities";
+import { getActiveAIProfile } from "./llm/profileStore";
 // NOTE: CitationGraphDialog is imported lazily to avoid circular dependencies.
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,6 +87,7 @@ export class ZInspire {
   private updateController: AbortController | null = null;
   private isCancelled: boolean = false;
   private escapeHandler?: (e: KeyboardEvent) => void;
+  private aiWindow?: Window;
 
   constructor(
     current: number = -1,
@@ -187,6 +197,360 @@ export class ZInspire {
     this.removeEscapeListener();
   }
 
+  openAIWindowFromSelection(): void {
+    try {
+      const mainWindow = Zotero.getMainWindow();
+      const pane = Zotero.getActiveZoteroPane?.();
+      const selected = (pane?.getSelectedItems?.() as Zotero.Item[]) || [];
+      const item = selected.find((it) => it && it.isRegularItem()) || null;
+      if (!item) {
+        Zotero.alert?.(mainWindow, "AI", "Select a regular item first.");
+        return;
+      }
+      const recid = deriveRecidFromItem(item);
+      if (!recid) {
+        Zotero.alert?.(mainWindow, "AI", "Selected item has no INSPIRE recid.");
+        return;
+      }
+      this.openOrFocusAIWindow({ seedItem: item, seedRecid: recid });
+    } catch (err) {
+      Zotero.debug?.(
+        `[${config.addonName}] openAIWindowFromSelection error: ${err}`,
+      );
+    }
+  }
+
+  openAIWindowFromReaderSelection(params: {
+    selection: ReaderSelectionPayload;
+    reader?: any;
+    mode?: "text" | "image";
+  }): void {
+    try {
+      const mainWindow = Zotero.getMainWindow();
+      const selection = params.selection;
+      const parentItemID = Number(selection?.parentItemID);
+      if (!Number.isFinite(parentItemID) || parentItemID <= 0) {
+        Zotero.alert?.(
+          mainWindow,
+          "AI",
+          "Cannot ask: invalid Zotero parent item for the selection.",
+        );
+        return;
+      }
+
+      const item = Zotero.Items.get(parentItemID);
+      if (!item || !item.isRegularItem()) {
+        Zotero.alert?.(
+          mainWindow,
+          "AI",
+          "Cannot ask: failed to resolve the selected paper item.",
+        );
+        return;
+      }
+
+      const recid = deriveRecidFromItem(item);
+      if (!recid) {
+        Zotero.alert?.(mainWindow, "AI", "Selected item has no INSPIRE recid.");
+        return;
+      }
+
+      const mode = params.mode === "image" ? "image" : "text";
+      this.openOrFocusAIWindow({
+        seedItem: item,
+        seedRecid: recid,
+        ask: { selection, reader: params.reader, mode },
+      });
+    } catch (err) {
+      Zotero.debug?.(
+        `[${config.addonName}] openAIWindowFromReaderSelection error: ${err}`,
+      );
+    }
+  }
+
+  private openOrFocusAIWindow(params: {
+    seedItem: Zotero.Item;
+    seedRecid: string;
+    ask?: { selection: ReaderSelectionPayload; reader?: any; mode: "text" | "image" };
+  }): void {
+    const mainWindow = Zotero.getMainWindow();
+    const url = `chrome://${config.addonRef}/content/aiWindow.xhtml`;
+    const features = "chrome,resizable,centerscreen,width=1200,height=900";
+
+    if (this.aiWindow && !this.aiWindow.closed) {
+      try {
+        this.aiWindow.focus();
+        const existing = (this.aiWindow as any).__zinspireAiDialog as
+          | AIDialog
+          | undefined;
+        const existingRecid =
+          typeof (existing as any)?.getSeedRecid === "function"
+            ? (existing as any).getSeedRecid()
+            : (existing as any)?.seedRecid;
+        if (existing && String(existingRecid || "") === params.seedRecid) {
+          if (params.ask) {
+            void this.runReaderAsk(existing, this.aiWindow.document, params.ask);
+          }
+          return;
+        }
+
+        this.renderAIWindow(this.aiWindow, params);
+        return;
+      } catch {
+        // ignore
+      }
+    }
+
+    const win = mainWindow.openDialog(
+      url,
+      "zoteroinspire-ai-window",
+      features,
+    ) as Window;
+    this.aiWindow = win;
+    let rendered = false;
+    const tryRender = () => {
+      if (rendered || win.closed) return;
+      try {
+        const doc = win.document;
+        const href = String(
+          (doc as any)?.location?.href || (doc as any)?.URL || "",
+        );
+        const looksLikeAiWindow =
+          href.includes("aiWindow.xhtml") ||
+          Boolean(doc?.getElementById?.("zinspire-ai-window-placeholder"));
+        if (!looksLikeAiWindow || !doc.body) {
+          return;
+        }
+        const readyState = String((doc as any)?.readyState || "");
+        if (readyState && readyState !== "interactive" && readyState !== "complete") {
+          return;
+        }
+        const ok = this.renderAIWindow(win, params);
+        if (ok) {
+          rendered = true;
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    // Try immediately, then retry on DOM lifecycle events and a longer poll.
+    tryRender();
+    try {
+      win.addEventListener("DOMContentLoaded", tryRender);
+      win.addEventListener("load", tryRender);
+      win.addEventListener("pageshow", tryRender);
+      win.document?.addEventListener?.("DOMContentLoaded", tryRender);
+      win.document?.addEventListener?.("readystatechange", tryRender);
+    } catch {
+      // ignore
+    }
+    try {
+      const start = Date.now();
+      let warned = false;
+      const poll = () => {
+        if (rendered || win.closed) return;
+        tryRender();
+        if (rendered || win.closed) return;
+        const elapsed = Date.now() - start;
+
+        // If the user is stuck on "Loading…" for a while, show a hint.
+        if (!warned && elapsed > 2000) {
+          warned = true;
+          try {
+            const doc = win.document;
+            const placeholder = doc?.getElementById?.(
+              "zinspire-ai-window-placeholder",
+            ) as HTMLElement | null;
+            if (placeholder) {
+              placeholder.textContent =
+                "Still loading AI UI… (if this persists, open Debug Output and check for render errors)";
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (elapsed > 15000) {
+          try {
+            const doc = win.document;
+            const placeholder = doc?.getElementById?.(
+              "zinspire-ai-window-placeholder",
+            ) as HTMLElement | null;
+            if (placeholder) {
+              const readyState = String((doc as any)?.readyState || "");
+              const href = String(
+                (doc as any)?.location?.href || (doc as any)?.URL || "",
+              );
+              placeholder.textContent = `Failed to load AI UI (timeout). readyState=${readyState}, url=${href}`;
+            }
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
+        try {
+          win.setTimeout(poll, 100);
+        } catch {
+          setTimeout(poll, 100);
+        }
+      };
+      win.setTimeout(poll, 50);
+    } catch {
+      // ignore
+    }
+    win.addEventListener(
+      "unload",
+      () => {
+        if (this.aiWindow === win) this.aiWindow = undefined;
+      },
+      { once: true },
+    );
+  }
+
+  private async runReaderAsk(
+    dialog: AIDialog,
+    doc: Document,
+    ask: { selection: ReaderSelectionPayload; reader?: any; mode: "text" | "image" },
+  ): Promise<void> {
+    const selection = ask.selection;
+    const mode = ask.mode === "image" ? "image" : "text";
+
+    if (mode === "text") {
+      await dialog.askFromReaderSelection({ selection, mode: "text" });
+      return;
+    }
+
+    const mainWindow = Zotero.getMainWindow();
+    const activeProfile = getActiveAIProfile();
+    if (!profileSupportsImageInput(activeProfile)) {
+      Zotero.alert?.(mainWindow, "AI", "模型不支持图像输入，将回退到文本问答。");
+      await dialog.askFromReaderSelection({ selection, mode: "text" });
+      return;
+    }
+
+    if (!ask.reader) {
+      Zotero.alert?.(mainWindow, "AI", "无法访问 Reader 实例，回退到文本问答。");
+      await dialog.askFromReaderSelection({ selection, mode: "text" });
+      return;
+    }
+
+    const position = selection.position;
+    if (!position) {
+      Zotero.alert?.(mainWindow, "AI", "选区缺少位置信息，回退到文本问答。");
+      await dialog.askFromReaderSelection({ selection, mode: "text" });
+      return;
+    }
+
+    try {
+      const images = await captureSelectionImagesFromReader({
+        reader: ask.reader,
+        position,
+        doc,
+        paddingPx: 8,
+        maxDimPx: 1024,
+      });
+      await dialog.askFromReaderSelection({
+        selection,
+        mode: "image",
+        images,
+      });
+    } catch (err: any) {
+      Zotero.alert?.(
+        mainWindow,
+        "AI",
+        `选区截图失败：${String(err?.message || err)}\n将回退到文本问答。`,
+      );
+      await dialog.askFromReaderSelection({ selection, mode: "text" });
+    }
+  }
+
+  private renderAIWindow(
+    win: Window,
+    params: {
+      seedItem: Zotero.Item;
+      seedRecid: string;
+      ask?: { selection: ReaderSelectionPayload; reader?: any; mode: "text" | "image" };
+    },
+  ): boolean {
+    const ensurePlaceholder = (doc: Document): HTMLElement | null => {
+      try {
+        let el = doc.getElementById(
+          "zinspire-ai-window-placeholder",
+        ) as HTMLElement | null;
+        if (el) return el;
+
+        el = doc.createElement("div");
+        el.id = "zinspire-ai-window-placeholder";
+        el.textContent = "Loading AI…";
+        el.style.position = "absolute";
+        el.style.inset = "0";
+        el.style.display = "flex";
+        el.style.alignItems = "center";
+        el.style.justifyContent = "center";
+        el.style.color = "var(--zotero-gray-6, #5b5b5f)";
+        el.style.fontSize = "13px";
+
+        const root =
+          (doc.body as unknown as HTMLElement | null) ||
+          (doc.documentElement as unknown as HTMLElement | null);
+        root?.appendChild(el);
+        return el;
+      } catch {
+        return null;
+      }
+    };
+
+    try {
+      const doc = win.document;
+      const placeholder = ensurePlaceholder(doc);
+      if (placeholder) {
+        placeholder.textContent = placeholder.textContent || "Loading AI…";
+        placeholder.style.display = "flex";
+      }
+
+      const existing = (win as any).__zinspireAiDialog as AIDialog | undefined;
+      existing?.dispose();
+      (win as any).__zinspireAiDialog = undefined;
+
+      const overlay = doc.querySelector(
+        ".zinspire-ai-dialog",
+      ) as HTMLElement | null;
+      overlay?.remove();
+
+      const dialog = new AIDialog(doc, {
+        seedItem: params.seedItem,
+        seedRecid: params.seedRecid,
+        mode: "window",
+      });
+      (win as any).__zinspireAiDialog = dialog;
+      if (params.ask) {
+        void this.runReaderAsk(dialog, doc, params.ask);
+      }
+      if (placeholder) {
+        placeholder.style.display = "none";
+      }
+      return true;
+    } catch (err) {
+      try {
+        const doc = win.document;
+        const placeholder = ensurePlaceholder(doc);
+        const overlay = doc.querySelector(
+          ".zinspire-ai-dialog",
+        ) as HTMLElement | null;
+        overlay?.remove();
+        if (placeholder) {
+          placeholder.textContent = `Failed to render AI UI: ${String(err)}`;
+          placeholder.style.display = "flex";
+        }
+      } catch {
+        // ignore
+      }
+      Zotero.debug?.(`[${config.addonName}] renderAIWindow error: ${err}`);
+      return false;
+    }
+  }
+
   /**
    * Setup global Escape key listener to cancel ongoing operations
    */
@@ -254,7 +618,8 @@ export class ZInspire {
         (first?.lastName as string | undefined) ??
         (first?.name as string | undefined) ??
         "";
-      const lastName = typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
+      const lastName =
+        typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
       const authorPart = lastName
         ? creators.length > 1
           ? `${lastName} et al.`
@@ -282,7 +647,11 @@ export class ZInspire {
       const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
       const regularItems = items.filter((item) => item?.isRegularItem());
 
-      const seeds: Array<{ recid: string; title?: string; authorLabel?: string }> = [];
+      const seeds: Array<{
+        recid: string;
+        title?: string;
+        authorLabel?: string;
+      }> = [];
       const seen = new Set<string>();
       const MAX_SEEDS = 10;
 
@@ -308,7 +677,10 @@ export class ZInspire {
         return;
       }
 
-      if (regularItems.length > seeds.length && regularItems.length > MAX_SEEDS) {
+      if (
+        regularItems.length > seeds.length &&
+        regularItems.length > MAX_SEEDS
+      ) {
         this.showCacheNotification(
           getString("citation-graph-merge-truncated", {
             args: { count: MAX_SEEDS },
@@ -350,7 +722,11 @@ export class ZInspire {
       const items = collection?.getChildItems?.() ?? [];
       const regularItems = items.filter((item) => item?.isRegularItem());
 
-      const seeds: Array<{ recid: string; title?: string; authorLabel?: string }> = [];
+      const seeds: Array<{
+        recid: string;
+        title?: string;
+        authorLabel?: string;
+      }> = [];
       const seen = new Set<string>();
       const MAX_SEEDS = 10;
 
@@ -1257,7 +1633,7 @@ export class ZInspire {
    * FTR-FAVORITE-PAPERS / FTR-FAVORITE-PRESENTATIONS
    */
   toggleFavoritePaperFromMenu() {
-    const items = ZoteroPane.getSelectedItems();
+    const items = Zotero.getActiveZoteroPane()?.getSelectedItems?.() ?? [];
     if (!items || items.length !== 1) {
       new ztoolkit.ProgressWindow(config.addonName)
         .createLine({
@@ -1272,7 +1648,9 @@ export class ZInspire {
 
     const recid = deriveRecidFromItem(item);
     const isPresentation = item.itemType === "presentation";
-    const prefKey = isPresentation ? "favorite_presentations" : "favorite_papers";
+    const prefKey = isPresentation
+      ? "favorite_presentations"
+      : "favorite_papers";
 
     // Get current favorites
     const json = getPref(prefKey) as string;
@@ -1305,7 +1683,9 @@ export class ZInspire {
       const creators = item.getCreators();
       const creatorType = isPresentation ? "presenter" : "author";
       const creatorTypeID = Zotero.CreatorTypes.getID(creatorType);
-      const firstCreator = creators.find((c) => c.creatorTypeID === creatorTypeID);
+      const firstCreator = creators.find(
+        (c) => c.creatorTypeID === creatorTypeID,
+      );
       const creatorCount = creators.filter(
         (c) => c.creatorTypeID === creatorTypeID,
       ).length;
@@ -1826,8 +2206,8 @@ export class ZInspire {
       actions.appendChild(buttonContainer);
       panel.appendChild(actions);
 
-      // Add to document
-      doc.documentElement.appendChild(overlay);
+      // Add to document (XUL vs HTML host docs differ; prefer <body> when present)
+      (doc.body || doc.documentElement).appendChild(overlay);
 
       // Event handlers
       let isFinished = false;
@@ -1966,10 +2346,7 @@ export class ZInspire {
     Zotero.debug(`[${config.addonName}] addCollabTagsToSelection: starting`);
 
     if (!isCollabTagEnabled()) {
-      this.showCollabTagNotification(
-        getString("collab-tag-disabled"),
-        "fail",
-      );
+      this.showCollabTagNotification(getString("collab-tag-disabled"), "fail");
       return;
     }
 
@@ -2039,10 +2416,7 @@ export class ZInspire {
     );
 
     if (!isCollabTagEnabled()) {
-      this.showCollabTagNotification(
-        getString("collab-tag-disabled"),
-        "fail",
-      );
+      this.showCollabTagNotification(getString("collab-tag-disabled"), "fail");
       return;
     }
 

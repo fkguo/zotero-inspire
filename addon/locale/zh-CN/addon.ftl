@@ -7,6 +7,7 @@ menuitem-submenulabel1 = 不含摘要
 menuitem-submenulabel2 = 仅引用次数
 menuitem-download-cache = 下载引用缓存
 menuitem-cancel-update = 取消更新
+menuitem-ai-window = AI…
 
 download-cache-progress-title = 正在下载引用缓存
 download-cache-start =

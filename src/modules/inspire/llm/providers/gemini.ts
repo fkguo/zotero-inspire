@@ -1,4 +1,8 @@
-import type { LLMCompleteRequest, LLMCompleteResult, LLMStreamRequest } from "../types";
+import type {
+  LLMCompleteRequest,
+  LLMCompleteResult,
+  LLMStreamRequest,
+} from "../types";
 import { LLMError } from "../types";
 
 const DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
@@ -7,17 +11,37 @@ function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
-export function normalizeGeminiEndpoint(model: string, baseURL?: string): string {
+export function normalizeGeminiEndpoint(
+  model: string,
+  baseURL?: string,
+): string {
   const raw = String(baseURL || "").trim();
-  const base = raw ? trimSlash(raw) : DEFAULT_GEMINI_BASE_URL;
+  const base = (() => {
+    if (!raw) return DEFAULT_GEMINI_BASE_URL;
+    if (/^https?:\/\//i.test(raw)) return trimSlash(raw);
+    throw new LLMError(
+      "Invalid base URL (must start with http:// or https://)",
+      { code: "bad_request", provider: "gemini" },
+    );
+  })();
   const safeModel = String(model || "gemini-1.5-flash").trim();
   // v1beta is the most widely available in the wild for API key auth.
   return `${base}/v1beta/models/${encodeURIComponent(safeModel)}:generateContent`;
 }
 
-export function normalizeGeminiStreamEndpoint(model: string, baseURL?: string): string {
+export function normalizeGeminiStreamEndpoint(
+  model: string,
+  baseURL?: string,
+): string {
   const raw = String(baseURL || "").trim();
-  const base = raw ? trimSlash(raw) : DEFAULT_GEMINI_BASE_URL;
+  const base = (() => {
+    if (!raw) return DEFAULT_GEMINI_BASE_URL;
+    if (/^https?:\/\//i.test(raw)) return trimSlash(raw);
+    throw new LLMError(
+      "Invalid base URL (must start with http:// or https://)",
+      { code: "bad_request", provider: "gemini" },
+    );
+  })();
   const safeModel = String(model || "gemini-1.5-flash").trim();
   // SSE streaming is enabled via alt=sse.
   return `${base}/v1beta/models/${encodeURIComponent(safeModel)}:streamGenerateContent?alt=sse`;
@@ -123,13 +147,39 @@ async function streamSseText(
   }
 }
 
-export async function geminiComplete(req: LLMCompleteRequest): Promise<LLMCompleteResult> {
-  const endpoint = normalizeGeminiEndpoint(req.profile.model, req.profile.baseURL);
+export async function geminiComplete(
+  req: LLMCompleteRequest,
+): Promise<LLMCompleteResult> {
+  const endpoint = normalizeGeminiEndpoint(
+    req.profile.model,
+    req.profile.baseURL,
+  );
+  const docs = Array.isArray(req.documents) ? req.documents : [];
+  const images = Array.isArray(req.images) ? req.images : [];
   const payload = {
     ...(req.system
       ? { systemInstruction: { parts: [{ text: req.system }] } }
       : {}),
-    contents: [{ role: "user", parts: [{ text: req.user }] }],
+    contents: [
+      {
+        role: "user",
+        parts: [
+          ...images.map((img) => ({
+            inline_data: {
+              mime_type: img.mimeType,
+              data: img.data,
+            },
+          })),
+          ...docs.map((d) => ({
+            inline_data: {
+              mime_type: d.mimeType,
+              data: d.data,
+            },
+          })),
+          { text: req.user },
+        ],
+      },
+    ],
     generationConfig: {
       temperature: req.temperature ?? 0.2,
       maxOutputTokens: req.maxOutputTokens ?? 1200,
@@ -169,9 +219,13 @@ export async function geminiComplete(req: LLMCompleteRequest): Promise<LLMComple
   const data = await readResponseJsonSafe(res);
   const usage = (data as any)?.usageMetadata;
   const inputTokens =
-    typeof usage?.promptTokenCount === "number" ? usage.promptTokenCount : undefined;
+    typeof usage?.promptTokenCount === "number"
+      ? usage.promptTokenCount
+      : undefined;
   const outputTokens =
-    typeof usage?.candidatesTokenCount === "number" ? usage.candidatesTokenCount : undefined;
+    typeof usage?.candidatesTokenCount === "number"
+      ? usage.candidatesTokenCount
+      : undefined;
   const totalTokens =
     typeof usage?.totalTokenCount === "number"
       ? usage.totalTokenCount
@@ -182,23 +236,48 @@ export async function geminiComplete(req: LLMCompleteRequest): Promise<LLMComple
   return {
     text: extractGeminiText(data),
     usage:
-      typeof inputTokens === "number" || typeof outputTokens === "number" || typeof totalTokens === "number"
+      typeof inputTokens === "number" ||
+      typeof outputTokens === "number" ||
+      typeof totalTokens === "number"
         ? { inputTokens, outputTokens, totalTokens }
         : undefined,
     raw: data,
   };
 }
 
-export async function geminiStream(req: LLMStreamRequest): Promise<LLMCompleteResult> {
+export async function geminiStream(
+  req: LLMStreamRequest,
+): Promise<LLMCompleteResult> {
   const endpoint = normalizeGeminiStreamEndpoint(
     req.profile.model,
     req.profile.baseURL,
   );
+  const docs = Array.isArray(req.documents) ? req.documents : [];
+  const images = Array.isArray(req.images) ? req.images : [];
   const payload = {
     ...(req.system
       ? { systemInstruction: { parts: [{ text: req.system }] } }
       : {}),
-    contents: [{ role: "user", parts: [{ text: req.user }] }],
+    contents: [
+      {
+        role: "user",
+        parts: [
+          ...images.map((img) => ({
+            inline_data: {
+              mime_type: img.mimeType,
+              data: img.data,
+            },
+          })),
+          ...docs.map((d) => ({
+            inline_data: {
+              mime_type: d.mimeType,
+              data: d.data,
+            },
+          })),
+          { text: req.user },
+        ],
+      },
+    ],
     generationConfig: {
       temperature: req.temperature ?? 0.2,
       maxOutputTokens: req.maxOutputTokens ?? 1200,
@@ -252,7 +331,9 @@ export async function geminiStream(req: LLMStreamRequest): Promise<LLMCompleteRe
         }
         const next = extractGeminiText(parsed);
         if (!next) return;
-        const delta = next.startsWith(fullText) ? next.slice(fullText.length) : next;
+        const delta = next.startsWith(fullText)
+          ? next.slice(fullText.length)
+          : next;
         if (!delta) return;
         fullText += delta;
         req.onDelta(delta);

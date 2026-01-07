@@ -23,7 +23,10 @@ export type AIProfilePresetId =
   | "deepseek"
   | "kimi"
   | "qwen"
+  | "bailian"
   | "zhipu"
+  | "doubao"
+  | "siliconflow"
   | "ollama"
   | "lmstudio"
   | "custom";
@@ -78,11 +81,32 @@ export const AI_PROFILE_PRESETS: Array<{
     defaultModel: "qwen-turbo",
   },
   {
+    id: "bailian",
+    label: "Bailian / Aliyun (OpenAI-compatible)",
+    provider: "openaiCompatible",
+    baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    defaultModel: "qwen-max",
+  },
+  {
     id: "zhipu",
     label: "Zhipu (try OpenAI-compatible / proxy)",
     provider: "openaiCompatible",
     baseURL: "https://open.bigmodel.cn/api/paas/v4",
     defaultModel: "glm-4-flash",
+  },
+  {
+    id: "doubao",
+    label: "Doubao / Volcengine Ark (OpenAI-compatible)",
+    provider: "openaiCompatible",
+    baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+    defaultModel: "doubao-pro-32k",
+  },
+  {
+    id: "siliconflow",
+    label: "SiliconFlow (OpenAI-compatible)",
+    provider: "openaiCompatible",
+    baseURL: "https://api.siliconflow.cn/v1",
+    defaultModel: "Qwen/Qwen2.5-72B-Instruct",
   },
   {
     id: "ollama",

@@ -28,6 +28,19 @@ export class ZInsMenu {
     });
   }
 
+  static registerToolsMenu() {
+    const menuIcon = `chrome://${config.addonRef}/content/icons/ai.svg`;
+    ztoolkit.Menu.register("menuTools", {
+      tag: "menuitem",
+      id: `${config.addonRef}-menu-tools-ai`,
+      label: getString("menuitem-ai-window"),
+      icon: menuIcon,
+      commandListener: () => {
+        _globalThis.inspire.openAIWindowFromSelection?.();
+      },
+    });
+  }
+
   private static buildMenuChildren(
     context: "item" | "collection",
   ): Array<Record<string, any>> {

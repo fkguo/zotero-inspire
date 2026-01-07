@@ -1,4 +1,8 @@
-import type { LLMCompleteRequest, LLMCompleteResult, LLMStreamRequest } from "../types";
+import type {
+  LLMCompleteRequest,
+  LLMCompleteResult,
+  LLMStreamRequest,
+} from "../types";
 import { LLMError } from "../types";
 
 const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
@@ -10,7 +14,14 @@ function trimSlash(url: string): string {
 
 export function normalizeAnthropicEndpoint(baseURL?: string): string {
   const raw = String(baseURL || "").trim();
-  const base = raw ? trimSlash(raw) : DEFAULT_ANTHROPIC_BASE_URL;
+  const base = (() => {
+    if (!raw) return DEFAULT_ANTHROPIC_BASE_URL;
+    if (/^https?:\/\//i.test(raw)) return trimSlash(raw);
+    throw new LLMError(
+      "Invalid base URL (must start with http:// or https://)",
+      { code: "bad_request", provider: "anthropic" },
+    );
+  })();
   if (/\/v1\/messages$/i.test(base)) return base;
   return `${base}/v1/messages`;
 }
@@ -64,14 +75,41 @@ function extractAnthropicText(payload: unknown): string {
   return parts.join("");
 }
 
-export async function anthropicComplete(req: LLMCompleteRequest): Promise<LLMCompleteResult> {
+export async function anthropicComplete(
+  req: LLMCompleteRequest,
+): Promise<LLMCompleteResult> {
   const endpoint = normalizeAnthropicEndpoint(req.profile.baseURL);
+  const docs = Array.isArray(req.documents) ? req.documents : [];
+  const images = Array.isArray(req.images) ? req.images : [];
   const payload = {
     model: req.profile.model,
     max_tokens: req.maxOutputTokens ?? 1200,
     temperature: req.temperature ?? 0.2,
     ...(req.system ? { system: req.system } : {}),
-    messages: [{ role: "user", content: req.user }],
+    messages: [
+      {
+        role: "user",
+        content: [
+          ...images.map((img) => ({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: img.mimeType,
+              data: img.data,
+            },
+          })),
+          ...docs.map((d) => ({
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: d.mimeType,
+              data: d.data,
+            },
+          })),
+          { type: "text", text: req.user },
+        ],
+      },
+    ],
   };
 
   let res: Response;
@@ -107,8 +145,10 @@ export async function anthropicComplete(req: LLMCompleteRequest): Promise<LLMCom
 
   const data = await readResponseJsonSafe(res);
   const usage = (data as any)?.usage;
-  const inputTokens = typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined;
-  const outputTokens = typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined;
+  const inputTokens =
+    typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined;
+  const outputTokens =
+    typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined;
   const totalTokens =
     typeof usage?.total_tokens === "number"
       ? usage.total_tokens
@@ -119,7 +159,9 @@ export async function anthropicComplete(req: LLMCompleteRequest): Promise<LLMCom
   return {
     text: extractAnthropicText(data),
     usage:
-      typeof inputTokens === "number" || typeof outputTokens === "number" || typeof totalTokens === "number"
+      typeof inputTokens === "number" ||
+      typeof outputTokens === "number" ||
+      typeof totalTokens === "number"
         ? { inputTokens, outputTokens, totalTokens }
         : undefined,
     raw: data,
@@ -127,15 +169,42 @@ export async function anthropicComplete(req: LLMCompleteRequest): Promise<LLMCom
 }
 
 // Optional: streaming support (SSE). Not all environments/providers support readable streams.
-export async function anthropicStream(req: LLMStreamRequest): Promise<LLMCompleteResult> {
+export async function anthropicStream(
+  req: LLMStreamRequest,
+): Promise<LLMCompleteResult> {
   const endpoint = normalizeAnthropicEndpoint(req.profile.baseURL);
+  const docs = Array.isArray(req.documents) ? req.documents : [];
+  const images = Array.isArray(req.images) ? req.images : [];
   const payload = {
     model: req.profile.model,
     max_tokens: req.maxOutputTokens ?? 1200,
     temperature: req.temperature ?? 0.2,
     stream: true,
     ...(req.system ? { system: req.system } : {}),
-    messages: [{ role: "user", content: req.user }],
+    messages: [
+      {
+        role: "user",
+        content: [
+          ...images.map((img) => ({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: img.mimeType,
+              data: img.data,
+            },
+          })),
+          ...docs.map((d) => ({
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: d.mimeType,
+              data: d.data,
+            },
+          })),
+          { type: "text", text: req.user },
+        ],
+      },
+    ],
   };
 
   let res: Response;
@@ -198,7 +267,8 @@ export async function anthropicStream(req: LLMStreamRequest): Promise<LLMComplet
       } catch {
         continue;
       }
-      const deltaText = parsed?.delta?.text ?? parsed?.content_block?.text ?? null;
+      const deltaText =
+        parsed?.delta?.text ?? parsed?.content_block?.text ?? null;
       if (typeof deltaText === "string" && deltaText) {
         fullText += deltaText;
         req.onDelta(deltaText);
