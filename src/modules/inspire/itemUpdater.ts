@@ -1577,6 +1577,44 @@ export class ZInspire {
   }
 
   /**
+   * Copy INSPIRE recid for the selected items.
+   */
+  async copyInspireRecid() {
+    const items = this.getSelectedRegularItems();
+    if (!items.length) return;
+
+    const recids: string[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      const recid = deriveRecidFromItem(item);
+      if (!recid || seen.has(recid)) continue;
+      seen.add(recid);
+      recids.push(recid);
+    }
+
+    if (!recids.length) {
+      this.showCopyNotification(getString("copy-error-no-recid"), "fail");
+      return;
+    }
+
+    const copiedCount = recids.length;
+    const success = await copyToClipboard(recids.join(", "));
+    if (success) {
+      this.showCopyNotification(
+        getString("copy-success-inspire-recid", {
+          args: { count: copiedCount },
+        }),
+        "success",
+      );
+    } else {
+      this.showCopyNotification(
+        getString("copy-error-clipboard-failed"),
+        "fail",
+      );
+    }
+  }
+
+  /**
    * Copy Zotero select link for the selected item.
    * Format: zotero://select/library/items/KEY or zotero://select/groups/GROUPID/items/KEY
    */

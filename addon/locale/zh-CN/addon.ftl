@@ -383,8 +383,9 @@ references-panel-cache-source-local-expired = 来自过期缓存（{ $age } 小�
 
 # 右键菜单复制操作
 menuitem-copy-bibtex = 复制 BibTeX
-menuitem-copy-inspire-link = 复制 INSPIRE 链接
 menuitem-copy-citation-key = 复制引用键
+menuitem-copy-inspire-recid = 复制 INSPIRE recid
+menuitem-copy-inspire-link = 复制 INSPIRE 链接
 menuitem-copy-zotero-link = 复制 Zotero 链接
 copy-success-bibtex =
   { $count ->
@@ -396,6 +397,11 @@ copy-success-citation-key =
   { $count ->
     [one] 已复制 1 个引用键
    *[other] 已复制 { $count } 个引用键
+  }
+copy-success-inspire-recid =
+  { $count ->
+    [one] 已复制 1 个 INSPIRE recid
+   *[other] 已复制 { $count } 个 INSPIRE recid
   }
 copy-success-zotero-link = Zotero 链接已复制到剪贴板
 copy-error-no-selection = 请选择单个条目以复制

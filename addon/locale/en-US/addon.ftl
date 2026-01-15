@@ -386,8 +386,9 @@ references-panel-cache-source-local-expired = From expired cache ({ $age }h ago)
 
 # Context menu copy actions
 menuitem-copy-bibtex = Copy BibTeX
-menuitem-copy-inspire-link = Copy INSPIRE link
 menuitem-copy-citation-key = Copy citation key
+menuitem-copy-inspire-recid = Copy INSPIRE recid
+menuitem-copy-inspire-link = Copy INSPIRE link
 menuitem-copy-inspire-link-md = Copy INSPIRE link (Markdown)
 menuitem-copy-zotero-link = Copy Zotero link
 copy-success-bibtex =
@@ -401,6 +402,11 @@ copy-success-citation-key =
   { $count ->
     [one] Copied 1 citation key
    *[other] Copied { $count } citation keys
+  }
+copy-success-inspire-recid =
+  { $count ->
+    [one] Copied 1 INSPIRE recid
+   *[other] Copied { $count } INSPIRE recids
   }
 copy-success-zotero-link = Zotero link copied to clipboard
 copy-error-no-selection = Select exactly one item to copy

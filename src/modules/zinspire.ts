@@ -14031,19 +14031,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     return {
       onAdd: async (entry, anchor) => {
         await this.handleAddAction(entry, anchor ?? this.body);
-        // handleAddAction already calls renderReferenceList internally
         // Use targeted update for the row if still visible
-        const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
-        if (row && entry.localItemID) {
-          this.entryRenderer?.updateLocalState(row, true);
-          // FIX: Also update PDF button state (disabled → find-pdf)
-          const hasPdf =
-            this.getFirstPdfAttachmentID(entry.localItemID) !== null;
-          this.entryRenderer?.updatePdfState(
-            row,
-            hasPdf ? "has-pdf" : "find-pdf",
-          );
-        }
+        this.updateRowStatus(entry);
       },
       onLink: async (entry) => {
         const wasRelated = entry.isRelated;
@@ -14923,13 +14912,51 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     return pdfID;
   }
 
-  private notifyItemModifiedForUI(itemID: number): void {
+  private async notifyItemModifiedForUI(
+    parentItemID: number,
+    attachmentItemID?: number,
+  ): Promise<void> {
+    const mainWin = Zotero.getMainWindow?.() as any;
+    const notifier: any = mainWin?.Zotero?.Notifier || (Zotero.Notifier as any);
+
+    // Prime best-attachment cache so the main items view (hasAttachment column) can show the icon
+    // without waiting for the delayed itemTree cell refresh.
     try {
-      const notifier: any = Zotero.Notifier as any;
+      const Z: any = mainWin?.Zotero || Zotero;
+      const parentItem =
+        typeof Z.Items?.get === "function"
+          ? Z.Items.get(parentItemID)
+          : Zotero.Items.get(parentItemID);
+      await parentItem?.getBestAttachmentState?.();
+    } catch {
+      // ignore
+    }
+
+    // Prefer Zotero.Notifier.trigger(..., force=true) to avoid being queued in an open transaction.
+    try {
       if (typeof notifier?.trigger === "function") {
-        notifier.trigger("modify", "item", [itemID], {});
+        if (attachmentItemID) {
+          // Update attachments box rows without selecting anything (avoid "add" side effects)
+          await notifier.trigger(
+            "refresh",
+            "item",
+            [attachmentItemID],
+            {},
+            true,
+          );
+        }
+        // Ensure itemTree re-renders the row, so the hasAttachment cell schedules
+        // (or immediately reflects) bestAttachmentState updates.
+        await notifier.trigger("refresh", "item", [parentItemID], {}, true);
+        await notifier.trigger("modify", "item", [parentItemID], {}, true);
+        await notifier.trigger("redraw", "item", [parentItemID], {}, true);
       } else if (typeof notifier?.notify === "function") {
-        notifier.notify("modify", "item", [itemID], {});
+        if (attachmentItemID) {
+          notifier.notify("refresh", "item", [attachmentItemID], {}, true);
+        }
+        notifier.notify("refresh", "item", [parentItemID], {}, true);
+        notifier.notify("modify", "item", [parentItemID], {}, true);
+        notifier.notify("redraw", "item", [parentItemID], {}, true);
       }
     } catch {
       // ignore
@@ -14939,10 +14966,19 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     try {
       const pane: any =
         Zotero.getActiveZoteroPane?.() ||
-        (Zotero.getMainWindow?.() as any)?.ZoteroPane ||
+        mainWin?.ZoteroPane ||
         (globalThis as any).ZoteroPane;
+
+      if (attachmentItemID && typeof pane?.itemsView?.notify === "function") {
+        await pane.itemsView.notify("refresh", "item", [attachmentItemID], {});
+      }
+      if (typeof pane?.itemsView?.notify === "function") {
+        await pane.itemsView.notify("refresh", "item", [parentItemID], {});
+        await pane.itemsView.notify("modify", "item", [parentItemID], {});
+        await pane.itemsView.notify("redraw", "item", [parentItemID], {});
+      }
+
       pane?.itemPane?.refresh?.();
-      pane?.itemsView?.refresh?.();
       pane?.itemsView?.invalidate?.();
     } catch {
       // ignore
@@ -16847,11 +16883,18 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       // Invalidate searchText so it will be recalculated on next filter
       entry.searchText = "";
       entry.isRelated = false;
-      this.renderReferenceList({ preserveScroll: true });
-      // Restore scroll position after rendering if needed
-      setTimeout(() => {
-        this.restoreScrollPositionIfNeeded();
-      }, 0);
+
+      // Update the clicked row immediately (marker + link + PDF button) without a full re-render.
+      // A full render can reset pagination/scroll and delay visual updates for the active row.
+      const rowFromCaches =
+        (this.rowCache.get(entry.id) as HTMLDivElement | undefined) ||
+        (this.entryRenderer?.getRowByEntryId(entry.id) as HTMLDivElement | undefined) ||
+        ((anchor.closest?.(".zinspire-ref-entry") as HTMLDivElement | null) ??
+          undefined);
+      if (rowFromCaches) {
+        this.rowCache.set(entry.id, rowFromCaches);
+      }
+      this.updateRowStatus(entry);
     }
   }
 
@@ -17622,10 +17665,20 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       };
 
       try {
-        const item = Zotero.Items.get(entry.localItemID);
-        if (item && Zotero.Attachments?.addAvailableFiles) {
+        // Match Zotero main-window context menu behavior:
+        // ZoteroPane.findFilesForSelectedItems() → Zotero.Attachments.addAvailableFiles()
+        // Running in the main window context helps ensure notifier-driven UI updates fire.
+        const mainWin = Zotero.getMainWindow?.() as any;
+        const Z: any = mainWin?.Zotero || Zotero;
+        const item =
+          typeof Z.Items?.get === "function"
+            ? Z.Items.get(entry.localItemID)
+            : Zotero.Items.get(entry.localItemID);
+        const attachmentsAPI: any = Z.Attachments || Zotero.Attachments;
+
+        if (item && attachmentsAPI?.addAvailableFiles) {
           // addAvailableFiles takes an array of items and shows a progress dialog
-          await Zotero.Attachments.addAvailableFiles([item]);
+          await attachmentsAPI.addAvailableFiles([item]);
           // Some environments update attachments asynchronously after the promise resolves.
           // Poll briefly to make PDF detection robust.
           const pdfID = await this.waitForFirstPdfAttachmentID(
@@ -17639,8 +17692,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
               PdfButtonState.HAS_PDF,
               pdfStrings,
             );
-            // Force UI refresh for the parent item so the main window reflects the new attachment.
-            this.notifyItemModifiedForUI(entry.localItemID);
+            // Force UI refresh so the main window reflects the new attachment immediately.
+            await this.notifyItemModifiedForUI(entry.localItemID, pdfID);
           } else {
             // Not found - restore original state
             renderPdfButtonIcon(

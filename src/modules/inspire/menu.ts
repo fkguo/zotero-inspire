@@ -110,6 +110,13 @@ export class ZInsMenu {
         },
         {
           tag: "menuitem",
+          label: getString("menuitem-copy-inspire-recid"),
+          commandListener: () => {
+            _globalThis.inspire.copyInspireRecid();
+          },
+        },
+        {
+          tag: "menuitem",
           label: getString("menuitem-copy-inspire-link"),
           commandListener: () => {
             _globalThis.inspire.copyInspireLink();
