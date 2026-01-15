@@ -252,6 +252,7 @@ A dedicated `localCache` service stores References/Cited By/Author Papers JSON f
 | **Cache**              | Download references cache    | Prefetch INSPIRE references into local cache                   |
 | **Copy**               | Copy BibTeX                  | Fetch and copy BibTeX from INSPIRE                             |
 |                              | Copy citation key            | Copy item's citation key                                       |
+|                              | Copy INSPIRE recid           | Copy INSPIRE record ID                                         |
 |                              | Copy INSPIRE link            | Copy INSPIRE literature URL                                    |
 |                              | Copy INSPIRE link (Markdown) | Copy as markdown link with title                               |
 |                              | Copy Zotero link             | Copy Zotero select link                                        |

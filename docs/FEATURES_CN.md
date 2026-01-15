@@ -56,6 +56,7 @@
 | **缓存**       | Download references cache    | 预先下载参考文献缓存，支持离线浏览                            |
 | **复制**       | Copy BibTeX                  | 从 INSPIRE 获取并复制 BibTeX                                  |
 |                      | Copy citation key            | 复制条目的 Citation Key                                       |
+|                      | Copy INSPIRE recid           | 复制 INSPIRE 记录 ID                                          |
 |                      | Copy INSPIRE link            | 复制 INSPIRE 文献链接                                         |
 |                      | Copy INSPIRE link (Markdown) | 复制 Markdown 格式链接                                        |
 |                      | Copy Zotero link             | 复制 Zotero 选择链接                                          |

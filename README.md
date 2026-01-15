@@ -58,6 +58,7 @@ The plugin automatically fetches metadata when you add new items (configurable i
 
 - **`Copy BibTeX`** — Fetch and copy BibTeX from INSPIRE
 - **`Copy citation key`** — Copy the INSPIRE texkey
+- **`Copy INSPIRE recid`** — Copy the INSPIRE record ID
 - **`Copy INSPIRE link`** — Copy the INSPIRE literature URL
 - **`Copy INSPIRE link (markdown)`** — Copy the INSPIRE literature URL in format of `[texkey](link)`
 - **`Copy Zotero link`** — Copy Zotero select link
