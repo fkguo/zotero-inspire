@@ -860,7 +860,16 @@ export function compareItemWithInspire(
   // Citation key comparison
   const citekey_pref = getPref("citekey");
   if (citekey_pref === "inspire" && metaInspire.citekey) {
-    const localCitekey = item.getField("citationKey") as string | null;
+    // On Zotero 8+, citation key lives in the native citationKey field.
+    // On Zotero 7 it is stored as "Citation Key: <key>" in the Extra field.
+    // Always check both so the comparison is version-agnostic.
+    let localCitekey =
+      (item.getField("citationKey") as string | undefined)?.trim() || null;
+    if (!localCitekey) {
+      const extraForKey = (item.getField("extra") as string | undefined) ?? "";
+      const keyMatch = extraForKey.match(/^Citation\s+Key:\s*(\S+)/m);
+      if (keyMatch) localCitekey = keyMatch[1];
+    }
     if (!valuesAreEqual(localCitekey, metaInspire.citekey)) {
       changes.push({
         field: "citekey",

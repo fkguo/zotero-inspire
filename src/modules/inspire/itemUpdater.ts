@@ -2614,19 +2614,22 @@ export async function setInspireMetaSelective(
         citekey_pref === "inspire" &&
         metaInspire.citekey
       ) {
-        item.setField("citationKey", metaInspire.citekey);
-
-        if (extra.includes("Citation Key")) {
-          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
-            "")[0]?.split(": ")[1];
-          if (initialCiteKey !== metaInspire.citekey) {
-            extra = extra.replace(
-              /^.*Citation\sKey.*$/gm,
-              `Citation Key: ${metaInspire.citekey}`,
-            );
-          }
+        const zoteroVersion = Zotero.platformMajorVersion;
+        if (zoteroVersion >= 8) {
+          item.setField("citationKey", metaInspire.citekey);
         } else {
-          extra += "\nCitation Key: " + metaInspire.citekey;
+          if (extra.includes("Citation Key")) {
+            const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
+              "")[0]?.split(": ")[1];
+            if (initialCiteKey !== metaInspire.citekey) {
+              extra = extra.replace(
+                /^.*Citation\sKey.*$/gm,
+                `Citation Key: ${metaInspire.citekey}`,
+              );
+            }
+          } else {
+            extra += "\nCitation Key: " + metaInspire.citekey;
+          }
         }
       }
     }
