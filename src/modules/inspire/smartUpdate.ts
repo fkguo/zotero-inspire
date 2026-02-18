@@ -858,8 +858,9 @@ export function compareItemWithInspire(
   }
 
   // Citation key comparison
-  if (metaInspire.citekey) {
-    const localCitekey = extra.match(/Citation Key:\s*(\S+)/)?.[1] || null;
+  const citekey_pref = getPref("citekey");
+  if (citekey_pref === "inspire" && metaInspire.citekey) {
+    const localCitekey = item.getField("citationKey") as string | null;
     if (!valuesAreEqual(localCitekey, metaInspire.citekey)) {
       changes.push({
         field: "citekey",
@@ -1399,7 +1400,7 @@ export function showUpdateNotification(
   notification.style.alignItems = "center";
   notification.style.justifyContent = "space-between";
   // FIX-ALIGNMENT: Use 8px horizontal padding to align with chart vertical line (matching 8px border-radius)
-  notification.style.padding = "8px 8px"; 
+  notification.style.padding = "8px 8px";
   notification.style.marginBottom = "8px";
   notification.style.backgroundColor = "#e0f2fe";
   // FIX-STYLE: Full-width style as requested by user
@@ -1412,11 +1413,11 @@ export function showUpdateNotification(
   notification.style.color = "#0369a1";
   notification.style.gap = "8px";
   // FIX-PANEL-WIDTH-OVERFLOW: Full width constraints
-  notification.style.width = "100%"; 
+  notification.style.width = "100%";
   notification.style.maxWidth = "100%";
   notification.style.minWidth = "0";
-  notification.style.flexShrink = "0"; 
-  notification.style.flexWrap = "wrap"; 
+  notification.style.flexShrink = "0";
+  notification.style.flexWrap = "wrap";
   notification.style.boxSizing = "border-box";
   notification.style.overflow = "hidden";
 
