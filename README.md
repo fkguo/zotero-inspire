@@ -1,6 +1,6 @@
 # Zotero INSPIRE References
 
-[![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
+[![zotero target version](https://img.shields.io/badge/Zotero-7%20to%209-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
 A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a community maintained database for **high energy physics and related fields**, into your reference management workflow. Browse references, citations, and author papers directly in Zotero without leaving your library.
@@ -58,6 +58,7 @@ The plugin automatically fetches metadata when you add new items (configurable i
 
 - **`Copy BibTeX`** — Fetch and copy BibTeX from INSPIRE
 - **`Copy citation key`** — Copy the INSPIRE texkey
+- **`Copy INSPIRE recid`** — Copy the INSPIRE record ID
 - **`Copy INSPIRE link`** — Copy the INSPIRE literature URL
 - **`Copy INSPIRE link (markdown)`** — Copy the INSPIRE literature URL in format of `[texkey](link)`
 - **`Copy Zotero link`** — Copy Zotero select link
@@ -67,17 +68,17 @@ The plugin automatically fetches metadata when you add new items (configurable i
 
 Select an item with an INSPIRE record, then find the **INSPIRE** section in the right panel:
 
-| Tab                     | What it shows                                                                                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **References**    | Papers cited by this item                                                                                  |
-| **Cited by**      | Papers that cite this item                                                                                 |
-| **Related**       | Recommended papers via a hybrid similarity score (shared references + co-citation)                         |
+| Tab               | What it shows                                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| **References**    | Papers cited by this item                                                                                |
+| **Cited by**      | Papers that cite this item                                                                               |
+| **Related**       | Recommended papers via a hybrid similarity score (shared references + co-citation)                       |
 | **Entry Cited**   | Papers citing a specific reference, appears only after clicking the `Cited by ...` button below an entry |
-| **Author Papers** | All papers by a clicked author, appears only after clicking an author name                                 |
-| **🔍**            | INSPIRE search results                                                                                     |
-| **⭐ Favorites**   | Your favorite authors and papers                                                                           |
+| **Author Papers** | All papers by a clicked author, appears only after clicking an author name                               |
+| **🔍**            | INSPIRE search results                                                                                   |
+| **⭐ Favorites**  | Your favorite authors and papers                                                                         |
 
-- **Related**: hybrid ranking = weighted bibliographic coupling (shared refs) + optional co-citation re-ranking; by default it ignores the PDG *Review of Particle Physics* as a seed anchor (too generic).
+- **Related**: hybrid ranking = weighted bibliographic coupling (shared refs) + optional co-citation re-ranking; by default it ignores the PDG _Review of Particle Physics_ as a seed anchor (too generic).
 - **Citation Graph**: a 1-hop visualization (refs/cited-by configurable up to 200 per side). Open via the panel button or the main toolbar button next to the search box; with no selection it opens an empty canvas where you can add seeds. Drag the time-range sliders under each x-axis to zoom the time window. Use the Reviews toggle to include/exclude review articles (incl. PDG).
 
 ### Search INSPIRE
@@ -111,26 +112,26 @@ Enable them via the column picker in the items list header. Preferences:
 
 ### Status Indicators
 
-| Icon        | Meaning                       |
-| ----------- | ----------------------------- |
+| Icon       | Meaning                       |
+| ---------- | ----------------------------- |
 | ● (green)  | Item exists in your library   |
 | ⊕ (red)    | Item can be imported          |
-| 🔗 (green)  | Linked as related item        |
-| 🔗 (gray)   | Not linked                    |
-| 📄 (green)  | PDF available - click to open |
-| ⬇️ (blue) | Find Full Text available      |
-| 📄 (gray)   | No PDF / Not in library       |
+| 🔗 (green) | Linked as related item        |
+| 🔗 (gray)  | Not linked                    |
+| 📄 (green) | PDF available - click to open |
+| ⬇️ (blue)  | Find Full Text available      |
+| 📄 (gray)  | No PDF / Not in library       |
 
 ### Interactions
 
 | Action               | Result                   |
 | -------------------- | ------------------------ |
-| Click ●             | Jump to local item       |
-| Double-click ●      | Open PDF directly        |
-| Click ⊕             | Open import dialog       |
+| Click ●              | Jump to local item       |
+| Double-click ●       | Open PDF directly        |
+| Click ⊕              | Open import dialog       |
 | Click 🔗             | Toggle related item link |
 | Click 📄 (green)     | Open PDF attachment      |
-| Click ⬇️ (blue)    | Trigger Find Full Text   |
+| Click ⬇️ (blue)      | Trigger Find Full Text   |
 | Click title          | Open in INSPIRE          |
 | Hover title          | Show abstract            |
 | Click author         | View author's papers     |
@@ -193,14 +194,14 @@ When reading a PDF in Zotero:
 
 ## Keyboard Shortcuts
 
-| Key                  | Action             |
-| -------------------- | ------------------ |
-| `↑` / `k`       | Previous entry     |
-| `↓` / `j`       | Next entry         |
-| `←` / `→`      | Navigate history   |
-| `Home` / `End`   | Jump to first/last |
+| Key                | Action             |
+| ------------------ | ------------------ |
+| `↑` / `k`          | Previous entry     |
+| `↓` / `j`          | Next entry         |
+| `←` / `→`          | Navigate history   |
+| `Home` / `End`     | Jump to first/last |
 | `Enter`            | Open PDF or import |
-| `Space` / `l`    | Toggle link        |
+| `Space` / `l`      | Toggle link        |
 | `Tab`              | Next tab           |
 | `Ctrl/Cmd+Shift+C` | Copy BibTeX        |
 | `Escape`           | Clear selection    |
@@ -238,7 +239,7 @@ Enable **Smart Update** in Preferences to preserve your manual edits when updati
 
 ### Better BibTeX Integration
 
-The plugin automatically sets INSPIRE citation keys in the Extra field, which Better BibTeX can use for pinning.
+The plugin automatically sets INSPIRE citation keys in the native Citation Key field (Zotero 8+) or Extra field (Zotero 7), which Better BibTeX can use for pinning.
 
 ### INSPIRE Lookup Engine
 
@@ -261,17 +262,17 @@ Add this to your Zotero `engines.json` for quick INSPIRE lookups:
 
 Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences`:
 
-| Setting                            | Description                                    |
-| ---------------------------------- | ---------------------------------------------- |
-| **Auto-fetch for new items** | Fetch metadata automatically when adding items |
-| **Citation key in Extra**    | Write INSPIRE texkey to Extra field            |
-| **Max authors**              | Number of authors shown before "et al."        |
-| **Statistics chart**         | Show year/citation distribution chart          |
-| **Local cache**              | Enable persistent disk cache for offline use   |
-| **Smart Update**             | Preserve manual edits during updates           |
-| **Preprint Watch**           | Monitor unpublished preprints                  |
-| **Fuzzy citation detection** | For PDFs with broken text layers               |
-| **Abstract LaTeX mode**      | KaTeX (full rendering, default) or Unicode     |
+| Setting                      | Description                                                          |
+| ---------------------------- | -------------------------------------------------------------------- |
+| **Auto-fetch for new items** | Fetch metadata automatically when adding items                       |
+| **Use INSPIRE Citekey**      | Write INSPIRE texkey to Citation Key (Zotero 8+) or Extra (Zotero 7) |
+| **Max authors**              | Number of authors shown before "et al."                              |
+| **Statistics chart**         | Show year/citation distribution chart                                |
+| **Local cache**              | Enable persistent disk cache for offline use                         |
+| **Smart Update**             | Preserve manual edits during updates                                 |
+| **Preprint Watch**           | Monitor unpublished preprints                                        |
+| **Fuzzy citation detection** | For PDFs with broken text layers                                     |
+| **Abstract LaTeX mode**      | KaTeX (full rendering, default) or Unicode                           |
 
 ---
 

@@ -122,7 +122,9 @@ async function loadPreprintWatchCache(): Promise<PreprintWatchCache | null> {
     preprintWatchCacheMemory = cached;
     return cached;
   } catch (e) {
-    Zotero.debug(`[${config.addonName}] Failed to load preprint watch cache: ${e}`);
+    Zotero.debug(
+      `[${config.addonName}] Failed to load preprint watch cache: ${e}`,
+    );
     return null;
   }
 }
@@ -130,7 +132,9 @@ async function loadPreprintWatchCache(): Promise<PreprintWatchCache | null> {
 /**
  * Save the unified preprint watch cache to disk.
  */
-async function savePreprintWatchCache(cache: PreprintWatchCache): Promise<void> {
+async function savePreprintWatchCache(
+  cache: PreprintWatchCache,
+): Promise<void> {
   const filePath = await getPreprintWatchCachePath();
   if (!filePath) return;
 
@@ -143,7 +147,9 @@ async function savePreprintWatchCache(cache: PreprintWatchCache): Promise<void> 
       `[${config.addonName}] Saved preprint watch cache (${cache.entries.length} entries)`,
     );
   } catch (e) {
-    Zotero.debug(`[${config.addonName}] Failed to save preprint watch cache: ${e}`);
+    Zotero.debug(
+      `[${config.addonName}] Failed to save preprint watch cache: ${e}`,
+    );
   }
 }
 
@@ -242,7 +248,10 @@ async function cleanupOldCandidatesFile(): Promise<void> {
   if (!cacheDir) return;
 
   const oldFile = PathUtils.join(cacheDir, "preprintCandidates_global.json.gz");
-  const oldFileJson = PathUtils.join(cacheDir, "preprintCandidates_global.json");
+  const oldFileJson = PathUtils.join(
+    cacheDir,
+    "preprintCandidates_global.json",
+  );
 
   try {
     await IOUtils.remove(oldFile, { ignoreAbsent: true });
@@ -378,7 +387,9 @@ export function extractArxivIdFromItem(item: Zotero.Item): string | null {
  */
 async function findItemByArxivId(arxivId: string): Promise<Zotero.Item | null> {
   // Search in journalAbbreviation (most common case for this plugin)
-  const search = new Zotero.Search({ libraryID: Zotero.Libraries.userLibraryID });
+  const search = new Zotero.Search({
+    libraryID: Zotero.Libraries.userLibraryID,
+  });
   search.addCondition("itemType", "is", "journalArticle");
   search.addCondition("journalAbbreviation", "contains", `arXiv:${arxivId}`);
   const ids = await search.search();
@@ -597,7 +608,8 @@ async function checkPublicationStatus(
   const response = await inspireFetch(url, { signal });
   if (!response.ok) return null;
 
-  const data = (await response.json()) as unknown as InspireLiteratureSearchResponse | null;
+  const data =
+    (await response.json()) as unknown as InspireLiteratureSearchResponse | null;
   const hits = data?.hits?.hits;
   if (!hits?.length) return null;
 
@@ -618,7 +630,10 @@ async function checkPublicationStatus(
 
       // Format journal title consistently (add spaces after dots)
       // This matches the formatting in metadataService.ts buildMetaFromMetadata
-      const formattedJournalTitle = primary.journal_title.replace(/\.\s|\./g, ". ");
+      const formattedJournalTitle = primary.journal_title.replace(
+        /\.\s|\./g,
+        ". ",
+      );
 
       return {
         journalTitle: formattedJournalTitle,
@@ -801,8 +816,12 @@ async function updateCacheFromResults(
       arxivId: result.arxivId,
       itemId: result.itemID,
       lastChecked: now,
-      status: result.status === "published" ? "published" :
-              result.status === "error" ? "error" : "unpublished",
+      status:
+        result.status === "published"
+          ? "published"
+          : result.status === "error"
+            ? "error"
+            : "unpublished",
       publicationInfo: result.publicationInfo,
     };
 
@@ -881,7 +900,11 @@ export async function updatePreprintWithPublicationInfo(
   // FTR-REFACTOR: If recid is available, fetch full metadata and do complete update
   // This ensures consistency with setInspireMeta() used by right-click and smart update
   if (pubInfo.recid) {
-    const fullMeta = await fetchInspireMetaByRecid(pubInfo.recid, undefined, "full");
+    const fullMeta = await fetchInspireMetaByRecid(
+      pubInfo.recid,
+      undefined,
+      "full",
+    );
     if (fullMeta !== -1 && typeof fullMeta === "object") {
       await updatePreprintWithFullMetadata(item, fullMeta as jsobject, opts);
       return;
@@ -1019,7 +1042,8 @@ async function updatePreprintWithFullMetadata(
     } else {
       arXivInfo = "arXiv:" + arxivId;
     }
-    const numberOfArxiv = (extra.match(/^.*(arXiv:|_eprint:).*$(\n|)/gim) || "").length;
+    const numberOfArxiv = (extra.match(/^.*(arXiv:|_eprint:).*$(\n|)/gim) || "")
+      .length;
     if (numberOfArxiv !== 1) {
       extra = extra.replace(/^.*(arXiv:|_eprint:).*$(\n|)/gim, "");
       if (extra.endsWith("\n")) {
@@ -1042,7 +1066,8 @@ async function updatePreprintWithFullMetadata(
 
   // Collaboration
   if (meta.collaborations && !extra.includes("tex.collaboration")) {
-    extra = extra + "\n" + "tex.collaboration: " + meta.collaborations.join(", ");
+    extra =
+      extra + "\n" + "tex.collaboration: " + meta.collaborations.join(", ");
   }
 
   // Citations
@@ -1057,13 +1082,22 @@ async function updatePreprintWithFullMetadata(
   // Citation key
   const citekey_pref = getPref("citekey");
   if (citekey_pref === "inspire" && meta.citekey) {
-    if (extra.includes("Citation Key")) {
-      const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) || "")[0]?.split(": ")[1];
-      if (initialCiteKey !== meta.citekey) {
-        extra = extra.replace(/^.*Citation\sKey.*$/gm, `Citation Key: ${meta.citekey}`);
-      }
+    const zoteroVersion = Zotero.platformMajorVersion;
+    if (zoteroVersion >= 8) {
+      item.setField("citationKey", meta.citekey);
     } else {
-      extra += "\nCitation Key: " + meta.citekey;
+      if (extra.includes("Citation Key")) {
+        const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
+          "")[0]?.split(": ")[1];
+        if (initialCiteKey !== meta.citekey) {
+          extra = extra.replace(
+            /^.*Citation\sKey.*$/gm,
+            `Citation Key: ${meta.citekey}`,
+          );
+        }
+      } else {
+        extra += "\nCitation Key: " + meta.citekey;
+      }
     }
   }
 
@@ -1157,7 +1191,9 @@ function setCitationsInExtra(
   const temp = extra.match(/^\d+\scitations/gm);
   let existingCitations: number[] = [0, 0];
   if (temp !== null && temp.length >= 2) {
-    existingCitations = temp.map((e: any) => Number(e.replace(" citations", "")));
+    existingCitations = temp.map((e: any) =>
+      Number(e.replace(" citations", "")),
+    );
   }
 
   const dateMatch = extra.match(/INSPIRE\s([\d/-]+)/);
