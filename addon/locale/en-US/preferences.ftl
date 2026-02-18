@@ -1,5 +1,5 @@
 pref-meta = Fetch INSPIRE Metadata for New Items
-pref-citekey = Set Citekey in Extra Field
+pref-citekey = Use INSPIRE Citekey
 pref-extra-order = Field Order in Extra
 pref-arxiv-tag = arXiv Primary Category Tag
 pref-refs-panel = References Panel

@@ -1,5 +1,5 @@
 pref-meta = 为新条目获取 INSPIRE 元数据
-pref-citekey = 在 Extra 字段设置引用键
+pref-citekey = 使用 INSPIRE 引用键
 pref-extra-order = Extra 字段顺序
 pref-arxiv-tag = arXiv 主分类标签
 pref-refs-panel = 引用面板

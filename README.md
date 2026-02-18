@@ -239,7 +239,7 @@ Enable **Smart Update** in Preferences to preserve your manual edits when updati
 
 ### Better BibTeX Integration
 
-The plugin automatically sets INSPIRE citation keys in the Extra field, which Better BibTeX can use for pinning.
+The plugin automatically sets INSPIRE citation keys in the native Citation Key field (Zotero 8+) or Extra field (Zotero 7), which Better BibTeX can use for pinning.
 
 ### INSPIRE Lookup Engine
 
@@ -262,6 +262,7 @@ Add this to your Zotero `engines.json` for quick INSPIRE lookups:
 
 Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences`:
 
+<<<<<<< HEAD
 | Setting                      | Description                                    |
 | ---------------------------- | ---------------------------------------------- |
 | **Auto-fetch for new items** | Fetch metadata automatically when adding items |
@@ -273,6 +274,19 @@ Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences
 | **Preprint Watch**           | Monitor unpublished preprints                  |
 | **Fuzzy citation detection** | For PDFs with broken text layers               |
 | **Abstract LaTeX mode**      | KaTeX (full rendering, default) or Unicode     |
+=======
+| Setting                      | Description                                                          |
+| ---------------------------- | -------------------------------------------------------------------- |
+| **Auto-fetch for new items** | Fetch metadata automatically when adding items                       |
+| **Use INSPIRE Citekey**      | Write INSPIRE texkey to Citation Key (Zotero 8+) or Extra (Zotero 7) |
+| **Max authors**              | Number of authors shown before "et al."                              |
+| **Statistics chart**         | Show year/citation distribution chart                                |
+| **Local cache**              | Enable persistent disk cache for offline use                         |
+| **Smart Update**             | Preserve manual edits during updates                                 |
+| **Preprint Watch**           | Monitor unpublished preprints                                        |
+| **Fuzzy citation detection** | For PDFs with broken text layers                                     |
+| **Abstract LaTeX mode**      | KaTeX (full rendering, default) or Unicode                           |
+>>>>>>> a82677e (feat: support native citationKey field for Zotero 8+, fix #102 (v3.0.3_dev))
 
 ---
 

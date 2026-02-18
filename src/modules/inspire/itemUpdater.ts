@@ -1546,9 +1546,18 @@ export class ZInspire {
     if (!items.length) return;
 
     const citationKeys = items
-      .map((item) =>
-        (item.getField("citationKey") as string | undefined)?.trim(),
-      )
+      .map((item) => {
+        let key = (item.getField("citationKey") as string | undefined)?.trim();
+        if (key) return key;
+
+        const extra = item.getField("extra") as string | undefined;
+        if (extra) {
+          const match = extra.match(/^Citation\s+Key:\s*(\S+)/m);
+          if (match) return match[1];
+        }
+
+        return undefined;
+      })
       .filter((key): key is string => !!key);
 
     if (!citationKeys.length) {
@@ -2700,18 +2709,23 @@ export async function setInspireMeta(
 
       await queueOrUpsertInspireNote(item, metaInspire.note);
 
-      if (citekey_pref === "inspire") {
-        if (extra.includes("Citation Key")) {
-          const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
-            "")[0].split(": ")[1];
-          if (initialCiteKey !== metaInspire.citekey) {
-            extra = extra.replace(
-              /^.*Citation\sKey.*$/gm,
-              `Citation Key: ${metaInspire.citekey}`,
-            );
-          }
+      if (citekey_pref === "inspire" && metaInspire.citekey) {
+        const zoteroVersion = Zotero.platformMajorVersion;
+        if (zoteroVersion >= 8) {
+          item.setField("citationKey", metaInspire.citekey);
         } else {
-          extra += "\nCitation Key: " + metaInspire.citekey;
+          if (extra.includes("Citation Key")) {
+            const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
+              "")[0].split(": ")[1];
+            if (initialCiteKey !== metaInspire.citekey) {
+              extra = extra.replace(
+                /^.*Citation\sKey.*$/gm,
+                `Citation Key: ${metaInspire.citekey}`,
+              );
+            }
+          } else {
+            extra += "\nCitation Key: " + metaInspire.citekey;
+          }
         }
       }
     }
@@ -2955,12 +2969,13 @@ export async function setInspireMetaSelective(
 
       await queueOrUpsertInspireNote(item, metaInspire.note);
 
-      // Citation key
       if (
         allowedFields.has("citekey") &&
         citekey_pref === "inspire" &&
         metaInspire.citekey
       ) {
+        item.setField("citationKey", metaInspire.citekey);
+
         if (extra.includes("Citation Key")) {
           const initialCiteKey = (extra.match(/^.*Citation\sKey:.*$/gm) ||
             "")[0]?.split(": ")[1];
