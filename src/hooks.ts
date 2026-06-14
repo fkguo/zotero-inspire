@@ -34,6 +34,10 @@ import {
   registerZInspirePickSaveTargetEndpoint,
   unregisterZInspirePickSaveTargetEndpoint,
 } from "./modules/connectorPickSaveTarget";
+import {
+  registerZInspireWriteEndpoint,
+  unregisterZInspireWriteEndpoint,
+} from "./modules/connectorWriteApi";
 
 // Track background timers for cleanup on shutdown (PERF-FIX-1)
 let purgeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -65,9 +69,10 @@ async function onStartup() {
   // Expose console commands for debugging
   exposeConsoleCommands();
 
-  // External tool integration: token + connector endpoint
+  // External tool integration: token + connector endpoints
   ensureExternalToken();
   registerZInspirePickSaveTargetEndpoint();
+  registerZInspireWriteEndpoint();
 
   // Purge expired local cache entries in background after startup (PERF-FIX-1: tracked timer)
   purgeTimer = setTimeout(() => {
@@ -214,6 +219,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 
 function onShutdown(): void {
   unregisterZInspirePickSaveTargetEndpoint();
+  unregisterZInspireWriteEndpoint();
 
   // PERF-FIX-1: Clear tracked timers before shutdown
   if (purgeTimer) {
