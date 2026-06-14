@@ -295,6 +295,17 @@ Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences
 
 ---
 
+## External Write API (for local tools)
+
+Since **3.0.3**, zotero-inspire registers an authenticated `POST /connector/zinspireWrite`
+endpoint so trusted local tools can do what Zotero's read-only Local API cannot:
+attach a local file to an item, and trash/erase items. This is what the
+**autoresearch `zotero-mcp` / `hep-mcp`** integration uses for PDF attachment and
+deletion. Full contract (auth, operations, errors, dependency notes):
+[`docs/EXTERNAL_WRITE_API.md`](docs/EXTERNAL_WRITE_API.md).
+
+---
+
 ## License
 
 Mozilla Public License (MPL) Version 2.0
