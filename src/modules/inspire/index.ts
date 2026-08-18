@@ -144,6 +144,7 @@ export {
   fetchReferencesEntries,
   buildReferenceEntry,
   enrichReferencesEntries,
+  type ReferenceEnrichmentResult,
 } from "./referencesService";
 
 // Re-export related papers service (FTR-RELATED-PAPERS)

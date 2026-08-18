@@ -4,6 +4,10 @@ import { getJournalAbbreviations } from "../utils/journalAbbreviations";
 import { getLocaleID, getString } from "../utils/locale";
 import type { FluentMessageId } from "../../typings/i10n";
 import { getPref, setPref } from "../utils/prefs";
+import {
+  getPrimarySelectedCollection,
+  getPrimarySelectedLibraryID,
+} from "../utils/zoteroPaneSelection";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   showTargetPickerUI,
@@ -10389,8 +10393,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           Zotero.debug(
             `[${config.addonName}] Starting enrichment for ${enrichMode}/${enrichRecid} (${entries.length} entries)`,
           );
+          let referenceEnrichmentComplete = true;
           if (mode === "references") {
-            await Promise.allSettled([
+            const [, metadataOutcome] = await Promise.allSettled([
               this.enrichLocalStatus(entries, enrichSignal),
               enrichReferencesEntries(entries, {
                 signal: enrichSignal,
@@ -10409,6 +10414,18 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
                 },
               }),
             ]);
+            referenceEnrichmentComplete =
+              metadataOutcome.status === "fulfilled" &&
+              metadataOutcome.value.complete;
+            if (!referenceEnrichmentComplete) {
+              const failedCount =
+                metadataOutcome.status === "fulfilled"
+                  ? metadataOutcome.value.failedRecids.length
+                  : entries.filter((entry) => entry.recid).length;
+              Zotero.debug(
+                `[${config.addonName}] Reference enrichment incomplete for ${enrichRecid} (${failedCount} failed recids); cache write skipped`,
+              );
+            }
           } else {
             await Promise.allSettled([
               this.enrichLocalStatus(entries, enrichSignal),
@@ -10430,13 +10447,15 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           // After enrichment completes, persist enriched data to local cache
           // ALWAYS write to cache after enrichment, even if user switched to another item
           // This ensures the enriched data is saved for future use
-          await this.persistEnrichedCache(
-            entries,
-            enrichMode,
-            enrichRecid,
-            enrichSortOption,
-            cacheKey,
-          );
+          if (enrichMode !== "references" || referenceEnrichmentComplete) {
+            await this.persistEnrichedCache(
+              entries,
+              enrichMode,
+              enrichRecid,
+              enrichSortOption,
+              cacheKey,
+            );
+          }
         } catch (err) {
           // Silently ignore enrichment errors - they don't affect core functionality
           if ((err as any)?.name !== "AbortError") {
@@ -16942,14 +16961,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
   private getDefaultTargetID(): string | null {
     const pane = Zotero.getActiveZoteroPane();
-    if (pane?.getSelectedCollection()) {
-      const selected = pane.getSelectedCollection();
-      if (selected) {
-        return `C${selected.id}`;
-      }
+    const selected = getPrimarySelectedCollection(pane);
+    if (selected) {
+      return `C${selected.id}`;
     }
     const libraryID =
-      pane?.getSelectedLibraryID() ?? Zotero.Libraries.userLibrary?.libraryID;
+      getPrimarySelectedLibraryID(pane) ?? Zotero.Libraries.userLibrary?.libraryID;
     return libraryID ? `L${libraryID}` : null;
   }
 

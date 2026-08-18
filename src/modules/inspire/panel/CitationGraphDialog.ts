@@ -1,6 +1,10 @@
 import { getString } from "../../../utils/locale";
 import { getPref, setPref } from "../../../utils/prefs";
 import {
+  getPrimarySelectedCollection,
+  getPrimarySelectedLibraryID,
+} from "../../../utils/zoteroPaneSelection";
+import {
   applyPillButtonStyle,
   showTargetPickerUI,
   type SaveTargetRow,
@@ -1528,14 +1532,12 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
   private getDefaultTargetID(): string | null {
     const pane = Zotero.getActiveZoteroPane?.();
-    if (pane?.getSelectedCollection?.()) {
-      const selected = pane.getSelectedCollection();
-      if (selected) {
-        return `C${selected.id}`;
-      }
+    const selected = getPrimarySelectedCollection(pane);
+    if (selected) {
+      return `C${selected.id}`;
     }
     const libraryID =
-      pane?.getSelectedLibraryID?.() ??
+      getPrimarySelectedLibraryID(pane) ??
       (Zotero.Libraries as any)?.userLibrary?.libraryID;
     return libraryID ? `L${libraryID}` : null;
   }
@@ -3256,7 +3258,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       const userLibrary =
         (Zotero.Libraries as any)?.userLibrary?.libraryID ??
         (Zotero.Libraries as any)?.userLibraryID;
-      libraryID = pane?.getSelectedLibraryID?.() ?? userLibrary;
+      libraryID = getPrimarySelectedLibraryID(pane) ?? userLibrary;
     } catch {
       libraryID =
         (Zotero.Libraries as any)?.userLibrary?.libraryID ??

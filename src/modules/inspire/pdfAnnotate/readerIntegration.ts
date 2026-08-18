@@ -1546,10 +1546,20 @@ export class ReaderIntegration {
       }
 
       // Enrich with complete metadata (title, authors, etc.)
-      await enrichReferencesEntries(entries);
+      const enrichmentResult = await enrichReferencesEntries(entries);
 
-      // Store to local cache
-      await localCache.set("refs", recid, entries, undefined, entries.length);
+      // Only persist transport-complete enrichment results. A failed batch must
+      // remain retryable instead of becoming a permanent references cache.
+      if (enrichmentResult.complete) {
+        await localCache.set("refs", recid, entries, undefined, entries.length);
+        Zotero.debug(
+          `[${config.addonName}] [PRELOAD] Cached ${entries.length} references for ${recid}`,
+        );
+      } else {
+        Zotero.debug(
+          `[${config.addonName}] [PRELOAD] Skipping incomplete references cache for ${recid} (${enrichmentResult.failedRecids.length} failed recids)`,
+        );
+      }
 
       // FTR-PDF-MATCHING: Set maxKnownLabel based on entry count for precise concatenated range detection
       // This provides an early estimate before PDF is parsed
@@ -1559,10 +1569,6 @@ export class ReaderIntegration {
           `[${config.addonName}] [PRELOAD] Set maxKnownLabel=${entries.length} for attachment ${attachmentItemID}`,
         );
       }
-
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] Cached ${entries.length} references for ${recid}`,
-      );
 
       // FTR-PDF-PARSE-PRELOAD: Also preload PDF parsing in background
       // This reduces first-click latency by having PDF mapping ready

@@ -1,5 +1,9 @@
 import { config } from "../../package.json";
 import { ensureExternalToken } from "../utils/externalToken";
+import {
+  getPrimarySelectedCollection,
+  getPrimarySelectedLibraryID,
+} from "../utils/zoteroPaneSelection";
 import { showTargetPickerUI, type SaveTargetRow } from "./pickerUI";
 
 const ENDPOINT_PATH = "/connector/zinspirePickSaveTarget";
@@ -119,14 +123,12 @@ function rememberRecentTarget(targetID: string) {
 
 function getDefaultTargetID(): string | null {
   const pane = Zotero.getActiveZoteroPane();
-  if (pane?.getSelectedCollection?.()) {
-    const selected = pane.getSelectedCollection();
-    if (selected) {
-      return `C${selected.id}`;
-    }
+  const selected = getPrimarySelectedCollection(pane);
+  if (selected) {
+    return `C${selected.id}`;
   }
   const libraryID =
-    pane?.getSelectedLibraryID?.() ?? Zotero.Libraries.userLibrary?.libraryID;
+    getPrimarySelectedLibraryID(pane) ?? Zotero.Libraries.userLibrary?.libraryID;
   return libraryID ? `L${libraryID}` : null;
 }
 
@@ -512,4 +514,3 @@ export function unregisterZInspirePickSaveTargetEndpoint(): void {
   previousEndpoint = null;
   registered = false;
 }
-

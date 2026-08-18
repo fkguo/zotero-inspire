@@ -592,9 +592,9 @@ export async function fetchCitationGraphOneHop(
   let referencesFilteredRecids: string[] = [];
   try {
     const allRefs = await fetchReferencesEntries(seedRecid, { signal });
-    refsOk = true;
     // Enrich references to get citation counts
-    await enrichReferencesEntries(allRefs, { signal });
+    const enrichmentResult = await enrichReferencesEntries(allRefs, { signal });
+    refsOk = enrichmentResult.complete;
     referencesAllRecids = allRefs
       .map((e) => e.recid)
       .filter((r): r is string => typeof r === "string" && r.trim().length > 0);

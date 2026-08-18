@@ -1,6 +1,7 @@
 import { config } from "../../../package.json";
 import { getString } from "../../utils/locale";
 import { getPref, setPref } from "../../utils/prefs";
+import { getPrimarySelectedCollection } from "../../utils/zoteroPaneSelection";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   DOI_ORG_URL,
@@ -78,7 +79,8 @@ export class ZInspire {
   error_norecid: boolean;
   error_norecid_shown: boolean;
   final_count_shown: boolean;
-  progressWindow: ProgressWindowHelper;
+  progressWindow?: ProgressWindowHelper;
+  private closedProgressWindows = new WeakSet<ProgressWindowHelper>();
   private updateController: AbortController | null = null;
   private isCancelled: boolean = false;
   private escapeHandler?: (e: KeyboardEvent) => void;
@@ -105,17 +107,30 @@ export class ZInspire {
     this.error_norecid = error_norecid;
     this.error_norecid_shown = error_norecid_shown;
     this.final_count_shown = final_count_shown;
-    this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-      closeOnClick: true,
-      closeTime: -1,
-    });
+  }
+
+  private closeActiveProgressWindow(
+    progressWindow: ProgressWindowHelper | undefined = this.progressWindow,
+  ): void {
+    if (!progressWindow || this.closedProgressWindows.has(progressWindow)) {
+      return;
+    }
+    this.closedProgressWindows.add(progressWindow);
+    if (this.progressWindow === progressWindow) {
+      this.progressWindow = undefined;
+    }
+    try {
+      progressWindow.close();
+    } catch (error) {
+      Zotero.debug(
+        `[${config.addonName}] Failed to close progress window: ${error}`,
+      );
+    }
   }
 
   resetState(operation: string) {
     if (operation === "initial") {
-      if (this.progressWindow) {
-        this.progressWindow.close();
-      }
+      this.closeActiveProgressWindow();
       this.current = -1;
       this.toUpdate = 0;
       this.itemsToUpdate = [];
@@ -128,7 +143,7 @@ export class ZInspire {
       this.final_count_shown = false;
     } else {
       if (this.error_norecid) {
-        this.progressWindow.close();
+        this.closeActiveProgressWindow();
         const icon = "chrome://zotero/skin/cross.png";
         if (this.error_norecid && !this.error_norecid_shown) {
           const progressWindowNoRecid = new ztoolkit.ProgressWindow(
@@ -154,18 +169,18 @@ export class ZInspire {
         }
       } else {
         if (!this.final_count_shown) {
-          this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+          const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
             closeOnClick: true,
           });
-          this.progressWindow.win.changeHeadline("Finished", PLUGIN_ICON);
+          progressWindow.win.changeHeadline("Finished", PLUGIN_ICON);
           if (operation === "full" || operation === "noabstract") {
-            this.progressWindow.createLine({
+            progressWindow.createLine({
               icon: PLUGIN_ICON,
               text: "INSPIRE metadata updated for " + this.counter + " items.",
               progress: 100,
             });
           } else if (operation === "citations") {
-            this.progressWindow.createLine({
+            progressWindow.createLine({
               icon: PLUGIN_ICON,
               text:
                 "INSPIRE citations updated for " +
@@ -177,8 +192,8 @@ export class ZInspire {
               progress: 100,
             });
           }
-          this.progressWindow.show();
-          this.progressWindow.startCloseTimer(3000);
+          progressWindow.show();
+          progressWindow.startCloseTimer(3000);
           this.final_count_shown = true;
         }
       }
@@ -240,7 +255,9 @@ export class ZInspire {
     this.resetState("initial");
     this.isCancelled = false;
     this.setupEscapeListener();
-    const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
+    const collection = getPrimarySelectedCollection(
+      Zotero.getActiveZoteroPane(),
+    );
     if (collection) {
       this.itemsToUpdate = collection.getChildItems();
       this.toUpdate = this.itemsToUpdate.length;
@@ -358,7 +375,9 @@ export class ZInspire {
    */
   openCombinedCitationGraphFromCollection(): void {
     try {
-      const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
+      const collection = getPrimarySelectedCollection(
+        Zotero.getActiveZoteroPane(),
+      );
       const items = collection?.getChildItems?.() ?? [];
       const regularItems = items.filter((item) => item?.isRegularItem());
 
@@ -472,7 +491,9 @@ export class ZInspire {
         );
         return;
       }
-      const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
+      const collection = getPrimarySelectedCollection(
+        Zotero.getActiveZoteroPane(),
+      );
       if (!collection) {
         this.showCacheNotification(
           getString("download-cache-no-selection"),
@@ -533,18 +554,19 @@ export class ZInspire {
     }
 
     // Show initial progress
-    this.progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+    const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
       closeOnClick: true,
       closeTime: -1,
     });
+    this.progressWindow = progressWindow;
     // Note: Zotero 7 ProgressWindow headline does not display icons
     // Use icon in createLine instead to show plugin logo
-    this.progressWindow.createLine({
+    progressWindow.createLine({
       icon: PLUGIN_ICON,
       text: `Processing 0 of ${total} items...`,
       progress: 0,
     });
-    this.progressWindow.show();
+    progressWindow.show();
 
     // Create a queue of pending items
     const queue = [...this.itemsToUpdate];
@@ -577,7 +599,7 @@ export class ZInspire {
         // Update progress
         if (!this.isCancelled) {
           const percent = Math.round((completed / total) * 100);
-          this.progressWindow.changeLine({
+          progressWindow.changeLine({
             icon: PLUGIN_ICON,
             text: `Processing ${completed} of ${total} items...`,
             progress: percent,
@@ -604,7 +626,7 @@ export class ZInspire {
 
       // Finish
       if (!this.isCancelled) {
-        this.progressWindow.close();
+        this.closeActiveProgressWindow(progressWindow);
         this.numberOfUpdatedItems = total;
         this.current = total - 1;
         this.resetState(operation);
@@ -613,7 +635,7 @@ export class ZInspire {
         );
       } else {
         // Cancelled - show stats
-        this.progressWindow.close();
+        this.closeActiveProgressWindow(progressWindow);
         this.numberOfUpdatedItems = total;
         this.current = total - 1;
         this.showCancelledStats(completed, total);
@@ -622,11 +644,7 @@ export class ZInspire {
       Zotero.debug(
         `[${config.addonName}] updateItemsConcurrent: fatal error: ${err}`,
       );
-      try {
-        this.progressWindow.close();
-      } catch (_e) {
-        /* ignore */
-      }
+      this.closeActiveProgressWindow(progressWindow);
       this.numberOfUpdatedItems = this.toUpdate;
     } finally {
       this.removeEscapeListener();
@@ -723,7 +741,12 @@ export class ZInspire {
         }
         // Enrich entries with complete metadata (title, authors, citation count)
         // This ensures cached data is complete and usable offline
-        await enrichReferencesEntries(entries);
+        const enrichmentResult = await enrichReferencesEntries(entries);
+        if (!enrichmentResult.complete) {
+          throw new Error(
+            `Metadata enrichment failed for ${enrichmentResult.failedRecids.length} linked references`,
+          );
+        }
         if (this.isCancelled) {
           progressWindow.close();
           this.showCacheCancelledStats(success, total);
@@ -797,8 +820,16 @@ export class ZInspire {
     this.numberOfUpdatedItems++;
 
     if (this.current === this.toUpdate - 1) {
-      this.progressWindow.close();
+      this.closeActiveProgressWindow();
       this.resetState(operation);
+      return;
+    }
+
+    const progressWindow = this.progressWindow;
+    if (!progressWindow) {
+      Zotero.debug(
+        `[${config.addonName}] updateNextItem called without an active progress window`,
+      );
       return;
     }
 
@@ -807,12 +838,12 @@ export class ZInspire {
     const percent = Math.round(
       (this.numberOfUpdatedItems / this.toUpdate) * 100,
     );
-    this.progressWindow.changeLine({ icon: PLUGIN_ICON, progress: percent });
-    this.progressWindow.changeLine({
+    progressWindow.changeLine({ icon: PLUGIN_ICON, progress: percent });
+    progressWindow.changeLine({
       icon: PLUGIN_ICON,
       text: "Item " + this.current + " of " + this.toUpdate,
     });
-    this.progressWindow.show();
+    progressWindow.show();
 
     this.updateItem(this.itemsToUpdate[this.current], operation);
   }
@@ -1541,7 +1572,9 @@ export class ZInspire {
    */
   async checkPreprintsInCollection(): Promise<void> {
     Zotero.debug(`[${config.addonName}] checkPreprintsInCollection: starting`);
-    const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
+    const collection = getPrimarySelectedCollection(
+      Zotero.getActiveZoteroPane(),
+    );
     if (!collection) {
       Zotero.debug(
         `[${config.addonName}] checkPreprintsInCollection: no collection selected`,
@@ -2107,7 +2140,9 @@ export class ZInspire {
       return;
     }
 
-    const collection = Zotero.getActiveZoteroPane()?.getSelectedCollection();
+    const collection = getPrimarySelectedCollection(
+      Zotero.getActiveZoteroPane(),
+    );
     if (!collection) {
       this.showCollabTagNotification(
         getString("collab-tag-no-selection"),

@@ -32,7 +32,7 @@ pref("__prefsPrefix__.local_cache_ttl_hours", 24);
 pref("__prefsPrefix__.local_cache_show_source", true);
 pref("__prefsPrefix__.local_cache_custom_dir", ""); // Empty = use default (Zotero Data Directory)
 pref("__prefsPrefix__.local_cache_compression", true); // Enable gzip compression for cache files
-pref("__prefsPrefix__.local_cache_enrich_batch", 100); // Entries per metadata batch (25-200 recommended)
+pref("__prefsPrefix__.local_cache_enrich_batch", 87); // Entries per metadata batch (25-110 allowed)
 pref("__prefsPrefix__.local_cache_enrich_parallel", 4); // Parallel batch requests (1-5 recommended)
 // Smart update settings (FTR-SMART-UPDATE)
 pref("__prefsPrefix__.smart_update_enable", false); // Enable smart/incremental update mode

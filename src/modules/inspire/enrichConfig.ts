@@ -6,7 +6,7 @@ export const ENRICH_PARALLEL_PREF = "local_cache_enrich_parallel";
 export const ENRICH_BATCH_RANGE = { min: 25, max: 110 };
 export const ENRICH_PARALLEL_RANGE = { min: 1, max: 5 };
 
-export const ENRICH_BATCH_DEFAULT = 100;
+export const ENRICH_BATCH_DEFAULT = 87;
 export const ENRICH_PARALLEL_DEFAULT = 4;
 
 function clamp(

@@ -236,6 +236,58 @@ interface EnrichReferencesOptions {
   onBatchComplete?: (processedRecids: string[]) => void;
 }
 
+export interface ReferenceEnrichmentResult {
+  /** Recids whose metadata was applied from memory or the INSPIRE response. */
+  processedRecids: string[];
+  /** Recids omitted by a successful INSPIRE response. */
+  unresolvedRecids: string[];
+  /** Recids not queried successfully after retry/adaptive splitting. */
+  failedRecids: string[];
+  /** Whether all network batches completed without transport/HTTP failures. */
+  complete: boolean;
+}
+
+interface BatchEnrichmentResult {
+  processedRecids: string[];
+  unresolvedRecids: string[];
+  failedRecids: string[];
+}
+
+const ADAPTIVE_SPLIT_MIN_BATCH_SIZE = 25;
+const NETWORK_RETRY_LIMIT = 1;
+const ADAPTIVE_SPLIT_HTTP_STATUSES = new Set([400, 413, 414, 431]);
+
+function shouldSplitFailedBatch(status: number): boolean {
+  return (
+    ADAPTIVE_SPLIT_HTTP_STATUSES.has(status) ||
+    (status >= 500 && status <= 599)
+  );
+}
+
+function emptyBatchEnrichmentResult(): BatchEnrichmentResult {
+  return {
+    processedRecids: [],
+    unresolvedRecids: [],
+    failedRecids: [],
+  };
+}
+
+function mergeBatchEnrichmentResults(
+  ...results: BatchEnrichmentResult[]
+): BatchEnrichmentResult {
+  const merged = emptyBatchEnrichmentResult();
+  for (const result of results) {
+    merged.processedRecids.push(...result.processedRecids);
+    merged.unresolvedRecids.push(...result.unresolvedRecids);
+    merged.failedRecids.push(...result.failedRecids);
+  }
+  return {
+    processedRecids: merged.processedRecids,
+    unresolvedRecids: merged.unresolvedRecids,
+    failedRecids: merged.failedRecids,
+  };
+}
+
 /**
  * Enrich reference entries by fetching missing metadata from INSPIRE.
  * This function is shared by:
@@ -247,11 +299,12 @@ interface EnrichReferencesOptions {
  *
  * @param entries - Array of InspireReferenceEntry to enrich (modified in place)
  * @param options - Optional signal for cancellation and progress callback
+ * @returns Structured completion status used to prevent incomplete cache writes
  */
 export async function enrichReferencesEntries(
   entries: InspireReferenceEntry[],
   options: EnrichReferencesOptions = {},
-): Promise<void> {
+): Promise<ReferenceEnrichmentResult> {
   const { signal, onBatchComplete } = options;
   const strings = getCachedStrings();
 
@@ -299,7 +352,12 @@ export async function enrichReferencesEntries(
   }
 
   if (!needsDetails.length || signal?.aborted) {
-    return;
+    return {
+      processedRecids: cacheAppliedRecids,
+      unresolvedRecids: [],
+      failedRecids: [],
+      complete: !signal?.aborted,
+    };
   }
 
   Zotero.debug(
@@ -317,6 +375,7 @@ export async function enrichReferencesEntries(
   }
 
   const uniqueRecids = Array.from(recidToEntry.keys());
+  const batchResults: BatchEnrichmentResult[] = [];
 
   // Split into batches
   const batches: string[][] = [];
@@ -326,27 +385,49 @@ export async function enrichReferencesEntries(
 
   // Process batches in parallel groups
   for (let i = 0; i < batches.length; i += parallelBatches) {
-    if (signal?.aborted) return;
+    if (signal?.aborted) {
+      return {
+        processedRecids: cacheAppliedRecids,
+        unresolvedRecids: [],
+        failedRecids: uniqueRecids,
+        complete: false,
+      };
+    }
 
     const parallelBatchGroup = batches.slice(i, i + parallelBatches);
-    await Promise.all(
+    const parallelResults = await Promise.all(
       parallelBatchGroup.map(async (batch) => {
-        const processed = await fetchAndApplyBatchMetadata(
+        const result = await fetchAndApplyBatchMetadata(
           batch,
           recidToEntry,
           strings,
           signal,
         );
-        if (processed.length && onBatchComplete) {
-          onBatchComplete(processed);
+        if (result.processedRecids.length && onBatchComplete) {
+          onBatchComplete(result.processedRecids);
         }
+        return result;
       }),
     );
+    batchResults.push(...parallelResults);
   }
 
+  const combined = mergeBatchEnrichmentResults(...batchResults);
+  const processedRecids = [
+    ...new Set([...cacheAppliedRecids, ...combined.processedRecids]),
+  ];
+  const unresolvedRecids = [...new Set(combined.unresolvedRecids)];
+  const failedRecids = [...new Set(combined.failedRecids)];
+
   Zotero.debug(
-    `[${config.addonName}] Enrichment completed for ${needsDetails.length} entries`,
+    `[${config.addonName}] Enrichment completed for ${needsDetails.length} entries (${processedRecids.length} processed, ${unresolvedRecids.length} unresolved, ${failedRecids.length} failed)`,
   );
+  return {
+    processedRecids,
+    unresolvedRecids,
+    failedRecids,
+    complete: failedRecids.length === 0,
+  };
 }
 
 /**
@@ -357,8 +438,16 @@ async function fetchAndApplyBatchMetadata(
   recidToEntry: Map<string, InspireReferenceEntry[]>,
   strings: ReturnType<typeof getCachedStrings>,
   signal?: AbortSignal,
-): Promise<string[]> {
-  if (signal?.aborted || !batchRecids.length) return [];
+  networkRetryCount = 0,
+): Promise<BatchEnrichmentResult> {
+  if (!batchRecids.length) return emptyBatchEnrichmentResult();
+  if (signal?.aborted) {
+    return {
+      processedRecids: [],
+      unresolvedRecids: [],
+      failedRecids: batchRecids,
+    };
+  }
 
   const query = batchRecids.map((r) => `recid:${r}`).join(" OR ");
   // FTR-API-FIELD-OPTIMIZATION: Use centralized field configuration
@@ -369,18 +458,38 @@ async function fetchAndApplyBatchMetadata(
     const response = await inspireFetch(
       url,
       signal ? { signal } : undefined,
-    ).catch(() => null);
-    if (!response) {
-      Zotero.debug(
-        `[${config.addonName}] enrich batch failed: no response (recids=${batchRecids.slice(0, 5).join(",")}${batchRecids.length > 5 ? "..." : ""})`,
-      );
-      return [];
-    }
+    );
     if (response.status !== 200) {
       Zotero.debug(
         `[${config.addonName}] enrich batch HTTP ${response.status} (recids=${batchRecids.slice(0, 5).join(",")}${batchRecids.length > 5 ? "..." : ""})`,
       );
-      return [];
+      if (
+        shouldSplitFailedBatch(response.status) &&
+        batchRecids.length > ADAPTIVE_SPLIT_MIN_BATCH_SIZE
+      ) {
+        const midpoint = Math.ceil(batchRecids.length / 2);
+        Zotero.debug(
+          `[${config.addonName}] Splitting failed enrichment batch ${batchRecids.length} -> ${midpoint} + ${batchRecids.length - midpoint}`,
+        );
+        const first = await fetchAndApplyBatchMetadata(
+          batchRecids.slice(0, midpoint),
+          recidToEntry,
+          strings,
+          signal,
+        );
+        const second = await fetchAndApplyBatchMetadata(
+          batchRecids.slice(midpoint),
+          recidToEntry,
+          strings,
+          signal,
+        );
+        return mergeBatchEnrichmentResults(first, second);
+      }
+      return {
+        processedRecids: [],
+        unresolvedRecids: [],
+        failedRecids: batchRecids,
+      };
     }
 
     const payload = (await response.json()) as unknown as
@@ -409,15 +518,35 @@ async function fetchAndApplyBatchMetadata(
       }
       processedRecids.push(recid);
     }
-    return processedRecids;
+    const processedSet = new Set(processedRecids);
+    return {
+      processedRecids,
+      unresolvedRecids: batchRecids.filter((recid) => !processedSet.has(recid)),
+      failedRecids: [],
+    };
   } catch (err) {
-    if ((err as any)?.name !== "AbortError") {
+    if ((err as any)?.name === "AbortError") {
+      throw err;
+    }
+    if (networkRetryCount < NETWORK_RETRY_LIMIT) {
       Zotero.debug(
-        `[${config.addonName}] Error fetching batch metadata: ${err}`,
+        `[${config.addonName}] Retrying enrichment batch after network error: ${err}`,
+      );
+      return fetchAndApplyBatchMetadata(
+        batchRecids,
+        recidToEntry,
+        strings,
+        signal,
+        networkRetryCount + 1,
       );
     }
+    Zotero.debug(`[${config.addonName}] Error fetching batch metadata: ${err}`);
+    return {
+      processedRecids: [],
+      unresolvedRecids: [],
+      failedRecids: batchRecids,
+    };
   }
-  return [];
 }
 
 /**
