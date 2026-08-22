@@ -23,6 +23,7 @@ pref("__prefsPrefix__.search_history_days", 30);
 pref("__prefsPrefix__.pdf_fuzzy_citation", false); // Aggressive citation detection for broken PDF text layers
 pref("__prefsPrefix__.pdf_parse_refs_list", false); // Parse PDF reference list to fix label mapping (for multi-citation references)
 pref("__prefsPrefix__.pdf_force_mapping_on_mismatch", true); // When PDF/INSPIRE reference counts diverge, force PDF mapping and skip index fallback
+pref("__prefsPrefix__.pdf_native_overlay_reuse", true); // Restart-required, source-gated Zotero 10 native citation overlay reuse
 pref("__prefsPrefix__.quick_filters_last_used", "[]");
 // Developer/debug toggles
 pref("__prefsPrefix__.debug_panel_layout", false); // Enable panel layout debug logs/UI

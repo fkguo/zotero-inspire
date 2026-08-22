@@ -539,7 +539,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       const labels = ["Guerrieri et al. 2014", "Guerrieri", "2014"];
       const results = matcher.matchAuthorYear(labels);
 
@@ -563,7 +563,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       const labels = ["Weinstein and Isgur 1982", "Weinstein", "Isgur", "1982"];
       const results = matcher.matchAuthorYear(labels);
 
@@ -591,7 +591,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       const labels = ["Guerrieri et al. 2014", "Guerrieri", "2014"];
       const results = matcher.matchAuthorYear(labels);
 
@@ -610,7 +610,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       const labels = ["Guerrieri et al. 2014", "Guerrieri", "2014"];
       const results = matcher.matchAuthorYear(labels);
 
@@ -641,7 +641,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       const labels = ["Guerrieri 2014", "Guerrieri", "2014"];
       const results = matcher.matchAuthorYear(labels);
 
@@ -659,7 +659,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       const labels = ["Chen 2017a", "Chen", "2017a"];
       const results = matcher.matchAuthorYear(labels);
 
@@ -679,7 +679,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       const labels = ["Guerrieri"];
       const results = matcher.matchAuthorYear(labels);
 
@@ -699,7 +699,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       const labels = ["Guerrieri et al. 2014", "Guerrieri", "2014"];
       const results = matcher.matchAuthorYear(labels);
 
@@ -736,7 +736,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
 
       // Set up author-year mapping from PDF (values are arrays of PDFPaperInfo)
       matcher.setAuthorYearMapping({
@@ -805,7 +805,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
       // No setAuthorYearMapping called
 
       expect(matcher.hasAuthorYearMapping()).toBe(false);
@@ -848,7 +848,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
 
       // Set up author-year mapping from PDF reference list (values are arrays)
       matcher.setAuthorYearMapping({
@@ -942,7 +942,7 @@ describe("LabelMatcher.matchAuthorYear", () => {
         }),
       ];
 
-      const matcher = new LabelMatcher(entries);
+      const matcher = new LabelMatcher(entries, 101);
 
       // Set up author-year mapping with ONLY the key we're searching for (values are arrays)
       // This simulates the case where PDF parsing succeeded but findPreciseMatch might fail

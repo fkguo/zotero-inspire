@@ -190,6 +190,8 @@ When reading a PDF in Zotero:
 
 **Supported formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, `[arXiv:2301.12345]`, superscripts
 
+On source-audited Zotero 10.0 builds, the plugin reuses Zotero's completed citation analysis in the background instead of parsing the whole PDF again. Hover and lookup never wait for this optional native evidence: before it is ready, on unsupported builds, and for PDFs over Zotero's 100-page native-production boundary (including the multi-thousand-page _Review of Particle Physics_), the existing matching path is used immediately.
+
 ---
 
 ## Keyboard Shortcuts
@@ -262,17 +264,18 @@ Add this to your Zotero `engines.json` for quick INSPIRE lookups:
 
 Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences`:
 
-| Setting                      | Description                                                          |
-| ---------------------------- | -------------------------------------------------------------------- |
-| **Auto-fetch for new items** | Fetch metadata automatically when adding items                       |
-| **Use INSPIRE Citekey**      | Write INSPIRE texkey to Citation Key (Zotero 8+) or Extra (Zotero 7) |
-| **Max authors**              | Number of authors shown before "et al."                              |
-| **Statistics chart**         | Show year/citation distribution chart                                |
-| **Local cache**              | Enable persistent disk cache for offline use                         |
-| **Smart Update**             | Preserve manual edits during updates                                 |
-| **Preprint Watch**           | Monitor unpublished preprints                                        |
-| **Fuzzy citation detection** | For PDFs with broken text layers                                     |
-| **Abstract LaTeX mode**      | KaTeX (full rendering, default) or Unicode                           |
+| Setting                               | Description                                                          |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| **Auto-fetch for new items**          | Fetch metadata automatically when adding items                       |
+| **Use INSPIRE Citekey**               | Write INSPIRE texkey to Citation Key (Zotero 8+) or Extra (Zotero 7) |
+| **Max authors**                       | Number of authors shown before "et al."                              |
+| **Statistics chart**                  | Show year/citation distribution chart                                |
+| **Local cache**                       | Enable persistent disk cache for offline use                         |
+| **Smart Update**                      | Preserve manual edits during updates                                 |
+| **Preprint Watch**                    | Monitor unpublished preprints                                        |
+| **Fuzzy citation detection**          | For PDFs with broken text layers                                     |
+| **Reuse Zotero 10 citation analysis** | Background reuse of completed Zotero 10.0 results; restart required  |
+| **Abstract LaTeX mode**               | KaTeX (full rendering, default) or Unicode                           |
 
 ---
 

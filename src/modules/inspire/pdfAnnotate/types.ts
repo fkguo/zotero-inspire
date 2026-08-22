@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { MatchConfidence, MatchMethod } from "./constants";
+import type { NativeOverlayReadToken } from "./nativeOverlayTypes";
 
 /**
  * Citation type detected from PDF text
@@ -168,6 +169,8 @@ export interface CitationLookupEvent {
   citation: ParsedCitation;
   /** Reader tab ID */
   readerTabID?: string;
+  /** Reader/document-scoped native evidence authority, if ready at click time */
+  readToken?: NativeOverlayReadToken;
 }
 
 /**
@@ -189,6 +192,8 @@ export interface CitationPreviewEvent {
   buttonRect: { top: number; left: number; bottom: number; right: number };
   /** Reader tab ID */
   readerTabID?: string;
+  /** Reader/document-scoped native evidence authority, if ready at hover time */
+  readToken?: NativeOverlayReadToken;
 }
 
 /**
@@ -316,7 +321,7 @@ export interface ZoteroOverlay {
 
 /**
  * Structured page data from Zotero's PDF processing
- * Obtained via pdfDocument.getPageData({ pageIndex })
+ * Legacy structured page record used by the optional reference-list parser.
  */
 export interface ZoteroPageData {
   /** Character-level data with position and formatting info */
@@ -329,7 +334,7 @@ export interface ZoteroPageData {
 
 /**
  * Processed data for the entire PDF document
- * Obtained via pdfDocument.getProcessedData()
+ * Legacy structured document record used only by parser-side fixtures.
  */
 export interface ZoteroProcessedData {
   /** Map of page index to page data */

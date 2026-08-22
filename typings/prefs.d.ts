@@ -31,6 +31,7 @@ declare namespace _ZoteroTypes {
       "pdf_fuzzy_citation": boolean;
       "pdf_parse_refs_list": boolean;
       "pdf_force_mapping_on_mismatch": boolean;
+      "pdf_native_overlay_reuse": boolean;
       "quick_filters_last_used": string;
       "debug_panel_layout": boolean;
       "local_cache_enable": boolean;

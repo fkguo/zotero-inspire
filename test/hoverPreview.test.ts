@@ -14,11 +14,8 @@ import {
 } from "vitest";
 import { LabelMatcher } from "../src/modules/inspire/pdfAnnotate/labelMatcher";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
-import type {
-  CitationPreviewEvent,
-  ZoteroOverlayReference,
-} from "../src/modules/inspire/pdfAnnotate/types";
-import type { OverlayReferenceMapping } from "../src/modules/inspire/pdfAnnotate/readerIntegration";
+import type { CitationPreviewEvent } from "../src/modules/inspire/pdfAnnotate/types";
+import type { NativeOverlayMatchPackage } from "../src/modules/inspire/pdfAnnotate/nativeOverlayTypes";
 
 // Mock globals
 beforeAll(() => {
@@ -175,7 +172,7 @@ describe("LabelMatcher for Preview - Numeric Citations", () => {
 
   beforeEach(() => {
     entries = createMockEntries();
-    matcher = new LabelMatcher(entries);
+    matcher = new LabelMatcher(entries, 101);
   });
 
   describe("match() basic behavior", () => {
@@ -199,70 +196,43 @@ describe("LabelMatcher for Preview - Numeric Citations", () => {
     });
   });
 
-  describe("match() with overlay mapping", () => {
-    it("should use overlay mapping when available", () => {
-      // Create mock overlay mapping
-      const overlayMapping: OverlayReferenceMapping = {
-        labelToReference: new Map([
-          [
-            "1",
-            [
-              {
-                index: 1,
-                text: "Guo et al., Phys. Rev. D 92, 094020 (2015)",
-                chars: [],
-                position: { pageIndex: 10, rects: [] },
-              },
-            ],
-          ],
+  describe("match() with call-scoped native evidence", () => {
+    it("should use a reliable native package when supplied for this call", () => {
+      entries[0].doi = "10.1234/first";
+      matcher = new LabelMatcher(entries, 101);
+      const nativePackage: NativeOverlayMatchPackage = {
+        tokenMap: new Map([
+          ["1", [{ doi: "10.1234/first" }]],
+          ["2", []],
+          ["3", []],
         ]),
-        totalMappedLabels: 1,
-        totalCitationOverlays: 5,
-        totalReferences: 1,
-        isReliable: true,
+        revision: 1,
       };
 
-      matcher.setOverlayMapping(overlayMapping);
-
-      // Should not throw and should return defined results
-      const results = matcher.match("1");
-      expect(results).toBeDefined();
-      expect(Array.isArray(results)).toBe(true);
+      const results = matcher.match("1", nativePackage);
+      expect(results).toHaveLength(1);
+      expect(results[0].entryId).toBe("entry-1");
+      expect(results[0].matchMethod).toBe("overlay");
     });
 
-    it("should handle multi-reference labels (FTR-OVERLAY-MULTI-REF)", () => {
-      // A single label [1] can contain multiple papers
-      const overlayMapping: OverlayReferenceMapping = {
-        labelToReference: new Map([
-          [
-            "1",
-            [
-              {
-                index: 1,
-                text: "Weinberg, Phys. Rev. 166, 1568 (1968)",
-                chars: [],
-                position: { pageIndex: 10, rects: [] },
-              },
-              {
-                index: 1,
-                text: "Gasser and Leutwyler, Nucl. Phys. B250, 465 (1985)",
-                chars: [],
-                position: { pageIndex: 10, rects: [] },
-              },
-            ],
-          ],
+    it("should handle multiple native references under one label", () => {
+      entries[0].doi = "10.1234/first";
+      entries[1].doi = "10.1234/second";
+      matcher = new LabelMatcher(entries, 101);
+      const nativePackage: NativeOverlayMatchPackage = {
+        tokenMap: new Map([
+          ["1", [{ doi: "10.1234/first" }, { doi: "10.1234/second" }]],
+          ["2", []],
+          ["3", []],
         ]),
-        totalMappedLabels: 1,
-        totalCitationOverlays: 1,
-        totalReferences: 2,
-        isReliable: true,
+        revision: 2,
       };
 
-      matcher.setOverlayMapping(overlayMapping);
-
-      // Match should return results for the multi-reference label
-      const results = matcher.match("1");
-      expect(results).toBeDefined();
+      const results = matcher.match("1", nativePackage);
+      expect(results.map((result) => result.entryId)).toEqual([
+        "entry-1",
+        "entry-2",
+      ]);
     });
   });
 });
@@ -278,7 +248,7 @@ describe("LabelMatcher for Preview - Author-Year Citations", () => {
 
   beforeEach(() => {
     entries = createMockEntries();
-    matcher = new LabelMatcher(entries);
+    matcher = new LabelMatcher(entries, 101);
   });
 
   describe("matchAuthorYear()", () => {
@@ -610,102 +580,42 @@ describe("Preview Card Position Calculation", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Part 7: Overlay Reference Mapping (FTR-OVERLAY-REFS)
+// Part 7: Native overlay match package
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("OverlayReferenceMapping", () => {
-  it("should create valid mapping structure", () => {
-    const mapping: OverlayReferenceMapping = {
-      labelToReference: new Map(),
-      totalMappedLabels: 0,
-      totalCitationOverlays: 0,
-      totalReferences: 0,
-      isReliable: false,
+describe("NativeOverlayMatchPackage", () => {
+  it("should keep only primitive token evidence", () => {
+    const nativePackage: NativeOverlayMatchPackage = {
+      tokenMap: new Map(),
+      revision: 1,
     };
 
-    expect(mapping.labelToReference.size).toBe(0);
-    expect(mapping.isReliable).toBe(false);
+    expect(nativePackage.tokenMap.size).toBe(0);
+    expect(nativePackage.revision).toBe(1);
   });
 
-  it("should mark as reliable when enough overlays found", () => {
-    const mapping: OverlayReferenceMapping = {
-      labelToReference: new Map([
-        [
-          "1",
-          [
-            {
-              index: 1,
-              text: "Ref 1",
-              chars: [],
-              position: { pageIndex: 10, rects: [] },
-            },
-          ],
-        ],
-        [
-          "2",
-          [
-            {
-              index: 2,
-              text: "Ref 2",
-              chars: [],
-              position: { pageIndex: 10, rects: [] },
-            },
-          ],
-        ],
-        [
-          "3",
-          [
-            {
-              index: 3,
-              text: "Ref 3",
-              chars: [],
-              position: { pageIndex: 10, rects: [] },
-            },
-          ],
-        ],
+  it("should support the three-label reliability floor", () => {
+    const nativePackage: NativeOverlayMatchPackage = {
+      tokenMap: new Map([
+        ["1", [{ doi: "10.1/a" }]],
+        ["2", []],
+        ["3", []],
       ]),
-      totalMappedLabels: 3,
-      totalCitationOverlays: 10,
-      totalReferences: 3,
-      isReliable: true,
+      revision: 2,
     };
 
-    expect(mapping.isReliable).toBe(true);
-    expect(mapping.totalMappedLabels).toBe(3);
+    expect(nativePackage.tokenMap.size).toBe(3);
   });
 
-  it("should support multi-reference per label", () => {
-    const refs: ZoteroOverlayReference[] = [
-      {
-        index: 1,
-        text: "Paper A",
-        chars: [],
-        position: { pageIndex: 10, rects: [] },
-      },
-      {
-        index: 1,
-        text: "Paper B",
-        chars: [],
-        position: { pageIndex: 10, rects: [] },
-      },
-      {
-        index: 1,
-        text: "Paper C",
-        chars: [],
-        position: { pageIndex: 10, rects: [] },
-      },
-    ];
-
-    const mapping: OverlayReferenceMapping = {
-      labelToReference: new Map([["1", refs]]),
-      totalMappedLabels: 1,
-      totalCitationOverlays: 1,
-      totalReferences: 3,
-      isReliable: true,
+  it("should preserve multiple source-order tokens per label", () => {
+    const nativePackage: NativeOverlayMatchPackage = {
+      tokenMap: new Map([
+        ["1", [{ doi: "10.1/a" }, { doi: "10.1/b" }, { doi: "10.1/c" }]],
+      ]),
+      revision: 3,
     };
 
-    expect(mapping.labelToReference.get("1")?.length).toBe(3);
-    expect(mapping.totalReferences).toBe(3);
+    expect(nativePackage.tokenMap.get("1")?.length).toBe(3);
   });
 });
 

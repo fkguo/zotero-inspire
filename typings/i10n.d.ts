@@ -154,6 +154,8 @@ export type FluentMessageId =
   | 'pref-pdf-force-mapping-desc'
   | 'pref-pdf-fuzzy-citation'
   | 'pref-pdf-fuzzy-citation-desc'
+  | 'pref-pdf-native-overlay-reuse'
+  | 'pref-pdf-native-overlay-reuse-desc'
   | 'pref-pdf-parse-refs-list'
   | 'pref-pdf-parse-refs-list-desc'
   | 'pref-preprint-watch'

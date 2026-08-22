@@ -27,7 +27,15 @@ export { LabelMatcher } from "./labelMatcher";
 
 // Re-export reader integration
 export { ReaderIntegration, getReaderIntegration } from "./readerIntegration";
-export type { OverlayReferenceMapping } from "./readerIntegration";
+export {
+  getOverlayCoordinator,
+  initializeOverlayCoordinator,
+  shutdownOverlayCoordinator,
+} from "./overlayCoordinatorRegistry";
+export type {
+  NativeOriginAnchor,
+  NativeOverlayReadToken,
+} from "./nativeOverlayTypes";
 
 // Re-export PDF references parser (FTR-PDF-ANNOTATE-MULTI-LABEL)
 export type { PDFReferenceMapping, PDFPaperInfo } from "./pdfReferencesParser";

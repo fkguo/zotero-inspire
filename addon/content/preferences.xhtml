@@ -81,6 +81,11 @@
     type="bool"
   />
   <preference
+    id="pref-pdf_native_overlay_reuse"
+    name="__prefsPrefix__.pdf_native_overlay_reuse"
+    type="bool"
+  />
+  <preference
     id="pref-pdf_force_mapping_on_mismatch"
     name="__prefsPrefix__.pdf_force_mapping_on_mismatch"
     type="bool"
@@ -539,6 +544,17 @@
       <html:p
         class="zinspire-pref-desc"
         data-l10n-id="pref-pdf-parse-refs-list-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-pdf_native_overlay_reuse"
+        preference="extensions.zotero.inspiremeta.pdf_native_overlay_reuse"
+        data-l10n-id="pref-pdf-native-overlay-reuse"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-pdf-native-overlay-reuse-desc"
       ></html:p>
     </vbox>
     <vbox class="zinspire-pref-row" style="margin-top: 8px; margin-left: 20px">

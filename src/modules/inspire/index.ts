@@ -304,6 +304,7 @@ export {
   LabelMatcher,
   ReaderIntegration,
   getReaderIntegration,
+  getOverlayCoordinator,
 } from "./pdfAnnotate";
 
 // Re-export style utilities
