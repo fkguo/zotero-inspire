@@ -29,6 +29,8 @@ jobs:
         run: npm run build
       - name: Test
         run: npm test
+      - name: Isolated RPP performance gate
+        run: npm run test:perf
 
   lint:
     name: Lint (non-blocking)

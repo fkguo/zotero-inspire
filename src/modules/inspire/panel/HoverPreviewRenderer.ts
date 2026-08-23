@@ -69,7 +69,10 @@ export interface PreviewRenderContext {
   isFavorite?: boolean;
 
   // Action callbacks (async to support state refresh after completion)
-  onAdd?: (entry: InspireReferenceEntry, anchor?: HTMLElement) => void | Promise<void>;
+  onAdd?: (
+    entry: InspireReferenceEntry,
+    anchor?: HTMLElement,
+  ) => void | Promise<void>;
   onLink?: (entry: InspireReferenceEntry) => void | Promise<void>;
   onUnlink?: (entry: InspireReferenceEntry) => void | Promise<void>;
   onOpenPdf?: (entry: InspireReferenceEntry) => void | Promise<void>;
@@ -243,7 +246,9 @@ export class HoverPreviewRenderer {
     titleEl.classList.add("zinspire-preview-card__title");
     applyPreviewCardTitleStyle(titleEl);
     const titleCandidate =
-      entry.titleOriginal !== undefined ? entry.titleOriginal : entry.title || "";
+      entry.titleOriginal !== undefined
+        ? entry.titleOriginal
+        : entry.title || "";
     const cleanedTitle = cleanMathTitle(titleCandidate);
     this.renderSupSubText(titleEl, cleanedTitle || s.noTitle);
     card.appendChild(titleEl);
@@ -306,6 +311,24 @@ export class HoverPreviewRenderer {
   }
 
   /**
+   * Render Zotero's exact PDF bibliography text without inventing INSPIRE
+   * metadata. This is the cold-cache hover fallback; clicking the lookup
+   * action can still materialize and align the full References list.
+   */
+  buildNativeReferenceContent(card: HTMLDivElement, text: string): void {
+    card.replaceChildren();
+    const referenceEl = this.doc.createElement("div");
+    referenceEl.classList.add("zinspire-preview-card__native-reference");
+    applyPreviewCardSectionStyle(referenceEl);
+    referenceEl.style.fontSize = "14px";
+    referenceEl.style.lineHeight = "1.45";
+    referenceEl.style.color = "var(--fill-primary, currentColor)";
+    referenceEl.style.whiteSpace = "normal";
+    referenceEl.textContent = text;
+    card.appendChild(referenceEl);
+  }
+
+  /**
    * Build identifiers row (arXiv, DOI links).
    */
   private buildIdentifiersRow(
@@ -361,7 +384,10 @@ export class HoverPreviewRenderer {
   /**
    * Build action row with buttons (Add, Open PDF, Select, Link, Copy).
    */
-  private buildActionRow(card: HTMLDivElement, ctx: PreviewRenderContext): void {
+  private buildActionRow(
+    card: HTMLDivElement,
+    ctx: PreviewRenderContext,
+  ): void {
     const { entry } = ctx;
     const s = this.strings;
     const isLocal = Boolean(entry.localItemID);
@@ -462,7 +488,8 @@ export class HoverPreviewRenderer {
       ) as HTMLButtonElement;
       importBtn.type = "button";
       importBtn.textContent = "⊕";
-      importBtn.title = s.dotAdd || getString("references-panel-button-add") || "";
+      importBtn.title =
+        s.dotAdd || getString("references-panel-button-add") || "";
       importBtn.setAttribute("aria-label", importBtn.title);
       applyRefEntryMarkerStyle(importBtn);
       applyRefEntryMarkerColor(importBtn, false);
@@ -480,7 +507,10 @@ export class HoverPreviewRenderer {
     }
 
     // Local status indicator (right side)
-    const statusEl = this.doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+    const statusEl = this.doc.createElementNS(
+      XHTML_NS,
+      "button",
+    ) as HTMLButtonElement;
     statusEl.type = "button";
     statusEl.classList.add("zinspire-preview-card__status");
     Object.assign(statusEl.style, {
@@ -532,8 +562,8 @@ export class HoverPreviewRenderer {
     const canOpenOnline = !isLocal && Boolean(onlineUrl);
 
     statusEl.title = isLocal
-      ? (getString("references-panel-button-select") || "")
-      : (getString("references-panel-open-link") || "");
+      ? getString("references-panel-button-select") || ""
+      : getString("references-panel-open-link") || "";
     statusEl.disabled = !(canSelect || canOpenOnline);
     if (statusEl.disabled) {
       statusEl.style.opacity = "0.55";
@@ -572,7 +602,9 @@ export class HoverPreviewRenderer {
       favBtn.type = "button";
       favBtn.textContent = isFav ? "★" : "☆";
       favBtn.title = getString(
-        isFav ? "references-panel-favorite-remove" : "references-panel-favorite-add",
+        isFav
+          ? "references-panel-favorite-remove"
+          : "references-panel-favorite-add",
       );
       favBtn.style.cssText = `
         border: none;
@@ -623,7 +655,10 @@ export class HoverPreviewRenderer {
     });
 
     // Prev button
-    const prevBtn = this.doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+    const prevBtn = this.doc.createElementNS(
+      XHTML_NS,
+      "button",
+    ) as HTMLButtonElement;
     prevBtn.textContent = "‹";
     prevBtn.title = getString("references-panel-back");
     prevBtn.disabled = current <= 1;
@@ -646,7 +681,10 @@ export class HoverPreviewRenderer {
     });
 
     // Next button
-    const nextBtn = this.doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+    const nextBtn = this.doc.createElementNS(
+      XHTML_NS,
+      "button",
+    ) as HTMLButtonElement;
     nextBtn.textContent = "›";
     nextBtn.title = getString("references-panel-forward");
     nextBtn.disabled = current >= total;
@@ -688,7 +726,10 @@ export class HoverPreviewRenderer {
     label: string,
     type: "add" | "link" | "unlink" | "copy" | "lookup" | "pdf" | "select",
   ): HTMLButtonElement {
-    const button = this.doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+    const button = this.doc.createElementNS(
+      XHTML_NS,
+      "button",
+    ) as HTMLButtonElement;
     button.textContent = label;
     button.title = label;
 

@@ -7,6 +7,7 @@
 import { config } from "../../../../package.json";
 import type { ZoteroChar, ZoteroPageData, StructuredRefEntry } from "./types";
 import { MATCH_CONFIG, PARSE_CONFIG } from "./constants";
+import { NATIVE_OVERLAY_LIMITS } from "./nativeOverlayTypes";
 
 /**
  * Extended letter character class for author names in PDF parsing.
@@ -101,6 +102,22 @@ export class PDFReferencesParser {
     "Literatur",
     "Bibliografía",
   ];
+
+  /**
+   * Parse one bibliography record obtained from an exact PDF link target.
+   * This deliberately bypasses section discovery and reuses the same metadata
+   * extraction used by whole-reference-list parsing.
+   */
+  parseReferenceText(referenceText: string): PDFPaperInfo[] {
+    if (
+      typeof referenceText !== "string" ||
+      referenceText.length === 0 ||
+      referenceText.length > NATIVE_OVERLAY_LIMITS.maxLinkedReferenceTextUnits
+    ) {
+      return [];
+    }
+    return this.parsePapersInText(referenceText).papers;
+  }
 
   /**
    * Parse PDF text to extract reference list structure.

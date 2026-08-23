@@ -37,6 +37,16 @@ export const NATIVE_OVERLAY_LIMITS = Object.freeze({
   readyProbeMilliseconds: 250,
   sliceStructuralUnits: 2_048,
   sliceTextUnits: 50_000,
+  maxLinkedSourceOverlays: 4_096,
+  maxLinkedRects: 32,
+  maxLinkedTargetChars: 50_000,
+  maxLinkedReferenceTextUnits: 4_000,
+  maxLinkedReferencesPerCitation: 64,
+  maxLinkedCaptureReferenceSlots: 256,
+  maxLinkedCaptureTextUnits: 64_000,
+  maxLinkedReferenceLines: 16,
+  linkedMarkerAmbiguityDistance: 8,
+  maxLinkedCaptures: 128,
 });
 
 export interface NativeGenericJournalToken {
@@ -79,6 +89,39 @@ export type NativeOriginAnchor =
 
 /** Opaque scalar authorization for one completed Reader/document revision. */
 export type NativeOverlayReadToken = string;
+
+/** Opaque, Reader/document-scoped handle for one PDF internal-link target. */
+export type NativeLinkedReferenceHandle = string;
+
+/**
+ * Synchronous result captured while Zotero's selection popup is being built.
+ * `unresolved` means a native link intersected the selection but was ambiguous,
+ * so callers must not fall back to a chapter-local numeric label.
+ */
+export type NativeLinkedReferenceCapture =
+  | {
+      readonly kind: "linked";
+      readonly handle: NativeLinkedReferenceHandle;
+      readonly label: string;
+    }
+  | { readonly kind: "unresolved"; readonly label: string };
+
+/** Primitive-only evidence emitted after Zotero's exact target is inspected. */
+export type NativeLinkedReferenceEvidence =
+  | {
+      readonly kind: "resolved";
+      readonly label: string;
+      readonly text: string;
+      /** Marker-local link targets outrank document-level citation matching. */
+      readonly source: "citation-overlay" | "link-target";
+    }
+  | {
+      /** A linked target existed, but it supplied no usable text evidence. */
+      readonly kind: "no-evidence";
+      readonly label: string;
+    }
+  | { readonly kind: "unresolved"; readonly label: string }
+  | { readonly kind: "timeout"; readonly label: string };
 
 export type NativeCitationFormat = "numeric" | "author-year";
 

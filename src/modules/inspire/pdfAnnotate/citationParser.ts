@@ -102,13 +102,13 @@ const BARE_AUTHOR_YEAR_GROUP_REGEX = new RegExp(
     `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,}` + // First surname token (>=2 chars total)
     `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,})*` + // Optional compound surname tokens
     `(?:` +
-      `(?:\\s*,\\s+[Aa]nd\\s+|\\s+[Aa]nd\\s+|\\s*&\\s+|\\s*,\\s*)` + // separators
-      `(?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?` + // Optional initials
-      `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,}` +
-      `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,})*` +
+    `(?:\\s*,\\s+[Aa]nd\\s+|\\s+[Aa]nd\\s+|\\s*&\\s+|\\s*,\\s*)` + // separators
+    `(?:[${AUTHOR_LETTER_UPPER}]\\.(?:\\s*-?[${AUTHOR_LETTER_UPPER}]\\.)*\\s*)?` + // Optional initials
+    `[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,}` +
+    `(?:\\s+[${AUTHOR_LETTER_UPPER}][${AUTHOR_LETTER}]{1,})*` +
     `)*` +
     `(?:\\s+[Ee]t\\s+[Aa]l\\.?)*` +
-  `)\\s*(?:,\\s*|\\s+)((?:1[5-9]\\d{2}|20\\d{2})[a-z]?(?:\\s*,\\s*(?:1[5-9]\\d{2}|20\\d{2})[a-z]?)*)\\b`,
+    `)\\s*(?:,\\s*|\\s+)((?:1[5-9]\\d{2}|20\\d{2})[a-z]?(?:\\s*,\\s*(?:1[5-9]\\d{2}|20\\d{2})[a-z]?)*)\\b`,
   "g",
 );
 
@@ -183,11 +183,14 @@ function expandRange(start: number, end: number): string[] {
  * Algorithm: Try splitting "ABCD" at each position to find valid range:
  * - "6264" → try "6-264", "62-64", "626-4"
  * - Valid if: start < end, both reasonable, small span (≤50)
+ * - Unequal-width endpoints must cross one decimal boundary with span ≤10
  *
  * Two modes:
  * 1. Precise mode (maxKnownLabel provided): Only trigger if num > maxKnownLabel
- * 2. Heuristic mode (maxKnownLabel undefined): Only consider 4-digit numbers
- *    where both parts are < 100, handling common cases like "6264" → "62-64"
+ * 2. Heuristic mode (maxKnownLabel undefined): Only consider equal-width
+ *    3-digit endpoints with a small ascending span. Four-digit tokens such as
+ *    "1234" can be real labels in large reviews, so 2+2 recovery waits until
+ *    an interaction has materialized a document-specific upper bound.
  *
  * @param label - The numeric label string (e.g., "6264")
  * @param maxKnownLabel - Maximum valid label from PDF parsing (optional)
@@ -217,19 +220,23 @@ function tryParseAsConcatenatedRange(
   // Determine if we have a valid threshold
   const hasValidThreshold = maxKnownLabel !== undefined && maxKnownLabel > 0;
 
+  const heuristicPartMax = 1000;
   if (hasValidThreshold) {
     // Precise mode: only trigger if num exceeds maxKnownLabel
     // This is the key heuristic: if PDF has refs 1-79, then "6264" is clearly invalid
     if (num <= maxKnownLabel!) return null;
   } else {
-    // Heuristic mode: only consider 4-digit numbers that are clearly too large
-    // Common papers have < 100 refs, so 4-digit numbers like "6264" are likely concatenations
-    // But we can't be sure about 3-digit numbers, so be conservative
-    if (label.length < 4 || num < 1000) return null;
+    // Without a materialized matcher there is no document-specific upper
+    // bound. A four-digit token may be a real label in a 10k-reference review;
+    // defer that 2+2 decision until hover/click has a cached-list bound. A
+    // six-digit token is outside the supported 16,384-entry matcher domain, so
+    // equal-width 3+3 recovery remains safe on the first interaction.
+    if (label.length !== 6) return null;
   }
 
   // Try splitting at each position
   for (let i = 1; i < label.length; i++) {
+    if (!hasValidThreshold && i !== label.length / 2) continue;
     const startStr = label.substring(0, i);
     const endStr = label.substring(i);
 
@@ -244,6 +251,21 @@ function tryParseAsConcatenatedRange(
     // 2. start >= 1 (valid starting point)
     if (start < 1 || start >= end) continue;
 
+    // A genuine high label just beyond a cached-list bound must not be split
+    // into a wide false range (for example, 725 with bound 700 -> 7-25).
+    // Keep historical unequal-width recovery only for short ranges crossing a
+    // decimal boundary, such as 9-12 -> 912 or 99-102 -> 99102.
+    if (hasValidThreshold && startStr.length !== endStr.length) {
+      const decimalBoundary = 10 ** startStr.length;
+      if (
+        endStr.length !== startStr.length + 1 ||
+        end < decimalBoundary ||
+        end - start > 10
+      ) {
+        continue;
+      }
+    }
+
     // 3. end within bounds
     // 4. span not too large (≤50)
     if (hasValidThreshold) {
@@ -251,9 +273,13 @@ function tryParseAsConcatenatedRange(
       if (end > maxKnownLabel! || end - start > 50) continue;
     } else {
       // Heuristic mode: conservative bounds
-      // Only accept splits where both parts are < 100
-      // This handles common cases like "6264" -> "62-64"
-      if (start >= 100 || end >= 100 || end - start > 50) continue;
+      if (
+        start >= heuristicPartMax ||
+        end >= heuristicPartMax ||
+        end - start > 50
+      ) {
+        continue;
+      }
     }
 
     // Found a valid split! Expand to range
@@ -270,8 +296,10 @@ function tryParseAsConcatenatedRange(
  *
  * Now works in two modes:
  * 1. Precise mode (maxKnownLabel provided): Uses threshold for accurate detection
- * 2. Heuristic mode (maxKnownLabel undefined): Conservative detection for 4-digit
- *    numbers where both parts are < 100 (e.g., "6264" → "62-64")
+ * 2. Heuristic mode (maxKnownLabel undefined): Conservative equal-width
+ *    detection only for 3-digit endpoints (for example,
+ *    "125130" → "125-130"). Ambiguous 4-digit labels are refined later when
+ *    the interaction path has a cached-list bound.
  *
  * @param labels - Array of extracted label strings
  * @param maxKnownLabel - Maximum valid label from PDF (optional)
@@ -289,7 +317,7 @@ export function postProcessLabels(
     // Try to parse as concatenated range
     // tryParseAsConcatenatedRange handles the decision logic:
     // - Precise mode if maxKnownLabel is set
-    // - Heuristic mode if maxKnownLabel is undefined (4-digit numbers with parts < 100)
+    // - Heuristic mode if maxKnownLabel is undefined (equal-width 3-digit endpoints)
     const expanded = tryParseAsConcatenatedRange(label, maxKnownLabel);
     if (expanded) {
       // Add expanded labels (avoiding duplicates)
@@ -1473,13 +1501,16 @@ export class CitationParser {
     ) {
       let bareMatch: RegExpExecArray | null;
       BARE_AUTHOR_YEAR_GROUP_REGEX.lastIndex = 0;
-      while ((bareMatch = BARE_AUTHOR_YEAR_GROUP_REGEX.exec(processedText)) !== null) {
+      while (
+        (bareMatch = BARE_AUTHOR_YEAR_GROUP_REGEX.exec(processedText)) !== null
+      ) {
         const full = bareMatch[0].trim();
         const parsed = this.parseAuthorYearGroup(full);
         for (const p of parsed) {
           // Check for duplicate - must consider initials for disambiguation
           const isDuplicate = matches.some((m) => {
-            if (m.authors[0] !== p.authors[0] || m.year !== p.year) return false;
+            if (m.authors[0] !== p.authors[0] || m.year !== p.year)
+              return false;
             const mInitial = m.authorInitials?.[0];
             const pInitial = p.authorInitials?.[0];
             if (mInitial && pInitial) return mInitial === pInitial;

@@ -222,7 +222,11 @@ import {
   // PDF Annotate (FTR-PDF-ANNOTATE)
   LabelMatcher,
   getReaderIntegration,
+  getPDFReferencesParser,
+  postProcessLabels,
   getOverlayCoordinator,
+  linkedReferenceIsInconclusive,
+  shouldTrustLinkedReferenceForStrictMatch,
   type CitationLookupEvent,
   type CitationPreviewEvent,
   type ParsedCitation,
@@ -496,6 +500,268 @@ class InlineHintHelper {
   }
 }
 
+let missingItemPaneSectionLogged = false;
+
+function readExpandedState(value: unknown): boolean | undefined {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) {
+    return undefined;
+  }
+  try {
+    const element = value as {
+      hasAttribute?: (name: string) => boolean;
+      getAttribute?: (name: string) => string | null;
+      open?: unknown;
+    };
+    if (element.hasAttribute?.("open")) return true;
+    const ariaExpanded = element.getAttribute?.("aria-expanded");
+    if (ariaExpanded === "true") return true;
+    if (ariaExpanded === "false") return false;
+    if (typeof element.open === "boolean") return element.open;
+  } catch {
+    // Fall through to the next bounded signal.
+  }
+  return undefined;
+}
+
+function isItemPaneSectionOpen(
+  body: HTMLDivElement,
+  toggleEvent?: Event,
+): boolean {
+  try {
+    const section = body.closest?.(
+      "collapsible-section, .collapsible-section",
+    ) as (HTMLElement & { open?: boolean }) | null | undefined;
+    if (!section) {
+      if (!missingItemPaneSectionLogged) {
+        missingItemPaneSectionLogged = true;
+        Zotero.debug(
+          `[${config.addonName}] Item-pane collapsible wrapper not found; using bounded toggle/geometry fallback`,
+        );
+      }
+      // Older supported Zotero builds may use a different wrapper. Prefer the
+      // toggle's own target state, then generic expanded/open ancestors. These
+      // paths are used only when the source-audited Zotero 10 selector misses.
+      const eventState =
+        readExpandedState(toggleEvent?.currentTarget) ??
+        readExpandedState(toggleEvent?.target);
+      if (eventState !== undefined) return eventState;
+      const expandedAncestor = body.closest?.("[aria-expanded]");
+      const ancestorState = readExpandedState(expandedAncestor);
+      if (ancestorState !== undefined) return ancestorState;
+      if (body.closest?.("[open]")) return true;
+
+      // Last-resort compatibility fallback: collapsed content has no body
+      // height. This keeps ordinary collapsed selection cold while preventing
+      // an unknown but visibly open host wrapper from becoming permanently
+      // empty.
+      if (body.hidden) return false;
+      const rect = body.getBoundingClientRect?.();
+      if (rect && Number.isFinite(rect.height)) return rect.height > 0;
+      return Number.isFinite(body.offsetHeight) && body.offsetHeight > 0;
+    }
+    // Zotero 10's `collapsible-section.open` getter deliberately returns false
+    // while the section is marked empty, even when the backing `open`
+    // attribute is present. A custom section has to load its first content in
+    // exactly that state, so the DOM attribute is the authoritative state.
+    return section.hasAttribute("open");
+  } catch (err) {
+    Zotero.debug(
+      `[${config.addonName}] Failed to inspect item-pane section state: ${err}`,
+    );
+    return false;
+  }
+}
+
+export function shouldAttemptOnDemandPDFParse(options: {
+  linkedStrictMatchCount: number;
+  pdfParseEnabled: boolean;
+  hasPDFMapping: boolean;
+  pdfParseAttempted: boolean;
+  totalEntries: number;
+  labelAvailableCount: number;
+  recommendation:
+    | "USE_INSPIRE_LABEL"
+    | "USE_INDEX_WITH_FALLBACK"
+    | "USE_INDEX_ONLY";
+  requestedLabelsNeedMapping: boolean;
+  globalDuplicateLabels: boolean;
+  forcePDFStrict: boolean;
+}): boolean {
+  const labelRate =
+    options.totalEntries > 0
+      ? options.labelAvailableCount / options.totalEntries
+      : 0;
+  const wellAlignedLabels =
+    options.recommendation === "USE_INSPIRE_LABEL" && labelRate >= 0.95;
+  // A low document-wide positional alignment score is expected when grouped
+  // references or chapter numbering repeat. Do not make a unique requested
+  // label pay for unrelated duplicates elsewhere in a 10k-entry review.
+  const unexplainedAlignmentMismatch =
+    !options.globalDuplicateLabels &&
+    (options.recommendation === "USE_INDEX_ONLY" ||
+      options.recommendation === "USE_INDEX_WITH_FALLBACK" ||
+      (options.forcePDFStrict && !wellAlignedLabels));
+
+  return (
+    options.linkedStrictMatchCount === 0 &&
+    options.pdfParseEnabled &&
+    !options.hasPDFMapping &&
+    !options.pdfParseAttempted &&
+    options.totalEntries > 0 &&
+    (options.requestedLabelsNeedMapping || unexplainedAlignmentMismatch)
+  );
+}
+
+/**
+ * Resolve numeric citations without treating a chapter-local number as a
+ * document-global identifier. Unique labels retain the complete historical
+ * matcher. Repeated labels require marker-local Zotero metadata or one bounded
+ * contiguous canonical run, preserving historical grouped multi-paper
+ * citations while separated chapter-local runs fail closed. A complete PDF
+ * mapping may refine the grouped result; a count-only mapping is not
+ * disambiguating evidence by itself.
+ */
+export function resolveSafeNumericMatches(options: {
+  labels: readonly string[];
+  matcher: Pick<
+    LabelMatcher,
+    | "hasDuplicateInspireLabel"
+    | "matchResolvedPDFDuplicateLabel"
+    | "matchContiguousDuplicateLabel"
+  >;
+  linkedStrictMatches: readonly MatchResult[];
+  legacyMatch: (labels: string[]) => MatchResult[];
+}): MatchResult[] {
+  if (options.labels.length === 1 && options.linkedStrictMatches.length > 0) {
+    const requestedLabel = options.labels[0].trim();
+    const corroborated = options.linkedStrictMatches.filter(
+      (match) => match.pdfLabel.trim() === requestedLabel,
+    );
+    if (corroborated.length > 0) return corroborated;
+  }
+
+  const uniqueLabels: string[] = [];
+  const matchesByLabel = new Map<string, MatchResult[]>();
+  for (const label of options.labels) {
+    if (options.matcher.hasDuplicateInspireLabel(label)) {
+      const mapped = options.matcher.matchResolvedPDFDuplicateLabel(label);
+      matchesByLabel.set(
+        label.trim(),
+        mapped.length > 0
+          ? mapped
+          : options.matcher.matchContiguousDuplicateLabel(label),
+      );
+    } else {
+      uniqueLabels.push(label);
+    }
+  }
+  if (uniqueLabels.length > 0) {
+    const requestedUnique = new Set(uniqueLabels.map((label) => label.trim()));
+    for (const match of options.legacyMatch(uniqueLabels)) {
+      const label = match.pdfLabel.trim();
+      if (!requestedUnique.has(label)) {
+        continue;
+      }
+      const bucket = matchesByLabel.get(label);
+      if (bucket) bucket.push(match);
+      else matchesByLabel.set(label, [match]);
+    }
+  }
+
+  // Keep the user's printed citation order even when some labels use the
+  // duplicate-safe path and others use the batched historical matcher. The
+  // first result controls the initial scroll/focus target.
+  const resolved = options.labels.flatMap(
+    (label) => matchesByLabel.get(label.trim()) ?? [],
+  );
+
+  const deduplicated: MatchResult[] = [];
+  const seen = new Set<string>();
+  for (const match of resolved) {
+    const key = `${match.pdfLabel}\u0000${match.entryIndex}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduplicated.push(match);
+  }
+  return deduplicated;
+}
+
+/**
+ * Choose a conservative upper bound for lost-dash recovery. A dense,
+ * chapter-reset list can safely use its largest actual printed label. If even
+ * one cached entry lacks a label, that maximum may merely describe the labeled
+ * prefix; use the full canonical cardinality so a genuine tail label is not
+ * split into a false range. A persisted PDF mapping may subsequently raise the
+ * Reader's monotone bound further.
+ */
+export function getSafeLostDashLabelBound(
+  matcher: Pick<LabelMatcher, "getInspireLabelStats" | "getMaxInspireLabel">,
+): number {
+  const stats = matcher.getInspireLabelStats();
+  const maxPrintedLabel = matcher.getMaxInspireLabel();
+  return stats.totalEntries > 0 &&
+    stats.labelAvailableCount < stats.totalEntries
+    ? Math.max(maxPrintedLabel, stats.totalEntries)
+    : maxPrintedLabel;
+}
+
+export async function resolveCitationRecidForInteraction(
+  item: Zotero.Item,
+  fetcher: (
+    item: Zotero.Item,
+  ) => Promise<string | null> = fetchRecidFromInspire,
+): Promise<string | null> {
+  return deriveRecidFromItem(item) ?? (await fetcher(item));
+}
+
+export function getItemPaneMaterializationKey(
+  itemID: number,
+  recid: string,
+  mode: InspireViewMode,
+): string {
+  return `${itemID}:${recid}:${mode}`;
+}
+
+/**
+ * Translate matcher-local indices into the current display order. The matcher
+ * is deliberately built from INSPIRE's canonical citation order, while the
+ * sidebar may be sorted by year/citation count. Never reuse a positional index
+ * directly across those two arrays.
+ */
+export function resolveMatchIndicesForDisplay(
+  matches: readonly MatchResult[],
+  matcher: Pick<LabelMatcher, "getEntryAt">,
+  displayedEntries: readonly InspireReferenceEntry[],
+): number[] {
+  const displayIndexByID = new Map<string, number>();
+  const duplicateIDs = new Set<string>();
+  for (let index = 0; index < displayedEntries.length; index++) {
+    const id = displayedEntries[index]?.id;
+    if (!id) continue;
+    if (displayIndexByID.has(id)) duplicateIDs.add(id);
+    else displayIndexByID.set(id, index);
+  }
+
+  const resolved: number[] = [];
+  const seen = new Set<number>();
+  for (const match of matches) {
+    const sourceEntry = matcher.getEntryAt(match.entryIndex);
+    const entryID = match.entryId || sourceEntry?.id;
+    let displayIndex = -1;
+    if (entryID && !duplicateIDs.has(entryID)) {
+      displayIndex = displayIndexByID.get(entryID) ?? -1;
+    }
+    if (displayIndex < 0 && sourceEntry) {
+      displayIndex = displayedEntries.indexOf(sourceEntry);
+    }
+    if (displayIndex >= 0 && !seen.has(displayIndex)) {
+      seen.add(displayIndex);
+      resolved.push(displayIndex);
+    }
+  }
+  return resolved;
+}
+
 export class ZInspireReferencePane {
   private static controllers = new WeakMap<
     HTMLDivElement,
@@ -563,6 +829,39 @@ export class ZInspireReferencePane {
       onRender: () => {
         // Required by Zotero 7 ItemPaneSection API even if we render manually
       },
+      onAsyncRender: async (args) => {
+        try {
+          const controller = this.controllers.get(args.body);
+          // Zotero considers a collapsed section header "visible" and may call
+          // onAsyncRender for it during ordinary item selection. Check the
+          // actual collapsible-section state before inflating cached data.
+          if (!isItemPaneSectionOpen(args.body)) return;
+          await controller?.handleVisibleItemChange(args);
+        } catch (err) {
+          Zotero.debug(
+            `[${config.addonName}] Item-pane async render failed: ${err}`,
+          );
+        }
+      },
+      onToggle: (args) => {
+        try {
+          const controller = this.controllers.get(args.body);
+          // Zotero 10 force-renders after an open toggle. Keep this explicit
+          // hook as a redundant host-supported trigger so a future callback
+          // scheduling change cannot leave an expanded section permanently
+          // cold. The controller shares this with the onAsyncRender callback.
+          if (!isItemPaneSectionOpen(args.body, args.event)) return;
+          void controller?.handleVisibleItemChange(args).catch((err) => {
+            Zotero.debug(
+              `[${config.addonName}] Item-pane toggle load failed: ${err}`,
+            );
+          });
+        } catch (err) {
+          Zotero.debug(
+            `[${config.addonName}] Item-pane toggle dispatch failed: ${err}`,
+          );
+        }
+      },
       onDestroy: (args) => {
         const controller = this.controllers.get(args.body);
         controller?.destroy();
@@ -570,7 +869,16 @@ export class ZInspireReferencePane {
       },
       onItemChange: (args) => {
         const controller = this.controllers.get(args.body);
-        controller?.handleItemChange(args);
+        // Zotero 10 calls this for target changes even when the custom section
+        // is off-screen. Keep it state-only; visible sections are materialized
+        // through onAsyncRender.
+        void controller
+          ?.handleItemChange(args, { loadData: false })
+          .catch((err) => {
+            Zotero.debug(
+              `[${config.addonName}] Item-pane state update failed: ${err}`,
+            );
+          });
       },
       sectionButtons: [
         {
@@ -1344,7 +1652,7 @@ export class ZInspireReferencePane {
   }
 }
 
-class InspireReferencePanelController {
+export class InspireReferencePanelController {
   private static get PANEL_LAYOUT_DEBUG(): boolean {
     return getPref("debug_panel_layout") === true;
   }
@@ -1512,6 +1820,8 @@ class InspireReferencePanelController {
   private citationGraphButton?: HTMLButtonElement;
   private currentItemID?: number;
   private currentRecid?: string;
+  /** Invalidates an older same-item recid lookup when fresher state arrives. */
+  private recidStateRevision = 0;
   private entryCitedSource?: EntryCitedSource;
   private authorNavigationStack: EntryCitedSource[] = []; // Stack for author navigation history
   private entryCitedPreviousMode: Exclude<InspireViewMode, "entryCited"> =
@@ -1558,6 +1868,8 @@ class InspireReferencePanelController {
   private rowCache = new Map<string, HTMLElement>();
   private activeAbort?: AbortController;
   private pendingToken?: string;
+  /** The newest visible load owns refresh-spinner cleanup. */
+  private refreshSpinnerOwner?: object;
   private notifierID?: string;
   private pendingScrollRestore?: ScrollState & { itemID: number };
   private currentTabType: "library" | "reader" = "library";
@@ -1710,6 +2022,8 @@ class InspireReferencePanelController {
   private citationLookupHandler?: (event: CitationLookupEvent) => void;
   /** Track if PDF parsing has been attempted per attachment (keyed by attachmentItemID) */
   private pdfParseAttemptedMap = new Map<number, boolean>();
+  /** Keep the disabled-parser fallback notice separate from real parse attempts. */
+  private pdfParseFallbackWarningShown = new Set<number>();
   /** FTR-MULTI-PDF-FIX-V2: Track current PDF attachment for quick access */
   private currentAttachmentID?: number;
   /** Deduplicate bursty citationLookup events */
@@ -1729,6 +2043,20 @@ class InspireReferencePanelController {
   };
   /** Map of itemID -> last check timestamp (for throttling, not permanent dedup) */
   private autoCheckLastCheckTime = new Map<number, number>();
+  /** Item whose deferred visible render still needs the normal auto-check. */
+  private pendingAutoCheckItemID?: number;
+  /** Item whose collapsed state-only transition still needs a visible repaint. */
+  private pendingVisibleItemSwitchID?: number;
+  /** Last item/recid/mode materialized by a visible render or explicit interaction. */
+  private lastAsyncRenderKey?: string;
+  /** Share duplicate visible-render callbacks without cancelling the same load. */
+  private asyncRenderLoad?: {
+    key: string;
+    promise: Promise<{ loaded: true } | { loaded: false; error: unknown }>;
+    errorReported: boolean;
+  };
+  /** Share the full open-trigger path, including a missing-recid lookup. */
+  private visibleItemLoad?: { key: string; promise: Promise<void> };
   /** Throttle interval: don't re-check same item within this time (ms) */
   private readonly autoCheckThrottleMs = 5000; // 5 seconds
   /** FTR-DARK-MODE-AUTO: Theme change listener for chart re-render */
@@ -2743,14 +3071,31 @@ class InspireReferencePanelController {
       parentItemID: number;
       recid: string;
     }) => {
-      // Find controller(s) showing this item and trigger refresh
-      for (const ctrl of InspireReferencePanelController.instances) {
-        if (ctrl.currentItemID === event.parentItemID) {
-          Zotero.debug(
-            `[${config.addonName}] [RECID-AUTO-UPDATE] Refreshing panel for item ${event.parentItemID} with new recid ${event.recid}`,
-          );
-          ctrl.handleRecidBecameAvailable(event.parentItemID, event.recid);
+      try {
+        // Reader recid notifications also arrive while a collapsed item pane
+        // merely tracks the selected item. Keep that path state-only and
+        // reserve cache inflation for Zotero's explicit open callbacks.
+        for (const ctrl of InspireReferencePanelController.instances) {
+          if (ctrl.currentItemID === event.parentItemID) {
+            const loadData = isItemPaneSectionOpen(ctrl.body);
+            Zotero.debug(
+              `[${config.addonName}] [RECID-AUTO-UPDATE] Updating panel state for item ${event.parentItemID} with new recid ${event.recid}; loadData=${loadData}`,
+            );
+            void ctrl
+              .handleRecidBecameAvailable(event.parentItemID, event.recid, {
+                loadData,
+              })
+              .catch((err) => {
+                Zotero.debug(
+                  `[${config.addonName}] [RECID-AUTO-UPDATE] Failed to apply recid event: ${err}`,
+                );
+              });
+          }
         }
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] [RECID-AUTO-UPDATE] Recid event dispatch failed: ${err}`,
+        );
       }
     };
     reader.on(
@@ -2762,14 +3107,22 @@ class InspireReferencePanelController {
     InspireReferencePanelController.noRecidHandler = (event: {
       parentItemID: number;
     }) => {
-      // Find controller(s) showing this item and show "no recid" message
-      for (const ctrl of InspireReferencePanelController.instances) {
-        if (ctrl.currentItemID === event.parentItemID) {
-          Zotero.debug(
-            `[${config.addonName}] [RECID-AUTO-UPDATE] Showing no-recid message for item ${event.parentItemID}`,
-          );
-          ctrl.handleNoRecid(event.parentItemID);
+      try {
+        // A collapsed pane records the state but does not repaint or touch its
+        // References data.
+        for (const ctrl of InspireReferencePanelController.instances) {
+          if (ctrl.currentItemID === event.parentItemID) {
+            const render = isItemPaneSectionOpen(ctrl.body);
+            Zotero.debug(
+              `[${config.addonName}] [RECID-AUTO-UPDATE] Applying no-recid state for item ${event.parentItemID}; render=${render}`,
+            );
+            ctrl.handleNoRecid(event.parentItemID, { render });
+          }
         }
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] [RECID-AUTO-UPDATE] No-recid event dispatch failed: ${err}`,
+        );
       }
     };
     reader.on("itemNoRecid", InspireReferencePanelController.noRecidHandler);
@@ -2926,40 +3279,33 @@ class InspireReferencePanelController {
     this.citationInFlightKey = evtKey;
 
     try {
-      // FTR-PRELOAD-AWAIT: Check for in-flight preloads and await them
-      // This significantly reduces first-click latency when preload is already running
       const reader = getReaderIntegration();
       const item = Zotero.Items.get(event.parentItemID);
-      if (item) {
-        const recid = deriveRecidFromItem(item);
-        if (recid) {
-          // Check for in-flight reference preload
-          const preloadPromise = reader.getPreloadPromise(recid);
-          if (preloadPromise) {
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] Awaiting in-flight reference preload for recid ${recid}`,
-            );
-            this.showToast(getString("references-panel-status-loading"));
-            await preloadPromise;
-            Zotero.debug(
-              `[${config.addonName}] [PDF-ANNOTATE] In-flight reference preload completed`,
-            );
-          }
-        }
+      let referencesViewMaterializedByLookup = false;
 
-        // Check for in-flight PDF parsing
-        // FTR-MULTI-PDF-FIX-V2: Use attachmentItemID for PDF-specific promise lookup
-        const pdfParsePromise = reader.getPdfParsePromise(
-          event.attachmentItemID,
+      // The panel lifecycle normally resolves this already. Keep a click-time
+      // fallback for startup/item-switch races and items whose identifier was
+      // added after the pane's last item-change notification.
+      if (
+        this.currentItemID === event.parentItemID &&
+        !this.currentRecid &&
+        item
+      ) {
+        const recidRevision = this.getRecidStateRevision();
+        const recid = await resolveCitationRecidForInteraction(
+          item,
+          (candidate) => this.fetchRecidForItem(candidate),
         );
-        if (pdfParsePromise) {
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] Awaiting in-flight PDF parsing for attachment ${event.attachmentItemID}`,
-          );
-          await pdfParsePromise;
-          Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] In-flight PDF parsing completed`,
-          );
+        if (this.currentItemID !== event.parentItemID) return;
+        if (this.getRecidStateRevision() !== recidRevision) {
+          // A Reader/item notification is newer than this lookup. Continue
+          // only with its authoritative positive result; never resurrect a
+          // recid after an authoritative no-recid event.
+          if (!this.currentRecid) return;
+          this.updateSortSelector();
+        } else if (recid) {
+          this.assignCurrentRecid(recid);
+          this.updateSortSelector();
         }
       }
 
@@ -2972,6 +3318,7 @@ class InspireReferencePanelController {
           );
           return;
         }
+        referencesViewMaterializedByLookup = true;
       }
 
       // FTR-FIX-LOOKUP-TAB: Citation lookup must ALWAYS use References tab entries
@@ -2980,8 +3327,13 @@ class InspireReferencePanelController {
       const wasOnReferencesTab = this.viewMode === "references";
 
       if (wasOnReferencesTab) {
-        // Already on References tab - use allEntries directly
-        referencesEntries = this.allEntries?.length ? this.allEntries : null;
+        // Use only a complete cached References list. `allEntries` can contain
+        // a progressive network prefix while the pane is still loading, which
+        // must never seed an attachment-scoped matcher.
+        const cached = this.currentRecid
+          ? this.referencesCache.get(this.currentRecid)
+          : undefined;
+        referencesEntries = cached?.length ? cached : null;
       } else {
         // Different tab - fetch References entries from cache
         if (this.currentRecid) {
@@ -2993,7 +3345,7 @@ class InspireReferencePanelController {
           );
           const cached = this.referencesCache.get(cacheKey);
           if (cached) {
-            referencesEntries = this.getSortedReferences(cached);
+            referencesEntries = cached;
             Zotero.debug(
               `[${config.addonName}] [PDF-ANNOTATE] Got ${referencesEntries.length} References entries from cache (current tab: ${this.viewMode})`,
             );
@@ -3006,10 +3358,22 @@ class InspireReferencePanelController {
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] No References entries available, switching to References tab to load`,
         );
-        // Switch to References tab and wait for entries to load
-        await this.activateViewMode("references");
-        // After switching, allEntries should now contain References data
-        referencesEntries = this.allEntries?.length ? this.allEntries : null;
+        // If References is already the selected mode, activateViewMode() is a
+        // no-op. Load explicitly in case the normal panel load is still in
+        // flight or an earlier cache read failed.
+        if (this.viewMode === "references" && this.currentRecid) {
+          await this.loadEntries(this.currentRecid, "references");
+          referencesViewMaterializedByLookup = true;
+        } else {
+          await this.activateViewMode("references");
+          referencesViewMaterializedByLookup = this.viewMode === "references";
+        }
+        // Matchers must use the canonical INSPIRE order. `allEntries` is a
+        // display array and may be sorted by year or citation count.
+        const loadedReferences = this.currentRecid
+          ? this.referencesCache.get(this.currentRecid)
+          : undefined;
+        referencesEntries = loadedReferences?.length ? loadedReferences : null;
       }
 
       if (!referencesEntries?.length) {
@@ -3020,9 +3384,50 @@ class InspireReferencePanelController {
         return;
       }
 
+      // A hover can warm the canonical References cache without opening or
+      // rendering the item-pane section. A following click must materialize
+      // that already-cached list before translating matcher indices into the
+      // sidebar's current display order; otherwise `allEntries` is empty and
+      // the lookup silently has nowhere to scroll.
+      if (
+        this.viewMode === "references" &&
+        this.currentRecid &&
+        this.allEntries.length === 0
+      ) {
+        await this.loadEntries(this.currentRecid, "references");
+        if (this.currentItemID !== event.parentItemID) return;
+        referencesViewMaterializedByLookup = true;
+        const materializedReferences = this.referencesCache.get(
+          this.currentRecid,
+        );
+        if (materializedReferences?.length) {
+          referencesEntries = materializedReferences;
+        }
+      }
+
       Zotero.debug(
         `[${config.addonName}] [PDF-ANNOTATE] Processing lookup: viewMode=${this.viewMode}, referencesEntriesCount=${referencesEntries.length}`,
       );
+
+      // Loading/switching the References view above can cross an item change.
+      // Never cache an attachment matcher from another item's `allEntries`.
+      if (this.currentItemID !== event.parentItemID) return;
+
+      if (
+        referencesViewMaterializedByLookup &&
+        this.currentRecid &&
+        this.viewMode === "references"
+      ) {
+        // Opening the pane below can synchronously trigger both onToggle and
+        // onAsyncRender. The explicit lookup has already decompressed, sorted,
+        // and rendered this complete list, so those host callbacks must only
+        // restore the existing view instead of materializing it a second time.
+        this.lastAsyncRenderKey = getItemPaneMaterializationKey(
+          event.parentItemID,
+          this.currentRecid,
+          "references",
+        );
+      }
 
       // FTR-MULTI-PDF-FIX-V3: Track PDF switches for performance monitoring
       if (this.currentAttachmentID !== event.attachmentItemID) {
@@ -3039,41 +3444,113 @@ class InspireReferencePanelController {
         event.attachmentItemID,
         referencesEntries,
       );
+      // Dense chapter-reset reviews use the largest printed label; a sparse
+      // list uses its full cardinality so an unlabeled tail cannot make a
+      // genuine high number look like a lost-dash range.
+      const lostDashBound = getSafeLostDashLabelBound(labelMatcher);
+      if (lostDashBound > 0) {
+        reader.setMaxKnownLabel(event.attachmentItemID, lostDashBound);
+      }
+
+      // Restore the old parser's persisted attachment mapping only after a
+      // real interaction. A cache miss remains cheap and does not start the
+      // whole-document parser.
+      await reader.ensureCachedPDFMappings(event.attachmentItemID);
+      if (this.currentItemID !== event.parentItemID) return;
 
       // FTR-MULTI-PDF-FIX-V3: Apply mappings if new matcher OR if cached matcher is missing mappings
-      // This fixes the bug where a matcher was cached before background parsing completed,
-      // and subsequent cache hits never got the PDF-specific mappings applied.
+      // A matcher may have been cached before an on-demand PDF mapping became
+      // available; apply that mapping on subsequent cache hits as well.
       // Note: 'reader' is already declared at the start of this function (line 2203)
 
       // Apply PDF numeric mapping if new OR missing
       if (isNewMatcher || !labelMatcher.hasPDFMapping?.()) {
-        const preloadedMapping = reader.getPreloadedPDFMapping(
+        const cachedMapping = reader.getCachedPDFMapping(
           event.attachmentItemID,
         );
-        if (preloadedMapping) {
-          labelMatcher.setPDFMapping(preloadedMapping);
+        if (cachedMapping) {
+          labelMatcher.setPDFMapping(cachedMapping);
           this.markPdfParseAttempted(event.attachmentItemID);
           Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] Applied preloaded PDF mapping (${preloadedMapping.totalLabels} labels, isNew=${isNewMatcher})`,
+            `[${config.addonName}] [PDF-ANNOTATE] Applied cached PDF mapping (${cachedMapping.totalLabels} labels, isNew=${isNewMatcher})`,
           );
         }
       }
 
       // Apply author-year mapping if new OR missing
       if (isNewMatcher || !labelMatcher.hasAuthorYearMapping?.()) {
-        const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(
+        const cachedAuthorYear = reader.getCachedAuthorYearMapping(
           event.attachmentItemID,
         );
-        if (preloadedAuthorYear) {
-          labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
+        if (cachedAuthorYear) {
+          labelMatcher.setAuthorYearMapping(cachedAuthorYear);
           Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] Applied preloaded author-year mapping (${preloadedAuthorYear.authorYearMap.size} entries, isNew=${isNewMatcher})`,
+            `[${config.addonName}] [PDF-ANNOTATE] Applied cached author-year mapping (${cachedAuthorYear.authorYearMap.size} entries, isNew=${isNewMatcher})`,
           );
         }
       }
 
+      // A four-digit token can be either a real label in a large review or a
+      // range whose dash disappeared from the copied PDF text. Reader-open no
+      // longer prewarms a whole-document bound, so defer that decision until
+      // this real interaction has materialized the canonical References list
+      // (or restored the persisted PDF mapping). This preserves both [1234]
+      // and [62-64] copied as [6264].
+      const refineCitationWithKnownBound = (): ParsedCitation => {
+        if (event.citation.type !== "numeric") return event.citation;
+        if (
+          event.citation.labels.length === 1 &&
+          event.linkedReference?.kind === "resolved" &&
+          event.linkedReference.label === event.citation.labels[0]
+        ) {
+          return event.citation;
+        }
+        // A token already printed by INSPIRE is corroborated as a real label;
+        // never reinterpret it as a lost-dash range.
+        if (
+          event.citation.labels.every(
+            (label) => labelMatcher.getInspireLabelMultiplicity(label) > 0,
+          )
+        ) {
+          return event.citation;
+        }
+        const refinedLabels = postProcessLabels(
+          event.citation.labels,
+          reader.getMaxKnownLabel(event.attachmentItemID) ??
+            (lostDashBound > 0 ? lostDashBound : undefined),
+        );
+        return refinedLabels.length === event.citation.labels.length &&
+          refinedLabels.every(
+            (label, index) => label === event.citation.labels[index],
+          )
+          ? event.citation
+          : { ...event.citation, labels: refinedLabels };
+      };
+      let citation = refineCitationWithKnownBound();
+
       // FTR-PDF-ANNOTATE-MULTI-LABEL: Check if PDF parsing is needed (even if labelMatcher exists)
       // This allows PDF parsing to be triggered if the preference was enabled after first lookup
+      const hasDuplicateLabels = labelMatcher.hasDuplicateInspireLabels();
+      const requestedLabelsNeedMapping = citation.labels.some(
+        (label) => labelMatcher.getInspireLabelMultiplicity(label) !== 1,
+      );
+      const requestedLabelHasDuplicates = citation.labels.some((label) =>
+        labelMatcher.hasDuplicateInspireLabel(label),
+      );
+      const linkedStrictMatches =
+        shouldTrustLinkedReferenceForStrictMatch(
+          event.linkedReference,
+          requestedLabelHasDuplicates,
+        ) &&
+        citation.labels.length === 1 &&
+        citation.labels[0] === event.linkedReference.label
+          ? labelMatcher.matchLinkedReference(
+              event.linkedReference.label,
+              getPDFReferencesParser().parseReferenceText(
+                event.linkedReference.text,
+              ),
+            )
+          : [];
       const report = labelMatcher.diagnoseAlignment();
       const pdfParseEnabled = getPref("pdf_parse_refs_list") === true;
       const hasPDFMapping = labelMatcher.hasPDFMapping?.() ?? false;
@@ -3085,25 +3562,25 @@ class InspireReferencePanelController {
         `[${config.addonName}] [PDF-ANNOTATE] State: pdfParseEnabled=${pdfParseEnabled}, pdfParseAttempted=${pdfParseAttempted}, hasPDFMapping=${hasPDFMapping}, recommendation=${report.recommendation}`,
       );
 
-      // Try PDF parsing if: enabled + labels missing + no existing mapping
-      // NOTE: Allow retry if previous attempt failed (pdfParseAttempted but no mapping)
-      // FTR-PDF-PARSE-PRELOAD: Skip if preloaded mapping was already applied
+      // Preserve the established parser for genuinely ambiguous clicks, but
+      // never repeat whole-document work automatically after one failed or
+      // unproductive attempt for this attachment.
       const forcePDFStrict = getPref("pdf_force_mapping_on_mismatch") !== false;
-      const labelAvail = report.labelAvailableCount ?? 0;
-      const labelRate =
-        report.totalEntries > 0 ? labelAvail / report.totalEntries : 0;
-      const wellAlignedLabels =
-        report.recommendation === "USE_INSPIRE_LABEL" && labelRate >= 0.95;
-      const shouldAttemptPDFParse =
-        pdfParseEnabled &&
-        !hasPDFMapping &&
-        report.totalEntries > 0 &&
-        // Original logic: labels are mostly missing
-        (report.recommendation === "USE_INDEX_ONLY" ||
-          // Additional case: labels are available but poorly aligned (need PDF reference)
-          report.recommendation === "USE_INDEX_WITH_FALLBACK" ||
-          // Additional case: when strict preference is on, only parse PDF if labels are not well aligned
-          (forcePDFStrict && !wellAlignedLabels));
+      const shouldAttemptPDFParse = shouldAttemptOnDemandPDFParse({
+        linkedStrictMatchCount: linkedStrictMatches.length,
+        pdfParseEnabled,
+        hasPDFMapping,
+        pdfParseAttempted,
+        totalEntries: report.totalEntries,
+        labelAvailableCount: report.labelAvailableCount ?? 0,
+        recommendation: report.recommendation,
+        // Missing and repeated requested labels retain the established parser
+        // fallback. Unrelated duplicates elsewhere in a review do not make a
+        // unique current label trigger whole-document work.
+        requestedLabelsNeedMapping,
+        globalDuplicateLabels: hasDuplicateLabels,
+        forcePDFStrict,
+      });
 
       if (shouldAttemptPDFParse) {
         const labelRateStr = report.labelAvailableCount
@@ -3115,6 +3592,11 @@ class InspireReferencePanelController {
           `[${config.addonName}] [PDF-ANNOTATE] ⚠️ WARNING: Label data mostly missing (${labelRateStr}% available). Attempting PDF parsing...`,
         );
 
+        // One bounded attempt per attachment/controller lifetime. Mark before
+        // awaiting so an exception or a no-mapping result cannot make every
+        // later click repeat the whole-document parse.
+        this.markPdfParseAttempted(event.attachmentItemID);
+
         // FTR-PDF-ANNOTATE-MULTI-LABEL: AWAIT PDF parsing before matching
         try {
           // FTR-MULTI-PDF-FIX: Pass attachmentItemID for PDF-specific parsing
@@ -3122,7 +3604,6 @@ class InspireReferencePanelController {
             event.attachmentItemID,
           );
           if (parseSuccess) {
-            this.markPdfParseAttempted(event.attachmentItemID); // FTR-MULTI-PDF-FIX-V3: Use map-based tracking
             Zotero.debug(
               `[${config.addonName}] [PDF-ANNOTATE] PDF parsing completed successfully`,
             );
@@ -3150,9 +3631,11 @@ class InspireReferencePanelController {
         Zotero.debug(
           `[${config.addonName}] [PDF-ANNOTATE] ⚠️ WARNING: Label data mostly missing (${labelRateStr}% available). PDF parsing disabled. Using index-based fallback.`,
         );
-        // Only show toast once per attachment (first lookup)
-        if (!this.hasPdfParseBeenAttempted(event.attachmentItemID)) {
-          this.markPdfParseAttempted(event.attachmentItemID); // FTR-MULTI-PDF-FIX-V3
+        // Only show the disabled-parser notice once per attachment. Do not
+        // mark this as a parse attempt: enabling the preference later must
+        // still permit one real on-demand parse.
+        if (!this.pdfParseFallbackWarningShown.has(event.attachmentItemID)) {
+          this.pdfParseFallbackWarningShown.add(event.attachmentItemID);
           this.showToast(
             getString("pdf-annotate-fallback-warning", {
               args: { rate: labelRateStr },
@@ -3163,7 +3646,9 @@ class InspireReferencePanelController {
 
       // FTR-PDF-ANNOTATE-MULTI-LABEL: Try to match all citation labels and get all matches
       // FTR-PDF-ANNOTATE-AUTHOR-YEAR: Use matchAuthorYear for author-year citation format
-      const citation = event.citation;
+      // A newly completed on-demand parser may have supplied the first precise
+      // bound for a label-sparse document; refine once more before matching.
+      citation = refineCitationWithKnownBound();
       let allMatches: MatchResult[];
 
       if (citation.type === "author-year") {
@@ -3173,11 +3658,25 @@ class InspireReferencePanelController {
         );
         allMatches = labelMatcher.matchAuthorYear(citation.labels);
       } else {
-        // Numeric or other citation types: use standard matchAll
-        allMatches = getOverlayCoordinator().matchLabelsWithReadyNative(
-          event.readToken,
-          labelMatcher,
-          citation.labels,
+        // A native target is an opportunistic high-confidence override. If it
+        // cannot be resolved or strictly matched, retain the established
+        // overlay/PDF-mapping/label fallback chain. The only exception is a
+        // repeated-label document where marker evidence exists but neither the
+        // strict target nor the old PDF mapping identified it: guessing by the
+        // global number there recreates the wrong-chapter regression.
+        allMatches = resolveSafeNumericMatches({
+          labels: citation.labels,
+          matcher: labelMatcher,
+          linkedStrictMatches,
+          legacyMatch: (labels) =>
+            getOverlayCoordinator().matchLabelsWithReadyNative(
+              event.readToken,
+              labelMatcher,
+              labels,
+            ),
+        });
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] Safe numeric resolution: strict=${linkedStrictMatches.length}, final=${allMatches.length}`,
         );
       }
 
@@ -3246,20 +3745,29 @@ class InspireReferencePanelController {
           }
         }
 
-        // Ensure INSPIRE pane is visible before scrolling
-        const paneActivated = this.ensureINSPIREPaneVisible();
-        Zotero.debug(
-          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible result: ${paneActivated}`,
-        );
-
         // FTR-FIX-LOOKUP-TAB: Switch to References tab if we weren't on it
-        // This ensures the matched entries are visible to the user
+        // before opening the pane. Otherwise an open-toggle can materialize a
+        // large Cited By/Related list that the click immediately replaces.
         if (!wasOnReferencesTab && this.viewMode !== "references") {
           Zotero.debug(
             `[${config.addonName}] [PDF-ANNOTATE] Switching to References tab to show matches`,
           );
           await this.activateViewMode("references");
+          if (this.currentItemID === event.parentItemID && this.currentRecid) {
+            this.lastAsyncRenderKey = getItemPaneMaterializationKey(
+              event.parentItemID,
+              this.currentRecid,
+              "references",
+            );
+          }
         }
+
+        // Ensure INSPIRE pane is visible only after the target References view
+        // is ready, then scroll/highlight within that materialized ordering.
+        const paneActivated = this.ensureINSPIREPaneVisible();
+        Zotero.debug(
+          `[${config.addonName}] [PDF-ANNOTATE] ensureINSPIREPaneVisible result: ${paneActivated}`,
+        );
 
         // Give the UI time to update if we just activated the pane
         // Then scroll to and highlight the matched entries
@@ -3281,14 +3789,32 @@ class InspireReferencePanelController {
             this.renderReferenceList({ preserveScroll: false });
           }
 
+          // Match indices belong to the matcher's source ordering. Resolve by
+          // stable entry ID against the currently rendered sort so a user sort
+          // or self-citation toggle cannot redirect the lookup to another row.
+          const currentIndices = resolveMatchIndicesForDisplay(
+            allMatches,
+            labelMatcher,
+            this.allEntries,
+          );
+          if (currentIndices.length === 0) {
+            Zotero.debug(
+              `[${config.addonName}] [PDF-ANNOTATE] Matched entries are no longer present in the rendered References list`,
+            );
+            this.showToast(
+              getString("pdf-annotate-not-found", {
+                args: { label: citation.labels.join(", ") },
+              }),
+            );
+            return;
+          }
+
           // Scroll to first match
-          const firstIndex = allMatches[0].entryIndex;
-          this.scrollToEntryByIndex(firstIndex);
+          this.scrollToEntryByIndex(currentIndices[0]);
 
           // FTR-PDF-ANNOTATE-MULTI-LABEL: Highlight all matches (with limit)
           const MAX_HIGHLIGHT = 20;
-          const toHighlight = allMatches.slice(0, MAX_HIGHLIGHT);
-          this.highlightEntryRows(toHighlight.map((m) => m.entryIndex));
+          this.highlightEntryRows(currentIndices.slice(0, MAX_HIGHLIGHT));
 
           // Show toast if multiple matches or truncated; include missing info if any
           if (allMatches.length > 1) {
@@ -3368,6 +3894,29 @@ class InspireReferencePanelController {
    * Sync controller state to the PDF parent item when citation events come from a different item.
    * Loads references so label matching can proceed.
    */
+  private getRecidStateRevision(): number {
+    return Number.isSafeInteger(this.recidStateRevision) &&
+      this.recidStateRevision >= 0
+      ? this.recidStateRevision
+      : 0;
+  }
+
+  private assignCurrentRecid(
+    recid: string | undefined,
+    forceRevision = false,
+  ): void {
+    const changed = this.currentRecid !== recid;
+    this.currentRecid = recid;
+    if (changed || forceRevision) {
+      this.recidStateRevision = this.getRecidStateRevision() + 1;
+    }
+  }
+
+  /** Keep all race-controlled callers on the existing INSPIRE resolver. */
+  private fetchRecidForItem(item: Zotero.Item): Promise<string | null> {
+    return fetchRecidFromInspire(item);
+  }
+
   private async ensureItemForCitation(itemID: number): Promise<boolean> {
     const item = Zotero.Items.get(itemID);
     if (!item || !item.isRegularItem()) {
@@ -3383,14 +3932,29 @@ class InspireReferencePanelController {
     this.viewMode = "references";
     // FTR-MULTI-PDF-FIX-V3: Clear labelMatcher cache on item switch (matchers are item-specific)
     this.labelMatcherCache.clear();
-    this.pdfParseAttemptedMap.clear();
+    // Parse-attempt state is attachment-keyed. Preserve it across item switches
+    // so navigating away and back cannot repeat an expensive whole-PDF parse.
+    // Explicit References refresh (or controller destruction) resets it.
     this.currentAttachmentID = undefined;
     this.currentItemID = itemID;
+    this.assignCurrentRecid(undefined, true);
+    this.lastAsyncRenderKey = undefined;
+    this.asyncRenderLoad = undefined;
 
-    const recid =
-      deriveRecidFromItem(item) ?? (await fetchRecidFromInspire(item));
+    let recid = deriveRecidFromItem(item) ?? undefined;
     if (!recid) {
-      this.currentRecid = undefined;
+      const recidRevision = this.getRecidStateRevision();
+      const resolvedRecid = await this.fetchRecidForItem(item);
+      if (this.currentItemID !== itemID) return false;
+      if (this.getRecidStateRevision() !== recidRevision) {
+        recid = this.currentRecid;
+        if (!recid) return false;
+      } else {
+        recid = resolvedRecid ?? undefined;
+      }
+    }
+    if (!recid) {
+      this.assignCurrentRecid(undefined);
       this.allEntries = [];
       this.renderChartImmediate();
       this.renderMessage(getString("references-panel-no-recid"));
@@ -3398,7 +3962,7 @@ class InspireReferencePanelController {
       return false;
     }
 
-    this.currentRecid = recid;
+    this.assignCurrentRecid(recid);
     this.updateSortSelector();
     try {
       await this.loadEntries(recid, "references");
@@ -3421,6 +3985,7 @@ class InspireReferencePanelController {
   private async handleRecidBecameAvailable(
     itemID: number,
     recid: string,
+    options: { loadData?: boolean } = {},
   ): Promise<void> {
     // Verify this is still the current item
     if (this.currentItemID !== itemID) {
@@ -3431,11 +3996,20 @@ class InspireReferencePanelController {
       `[${config.addonName}] [RECID-AUTO-UPDATE] handleRecidBecameAvailable: item ${itemID}, recid ${recid}`,
     );
 
-    // Show notification to user
-    this.showToast(getString("references-panel-recid-found"));
+    // Always record the new identifier, but do not inflate a collapsed pane.
+    // A same-item recid correction invalidates every old recid-scoped progress,
+    // render, and enrichment callback even when its fetch ignores AbortSignal.
+    if (this.currentRecid !== recid) this.cancelActiveRequest();
+    this.assignCurrentRecid(recid, true);
+    this.lastAsyncRenderKey = undefined;
+    this.asyncRenderLoad = undefined;
+    this.visibleItemLoad = undefined;
+    this.pendingVisibleItemSwitchID = itemID;
+    if (options.loadData === false) return;
 
-    // Update current recid and load entries
-    this.currentRecid = recid;
+    // Show notification to user only when the section is actually visible.
+    this.showToast(getString("references-panel-recid-found"));
+    this.pendingVisibleItemSwitchID = undefined;
     this.updateSortSelector();
 
     // Reset view mode to references if not already
@@ -3447,6 +4021,17 @@ class InspireReferencePanelController {
     // Load entries with the new recid
     try {
       await this.loadEntries(recid, "references");
+      if (
+        this.currentItemID === itemID &&
+        this.currentRecid === recid &&
+        this.viewMode === "references"
+      ) {
+        this.lastAsyncRenderKey = getItemPaneMaterializationKey(
+          itemID,
+          recid,
+          "references",
+        );
+      }
       Zotero.debug(
         `[${config.addonName}] [RECID-AUTO-UPDATE] Successfully loaded ${this.allEntries.length} entries for item ${itemID}`,
       );
@@ -3466,7 +4051,10 @@ class InspireReferencePanelController {
    * FTR-RECID-AUTO-UPDATE: Handle event when item has no recid.
    * Shows the "no recid" message immediately instead of trying to load.
    */
-  private handleNoRecid(itemID: number): void {
+  private handleNoRecid(
+    itemID: number,
+    options: { render?: boolean } = {},
+  ): void {
     // Verify this is still the current item
     if (this.currentItemID !== itemID) {
       return;
@@ -3476,12 +4064,21 @@ class InspireReferencePanelController {
       `[${config.addonName}] [RECID-AUTO-UPDATE] handleNoRecid: item ${itemID}`,
     );
 
-    // Clear any loading state and show no-recid message
-    this.currentRecid = undefined;
+    // Clear state immediately, but repaint only when Zotero says the section
+    // is open. A collapsed header must remain free of list/chart work.
+    this.cancelActiveRequest();
+    this.assignCurrentRecid(undefined, true);
     this.allEntries = [];
+    this.lastRenderedEntries = [];
+    this.lastAsyncRenderKey = undefined;
+    this.asyncRenderLoad = undefined;
+    this.visibleItemLoad = undefined;
+    this.pendingVisibleItemSwitchID = itemID;
+    if (options.render === false) return;
+
+    this.pendingVisibleItemSwitchID = undefined;
     this.renderChartImmediate();
     this.renderMessage(getString("references-panel-no-recid"));
-    this.lastRenderedEntries = [];
     this.updateSortSelector();
   }
 
@@ -3502,13 +4099,100 @@ class InspireReferencePanelController {
     // Determine which entries to use
     let entries: InspireReferenceEntry[] | undefined;
     let labelMatcher: LabelMatcher | undefined;
+    let linkedStrictMatches: MatchResult[] = [];
+    const exactNativeText =
+      event.citationType === "numeric" &&
+      event.linkedReference?.kind === "resolved"
+        ? event.linkedReference.text
+        : undefined;
+    const nativeEvidenceInconclusive =
+      event.citationType === "numeric" &&
+      linkedReferenceIsInconclusive(event.linkedReference);
+    let numericLabels = [event.label];
+    const showExactNativePreview = (): boolean => {
+      if (!this.hoverPreview) return false;
+      if (
+        !exactNativeText ||
+        numericLabels.length !== 1 ||
+        numericLabels[0] !== event.label
+      ) {
+        return false;
+      }
+      if (
+        event.linkedReference?.kind === "resolved" &&
+        event.linkedReference.source === "citation-overlay" &&
+        (!labelMatcher || labelMatcher.hasDuplicateInspireLabel(event.label))
+      ) {
+        Zotero.debug(
+          `[${config.addonName}] [HOVER-PREVIEW] Deferring document-global native text until the cached list corroborates unique label ${event.label}`,
+        );
+        return false;
+      }
+      this.hoverPreview.scheduleShowNativeReference(exactNativeText, {
+        label: event.label,
+        buttonRect: event.buttonRect,
+      });
+      Zotero.debug(
+        `[${config.addonName}] [HOVER-PREVIEW] Showing Zotero-native reference text without materializing the full References cache`,
+      );
+      return true;
+    };
+    const matchExactNativeReference = (matcher: LabelMatcher): MatchResult[] =>
+      exactNativeText &&
+      numericLabels.length === 1 &&
+      numericLabels[0] === event.label &&
+      shouldTrustLinkedReferenceForStrictMatch(
+        event.linkedReference,
+        matcher.hasDuplicateInspireLabel(event.label),
+      )
+        ? matcher.matchLinkedReference(
+            event.label,
+            getPDFReferencesParser().parseReferenceText(exactNativeText),
+          )
+        : [];
 
     if (this.currentItemID === event.parentItemID) {
+      // onItemChange deliberately avoids a remote recid lookup. Resolve it
+      // here, on the first real interaction, so a cold panel can still reach
+      // its persisted References cache.
+      if (!this.currentRecid) {
+        // The exact processed Zotero reference is already sufficient for a
+        // truthful cold hover. Do not perform a remote recid lookup merely to
+        // upgrade this lightweight preview.
+        if (showExactNativePreview()) return;
+        if (nativeEvidenceInconclusive) {
+          Zotero.debug(
+            `[${config.addonName}] [HOVER-PREVIEW] Deferring inconclusive native evidence while the References list is cold`,
+          );
+          return;
+        }
+        const parentItem = Zotero.Items.get(event.parentItemID);
+        if (parentItem) {
+          const recidRevision = this.getRecidStateRevision();
+          const recid = await resolveCitationRecidForInteraction(
+            parentItem,
+            (candidate) => this.fetchRecidForItem(candidate),
+          );
+          if (this.currentItemID !== event.parentItemID) return;
+          if (this.getRecidStateRevision() !== recidRevision) {
+            if (!this.currentRecid) return;
+            this.updateSortSelector();
+          } else if (recid) {
+            this.assignCurrentRecid(recid);
+            this.updateSortSelector();
+          }
+        }
+      }
+
       // FTR-FIX-LOOKUP-TAB: Preview must also use References entries regardless of current tab
       // Same as handleCitationLookup - citation matching only works with References list
       if (this.viewMode === "references") {
-        // Already on References tab - use allEntries directly
-        entries = this.allEntries;
+        // Prefer the complete raw cache. `allEntries` can be only the first
+        // progressive page while a network load is in flight.
+        const cached = this.currentRecid
+          ? this.referencesCache.get(this.currentRecid)
+          : undefined;
+        entries = cached?.length ? cached : undefined;
       } else {
         // Different tab - fetch References entries from cache
         if (this.currentRecid) {
@@ -3520,19 +4204,72 @@ class InspireReferencePanelController {
           );
           const cached = this.referencesCache.get(cacheKey);
           if (cached) {
-            entries = this.getSortedReferences(cached);
+            entries = cached;
             Zotero.debug(
               `[${config.addonName}] [HOVER-PREVIEW] Got ${entries.length} References entries from cache (current tab: ${this.viewMode})`,
             );
           }
         }
-        // If no cache available, fall back to allEntries (may not match correctly)
-        if (!entries) {
-          entries = this.allEntries;
-          Zotero.debug(
-            `[${config.addonName}] [HOVER-PREVIEW] Warning: Using allEntries from ${this.viewMode} tab (References not in cache)`,
+      }
+
+      // A Zotero 10 onItemChange is state-only, so the default References view
+      // can legitimately still be cold when the first real hover arrives. Try
+      // the controller LRU first. When Zotero supplied exact native text, show
+      // it directly and leave gzip decompression/full-list alignment for an
+      // explicit click. Other citation formats retain the historical disk
+      // cache fallback.
+      if (!entries?.length && this.currentRecid) {
+        const sortOption = this.getSortOptionForMode("references");
+        const cacheKey = this.getCacheKey(
+          this.currentRecid,
+          "references",
+          sortOption,
+        );
+        const memoryCached = this.referencesCache.get(cacheKey);
+        if (memoryCached?.length) {
+          entries = memoryCached;
+        } else if (showExactNativePreview()) {
+          return;
+        } else {
+          if (nativeEvidenceInconclusive) {
+            Zotero.debug(
+              `[${config.addonName}] [HOVER-PREVIEW] Deferring inconclusive native evidence rather than inflating the disk cache`,
+            );
+            return;
+          }
+          const cacheRecid = this.currentRecid;
+          const diskCached = await localCache.get<InspireReferenceEntry[]>(
+            "refs",
+            cacheRecid,
           );
+          if (
+            this.currentItemID !== event.parentItemID ||
+            this.currentRecid !== cacheRecid
+          ) {
+            return;
+          }
+          if (diskCached?.data?.length) {
+            // References are persisted in canonical (unsorted) order. Mirror
+            // loadEntries(): warm the controller LRU and build the matcher from
+            // that raw array. Display sorting is resolved later by stable ID.
+            this.referencesCache.set(cacheKey, diskCached.data);
+            entries = diskCached.data;
+            Zotero.debug(
+              `[${config.addonName}] [HOVER-PREVIEW] Loaded ${entries.length} References entries from disk cache on first interaction`,
+            );
+          }
         }
+      }
+
+      // Never cache a matcher backed by an empty, still-loading panel. This
+      // race became common when hover arrived before the References cache had
+      // materialized and left the later click reusing a permanently empty
+      // matcher for the attachment.
+      if (!entries?.length) {
+        Zotero.debug(
+          `[${config.addonName}] [HOVER-PREVIEW] Skipping matcher creation while References entries are still loading`,
+        );
+        return;
       }
 
       // FTR-MULTI-PDF-FIX-V3: Track PDF switch for perfStats
@@ -3551,42 +4288,84 @@ class InspireReferencePanelController {
         entries,
       );
       labelMatcher = cachedMatcher;
+      const lostDashBound = getSafeLostDashLabelBound(labelMatcher);
+      if (lostDashBound > 0) {
+        getReaderIntegration().setMaxKnownLabel(
+          event.attachmentItemID,
+          lostDashBound,
+        );
+      }
+
+      // Exact Zotero citation text does not need the potentially large
+      // persisted PDF mapping. Either upgrade it with strict INSPIRE metadata
+      // from the already-materialized memory list, or keep the native text.
+      if (exactNativeText) {
+        linkedStrictMatches = matchExactNativeReference(labelMatcher);
+      }
+
+      // Once Zotero's strict marker-local evidence did not identify an entry,
+      // hover and click must delegate to the same fully restored historical
+      // matcher. Reading the small attachment-scoped persisted map is bounded
+      // interaction work; it never parses `.zotero-ft-cache` or the whole PDF.
+      const needsLegacyMappings = linkedStrictMatches.length === 0;
 
       // FTR-MULTI-PDF-FIX-V3: Apply mappings if new matcher OR if cached matcher is missing mappings
-      // This fixes the bug where a matcher was cached before background parsing completed,
-      // and subsequent cache hits never got the PDF-specific mappings applied.
+      // A matcher may have been cached before an on-demand PDF mapping became
+      // available; apply that mapping on subsequent cache hits as well.
       if (isNewMatcher) {
         Zotero.debug(
           `[${config.addonName}] [HOVER-PREVIEW] Created new labelMatcher for attachment ${event.attachmentItemID}`,
         );
       }
 
-      // Apply mappings just like handleCitationLookup does
+      // Apply mappings just like handleCitationLookup does when the native
+      // exact path was unavailable.
       const reader = getReaderIntegration();
+      if (needsLegacyMappings) {
+        await reader.ensureCachedPDFMappings(event.attachmentItemID);
+        if (this.currentItemID !== event.parentItemID) return;
+        if (
+          event.citationType === "numeric" &&
+          event.linkedReference?.kind !== "resolved" &&
+          labelMatcher.getInspireLabelMultiplicity(event.label) === 0
+        ) {
+          numericLabels = postProcessLabels(
+            [event.label],
+            reader.getMaxKnownLabel(event.attachmentItemID) ??
+              (lostDashBound > 0 ? lostDashBound : undefined),
+          );
+        }
+      }
 
       // Apply PDF numeric mapping if new OR missing
-      if (isNewMatcher || !labelMatcher.hasPDFMapping?.()) {
-        const preloadedMapping = reader.getPreloadedPDFMapping(
+      if (
+        needsLegacyMappings &&
+        (isNewMatcher || !labelMatcher.hasPDFMapping?.())
+      ) {
+        const cachedMapping = reader.getCachedPDFMapping(
           event.attachmentItemID,
         );
-        if (preloadedMapping) {
-          labelMatcher.setPDFMapping(preloadedMapping);
+        if (cachedMapping) {
+          labelMatcher.setPDFMapping(cachedMapping);
           this.markPdfParseAttempted(event.attachmentItemID);
           Zotero.debug(
-            `[${config.addonName}] [HOVER-PREVIEW] Applied preloaded PDF mapping (${preloadedMapping.totalLabels} labels, isNew=${isNewMatcher})`,
+            `[${config.addonName}] [HOVER-PREVIEW] Applied cached PDF mapping (${cachedMapping.totalLabels} labels, isNew=${isNewMatcher})`,
           );
         }
       }
 
       // Apply author-year mapping if new OR missing
-      if (isNewMatcher || !labelMatcher.hasAuthorYearMapping?.()) {
-        const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(
+      if (
+        needsLegacyMappings &&
+        (isNewMatcher || !labelMatcher.hasAuthorYearMapping?.())
+      ) {
+        const cachedAuthorYear = reader.getCachedAuthorYearMapping(
           event.attachmentItemID,
         );
-        if (preloadedAuthorYear) {
-          labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
+        if (cachedAuthorYear) {
+          labelMatcher.setAuthorYearMapping(cachedAuthorYear);
           Zotero.debug(
-            `[${config.addonName}] [HOVER-PREVIEW] Applied preloaded author-year mapping (${preloadedAuthorYear.authorYearMap.size} entries, isNew=${isNewMatcher})`,
+            `[${config.addonName}] [HOVER-PREVIEW] Applied cached author-year mapping (${cachedAuthorYear.authorYearMap.size} entries, isNew=${isNewMatcher})`,
           );
         }
       }
@@ -3596,10 +4375,15 @@ class InspireReferencePanelController {
         `[${config.addonName}] [HOVER-PREVIEW] currentItemID mismatch, trying cache for parentItemID=${event.parentItemID}`,
       );
 
+      // A foreign panel's disk cache can be RPP-sized. Native citation text is
+      // already exact and should not be delayed by unrelated pane state.
+      if (showExactNativePreview()) return;
+      if (nativeEvidenceInconclusive) return;
+
       // Get recid for the PDF's parent item
       const parentItem = Zotero.Items.get(event.parentItemID);
       if (parentItem) {
-        const recid = deriveRecidFromItem(parentItem);
+        const recid = await resolveCitationRecidForInteraction(parentItem);
         if (recid) {
           // Try to get entries from cache
           const cached = await localCache.get<InspireReferenceEntry[]>(
@@ -3607,6 +4391,8 @@ class InspireReferencePanelController {
             recid,
           );
           if (cached?.data && cached.data.length > 0) {
+            // The foreign panel's sort preference must not change the PDF's
+            // positional label mapping.
             entries = cached.data;
             // Create a temporary LabelMatcher for matching
             labelMatcher = new LabelMatcher(entries, event.attachmentItemID);
@@ -3617,27 +4403,55 @@ class InspireReferencePanelController {
             // FTR-HOVER-PREVIEW-FULL: Apply mappings to temp LabelMatcher for full matching capability
             // This enables multi-entry lookup (overlay) and author-year matching
             const reader = getReaderIntegration();
+            const lostDashBound = getSafeLostDashLabelBound(labelMatcher);
+            if (lostDashBound > 0) {
+              reader.setMaxKnownLabel(event.attachmentItemID, lostDashBound);
+            }
+            await reader.ensureCachedPDFMappings(event.attachmentItemID);
+            if (
+              event.citationType === "numeric" &&
+              event.linkedReference?.kind !== "resolved" &&
+              labelMatcher.getInspireLabelMultiplicity(event.label) === 0
+            ) {
+              numericLabels = postProcessLabels(
+                [event.label],
+                reader.getMaxKnownLabel(event.attachmentItemID) ??
+                  (lostDashBound > 0 ? lostDashBound : undefined),
+              );
+            }
+            // A document-level citation overlay cannot be shown cold, but once
+            // this PDF's canonical cache has been loaded it may identify a
+            // unique entry through DOI/arXiv/journal metadata. Re-run the same
+            // strict matcher used by the current-item branch before delegating
+            // to positional/legacy matching; repeated labels remain rejected
+            // by shouldTrustLinkedReferenceForStrictMatch().
+            if (exactNativeText) {
+              linkedStrictMatches = matchExactNativeReference(labelMatcher);
+            }
+            // This matcher is deliberately independent of the panel's current
+            // item. If the pane changes while the cache read is in flight, the
+            // same event/attachment evidence remains valid for the PDF hover.
 
             // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache lookup
-            // Apply preloaded PDF mapping if available
-            const preloadedMapping = reader.getPreloadedPDFMapping(
+            // Apply a cached PDF mapping if available.
+            const cachedMapping = reader.getCachedPDFMapping(
               event.attachmentItemID,
             );
-            if (preloadedMapping) {
-              labelMatcher.setPDFMapping(preloadedMapping);
+            if (cachedMapping) {
+              labelMatcher.setPDFMapping(cachedMapping);
               Zotero.debug(
-                `[${config.addonName}] [HOVER-PREVIEW] Applied preloaded PDF mapping (${preloadedMapping.totalLabels} labels)`,
+                `[${config.addonName}] [HOVER-PREVIEW] Applied cached PDF mapping (${cachedMapping.totalLabels} labels)`,
               );
             }
 
             // Apply author-year mapping for author-year citation support
-            const preloadedAuthorYear = reader.getPreloadedAuthorYearMapping(
+            const cachedAuthorYear = reader.getCachedAuthorYearMapping(
               event.attachmentItemID,
             );
-            if (preloadedAuthorYear) {
-              labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
+            if (cachedAuthorYear) {
+              labelMatcher.setAuthorYearMapping(cachedAuthorYear);
               Zotero.debug(
-                `[${config.addonName}] [HOVER-PREVIEW] Applied preloaded author-year mapping (${preloadedAuthorYear.authorYearMap.size} entries)`,
+                `[${config.addonName}] [HOVER-PREVIEW] Applied cached author-year mapping (${cachedAuthorYear.authorYearMap.size} entries)`,
               );
             }
           }
@@ -3662,13 +4476,19 @@ class InspireReferencePanelController {
       // No fallback to index-based matching - if match() returns empty, the label
       // is not in INSPIRE references (e.g., footnotes), so don't show preview
       if (labelMatcher) {
-        const matches = getOverlayCoordinator().matchLabelWithReadyNative(
-          event.readToken,
-          labelMatcher,
-          event.label,
-        );
+        const matches = resolveSafeNumericMatches({
+          labels: numericLabels,
+          matcher: labelMatcher,
+          linkedStrictMatches,
+          legacyMatch: (labels) =>
+            getOverlayCoordinator().matchLabelsWithReadyNative(
+              event.readToken,
+              labelMatcher,
+              labels,
+            ),
+        });
         for (const match of matches) {
-          const entry = entries[match.entryIndex];
+          const entry = labelMatcher.getEntryAt(match.entryIndex);
           if (entry && !matchedEntries.includes(entry)) {
             matchedEntries.push(entry);
           }
@@ -3695,14 +4515,14 @@ class InspireReferencePanelController {
             `[${config.addonName}] [HOVER-PREVIEW] Ambiguous author-year match with ${firstMatch.ambiguousCandidates.length} candidates`,
           );
           for (const candidate of firstMatch.ambiguousCandidates) {
-            const entry = entries[candidate.entryIndex];
+            const entry = labelMatcher.getEntryAt(candidate.entryIndex);
             if (entry && !matchedEntries.includes(entry)) {
               matchedEntries.push(entry);
             }
           }
         } else {
           // Non-ambiguous: only show the first match (like click handler does)
-          const entry = entries[firstMatch.entryIndex];
+          const entry = labelMatcher.getEntryAt(firstMatch.entryIndex);
           if (entry) {
             matchedEntries.push(entry);
           }
@@ -3714,6 +4534,7 @@ class InspireReferencePanelController {
     }
 
     if (matchedEntries.length === 0) {
+      if (showExactNativePreview()) return;
       Zotero.debug(
         `[${config.addonName}] [HOVER-PREVIEW] No entry found for label: ${event.label}`,
       );
@@ -3891,7 +4712,7 @@ class InspireReferencePanelController {
   /**
    * Try to parse PDF reference list and apply mapping to LabelMatcher.
    * FTR-PDF-ANNOTATE-MULTI-LABEL: Scans PDF's References section to fix label alignment.
-   * FTR-PDF-PARSE-PRELOAD: Checks preload cache first to avoid duplicate work.
+   * Reuses any mapping already produced by an earlier on-demand lookup.
    * FTR-MULTI-PDF-FIX: Changed from parentItemID to attachmentItemID for multi-PDF support.
    * @param attachmentItemID - The Zotero attachment item ID (the specific PDF file)
    * @returns true if mapping was successfully applied, false otherwise
@@ -3908,49 +4729,22 @@ class InspireReferencePanelController {
       return false;
     }
 
-    // FTR-PDF-PARSE-PRELOAD: Check preload cache first to avoid duplicate parsing
+    // Check the attachment-scoped mapping cache first to avoid duplicate parsing.
     // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache lookup
     const reader = getReaderIntegration();
-    const preloadedMapping = reader.getPreloadedPDFMapping(attachmentItemID);
-    if (preloadedMapping) {
-      labelMatcher.setPDFMapping(preloadedMapping);
+    const cachedMapping = reader.getCachedPDFMapping(attachmentItemID);
+    if (cachedMapping) {
+      labelMatcher.setPDFMapping(cachedMapping);
       Zotero.debug(
-        `[${config.addonName}] [PDF-PARSE] Using preloaded mapping (${preloadedMapping.totalLabels} labels)`,
+        `[${config.addonName}] [PDF-PARSE] Using cached mapping (${cachedMapping.totalLabels} labels)`,
       );
       // Also check for author-year mapping
-      const preloadedAuthorYear =
-        reader.getPreloadedAuthorYearMapping(attachmentItemID);
-      if (preloadedAuthorYear) {
-        labelMatcher.setAuthorYearMapping(preloadedAuthorYear);
+      const cachedAuthorYear =
+        reader.getCachedAuthorYearMapping(attachmentItemID);
+      if (cachedAuthorYear) {
+        labelMatcher.setAuthorYearMapping(cachedAuthorYear);
       }
       return true;
-    }
-
-    // FTR-PDF-PARSE-PRELOAD: If preload is in progress, wait briefly then check again
-    if (reader.isPDFParsingInProgress(attachmentItemID)) {
-      Zotero.debug(
-        `[${config.addonName}] [PDF-PARSE] Preload in progress, waiting...`,
-      );
-      // Wait up to 2 seconds for preload to complete
-      for (let i = 0; i < 20; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        if (!reader.isPDFParsingInProgress(attachmentItemID)) {
-          const mapping = reader.getPreloadedPDFMapping(attachmentItemID);
-          if (mapping) {
-            labelMatcher.setPDFMapping(mapping);
-            const authorYear =
-              reader.getPreloadedAuthorYearMapping(attachmentItemID);
-            if (authorYear) {
-              labelMatcher.setAuthorYearMapping(authorYear);
-            }
-            Zotero.debug(
-              `[${config.addonName}] [PDF-PARSE] Preload completed, using cached mapping`,
-            );
-            return true;
-          }
-          break;
-        }
-      }
     }
 
     const [
@@ -3997,7 +4791,7 @@ class InspireReferencePanelController {
     if (persistedParse?.numeric || persistedParse?.authorYear) {
       if (persistedParse.numeric) {
         labelMatcher.setPDFMapping(persistedParse.numeric);
-        getReaderIntegration().setPreloadedPDFMapping(
+        getReaderIntegration().setCachedPDFMapping(
           attachmentItemID,
           persistedParse.numeric,
         );
@@ -4013,7 +4807,7 @@ class InspireReferencePanelController {
       }
       if (persistedParse.authorYear) {
         labelMatcher.setAuthorYearMapping(persistedParse.authorYear);
-        getReaderIntegration().setPreloadedAuthorYearMapping(
+        getReaderIntegration().setCachedAuthorYearMapping(
           attachmentItemID,
           persistedParse.authorYear,
         );
@@ -4085,12 +4879,8 @@ class InspireReferencePanelController {
       if (mapping && mapping.totalLabels > 0) {
         labelMatcher.setPDFMapping(mapping);
 
-        // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
-        // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache
-        getReaderIntegration().setPreloadedPDFMapping(
-          attachmentItemID,
-          mapping,
-        );
+        // Cache the attachment-scoped mapping for later lookups.
+        getReaderIntegration().setCachedPDFMapping(attachmentItemID, mapping);
 
         // FTR-PDF-MATCHING: Calculate and store max label for concatenated range detection
         // FTR-MULTI-PDF-FIX: Use attachmentItemID directly
@@ -4157,9 +4947,8 @@ class InspireReferencePanelController {
 
       if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
         labelMatcher.setAuthorYearMapping(authorYearMapping);
-        // FTR-PDF-PARSE-PRELOAD: Cache to readerIntegration for future use
-        // FTR-MULTI-PDF-FIX: Use attachmentItemID for PDF-specific cache
-        getReaderIntegration().setPreloadedAuthorYearMapping(
+        // Cache the attachment-scoped mapping for later lookups.
+        getReaderIntegration().setCachedAuthorYearMapping(
           attachmentItemID,
           authorYearMapping,
         );
@@ -7712,6 +8501,9 @@ class InspireReferencePanelController {
   destroy() {
     this.unregisterNotifier();
     this.cancelActiveRequest();
+    this.asyncRenderLoad = undefined;
+    this.visibleItemLoad = undefined;
+    this.pendingVisibleItemSwitchID = undefined;
     // PERF-FIX-2: Cancel any ongoing export operations
     this.cancelExport();
     // FTR-CITATION-GRAPH: Cleanup citation graph dialog
@@ -7838,6 +8630,7 @@ class InspireReferencePanelController {
     // FTR-MULTI-PDF-FIX-V3: Clear labelMatcher cache on destroy
     this.labelMatcherCache.clear();
     this.pdfParseAttemptedMap.clear();
+    this.pdfParseFallbackWarningShown.clear();
     this.currentAttachmentID = undefined;
     InspireReferencePanelController.instances.delete(this);
     if (!InspireReferencePanelController.instances.size) {
@@ -8059,6 +8852,9 @@ class InspireReferencePanelController {
     switch (this.viewMode) {
       case "references":
         this.referencesCache.delete(this.currentRecid);
+        this.labelMatcherCache.clear();
+        this.pdfParseAttemptedMap.clear();
+        this.pdfParseFallbackWarningShown.clear();
         // References only use unsorted cache
         localCache.delete("refs", this.currentRecid).catch(() => {});
         break;
@@ -9245,17 +10041,45 @@ class InspireReferencePanelController {
     await this.openBibliographyDialog(entriesWithLocalItemNow);
   }
 
+  async handleVisibleItemChange(
+    args: _ZoteroTypes.ItemPaneManagerSection.SectionHookArgs,
+  ): Promise<void> {
+    const key = `${args.tabType}:${args.item?.id ?? "none"}:${this.viewMode}`;
+    const existing = this.visibleItemLoad;
+    if (existing?.key === key) {
+      return existing.promise;
+    }
+
+    const request = {
+      key,
+      promise: this.handleItemChange(args, { loadData: true }),
+    };
+    this.visibleItemLoad = request;
+    try {
+      await request.promise;
+    } finally {
+      if (this.visibleItemLoad === request) {
+        this.visibleItemLoad = undefined;
+      }
+    }
+  }
+
   async handleItemChange(
     args: _ZoteroTypes.ItemPaneManagerSection.SectionHookArgs,
+    options: { loadData?: boolean } = {},
   ) {
+    const loadData = options.loadData !== false;
     try {
       if (args.tabType !== "library" && args.tabType !== "reader") {
         // Don't override search mode display
         if (this.viewMode !== "search") {
           this.allEntries = [];
-          this.renderChartImmediate();
-          this.renderMessage(getString("references-panel-reader-mode"));
           this.lastRenderedEntries = [];
+          this.lastAsyncRenderKey = undefined;
+          if (loadData) {
+            this.renderChartImmediate();
+            this.renderMessage(getString("references-panel-reader-mode"));
+          }
         }
         return;
       }
@@ -9266,26 +10090,41 @@ class InspireReferencePanelController {
           : undefined;
       const item = args.item;
       if (!item || !item.isRegularItem()) {
+        this.cancelActiveRequest();
         this.currentItemID = undefined;
-        this.currentRecid = undefined;
+        this.assignCurrentRecid(undefined, true);
+        this.pendingAutoCheckItemID = undefined;
+        this.pendingVisibleItemSwitchID = undefined;
+        this.lastAsyncRenderKey = undefined;
+        this.asyncRenderLoad = undefined;
         // In search mode, don't show "select item" message - keep search results visible
         if (this.viewMode !== "search") {
           this.allEntries = [];
-          this.renderChartImmediate();
-          this.renderMessage(getString("references-panel-select-item"));
           this.lastRenderedEntries = [];
+          if (loadData) {
+            this.renderChartImmediate();
+            this.renderMessage(getString("references-panel-select-item"));
+          }
         }
-        this.updateSortSelector();
+        if (loadData) this.updateSortSelector();
         return;
       }
 
-      // Skip redundant processing for same item (e.g., PDF annotation changes)
-      // This avoids unnecessary network requests to INSPIRE for recid lookup
-      if (item.id === this.currentItemID && this.currentRecid) {
-        // Same item and already have recid - no need to re-process
-        // Just handle any scroll restoration if needed
-        if (this.viewMode !== "search") {
-          this.restoreScrollPositionIfNeeded();
+      // onItemChange is intentionally state-only. Zotero invokes it for
+      // off-screen custom sections, and its own API contract reserves expensive
+      // cache loading/rendering for onAsyncRender. Preserve a fetched recid for
+      // same-item notifier churn; only a true item switch invalidates it.
+      if (!loadData && item.id === this.currentItemID) {
+        const localRecid = deriveRecidFromItem(item);
+        if (localRecid) {
+          const recidChanged = this.currentRecid !== localRecid;
+          this.assignCurrentRecid(localRecid, true);
+          if (recidChanged) {
+            this.lastAsyncRenderKey = undefined;
+            this.asyncRenderLoad = undefined;
+            this.visibleItemLoad = undefined;
+            this.pendingVisibleItemSwitchID = item.id;
+          }
         }
         return;
       }
@@ -9294,9 +10133,16 @@ class InspireReferencePanelController {
       const itemChanged = previousItemID !== item.id;
       this.currentItemID = item.id;
       if (itemChanged) {
+        this.assignCurrentRecid(undefined, true);
+        this.pendingAutoCheckItemID = item.id;
+        this.pendingVisibleItemSwitchID = item.id;
+        this.lastAsyncRenderKey = undefined;
+        this.asyncRenderLoad = undefined;
         // FTR-MULTI-PDF-FIX-V3: Clear labelMatcher cache when item changes
         this.labelMatcherCache.clear();
-        this.pdfParseAttemptedMap.clear();
+        // Keep attachment-keyed parser attempts/warnings across item switches.
+        // Otherwise A -> B -> A would permit another whole-PDF parse without
+        // the explicit References refresh required by the interaction policy.
         this.currentAttachmentID = undefined;
         if (!InspireReferencePanelController.isNavigatingHistory) {
           InspireReferencePanelController.forwardStack = [];
@@ -9333,8 +10179,6 @@ class InspireReferencePanelController {
             this.filterInput.value = "";
           }
           this.filterInlineHint?.hide();
-          this.renderChartLoading(); // Show loading state in chart
-          this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
         } else {
           // Search mode: preserve search results but still restore scroll position
           // when navigating back (e.g., after clicking green dot to jump to a local item).
@@ -9343,17 +10187,49 @@ class InspireReferencePanelController {
             this.restoreScrollPositionIfNeeded();
           }, 0);
         }
-      } else {
+      } else if (loadData) {
         // Check if we need to restore scroll position when switching back to original item
         // Only restore if we are not loading new content (item didn't change)
         this.restoreScrollPositionIfNeeded();
       }
 
-      const recid =
-        deriveRecidFromItem(item) ?? (await fetchRecidFromInspire(item));
+      const localRecid = deriveRecidFromItem(item);
+      if (!loadData) {
+        this.assignCurrentRecid(localRecid ?? undefined);
+        return;
+      }
+
+      const switchedForVisibleRender =
+        itemChanged || this.pendingVisibleItemSwitchID === item.id;
+      if (switchedForVisibleRender) {
+        this.pendingVisibleItemSwitchID = undefined;
+        if (this.viewMode !== "search") {
+          // Paint synchronously before a possible remote recid/cache await, so
+          // an already-open pane never attributes the previous item's rows to
+          // the newly selected item.
+          this.lastRenderedEntries = [];
+          this.renderChartLoading();
+          this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
+        }
+      }
+
+      let recid = localRecid ?? this.currentRecid;
       if (!recid) {
-        this.currentRecid = undefined;
+        const recidRevision = this.getRecidStateRevision();
+        const resolvedRecid = await this.fetchRecidForItem(item);
+        if (
+          this.currentItemID !== item.id ||
+          this.getRecidStateRevision() !== recidRevision
+        ) {
+          return;
+        }
+        recid = resolvedRecid ?? undefined;
+      }
+      if (!recid) {
+        this.assignCurrentRecid(undefined);
         this.allEntries = [];
+        this.lastAsyncRenderKey = undefined;
+        this.asyncRenderLoad = undefined;
         this.renderChartImmediate();
         this.renderMessage(getString("references-panel-no-recid"));
         this.lastRenderedEntries = [];
@@ -9361,37 +10237,78 @@ class InspireReferencePanelController {
         return;
       }
 
-      // FTR-SMART-UPDATE-AUTO-CHECK: Trigger auto-check when item changes
-      // Run in parallel with references loading (don't await)
-      // Pass the already-obtained recid to avoid redundant lookup
-      if (itemChanged) {
+      // FTR-SMART-UPDATE-AUTO-CHECK: onItemChange may have run while the pane
+      // was hidden. Consume its deferred check when Zotero asks us to render
+      // the visible section.
+      if (itemChanged || this.pendingAutoCheckItemID === item.id) {
+        this.pendingAutoCheckItemID = undefined;
         this.performAutoCheck(item, recid).catch((err) => {
           Zotero.debug(`[${config.addonName}] Auto-check failed: ${err}`);
         });
       }
 
-      if (this.currentRecid !== recid) {
-        this.currentRecid = recid;
-        this.updateSortSelector();
-        // Don't load entries if in search mode - keep search results visible
-        if (this.viewMode !== "search") {
-          await this.loadEntries(recid, this.viewMode).catch((err) => {
-            if ((err as any)?.name !== "AbortError") {
-              Zotero.debug(
-                `[${config.addonName}] Failed to load INSPIRE data: ${err}`,
-              );
-              this.allEntries = [];
-              this.renderChartImmediate();
-              this.renderMessage(getString("references-panel-status-error"));
-            }
-          });
+      const recidChanged = this.currentRecid !== recid;
+      this.assignCurrentRecid(recid);
+      this.updateSortSelector();
+
+      if (this.viewMode !== "search") {
+        const renderMode = this.viewMode;
+        const asyncRenderKey = getItemPaneMaterializationKey(
+          item.id,
+          recid,
+          renderMode,
+        );
+        if (recidChanged || this.lastAsyncRenderKey !== asyncRenderKey) {
+          let renderLoad = this.asyncRenderLoad;
+          if (!renderLoad || renderLoad.key !== asyncRenderKey) {
+            const promise = this.loadEntries(recid, renderMode).then(
+              () => ({ loaded: true }) as const,
+              (error: unknown) => ({ loaded: false, error }) as const,
+            );
+            renderLoad = {
+              key: asyncRenderKey,
+              promise,
+              errorReported: false,
+            };
+            this.asyncRenderLoad = renderLoad;
+            void promise.then(() => {
+              if (this.asyncRenderLoad === renderLoad) {
+                this.asyncRenderLoad = undefined;
+              }
+            });
+          }
+
+          const outcome = await renderLoad.promise;
+          if (
+            this.currentItemID !== item.id ||
+            this.currentRecid !== recid ||
+            this.viewMode !== renderMode
+          ) {
+            return;
+          }
+          if (outcome.loaded) {
+            // Only a completed materialization suppresses a future open. An
+            // abort or failure must remain retryable.
+            this.lastAsyncRenderKey = asyncRenderKey;
+          } else if (
+            (outcome.error as any)?.name !== "AbortError" &&
+            !renderLoad.errorReported
+          ) {
+            renderLoad.errorReported = true;
+            const err = outcome.error;
+            Zotero.debug(
+              `[${config.addonName}] Failed to load INSPIRE data: ${err}`,
+            );
+            this.allEntries = [];
+            this.renderChartImmediate();
+            this.renderMessage(getString("references-panel-status-error"));
+          }
+        } else {
+          // Re-opening an already materialized pane only needs to restore its
+          // existing view; do not decompress or sort the disk cache again.
+          this.renderChartImmediate();
+          this.renderReferenceList({ preserveScroll: true });
         }
-      } else if (this.viewMode !== "search") {
-        // Recid unchanged but item changed (e.g., user switched away and back)
-        // Need to re-render both chart and list since renderChartLoading() was called
-        this.renderChartImmediate();
-        this.renderReferenceList({ preserveScroll: true });
-        // Restore scroll position after rendering if needed
         setTimeout(() => {
           this.restoreScrollPositionIfNeeded();
         }, 0);
@@ -9403,6 +10320,10 @@ class InspireReferencePanelController {
           this.restoreScrollPositionIfNeeded();
         }, 0);
       }
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] Item-pane item change failed: ${err}`,
+      );
     } finally {
       if (InspireReferencePanelController.isNavigatingHistory) {
         const currentID = args.item?.id;
@@ -9892,8 +10813,23 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     mode: InspireViewMode,
     options: { force?: boolean; resetScroll?: boolean } = {},
   ) {
+    const itemIDAtStart = this.currentItemID;
+    const isStillCurrent = () =>
+      this.currentItemID === itemIDAtStart &&
+      this.viewMode === mode &&
+      (mode !== "references" || this.currentRecid === recid);
     this.cancelActiveRequest();
     const isActiveMode = this.viewMode === mode;
+    const spinnerOwner = isActiveMode ? {} : undefined;
+    if (spinnerOwner) {
+      this.refreshSpinnerOwner = spinnerOwner;
+    }
+    const clearRefreshSpinnerIfOwner = () => {
+      if (spinnerOwner && this.refreshSpinnerOwner === spinnerOwner) {
+        this.refreshSpinnerOwner = undefined;
+        this.setRefreshButtonLoading(false);
+      }
+    };
     if (isActiveMode) {
       const loadingMessage = this.getLoadingMessageForMode(mode);
       this.allEntries = [];
@@ -9960,7 +10896,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             this.restoreScrollPositionIfNeeded();
           }, 0);
         }
-        this.setRefreshButtonLoading(false);
+        clearRefreshSpinnerIfOwner();
       }
       return;
     }
@@ -10025,6 +10961,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         if (localResult) {
           // Found in local cache - populate memory cache and display
           cache.set(cacheKey, localResult.data);
+          if (!isStillCurrent()) {
+            clearRefreshSpinnerIfOwner();
+            return;
+          }
           if (isActiveMode) {
             const shouldReset = Boolean(options.resetScroll);
             // Apply client-side sorting if using unsorted cache
@@ -10063,7 +11003,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
                 this.restoreScrollPositionIfNeeded();
               }, 0);
             }
-            this.setRefreshButtonLoading(false);
+            clearRefreshSpinnerIfOwner();
 
             // For author papers: if cache is expired (> 12h), trigger background refresh
             // This updates the cache for next time while showing current data immediately
@@ -10144,7 +11084,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         currentEntries: InspireReferenceEntry[],
         total: number | null,
       ) => {
-        if (this.pendingToken !== token || this.viewMode !== mode) {
+        if (this.pendingToken !== token || !isStillCurrent()) {
           return;
         }
         const prevCount = previousEntryCount;
@@ -10190,7 +11130,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           currentEntries: InspireReferenceEntry[],
           total: number,
         ) => {
-          if (this.pendingToken !== token || this.viewMode !== mode) {
+          if (this.pendingToken !== token || !isStillCurrent()) {
             return;
           }
           // Apply sorting before display
@@ -10254,7 +11194,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             totalAnchors: number;
             entries: InspireReferenceEntry[];
           }) => {
-            if (this.pendingToken !== token || this.viewMode !== mode) {
+            if (this.pendingToken !== token || !isStillCurrent()) {
               return;
             }
 
@@ -10320,7 +11260,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       // Local cache write is deferred until after enrichment completes
       // to ensure complete data (with titles, authors, citation counts) is stored
 
-      if (this.pendingToken === token && this.viewMode === mode) {
+      if (this.pendingToken === token && isStillCurrent()) {
         const entriesForDisplay =
           mode === "references"
             ? this.getSortedReferences(entries)
@@ -10361,7 +11301,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       const enrichSortOption = sortOption;
       setTimeout(async () => {
         // Skip if request was cancelled or mode changed
-        if (this.pendingToken !== enrichToken) {
+        if (this.pendingToken !== enrichToken || !isStillCurrent()) {
           Zotero.debug(
             `[${config.addonName}] Enrichment skipped: token mismatch (expected ${enrichToken}, got ${this.pendingToken})`,
           );
@@ -10378,7 +11318,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
               enrichReferencesEntries(entries, {
                 signal: enrichSignal,
                 onBatchComplete: (processedRecids) => {
-                  if (this.pendingToken !== enrichToken) {
+                  if (this.pendingToken !== enrichToken || !isStillCurrent()) {
                     return;
                   }
                   for (const recid of processedRecids) {
@@ -10413,6 +11353,17 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           Zotero.debug(
             `[${config.addonName}] Enrichment completed for ${enrichMode}/${enrichRecid}`,
           );
+
+          if (
+            enrichMode === "references" &&
+            this.currentRecid === enrichRecid
+          ) {
+            // Identifier/publication fields used by strict native matching can
+            // be filled in place by enrichment. Rebuild on the next real
+            // interaction so a matcher created in the short pre-enrichment
+            // window cannot retain stale indexes.
+            this.labelMatcherCache.clear();
+          }
 
           if (
             enrichMode === "entryCited" &&
@@ -10502,6 +11453,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
             // Populate memory cache and display stale data
             cache.set(cacheKey, staleResult.data);
+            if (this.pendingToken !== token || !isStillCurrent()) return;
             if (isActiveMode) {
               const entriesForDisplay =
                 mode === "related"
@@ -10550,12 +11502,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       // No stale cache available, re-throw the error
       throw err;
     } finally {
-      if (this.pendingToken === token) {
+      const ownsToken = this.pendingToken === token;
+      if (ownsToken) {
         this.activeAbort = undefined;
       }
-      if (isActiveMode) {
-        this.setRefreshButtonLoading(false);
-      }
+      clearRefreshSpinnerIfOwner();
     }
   }
 
@@ -12796,11 +13747,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         return;
       }
       this.referenceSort = rawValue;
-      // FTR-MULTI-PDF-FIX-V3: Clear labelMatcher cache when sort changes
-      // Cached matchers store entry indices based on OLD array order;
-      // getSortedReferences() creates NEW array with different order.
-      // Without clearing, entries[match.entryIndex] returns wrong entry.
-      this.labelMatcherCache.clear();
       const cached = this.referencesCache.get(this.currentRecid);
       if (cached) {
         this.allEntries = this.getSortedReferences(cached);
@@ -16934,6 +17880,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       // Ignore abort errors for environments without AbortController
     }
     this.activeAbort = undefined;
+    // Progress callbacks and deferred enrichment also key off pendingToken.
+    // Invalidating it closes the race where an abort-unaware promise from the
+    // previous item renders into the newly selected item's pane.
+    this.pendingToken = undefined;
   }
 
   private async promptForSaveTarget(

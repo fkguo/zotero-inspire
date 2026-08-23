@@ -41,6 +41,11 @@ import type { MatchResult } from "./types";
 import { installStandaloneReaderListeners } from "./overlayStandaloneListeners";
 import { invalidateNativeAttachment } from "./overlayInvalidation";
 import { validateNativeOriginAnchorEvent } from "./overlayEventValidation";
+import { NativeLinkedReferenceResolver } from "./nativeLinkedReference";
+import type {
+  NativeLinkedReferenceCapture,
+  NativeLinkedReferenceEvidence,
+} from "./nativeOverlayTypes";
 
 export class OverlayCoordinator {
   readonly adapter: NativeOverlayAdapter;
@@ -50,6 +55,7 @@ export class OverlayCoordinator {
   private readonly scheduler: OverlayScheduler;
   private readonly formatCache: NativeFormatCache;
   private readonly pendingAdmissions: OverlayPendingAdmissions;
+  private readonly linkedReferences: NativeLinkedReferenceResolver;
   private generation = 1;
   private roundRobinWorkKeys: string[] = [];
   private stopped = false;
@@ -58,6 +64,10 @@ export class OverlayCoordinator {
     this.adapter = new NativeOverlayAdapter(
       profile,
       OverlayScheduler.supportsNativeIdleRuntime(),
+    );
+    this.linkedReferences = new NativeLinkedReferenceResolver(
+      profile,
+      () => this.adapter.enabled,
     );
     if (
       enabledAtStartup &&
@@ -309,6 +319,27 @@ export class OverlayCoordinator {
     );
   }
 
+  captureLinkedReference(
+    outerReader: unknown,
+    sourceAttachmentItemID: number,
+    selectionPosition: unknown,
+    label: string,
+  ): NativeLinkedReferenceCapture | undefined {
+    return this.linkedReferences.capture(
+      outerReader,
+      sourceAttachmentItemID,
+      selectionPosition,
+      label,
+    );
+  }
+
+  resolveLinkedReference(
+    outerReader: unknown,
+    capture: NativeLinkedReferenceCapture,
+  ): Promise<NativeLinkedReferenceEvidence> {
+    return this.linkedReferences.resolve(outerReader, capture);
+  }
+
   shutdown(): void {
     if (this.stopped) return;
     this.stopped = true;
@@ -318,6 +349,7 @@ export class OverlayCoordinator {
     this.windows.shutdown();
     this.formatCache.shutdown();
     this.pendingAdmissions.shutdown();
+    this.linkedReferences.shutdown();
     this.roundRobinWorkKeys.length = 0;
     this.memory.reset();
   }

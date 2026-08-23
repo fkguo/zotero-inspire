@@ -50,7 +50,11 @@ export interface PreviewActionCallbacks {
   /** Copy texkey */
   onCopyTexkey?: (entry: InspireReferenceEntry) => Promise<void>;
   /** Show context menu for abstract */
-  onAbstractContextMenu?: (e: MouseEvent, el: HTMLElement, entry: InspireReferenceEntry) => void;
+  onAbstractContextMenu?: (
+    e: MouseEvent,
+    el: HTMLElement,
+    entry: InspireReferenceEntry,
+  ) => void;
   /** Check if entry has PDF attachment */
   hasPdf?: (entry: InspireReferenceEntry) => boolean;
   /** Called when preview is shown */
@@ -196,6 +200,25 @@ export class HoverPreviewController {
 
     this.showTimeout = setTimeout(() => {
       this.showMulti(limitedEntries, options);
+    }, this.showDelay);
+  }
+
+  /**
+   * Show Zotero's exact native bibliography text when the full INSPIRE list is
+   * still only on disk. This keeps first hover cheap and truthful; a click can
+   * load the cached list and upgrade to the rich INSPIRE entry.
+   */
+  scheduleShowNativeReference(
+    text: string,
+    options: { label: string; buttonRect: PositionRect },
+  ): void {
+    this.cancelShow();
+    this.cancelHide();
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (!normalized) return;
+
+    this.showTimeout = setTimeout(() => {
+      this.showNativeReference(normalized, options);
     }, this.showDelay);
   }
 
@@ -399,6 +422,31 @@ export class HoverPreviewController {
     this.callbacks.onShow?.(entry);
   }
 
+  private showNativeReference(
+    text: string,
+    options: { label: string; buttonRect: PositionRect },
+  ): void {
+    const key = `native:${options.label}:${text}`;
+    if (this.currentEntryId === key) return;
+
+    this.abortController?.abort();
+    this.abortController = undefined;
+    this.currentEntryId = key;
+    this.entries = [];
+    this.currentIndex = 0;
+    this.label = options.label;
+    this.citationType = "numeric";
+    this.anchorRect = options.buttonRect;
+
+    const card = this.getCard();
+    this.renderer.buildNativeReferenceContent(card, text);
+    this.renderer.positionRelativeToRect(card, options.buttonRect);
+    if (this.clickThrough) {
+      card.style.pointerEvents = "none";
+    }
+    card.style.display = "block";
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Internal - Card Management
   // ─────────────────────────────────────────────────────────────────────────────
@@ -443,7 +491,11 @@ export class HoverPreviewController {
             this.cancelHide();
           }
         };
-        this.doc.addEventListener("mousemove", this.clickThroughMoveHandler, true);
+        this.doc.addEventListener(
+          "mousemove",
+          this.clickThroughMoveHandler,
+          true,
+        );
       }
 
       // Keyboard copy handler
@@ -470,7 +522,10 @@ export class HoverPreviewController {
   /**
    * Build preview card content using renderer.
    */
-  private buildContent(card: HTMLDivElement, entry: InspireReferenceEntry): void {
+  private buildContent(
+    card: HTMLDivElement,
+    entry: InspireReferenceEntry,
+  ): void {
     const ctx: PreviewRenderContext = {
       entry,
       entries: this.entries.length > 1 ? this.entries : undefined,
@@ -537,7 +592,11 @@ export class HoverPreviewController {
             this.buildContent(card, e);
 
             // Restore abstract content if unchanged (skip expensive re-render)
-            if (savedAbstractEl && savedLatexSource && e.abstract === savedLatexSource) {
+            if (
+              savedAbstractEl &&
+              savedLatexSource &&
+              e.abstract === savedLatexSource
+            ) {
               const newAbstractEl = card.querySelector(
                 ".zinspire-preview-card__abstract",
               ) as HTMLElement | null;
@@ -567,7 +626,11 @@ export class HoverPreviewController {
             this.buildContent(card, e);
 
             // Restore abstract content if unchanged (skip expensive re-render)
-            if (savedAbstractEl && savedLatexSource && e.abstract === savedLatexSource) {
+            if (
+              savedAbstractEl &&
+              savedLatexSource &&
+              e.abstract === savedLatexSource
+            ) {
               const newAbstractEl = card.querySelector(
                 ".zinspire-preview-card__abstract",
               ) as HTMLElement | null;
@@ -593,7 +656,7 @@ export class HoverPreviewController {
       onCopyTexkey: this.callbacks.onCopyTexkey
         ? (e) => this.callbacks.onCopyTexkey!(e)
         : undefined,
-          onToggleFavorite: this.callbacks.onToggleFavorite
+      onToggleFavorite: this.callbacks.onToggleFavorite
         ? async (e) => {
             const oldAbstractEl = card.querySelector(
               ".zinspire-preview-card__abstract",
@@ -604,7 +667,11 @@ export class HoverPreviewController {
             await this.callbacks.onToggleFavorite!(e);
             this.buildContent(card, e);
 
-            if (savedAbstractEl && savedLatexSource && e.abstract === savedLatexSource) {
+            if (
+              savedAbstractEl &&
+              savedLatexSource &&
+              e.abstract === savedLatexSource
+            ) {
               const newAbstractEl = card.querySelector(
                 ".zinspire-preview-card__abstract",
               ) as HTMLElement | null;
@@ -620,7 +687,7 @@ export class HoverPreviewController {
       onNavigate: (delta) => this.navigate(delta),
       onAbstractContextMenu: this.callbacks.onAbstractContextMenu
         ? (e, el) => {
-          this.setContextMenuOpen(true);
+            this.setContextMenuOpen(true);
             this.callbacks.onAbstractContextMenu!(e, el, entry);
           }
         : undefined,
@@ -724,7 +791,11 @@ export class HoverPreviewController {
     }
 
     if (this.clickThroughMoveHandler) {
-      this.doc.removeEventListener("mousemove", this.clickThroughMoveHandler, true);
+      this.doc.removeEventListener(
+        "mousemove",
+        this.clickThroughMoveHandler,
+        true,
+      );
       this.clickThroughMoveHandler = undefined;
     }
 

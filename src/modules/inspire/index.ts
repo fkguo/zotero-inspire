@@ -301,10 +301,14 @@ export {
   // Classes
   CitationParser,
   getCitationParser,
+  postProcessLabels,
   LabelMatcher,
   ReaderIntegration,
   getReaderIntegration,
+  getPDFReferencesParser,
   getOverlayCoordinator,
+  linkedReferenceIsInconclusive,
+  shouldTrustLinkedReferenceForStrictMatch,
 } from "./pdfAnnotate";
 
 // Re-export style utilities

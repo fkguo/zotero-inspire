@@ -4,7 +4,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { MatchConfidence, MatchMethod } from "./constants";
-import type { NativeOverlayReadToken } from "./nativeOverlayTypes";
+import type {
+  NativeLinkedReferenceEvidence,
+  NativeOverlayReadToken,
+} from "./nativeOverlayTypes";
 
 /**
  * Citation type detected from PDF text
@@ -171,6 +174,8 @@ export interface CitationLookupEvent {
   readerTabID?: string;
   /** Reader/document-scoped native evidence authority, if ready at click time */
   readToken?: NativeOverlayReadToken;
+  /** Exact bibliography text reached through Zotero's native PDF link target. */
+  linkedReference?: NativeLinkedReferenceEvidence;
 }
 
 /**
@@ -194,6 +199,8 @@ export interface CitationPreviewEvent {
   readerTabID?: string;
   /** Reader/document-scoped native evidence authority, if ready at hover time */
   readToken?: NativeOverlayReadToken;
+  /** Exact bibliography text reached through Zotero's native PDF link target. */
+  linkedReference?: NativeLinkedReferenceEvidence;
 }
 
 /**

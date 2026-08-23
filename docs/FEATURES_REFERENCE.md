@@ -9,11 +9,11 @@
 
 ### 1.1 View Modes
 
-| Mode                    | Description                                                             |
-| ----------------------- | ----------------------------------------------------------------------- |
+| Mode              | Description                                                             |
+| ----------------- | ----------------------------------------------------------------------- |
 | **References**    | Shows papers cited by the current item (from INSPIRE's references data) |
 | **Cited By**      | Shows papers that cite the current item                                 |
-| **Related**       | Recommends papers via a hybrid score (shared refs + co-citation)         |
+| **Related**       | Recommends papers via a hybrid score (shared refs + co-citation)        |
 | **Entry Cited**   | Shows papers citing a specific reference (click citation count)         |
 | **Author Papers** | Shows all papers by a specific author (click author name)               |
 | **Search**        | Shows INSPIRE search results                                            |
@@ -39,8 +39,8 @@
 
 The **Related** tab recommends papers using a **hybrid** similarity score that blends:
 
-1) **Weighted bibliographic coupling** (shared references): pick `K` anchor references from the seed paper’s references; for each anchor `r`, fetch the top `N` papers that cite `r`, and aggregate per-candidate shared anchors.
-2) **Co-citation** re-ranking: for the top `T` coupling candidates, query INSPIRE for the number of papers that cite **both** the seed and the candidate, and compute a normalized co-citation cosine similarity.
+1. **Weighted bibliographic coupling** (shared references): pick `K` anchor references from the seed paper’s references; for each anchor `r`, fetch the top `N` papers that cite `r`, and aggregate per-candidate shared anchors.
+2. **Co-citation** re-ranking: for the top `T` coupling candidates, query INSPIRE for the number of papers that cite **both** the seed and the candidate, and compute a normalized co-citation cosine similarity.
 
 **Scoring (implementation)**:
 
@@ -53,7 +53,7 @@ The **Related** tab recommends papers using a **hybrid** similarity score that b
 **Budget control & filtering**:
 
 - Co-citation is computed only for the top `T = 25` coupling candidates.
-- By default it excludes review articles and ignores PDG *Review of Particle Physics* as an anchor (too generic).
+- By default it excludes review articles and ignores PDG _Review of Particle Physics_ as an anchor (too generic).
 
 **Caching**:
 
@@ -117,23 +117,23 @@ The **⭐ Favorites** tab provides quick access to favorite authors, papers, and
 
 ### 1.7 Interaction Table
 
-| Action                         | Behavior                                           |
-| ------------------------------ | -------------------------------------------------- |
-| Click local status (●/⊕)     | Open existing item in library, or add missing item |
+| Action                        | Behavior                                           |
+| ----------------------------- | -------------------------------------------------- |
+| Click local status (●/⊕)      | Open existing item in library, or add missing item |
 | Double-click local status (●) | Open PDF directly if available                     |
-| Click link icon                | Add/remove related item relationship               |
-| Click PDF icon (green)         | Open PDF attachment in reader                      |
-| Click PDF icon (blue)          | Trigger Find Full Text for the item                |
-| Click author name              | View all papers by that author                     |
-| Click title                    | Open in INSPIRE (or arXiv/DOI fallback)            |
-| Click citation count           | View papers citing this entry                      |
-| Click BibTeX button            | Copy BibTeX to clipboard                           |
-| Click TeX key button           | Copy INSPIRE TeX key to clipboard                  |
-| Hover over title               | Show abstract tooltip                              |
-| Hover over author name         | Show author profile preview card                   |
-| Click refresh button           | Reload current view (bypass cache)                 |
-| Click copy all BibTeX button   | Copy all visible entries as BibTeX                 |
-| Right-click entry (in panel) | Context menu with favorite option                  |
+| Click link icon               | Add/remove related item relationship               |
+| Click PDF icon (green)        | Open PDF attachment in reader                      |
+| Click PDF icon (blue)         | Trigger Find Full Text for the item                |
+| Click author name             | View all papers by that author                     |
+| Click title                   | Open in INSPIRE (or arXiv/DOI fallback)            |
+| Click citation count          | View papers citing this entry                      |
+| Click BibTeX button           | Copy BibTeX to clipboard                           |
+| Click TeX key button          | Copy INSPIRE TeX key to clipboard                  |
+| Hover over title              | Show abstract tooltip                              |
+| Hover over author name        | Show author profile preview card                   |
+| Click refresh button          | Reload current view (bypass cache)                 |
+| Click copy all BibTeX button  | Copy all visible entries as BibTeX                 |
+| Right-click entry (in panel)  | Context menu with favorite option                  |
 
 ### 1.8 Citation Graph
 
@@ -151,8 +151,8 @@ The **Citation Graph** dialog provides a 1-hop visualization of **References** (
 
 When hovering over an author name, a profile preview card appears with the following information:
 
-| Field                      | Description                                      |
-| -------------------------- | ------------------------------------------------ |
+| Field                | Description                                      |
+| -------------------- | ------------------------------------------------ |
 | **Name + BAI**       | Author name and INSPIRE Author Identifier        |
 | **Position**         | Current institution and rank (if available)      |
 | **arXiv Categories** | Research areas (e.g., hep-ph, nucl-th)           |
@@ -176,17 +176,17 @@ When hovering over an author name, a profile preview card appears with the follo
 
 Zotero's main item list (Item Tree) supports two custom columns:
 
-| Column | Data Source (local) | Notes |
-| ------ | ------------------- | ----- |
-| `Cites` | `Extra` field | Reads `X citations ...` lines written by this plugin; default includes self-citations |
+| Column  | Data Source (local)               | Notes                                                                                                                                     |
+| ------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cites` | `Extra` field                     | Reads `X citations ...` lines written by this plugin; default includes self-citations                                                     |
 | `arXiv` | Journal Abbr. / Extra / URL / DOI | Extracted via `extractArxivIdFromItem()`; no network requests. Sorting normalizes old-style IDs (e.g., `hep-th/9802109`) by numeric part. |
 
 **Preferences**:
 
-| Preference | Type | Default | Description |
-| ---------- | ---- | ------- | ----------- |
-| `cites_column_exclude_self` | boolean | false | Show citation counts without self-citations when available. If the items list doesn't update, switch collections or restart Zotero. |
-| `arxiv_in_journal_abbrev` | boolean | false | Legacy: write `arXiv:...` into `journalAbbreviation` for unpublished papers (kept for backward compatibility). |
+| Preference                  | Type    | Default | Description                                                                                                                         |
+| --------------------------- | ------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `cites_column_exclude_self` | boolean | false   | Show citation counts without self-citations when available. If the items list doesn't update, switch collections or restart Zotero. |
+| `arxiv_in_journal_abbrev`   | boolean | false   | Legacy: write `arXiv:...` into `journalAbbreviation` for unpublished papers (kept for backward compatibility).                      |
 
 ---
 
@@ -196,16 +196,14 @@ Zotero's main item list (Item Tree) supports two custom columns:
 
 All data caches use LRU (Least Recently Used) eviction to prevent unbounded memory growth.
 
-| Cache                         | Max Size | Purpose                                   |
-| ----------------------------- | -------- | ----------------------------------------- |
+| Cache                       | Max Size | Purpose                                   |
+| --------------------------- | -------- | ----------------------------------------- |
 | `referencesCache`           | 100      | Caches fetched references by recid + sort |
 | `citedByCache`              | 50       | Caches cited-by results by recid + sort   |
 | `entryCitedCache`           | 50       | Caches entry-cited/author-papers results  |
 | `metadataCache`             | 500      | Caches individual record metadata         |
 | `recidLookupCache`          | 500      | Caches recid lookups                      |
 | `authorProfileCache`        | 100      | Caches author profiles (30min TTL)        |
-| `processedDataCache`        | 20       | Caches PDF processed data per item        |
-| `pageDataCache`             | 50       | Caches PDF page data per item+page        |
 | `pdfMappingCache`           | 30       | Caches PDF numeric reference mapping      |
 | `pdfAuthorYearMappingCache` | 30       | Caches PDF author-year mapping            |
 | `rowCache`                  | -        | Caches DOM elements for rendered rows     |
@@ -244,34 +242,34 @@ A dedicated `localCache` service stores References/Cited By/Author Papers JSON f
 
 ### 3.1 Item Menu
 
-| Category                     | Operation                    | Description                                                    |
-| ---------------------------- | ---------------------------- | -------------------------------------------------------------- |
+| Category               | Operation                    | Description                                                    |
+| ---------------------- | ---------------------------- | -------------------------------------------------------------- |
 | **Update Metadata**    | With abstracts               | Full metadata update including abstract                        |
-|                              | Without abstracts            | Metadata update excluding abstract                             |
-|                              | Citation counts only         | Only update citation counts (falls back to CrossRef if needed) |
+|                        | Without abstracts            | Metadata update excluding abstract                             |
+|                        | Citation counts only         | Only update citation counts (falls back to CrossRef if needed) |
 | **Cache**              | Download references cache    | Prefetch INSPIRE references into local cache                   |
 | **Copy**               | Copy BibTeX                  | Fetch and copy BibTeX from INSPIRE                             |
-|                              | Copy citation key            | Copy item's citation key                                       |
-|                              | Copy INSPIRE recid           | Copy INSPIRE record ID                                         |
-|                              | Copy INSPIRE link            | Copy INSPIRE literature URL                                    |
-|                              | Copy INSPIRE link (Markdown) | Copy as markdown link with title                               |
-|                              | Copy Zotero link             | Copy Zotero select link                                        |
+|                        | Copy citation key            | Copy item's citation key                                       |
+|                        | Copy INSPIRE recid           | Copy INSPIRE record ID                                         |
+|                        | Copy INSPIRE link            | Copy INSPIRE literature URL                                    |
+|                        | Copy INSPIRE link (Markdown) | Copy as markdown link with title                               |
+|                        | Copy Zotero link             | Copy Zotero select link                                        |
 | **Collaboration Tags** | Add Collaboration Tags       | Add collaboration name as tag for large collaboration papers   |
 | **Preprint**           | Check Preprint Status        | Check if arXiv preprints have been published                   |
-| **Favorites**          | Toggle Favorite Paper        | Add/remove current item from favorites |
+| **Favorites**          | Toggle Favorite Paper        | Add/remove current item from favorites                         |
 | **Actions**            | Cancel update                | Cancel any ongoing update operation                            |
 
 ### 3.2 Collection Menu
 
-| Category                     | Operation                      | Description                                       |
-| ---------------------------- | ------------------------------ | ------------------------------------------------- |
+| Category               | Operation                      | Description                                       |
+| ---------------------- | ------------------------------ | ------------------------------------------------- |
 | **Update Metadata**    | With abstracts                 | Update all items in collection with full metadata |
-|                              | Without abstracts              | Update all items excluding abstracts              |
-|                              | Citation counts only           | Update citation counts for all items              |
+|                        | Without abstracts              | Update all items excluding abstracts              |
+|                        | Citation counts only           | Update citation counts for all items              |
 | **Cache**              | Download references cache      | Prefetch references for all items                 |
 | **Collaboration Tags** | Reapply Collaboration Tags     | Reapply collaboration tags to items in collection |
 | **Preprint**           | Check Preprints in Collection  | Check preprints in this collection                |
-|                              | Check All Preprints in Library | Check all preprints in entire library             |
+|                        | Check All Preprints in Library | Check all preprints in entire library             |
 | **Actions**            | Cancel update                  | Cancel any ongoing update operation               |
 
 ---
@@ -301,8 +299,8 @@ When enabled, Smart Update compares local item data with INSPIRE metadata and al
 
 **Preferences**:
 
-| Preference                        | Type    | Default | Description                            |
-| --------------------------------- | ------- | ------- | -------------------------------------- |
+| Preference                      | Type    | Default | Description                            |
+| ------------------------------- | ------- | ------- | -------------------------------------- |
 | `smart_update_enable`           | boolean | false   | Master toggle                          |
 | `smart_update_show_preview`     | boolean | true    | Show preview dialog for single items   |
 | `smart_update_protect_title`    | boolean | true    | Protect title field                    |
@@ -325,20 +323,21 @@ When selecting text containing citation markers in the Zotero PDF Reader, the ad
 
 ### 5.2 Supported Citation Formats
 
-| Format             | Examples                      |
-| ------------------ | ----------------------------- |
+| Format             | Examples                  |
+| ------------------ | ------------------------- |
 | Single number      | `[1]`, `[42]`             |
 | Multiple numbers   | `[1,2,3]`, `[1, 2, 3]`    |
-| Number range       | `[1-5]`, `[1–5]`         |
-| Mixed format       | `[1,3-5,7]`                 |
+| Number range       | `[1-5]`, `[1–5]`          |
+| Mixed format       | `[1,3-5,7]`               |
 | Author-year        | `[Smith 2024]`, `[WGR17]` |
-| Superscript digits | ¹²³⁴⁵⁶⁷⁸⁹⁰          |
+| Superscript digits | ¹²³⁴⁵⁶⁷⁸⁹⁰                |
 
 ### 5.3 Hover Preview
 
 Preview card appears when hovering over lookup buttons:
 
 - Contents: Title, authors, abstract, publication info, identifiers
+- Cold-cache Zotero 10 numeric citations can first show marker-local Zotero bibliography text without inflating the complete References cache; document-level citation overlays require cached-list corroboration
 - Status badge: click **In Library** to select the Zotero item; click **Online** to open the record in your browser (prefers INSPIRE)
 - Actions: Add (if not in library), Open PDF (if available), Link/Unlink, copy BibTeX/texkey, favorite toggle
 - Ambiguous match hint: "Author-year match only; click to select"
@@ -351,7 +350,15 @@ When clicking the lookup button:
 2. Highlights the corresponding reference entry (temporary pulse + persistent focus)
 3. Scrolls to that entry position
 
-### 5.5 Persistent Focus Selection
+### 5.5 Native Target Reuse and Cache Loading
+
+On source-audited Zotero 10.0 builds, the add-on first reuses Zotero's own resolved citation text. An internal-link target is marker-local and can be shown directly; a citation-overlay result is Zotero's document-level numeric match and must first be corroborated by the cached list, because the number may repeat in another chapter. Reader opening, toolbar rendering, and add-on startup do not pre-index the full native overlay store; in particular, the embedded PDF Preview created by ordinary library selection cannot use `renderToolbar` as a preload trigger. That global compatibility index is admitted only after a real Reader text-selection or citation interaction. When text selection creates a citation lookup control and only an internal-link target is available, even a multi-thousand-page PDF loads at most the linked bibliography page. The target text is matched against the cached INSPIRE list using unique arXiv/DOI evidence or journal-volume-page plus author metadata. Repeated chapter-local numbers and list positions are excluded from this strict path. A persisted old-parser mapping may retain a contiguous grouped multi-paper bibliography entry, but the same printed number in separated chapter runs fails closed instead of selecting a guessed entry.
+
+Selecting an item while the References section is collapsed, or merely opening a Reader, does not inflate the add-on's References cache or parse `.zotero-ft-cache`. `onItemChange` records state only; the existing full list is materialized when the section is actually expanded or when lookup is clicked. If the list is still cold, hover can show a marker-local internal-link target without decompressing the large gzip cache. A document-level citation-overlay result instead loads/corroborates the cached list before it is shown; an in-memory list upgrades the hover card to rich INSPIRE metadata. If a compatible Reader supplies no native result at all, or a linked target yields no extractable text (unsupported build, non-numeric marker, scanned target page, or no overlay intersecting the selection), the historical cached-list fallback remains available and its first hover may materialize a cold cache. Ambiguous native evidence, or a target that exceeds the hover time budget, instead suppresses a cold hover card until the list is already in memory or the user clicks lookup. Zotero's processed target is a high-confidence shortcut, not a compatibility gate: on a strict click miss the add-on restores any persisted attachment mapping and retains the complete established PDF parser/matcher fallback.
+
+When hover delegates to that historical matcher, it restores the same small persisted attachment mapping used by click before resolving the marker. Before any list or mapping is materialized, the unambiguous six-digit form `125130` can be recovered as `125–130`. An ambiguous four-digit token stays intact so a genuine high label such as `1234` is never split. Once the first real hover or click has a bound, a fully labelled chapter-reset list may refine copied `6264` to `62–64`; a sparse list instead uses the larger of its printed maximum and full length so a genuine unlabeled tail number is preserved. Equal-width lost-dash endpoints keep the established span limit; unequal-width recovery is limited to a short decimal-boundary crossing such as `912` → `9–12`, so a real high label such as `725` cannot become `7–25`. The label-coverage statistic comes from the matcher's existing index pass rather than a second full-list diagnosis. A persisted PDF mapping can only raise the bound.
+
+### 5.6 Persistent Focus Selection
 
 After jumping from PDF lookup, the entry maintains a focused state:
 
@@ -359,7 +366,7 @@ After jumping from PDF lookup, the entry maintains a focused state:
 - Clears on: Escape key, tab switch, refresh, or clicking another entry
 - Independent from batch import checkbox selection
 
-### 5.6 Fuzzy Detection Mode (Experimental)
+### 5.7 Fuzzy Detection Mode (Experimental)
 
 For PDFs with broken text layers:
 
@@ -376,11 +383,11 @@ For PDFs with broken text layers:
 
 The plugin integrates with Zotero's main search bar using the `inspire:` prefix.
 
-| Feature           | Description                                                       |
-| ----------------- | ----------------------------------------------------------------- |
-| **Trigger** | Type `inspire:` followed by query, press Enter                  |
+| Feature     | Description                                                   |
+| ----------- | ------------------------------------------------------------- |
+| **Trigger** | Type `inspire:` followed by query, press Enter                |
 | **Syntax**  | Native INSPIRE query syntax (e.g.,`a Witten`, `t quark mass`) |
-| **Results** | Displayed in "🔍 Search" tab in References Panel                  |
+| **Results** | Displayed in "🔍 Search" tab in References Panel              |
 
 ### 6.2 Event Interception
 
@@ -401,11 +408,11 @@ target.value = "";
 
 ### 6.3 Search History
 
-| Setting     | Value                                         |
-| ----------- | --------------------------------------------- |
-| Max entries | 10                                            |
+| Setting     | Value                                       |
+| ----------- | ------------------------------------------- |
+| Max entries | 10                                          |
 | Storage     | Zotero preferences (`inspireSearchHistory`) |
-| Format      | JSON array of query strings                   |
+| Format      | JSON array of query strings                 |
 
 ---
 
@@ -455,8 +462,8 @@ Appears when entries are selected:
 
 The "Select Citation Style..." option opens a picker dialog for exporting references in any Zotero citation style:
 
-| Feature                    | Description                                       |
-| -------------------------- | ------------------------------------------------- |
+| Feature              | Description                                       |
+| -------------------- | ------------------------------------------------- |
 | **Style Selection**  | Choose from installed Zotero citation styles      |
 | **Target Selection** | Pick destination library and collections          |
 | **Tags & Notes**     | Optionally prefill tags and notes                 |
@@ -542,8 +549,8 @@ When publications are found:
 
 ### 8.4 Preferences
 
-| Preference                    | Type    | Default | Description                   |
-| ----------------------------- | ------- | ------- | ----------------------------- |
+| Preference                  | Type    | Default | Description                   |
+| --------------------------- | ------- | ------- | ----------------------------- |
 | `preprint_watch_enabled`    | boolean | true    | Master toggle                 |
 | `preprint_watch_auto_check` | string  | "daily" | Auto-check mode: daily/never  |
 | `preprint_watch_notify`     | boolean | true    | Show notification on findings |
@@ -569,8 +576,8 @@ The funding extraction feature parses PDF acknowledgment sections to identify fu
 
 ### 9.3 Supported Funders
 
-| Category                | Examples                                                          |
-| ----------------------- | ----------------------------------------------------------------- |
+| Category          | Examples                                                          |
+| ----------------- | ----------------------------------------------------------------- |
 | **China**         | NSFC, MoST (National Key R&D Program), CAS, CPSF, provincial NSFs |
 | **USA**           | DOE, NSF (US), NIH, Fermilab, SLAC, BNL                           |
 | **Europe**        | ERC, DFG, BMBF, STFC, INFN, ANR, SNSF, VolkswagenStiftung         |
@@ -595,8 +602,8 @@ Paper Title 2	2302.07890	DOE: SC0012345; ERC: 123456789
 
 ### 9.5 Implementation Details
 
-| Component                      | Description                                   |
-| ------------------------------ | --------------------------------------------- |
+| Component                    | Description                                   |
+| ---------------------------- | --------------------------------------------- |
 | `fundingPatterns.ts`         | Regex patterns for 50+ funding agencies       |
 | `acknowledgmentExtractor.ts` | Locates acknowledgment section in PDF text    |
 | `fundingExtractor.ts`        | Extracts grant numbers using pattern matching |
@@ -614,8 +621,8 @@ Each funder pattern includes:
 
 ### 9.7 Preferences
 
-| Preference             | Type    | Default | Description                  |
-| ---------------------- | ------- | ------- | ---------------------------- |
+| Preference           | Type    | Default | Description                  |
+| -------------------- | ------- | ------- | ---------------------------- |
 | `funding_china_only` | boolean | false   | Only extract Chinese funders |
 
 ---
@@ -715,8 +722,8 @@ updateRowStatus() / updateRowCitationCount()
 
 Available in Zotero Error Console (`Tools` → `Developer` → `Error Console`):
 
-| Command                                         | Description                                |
-| ----------------------------------------------- | ------------------------------------------ |
+| Command                                       | Description                                |
+| --------------------------------------------- | ------------------------------------------ |
 | `Zotero.ZoteroInspire.getCacheStats()`        | Returns cache statistics object            |
 | `Zotero.ZoteroInspire.logCacheStats()`        | Logs formatted stats to debug output       |
 | `Zotero.ZoteroInspire.resetCacheStats()`      | Resets all hit/miss counters               |
@@ -726,19 +733,15 @@ Available in Zotero Error Console (`Tools` → `Developer` → `Error Console`):
 **Registered Caches**:
 
 - `recidLookup` - INSPIRE recid lookups
-- `processedData` - PDF processed data
-- `pageData` - PDF page data
 - `pdfMapping` - PDF numeric reference mapping
 - `pdfAuthorYearMapping` - PDF author-year mapping
 
 **Sample Output**:
 
 ```
-processedData: 85.2% hit rate (23/27), size: 15/20
-pageData: 92.1% hit rate (117/127), size: 48/50
 pdfMapping: 78.6% hit rate (11/14), size: 8/30
 recidLookup: 95.0% hit rate (190/200), size: 156/500
-[Overall]: 91.3% hit rate (341/368)
+[Overall]: 93.9% hit rate (201/214)
 ```
 
 ---
@@ -749,15 +752,15 @@ recidLookup: 95.0% hit rate (190/200), size: 156/500
 
 Two rendering modes for LaTeX formulas in abstracts:
 
-| Mode              | Description                                                                |
-| ----------------- | -------------------------------------------------------------------------- |
+| Mode        | Description                                                                |
+| ----------- | -------------------------------------------------------------------------- |
 | **KaTeX**   | Full KaTeX rendering for complex formulas (fractions, integrals, matrices) |
 | **Unicode** | Converts simple LaTeX to Unicode characters (lightweight)                  |
 
 **Preferences**:
 
-| Preference            | Type   | Default | Description          |
-| --------------------- | ------ | ------- | -------------------- |
+| Preference          | Type   | Default | Description          |
+| ------------------- | ------ | ------- | -------------------- |
 | `latex_render_mode` | string | "katex" | "katex" or "unicode" |
 
 **KaTeX Features**:
@@ -771,8 +774,8 @@ Two rendering modes for LaTeX formulas in abstracts:
 
 Right-click on abstract preview card shows context menu:
 
-| Option                   | Description                      |
-| ------------------------ | -------------------------------- |
+| Option             | Description                      |
+| ------------------ | -------------------------------- |
 | **Copy**           | Copy full abstract as plain text |
 | **Copy Selection** | Copy selected text (if any)      |
 | **Copy as LaTeX**  | Copy original LaTeX source code  |

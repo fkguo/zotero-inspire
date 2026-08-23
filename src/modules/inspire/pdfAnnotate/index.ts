@@ -20,7 +20,11 @@ export type {
 } from "./types";
 
 // Re-export citation parser
-export { CitationParser, getCitationParser } from "./citationParser";
+export {
+  CitationParser,
+  getCitationParser,
+  postProcessLabels,
+} from "./citationParser";
 
 // Re-export label matcher
 export { LabelMatcher } from "./labelMatcher";
@@ -32,6 +36,10 @@ export {
   initializeOverlayCoordinator,
   shutdownOverlayCoordinator,
 } from "./overlayCoordinatorRegistry";
+export {
+  linkedReferenceIsInconclusive,
+  shouldTrustLinkedReferenceForStrictMatch,
+} from "./nativeLinkedReference";
 export type {
   NativeOriginAnchor,
   NativeOverlayReadToken,

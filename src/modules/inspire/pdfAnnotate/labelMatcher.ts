@@ -93,8 +93,6 @@ export class LabelMatcher {
   private readonly sourceAttachmentItemID: number;
   /** Maps INSPIRE label string -> entry array indices (one-to-many) */
   private labelMap: Map<string, number[]>;
-  /** Maps 1-based position -> entry array index (for fallback) */
-  private indexMap: Map<number, number>;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // FTR-REFACTOR: Pre-computed identifier indexes for O(1) lookup
@@ -109,6 +107,16 @@ export class LabelMatcher {
   private journalVolIndex: Map<string, number[]> = new Map();
   /** Maps "journal:volume:page" -> entry index (for exact journal match) */
   private journalVolPageIndex: Map<string, number> = new Map();
+  /**
+   * Complete buckets are needed only for exact native-target matching. Build
+   * them lazily so ordinary citation paths retain their existing construction
+   * and high-scale interaction costs.
+   */
+  private linkedReferenceIndexes?: {
+    arxiv: Map<string, number[]>;
+    doi: Map<string, number[]>;
+    journalVolumePage: Map<string, number[]>;
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   // PERF-FIX-4: Pre-computed normalized values to avoid redundant normalization
@@ -120,6 +128,9 @@ export class LabelMatcher {
     arxivNorm: string | null;
     doiNorm: string | null;
     yearNum: number | null;
+    journalNorm: string | null;
+    volumeNorm: string | null;
+    pageNorm: string | null;
   }> = [];
 
   /** Cached alignment diagnosis */
@@ -141,6 +152,10 @@ export class LabelMatcher {
   private pdfMissingByLabel: Map<string, PDFPaperInfo[]> = new Map();
   /** True when INSPIRE labels contain duplicates (unreliable to trust directly) */
   private hasDuplicateLabels: boolean = false;
+  /** Largest numeric label printed by INSPIRE, computed in the index pass. */
+  private maxInspireLabel: number = 0;
+  /** Number of cached INSPIRE entries carrying any non-empty printed label. */
+  private inspireLabelAvailableCount: number = 0;
   /** FTR-PDF-ANNOTATE-AUTHOR-YEAR: Author-year PDF mapping for precise matching */
   private authorYearMapping?: AuthorYearReferenceMapping;
   constructor(
@@ -155,11 +170,13 @@ export class LabelMatcher {
         "LabelMatcher requires a positive attachment item ID",
       );
     }
-    this.entries = entries;
+    // Freeze the source ordering at matcher construction. Sidebar sorting
+    // creates new arrays today, but this shallow copy keeps a future in-place
+    // sort from redirecting attachment-scoped indices while preserving entry
+    // object identity for display-order fallback.
+    this.entries = entries.slice();
     this.sourceAttachmentItemID = sourceAttachmentItemID;
     this.labelMap = new Map();
-    this.indexMap = new Map();
-    this.buildMaps();
     this.buildIdentifierIndexes();
   }
 
@@ -167,32 +184,26 @@ export class LabelMatcher {
     return this.sourceAttachmentItemID;
   }
 
-  /**
-   * Build lookup maps from entries.
-   * FTR-PDF-ANNOTATE-MULTI-LABEL: labelMap now stores arrays of indices.
-   */
-  private buildMaps(): void {
-    this.labelMap.clear();
-    this.indexMap.clear();
-    this.hasDuplicateLabels = false;
+  /** Resolve a match index against the exact immutable ordering used by this matcher. */
+  getEntryAt(entryIndex: number): InspireReferenceEntry | undefined {
+    return Number.isSafeInteger(entryIndex) && entryIndex >= 0
+      ? this.entries[entryIndex]
+      : undefined;
+  }
 
-    this.entries.forEach((entry, idx) => {
-      // Build label map from INSPIRE's label field - now supports multi-entry per label
-      if (entry.label) {
-        const normalizedLabel = entry.label.trim();
-        if (normalizedLabel) {
-          const existing = this.labelMap.get(normalizedLabel) || [];
-          existing.push(idx);
-          this.labelMap.set(normalizedLabel, existing);
-          if (existing.length > 1) {
-            this.hasDuplicateLabels = true;
-          }
-        }
-      }
+  /** Repeated INSPIRE labels are ambiguous until native text or PDF mapping disambiguates them. */
+  hasDuplicateInspireLabels(): boolean {
+    return this.hasDuplicateLabels;
+  }
 
-      // Build 1-based index map (PDF references are usually 1-indexed)
-      this.indexMap.set(idx + 1, idx);
-    });
+  /** Whether this exact printed label occurs on more than one INSPIRE entry. */
+  hasDuplicateInspireLabel(label: string): boolean {
+    return (this.labelMap.get(label.trim())?.length ?? 0) > 1;
+  }
+
+  /** Number of cached INSPIRE entries carrying this exact printed label. */
+  getInspireLabelMultiplicity(label: string): number {
+    return this.labelMap.get(label.trim())?.length ?? 0;
   }
 
   /**
@@ -205,11 +216,44 @@ export class LabelMatcher {
     this.doiIndex.clear();
     this.journalVolIndex.clear();
     this.journalVolPageIndex.clear();
+    this.linkedReferenceIndexes = undefined;
+    this.labelMap.clear();
+    this.hasDuplicateLabels = false;
+    this.maxInspireLabel = 0;
+    this.inspireLabelAvailableCount = 0;
     // PERF-FIX-4: Initialize normalizedEntries array
     this.normalizedEntries = new Array(this.entries.length);
+    // Reviews repeatedly cite the same small journal vocabulary. Normalize a
+    // journal spelling once per matcher construction instead of repeating the
+    // abbreviation table/regex path for every one of 10k+ entries.
+    const normalizedJournalCache = new Map<string, string | null>();
 
     for (let idx = 0; idx < this.entries.length; idx++) {
       const entry = this.entries[idx];
+
+      // Build the one-to-many INSPIRE label map in this same source pass.
+      // The 1-based positional fallback is `label - 1`, so it needs no
+      // separate 10k-entry Map allocation.
+      if (entry.label) {
+        const normalizedLabel = entry.label.trim();
+        if (normalizedLabel) {
+          this.inspireLabelAvailableCount++;
+          const numericLabel = Number.parseInt(normalizedLabel, 10);
+          if (
+            Number.isFinite(numericLabel) &&
+            numericLabel > this.maxInspireLabel
+          ) {
+            this.maxInspireLabel = numericLabel;
+          }
+          const existing = this.labelMap.get(normalizedLabel);
+          if (existing) {
+            existing.push(idx);
+            this.hasDuplicateLabels = true;
+          } else {
+            this.labelMap.set(normalizedLabel, [idx]);
+          }
+        }
+      }
 
       // Index by arXiv ID
       const arxiv = normalizeArxivId(entry.arxivDetails);
@@ -225,11 +269,15 @@ export class LabelMatcher {
 
       // PERF-FIX-4: Store pre-computed normalized values
       // These are reused in O(n) loops instead of calling normalize functions repeatedly
-      this.normalizedEntries[idx] = {
+      const normalizedEntry: (typeof this.normalizedEntries)[number] = {
         arxivNorm: arxiv,
         doiNorm: doi,
         yearNum: entry.year ? parseInt(entry.year, 10) : null,
+        journalNorm: null,
+        volumeNorm: null,
+        pageNorm: null,
       };
+      this.normalizedEntries[idx] = normalizedEntry;
 
       // Index by journal+volume and journal+volume+page
       if (
@@ -238,18 +286,30 @@ export class LabelMatcher {
         !Array.isArray(entry.publicationInfo)
       ) {
         const pub = entry.publicationInfo;
-        const journal =
-          typeof pub.journal_title === "string"
-            ? normalizeJournal(pub.journal_title)
-            : null;
+        const journalTitle = pub.journal_title;
+        let journal: string | null = null;
+        if (typeof journalTitle === "string") {
+          if (normalizedJournalCache.has(journalTitle)) {
+            journal = normalizedJournalCache.get(journalTitle) ?? null;
+          } else {
+            journal = normalizeJournal(journalTitle);
+            normalizedJournalCache.set(journalTitle, journal);
+          }
+        }
         const volume = pub.journal_volume || pub.volume;
         const page = pub.page_start || pub.artid;
 
+        if (journal && volume != null && page != null) {
+          normalizedEntry.journalNorm = journal;
+          normalizedEntry.volumeNorm = String(volume);
+          normalizedEntry.pageNorm = String(page);
+        }
+
         if (journal && volume) {
           const jvKey = `${journal}:${volume}`;
-          const existing = this.journalVolIndex.get(jvKey) || [];
-          existing.push(idx);
-          this.journalVolIndex.set(jvKey, existing);
+          const existing = this.journalVolIndex.get(jvKey);
+          if (existing) existing.push(idx);
+          else this.journalVolIndex.set(jvKey, [idx]);
 
           if (page) {
             const jvpKey = `${journal}:${volume}:${page}`;
@@ -601,26 +661,36 @@ export class LabelMatcher {
   ): Map<string, GenericCandidateBucket> {
     const index = new Map<string, GenericCandidateBucket>();
     if (queryKeys.size === 0) return index;
+    const singleQueryKey =
+      queryKeys.size === 1 ? queryKeys.values().next().value : undefined;
+    const singleSeparator = singleQueryKey?.indexOf(":") ?? -1;
+    const singleVolume =
+      singleSeparator >= 0
+        ? singleQueryKey!.slice(0, singleSeparator)
+        : undefined;
+    const singlePage =
+      singleSeparator >= 0
+        ? singleQueryKey!.slice(singleSeparator + 1)
+        : undefined;
     const queriedPagesByVolume = new Map<string, Set<string>>();
-    for (const key of queryKeys) {
-      const separator = key.indexOf(":");
-      const volume = key.slice(0, separator);
-      const page = key.slice(separator + 1);
-      const pages = queriedPagesByVolume.get(volume) || new Set<string>();
-      pages.add(page);
-      queriedPagesByVolume.set(volume, pages);
+    if (queryKeys.size > 1) {
+      for (const key of queryKeys) {
+        const separator = key.indexOf(":");
+        const volume = key.slice(0, separator);
+        const page = key.slice(separator + 1);
+        const pages = queriedPagesByVolume.get(volume) || new Set<string>();
+        pages.add(page);
+        queriedPagesByVolume.set(volume, pages);
+      }
     }
     for (let i = 0; i < this.entries.length; i++) {
       try {
         const entry = this.entries[i];
-        const publicationInfo = Object.getOwnPropertyDescriptor(
-          entry,
-          "publicationInfo",
-        );
-        if (!publicationInfo || !("value" in publicationInfo)) {
-          continue;
-        }
-        const pub = publicationInfo.value;
+        // Entries are our already-decoded INSPIRE cache objects (and were
+        // accessed while constructing the ordinary indexes), not objects from
+        // the Reader compartment. Keep this hot 10k-row scan to a normal
+        // property read; the surrounding guard still contains malformed data.
+        const pub = entry.publicationInfo;
         if (!pub || typeof pub !== "object" || Array.isArray(pub)) continue;
         const entryVol = pub.journal_volume || pub.volume;
         const entryPage = pub.page_start || pub.artid;
@@ -628,16 +698,19 @@ export class LabelMatcher {
         const volume = primitiveMetadataString(entryVol);
         const page = primitiveMetadataString(entryPage);
         if (volume === undefined || page === undefined) continue;
-        if (
-          volume.length > NATIVE_OVERLAY_LIMITS.maxVolumePageUnits ||
-          page.length > NATIVE_OVERLAY_LIMITS.maxVolumePageUnits ||
-          !/^\d+$/.test(volume) ||
-          !/^\d+[A-Za-z]?\d*$/.test(page) ||
-          !queriedPagesByVolume.get(volume)?.has(page)
-        ) {
-          continue;
+        // Query keys have already passed the bounded numeric validation in
+        // collectNativeGenericKeys(). Reject non-target source rows before any
+        // regex work: a 10k-entry review normally has only one matching
+        // volume/page pair, so this keeps the interaction scan inexpensive.
+        let key: string;
+        if (singleQueryKey !== undefined) {
+          if (volume !== singleVolume || page !== singlePage) continue;
+          key = singleQueryKey;
+        } else {
+          const queriedPages = queriedPagesByVolume.get(volume);
+          if (!queriedPages?.has(page)) continue;
+          key = `${volume}:${page}`;
         }
-        const key = `${volume}:${page}`;
         const journal = pub.journal_title as unknown;
         if (!journal) continue;
         if (
@@ -1163,6 +1236,223 @@ export class LabelMatcher {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
+   * Match metadata extracted from a single Zotero-native PDF link target.
+   * Numeric labels and list positions are intentionally excluded: chapter-local
+   * labels such as RPP's repeated [27] are not globally identifying evidence.
+   */
+  matchLinkedReference(
+    pdfLabel: string,
+    paperInfos: readonly PDFPaperInfo[],
+  ): MatchResult[] {
+    const label = pdfLabel.trim();
+    if (!/^[1-9]\d{0,5}$/.test(label) || paperInfos.length === 0) return [];
+    const indexes = this.getLinkedReferenceIndexes();
+    const results: MatchResult[] = [];
+    const usedEntries = new Set<number>();
+    const eligibleSourcePapers = new Set<number>();
+    const matchedSourcePapers = new Set<number>();
+
+    for (
+      let sourcePaperIndex = 0;
+      sourcePaperIndex < paperInfos.length;
+      sourcePaperIndex++
+    ) {
+      const paper = paperInfos[sourcePaperIndex];
+      if (!paper || paper.isErratum) continue;
+      eligibleSourcePapers.add(sourcePaperIndex);
+      const candidateIndices = new Set<number>();
+      const arxiv = normalizeArxivId(paper.arxivId);
+      const doi = normalizeDoi(paper.doi);
+      if (arxiv) {
+        for (const idx of indexes.arxiv.get(arxiv) || []) {
+          candidateIndices.add(idx);
+        }
+      }
+      if (doi) {
+        for (const idx of indexes.doi.get(doi) || []) {
+          candidateIndices.add(idx);
+        }
+      }
+      if (paper.journalAbbrev && paper.volume && paper.pageStart) {
+        const journal = normalizeJournal(paper.journalAbbrev);
+        if (journal) {
+          const key = `${journal}:${paper.volume}:${paper.pageStart}`;
+          for (const idx of indexes.journalVolumePage.get(key) || []) {
+            candidateIndices.add(idx);
+          }
+        }
+      }
+
+      const strong: Array<{
+        idx: number;
+        kind: "arxiv" | "doi" | "journal";
+        score: number;
+      }> = [];
+      for (const idx of candidateIndices) {
+        const match = getStrongMatchKind(paper, this.entries[idx]);
+        if (match) strong.push({ idx, ...match });
+      }
+      if (strong.length === 0) continue;
+      // Exact identifiers from one target record must not disagree. Choosing
+      // arXiv over a conflicting DOI/journal candidate would turn corrupt or
+      // duplicated metadata into a confident override.
+      if (new Set(strong.map((candidate) => candidate.idx)).size !== 1) {
+        continue;
+      }
+      strong.sort((a, b) => {
+        const priority = (kind: "arxiv" | "doi" | "journal") =>
+          kind === "arxiv" ? 3 : kind === "doi" ? 2 : 1;
+        return priority(b.kind) - priority(a.kind) || b.score - a.score;
+      });
+      const best = strong[0];
+      if (usedEntries.has(best.idx)) continue;
+      usedEntries.add(best.idx);
+      matchedSourcePapers.add(sourcePaperIndex);
+      const entry = this.entries[best.idx];
+      let value = "";
+      if (best.kind === "arxiv") value = arxiv || "";
+      else if (best.kind === "doi") value = doi || "";
+      else {
+        const pub = entry.publicationInfo;
+        value = pub
+          ? `${pub.journal_title || ""} ${pub.journal_volume || pub.volume || ""}, ${pub.page_start || pub.artid || ""}`.trim()
+          : "";
+      }
+      results.push({
+        pdfLabel: label,
+        entryIndex: best.idx,
+        entryId: entry.id,
+        confidence: "high",
+        matchMethod: "overlay",
+        matchedIdentifier: { type: best.kind, value },
+        score: best.score,
+        sourcePaperIndex,
+      });
+    }
+    // A target record can contain multiple papers under one numeric label.
+    // Never suppress the established one-to-many fallback with a partial
+    // strict result; the native override is accepted only with full coverage.
+    return eligibleSourcePapers.size > 0 &&
+      matchedSourcePapers.size === eligibleSourcePapers.size
+      ? results
+      : [];
+  }
+
+  /**
+   * Preserve the historical one-to-many result for an ordinary grouped
+   * bibliography item. A small run of equal labels at adjacent canonical
+   * indices represents one printed marker containing several papers. The same
+   * label in separated runs is chapter-local numbering and must fail closed.
+   */
+  matchContiguousDuplicateLabel(pdfLabel: string): MatchResult[] {
+    const label = pdfLabel.trim();
+    const indices = this.labelMap.get(label);
+    if (
+      !indices ||
+      indices.length < 2 ||
+      indices.length > NATIVE_OVERLAY_LIMITS.maxLinkedReferencesPerCitation
+    ) {
+      return [];
+    }
+    for (let i = 1; i < indices.length; i++) {
+      if (indices[i] !== indices[i - 1] + 1) return [];
+    }
+    return indices.map((entryIndex) => ({
+      pdfLabel: label,
+      entryIndex,
+      entryId: this.entries[entryIndex]?.id,
+      confidence: "high",
+      matchMethod: "exact",
+    }));
+  }
+
+  /**
+   * Admit an established PDF mapping for a repeated numeric label only when
+   * its per-paper metadata uniquely covers every INSPIRE entry carrying that
+   * label. This preserves grouped multi-paper citations (including a paper
+   * absent from INSPIRE) while rejecting count-only mappings and chapter-local
+   * numbering where one globally parsed [n] cannot identify the clicked one.
+   */
+  matchResolvedPDFDuplicateLabel(pdfLabel: string): MatchResult[] {
+    const label = pdfLabel.trim();
+    const contiguousMatches = this.matchContiguousDuplicateLabel(label);
+    if (!this.pdfLabelMap?.has(label) || contiguousMatches.length < 2) {
+      return [];
+    }
+    const duplicateIndices = contiguousMatches.map((match) => match.entryIndex);
+    const paperInfos = this.pdfPaperInfos?.get(label);
+    if (!paperInfos?.length) return [];
+
+    const duplicateIndexSet = new Set(duplicateIndices);
+    const byEntryIndex = new Map<number, MatchResult>();
+    for (let paperIndex = 0; paperIndex < paperInfos.length; paperIndex++) {
+      const paperInfo = paperInfos[paperIndex];
+      if (!paperInfo || paperInfo.isErratum) continue;
+      const matches = this.matchLinkedReference(label, [paperInfo]);
+      if (matches.length !== 1) continue;
+      const match = matches[0];
+      if (duplicateIndexSet.has(match.entryIndex)) {
+        // Two parsed source papers claiming the same INSPIRE entry makes the
+        // per-paper attribution non-unique. Reject the precise mapping rather
+        // than letting the later paper silently overwrite sourcePaperIndex.
+        if (byEntryIndex.has(match.entryIndex)) return [];
+        // `matchLinkedReference(label, [paperInfo])` necessarily reports its
+        // one-element source array as index 0. Preserve the paper's truthful
+        // position in the complete grouped PDF record for downstream callers.
+        byEntryIndex.set(match.entryIndex, {
+          ...match,
+          sourcePaperIndex: paperIndex,
+        });
+      }
+    }
+
+    if (
+      byEntryIndex.size !== duplicateIndices.length ||
+      duplicateIndices.some((index) => !byEntryIndex.has(index))
+    ) {
+      return [];
+    }
+    return duplicateIndices.map((index) => byEntryIndex.get(index)!);
+  }
+
+  private getLinkedReferenceIndexes(): NonNullable<
+    LabelMatcher["linkedReferenceIndexes"]
+  > {
+    if (this.linkedReferenceIndexes) return this.linkedReferenceIndexes;
+    const indexes: NonNullable<LabelMatcher["linkedReferenceIndexes"]> = {
+      arxiv: new Map(),
+      doi: new Map(),
+      journalVolumePage: new Map(),
+    };
+    const add = (map: Map<string, number[]>, key: string, idx: number) => {
+      const bucket = map.get(key);
+      if (bucket) bucket.push(idx);
+      else map.set(key, [idx]);
+    };
+    for (let idx = 0; idx < this.entries.length; idx++) {
+      const normalized = this.normalizedEntries[idx];
+      if (normalized?.arxivNorm) {
+        add(indexes.arxiv, normalized.arxivNorm, idx);
+      }
+      if (normalized?.doiNorm) {
+        add(indexes.doi, normalized.doiNorm, idx);
+      }
+      const journal = normalized?.journalNorm;
+      const volume = normalized?.volumeNorm;
+      const page = normalized?.pageNorm;
+      if (journal && volume && page) {
+        add(
+          indexes.journalVolumePage,
+          `${journal}:${String(volume)}:${String(page)}`,
+          idx,
+        );
+      }
+    }
+    this.linkedReferenceIndexes = indexes;
+    return indexes;
+  }
+
+  /**
    * Match a PDF label to entries.
    * FTR-PDF-ANNOTATE-MULTI-LABEL: Now returns array of matches (empty if no match).
    * Tries multiple strategies: PDF mapping, INSPIRE label, index-based, fuzzy.
@@ -1204,7 +1494,15 @@ export class LabelMatcher {
     const nonErrataInfos = paperInfosRaw?.filter((p) => !p.isErratum) ?? [];
     const paperInfos =
       nonErrataInfos.length > 0 ? nonErrataInfos : paperInfosRaw;
-    const expectedCount = paperInfos ? paperInfos.length : 0;
+    // A count-only positional mapping remains useful when INSPIRE provides no
+    // occurrence of this printed label (the established misalignment
+    // fallback). It must never multiply a label that INSPIRE already identifies
+    // uniquely, nor disambiguate a repeated chapter-local number.
+    const mappedExpectedCount =
+      this.getInspireLabelMultiplicity(normalizedLabel) === 0
+        ? (this.pdfLabelMap?.get(normalizedLabel)?.length ?? 0)
+        : 0;
+    const expectedCount = paperInfos ? paperInfos.length : mappedExpectedCount;
     const overParsedActive =
       this.pdfOverParsed && this.pdfOverParsedRatio > 1.05;
 
@@ -1214,6 +1512,17 @@ export class LabelMatcher {
     // FTR-NO-LABELS-FIX: Calculate noLabelsInInspire early so we can use it throughout the function
     const maxInspireLabel = this.getMaxInspireLabel();
     const noLabelsInInspire = maxInspireLabel === 0;
+    // A partially labelled INSPIRE payload can have a long unlabeled tail.
+    // In that case the largest printed label is not a safe version-mismatch
+    // boundary: label N can still identify canonical entry N even when only an
+    // earlier prefix carries explicit labels. Keep the old printed-label bound
+    // for fully labelled/chapter-reset lists, but use cardinality for sparse
+    // payloads so the established positional fallback remains reachable.
+    const maxNumericLabelBound =
+      alignment.totalEntries > 0 &&
+      (alignment.labelAvailableCount ?? 0) < alignment.totalEntries
+        ? Math.max(maxInspireLabel, alignment.totalEntries)
+        : maxInspireLabel;
 
     const preferPdfMapping =
       this.pdfLabelMap &&
@@ -1272,10 +1581,10 @@ export class LabelMatcher {
     if (
       !isNaN(numLabelForDiag) &&
       !noLabelsInInspire &&
-      numLabelForDiag > maxInspireLabel
+      numLabelForDiag > maxNumericLabelBound
     ) {
       Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] [VERSION-MISMATCH] Label [${normalizedLabel}] exceeds INSPIRE max ${maxInspireLabel}. ` +
+        `[${config.addonName}] [PDF-ANNOTATE] [VERSION-MISMATCH] Label [${normalizedLabel}] exceeds safe INSPIRE bound ${maxNumericLabelBound}. ` +
           `paperInfos=${paperInfos ? `${paperInfos.length} paper(s)` : "NONE"}. ` +
           `arXiv=${paperInfos?.[0]?.arxivId || "N/A"}, DOI=${paperInfos?.[0]?.doi || "N/A"}`,
       );
@@ -1422,19 +1731,16 @@ export class LabelMatcher {
       // NOTE: If maxInspireLabel is 0, it means INSPIRE has no labels at all, not a version mismatch
       if (!trustInspireLabels && results.length === 0) {
         const numLabel = parseInt(normalizedLabel, 10);
-        const maxInspireLabel = this.getMaxInspireLabel();
-        const noLabelsInInspire = maxInspireLabel === 0;
-
         // Version mismatch: PDF has more refs than INSPIRE - try global identifier search
         // Don't treat "no labels in INSPIRE" as version mismatch - fall through to index fallback
         if (
           !noLabelsInInspire &&
           !isNaN(numLabel) &&
-          numLabel > maxInspireLabel &&
+          numLabel > maxNumericLabelBound &&
           paperInfos?.length
         ) {
           Zotero.debug(
-            `[${config.addonName}] [PDF-ANNOTATE] [VERSION-MISMATCH-SEARCH] Label [${normalizedLabel}] exceeds max ${maxInspireLabel}, trying global arXiv/DOI search`,
+            `[${config.addonName}] [PDF-ANNOTATE] [VERSION-MISMATCH-SEARCH] Label [${normalizedLabel}] exceeds safe bound ${maxNumericLabelBound}, trying global arXiv/DOI search`,
           );
 
           for (const pdfPaper of paperInfos) {
@@ -1467,7 +1773,7 @@ export class LabelMatcher {
                   matchMethod: "exact",
                   // FTR-PDF-MATCHING: Enhanced diagnostic info
                   matchedIdentifier: { type: "arxiv", value: pdfArxivNorm },
-                  versionMismatchWarning: `PDF label [${pdfLabel}] exceeds INSPIRE max label ${maxInspireLabel}. Matched via arXiv ID.`,
+                  versionMismatchWarning: `PDF label [${pdfLabel}] exceeds INSPIRE safe label bound ${maxNumericLabelBound}. Matched via arXiv ID.`,
                 });
                 Zotero.debug(
                   `[${config.addonName}] [PDF-ANNOTATE] [VERSION-MISMATCH-SEARCH] arXiv match: [${pdfLabel}] -> idx ${i} (INSPIRE label ${entry.label}) via arXiv:${pdfArxivNorm}`,
@@ -1485,7 +1791,7 @@ export class LabelMatcher {
                   matchMethod: "exact",
                   // FTR-PDF-MATCHING: Enhanced diagnostic info
                   matchedIdentifier: { type: "doi", value: pdfDoiNorm },
-                  versionMismatchWarning: `PDF label [${pdfLabel}] exceeds INSPIRE max label ${maxInspireLabel}. Matched via DOI.`,
+                  versionMismatchWarning: `PDF label [${pdfLabel}] exceeds INSPIRE safe label bound ${maxNumericLabelBound}. Matched via DOI.`,
                 });
                 Zotero.debug(
                   `[${config.addonName}] [PDF-ANNOTATE] [VERSION-MISMATCH-SEARCH] DOI match: [${pdfLabel}] -> idx ${i} (INSPIRE label ${entry.label}) via doi:${pdfDoiNorm}`,
@@ -2204,8 +2510,12 @@ export class LabelMatcher {
         }
       }
       const numLabel = parseInt(normalizedLabel, 10);
-      if (!isNaN(numLabel) && this.indexMap.has(numLabel)) {
-        const idx = this.indexMap.get(numLabel)!;
+      if (
+        Number.isSafeInteger(numLabel) &&
+        numLabel >= 1 &&
+        numLabel <= this.entries.length
+      ) {
+        const idx = numLabel - 1;
         const entry = this.entries[idx];
         results.push({
           pdfLabel,
@@ -2266,7 +2576,7 @@ export class LabelMatcher {
     // EXCEPTION: If maxInspireLabel is 0 (no labels in INSPIRE data), try scoring-based match first
     // Note: noLabelsInInspire and maxInspireLabel are calculated at function start
     const isVersionMismatch =
-      !noLabelsInInspire && !isNaN(numLabel) && numLabel > maxInspireLabel;
+      !noLabelsInInspire && !isNaN(numLabel) && numLabel > maxNumericLabelBound;
 
     // FTR-NO-LABELS-FIX: When INSPIRE has no labels, use scoring-based matching with paperInfos
     // instead of blind index fallback (which assumes PDF order matches INSPIRE order)
@@ -2397,7 +2707,7 @@ export class LabelMatcher {
     // Index-based matching assumes PDF order = INSPIRE order, which is unreliable without labels
     if (isVersionMismatch) {
       Zotero.debug(
-        `[${config.addonName}] [PDF-ANNOTATE] Label [${normalizedLabel}] exceeds INSPIRE max label ${maxInspireLabel}, skipping index fallback to avoid wrong match`,
+        `[${config.addonName}] [PDF-ANNOTATE] Label [${normalizedLabel}] exceeds safe INSPIRE bound ${maxNumericLabelBound}, skipping index fallback to avoid wrong match`,
       );
       // Continue to Strategy 3 (fuzzy match) and Strategy 4 (global arXiv/DOI search)
     } else if (noLabelsInInspire) {
@@ -2405,8 +2715,12 @@ export class LabelMatcher {
       Zotero.debug(
         `[${config.addonName}] [PDF-ANNOTATE] No INSPIRE labels, skipping index fallback for [${normalizedLabel}]`,
       );
-    } else if (!isNaN(numLabel) && this.indexMap.has(numLabel)) {
-      const idx = this.indexMap.get(numLabel)!;
+    } else if (
+      Number.isSafeInteger(numLabel) &&
+      numLabel >= 1 &&
+      numLabel <= this.entries.length
+    ) {
+      const idx = numLabel - 1;
       // Check if there's an INSPIRE label that matches the index
       const entry = this.entries[idx];
       const inspireLabel = entry.label ? parseInt(entry.label, 10) : null;
@@ -3024,17 +3338,19 @@ export class LabelMatcher {
    * Get the maximum numeric label from INSPIRE entries.
    * FTR-PDF-MATCHING: Used to detect when PDF labels exceed INSPIRE range.
    */
-  private getMaxInspireLabel(): number {
-    let maxLabel = 0;
-    for (const entry of this.entries) {
-      if (entry.label) {
-        const num = parseInt(entry.label, 10);
-        if (!isNaN(num) && num > maxLabel) {
-          maxLabel = num;
-        }
-      }
-    }
-    return maxLabel;
+  getMaxInspireLabel(): number {
+    return this.maxInspireLabel;
+  }
+
+  /** Cheap label coverage already accumulated by the constructor's index pass. */
+  getInspireLabelStats(): {
+    totalEntries: number;
+    labelAvailableCount: number;
+  } {
+    return {
+      totalEntries: this.entries.length,
+      labelAvailableCount: this.inspireLabelAvailableCount,
+    };
   }
 
   /**

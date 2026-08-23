@@ -1,6 +1,6 @@
 {
   "name": "zotero-inspire",
-  "version": "3.0.8",
+  "version": "3.0.9",
   "description": "Bridge between Zotero and INSPIRE for high energy physics and related fields",
   "config": {
     "addonName": "zotero-inspire",
@@ -29,6 +29,7 @@
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
     "test": "vitest run",
+    "test:perf": "ZINSPIRE_PERF_GATE=1 ZINSPIRE_REPORT_PERF=1 vitest run test/nativeOverlayReuse.test.ts --maxWorkers=1 --retry=2",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "update-deps": "npm update --save"

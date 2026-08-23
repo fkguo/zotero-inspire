@@ -1,39 +1,33 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Reader Integration
 // FTR-PDF-ANNOTATE: Integrate with Zotero Reader for citation detection
-// FTR-CACHE-PRELOAD: Background preload references when PDF is opened
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../../../package.json";
 import { getCitationParser, postProcessLabels } from "./citationParser";
 import { getPref } from "../../../utils/prefs";
 import { deriveRecidFromItem } from "../apiUtils";
-import { CACHE_TTL } from "../constants";
-import { localCache } from "../localCache";
 import {
   loadPersistedPdfParse,
-  persistPdfParse,
   pdfMappingCacheKey,
 } from "./pdfMappingPersistence";
 import { MemoryMonitor } from "../memoryMonitor";
-import {
-  fetchReferencesEntries,
-  enrichReferencesEntries,
-} from "../referencesService";
-import {
-  getPDFReferencesParser,
-  type PDFReferenceMapping,
-  type AuthorYearReferenceMapping,
+import type {
+  PDFReferenceMapping,
+  AuthorYearReferenceMapping,
 } from "./pdfReferencesParser";
-import { buildPdfTextCandidatesForReferenceParsing } from "./textSampling";
-import type { InspireReferenceEntry } from "../types";
 import { LRUCache } from "../utils";
 import {
   getOverlayCoordinator,
   initializeOverlayCoordinator,
   shutdownOverlayCoordinator,
 } from "./overlayCoordinatorRegistry";
-import type { NativeOriginAnchor } from "./nativeOverlayTypes";
+import type {
+  NativeLinkedReferenceCapture,
+  NativeLinkedReferenceEvidence,
+  NativeOriginAnchor,
+} from "./nativeOverlayTypes";
+import { settleLinkedReferenceWithin } from "./nativeLinkedReference";
 import type {
   ParsedCitation,
   CitationLookupEvent,
@@ -51,22 +45,14 @@ import type {
  * Centralizing these allows simple reset via createInitialTransientState().
  */
 interface TransientState {
-  /** Track preloaded recids to avoid duplicate background fetches */
-  preloadedRecids: Set<string>;
-  /** Track in-flight preload promises to avoid concurrent fetches for same recid */
-  preloadingRecids: Map<string, Promise<void>>;
   /** FTR-PDF-MATCHING: Store max known label per item for concatenated range detection */
   maxKnownLabelByItem: Map<number, number>;
   /** FTR-RECID-AUTO-UPDATE: Track parent items that were opened without recid */
   itemsAwaitingRecid: Set<number>;
-  /** FTR-PDF-PARSE-PRELOAD: Track items being preloaded to avoid duplicate parses */
-  pdfParsingItems: Set<number>;
-  /** FTR-PRELOAD-AWAIT: Track PDF parsing promises for await support */
-  pdfParsingPromises: Map<number, Promise<void>>;
-  /** S2: FIFO queue of attachment IDs awaiting a background PDF parse (concurrency=1) */
-  pdfParseQueue: number[];
-  /** S2: true while a background PDF parse is running/scheduled (serialization guard) */
-  pdfParseRunning: boolean;
+  /** Interaction-triggered persisted-map loads (never full-text parsing). */
+  pdfMappingCacheLoads: Map<number, Promise<boolean>>;
+  /** Avoid repeatedly probing a missing/stale persisted map in one session. */
+  pdfMappingCacheLoadAttempted: Set<number>;
 }
 
 /**
@@ -75,14 +61,10 @@ interface TransientState {
  */
 function createInitialTransientState(): TransientState {
   return {
-    preloadedRecids: new Set(),
-    preloadingRecids: new Map(),
     maxKnownLabelByItem: new Map(),
     itemsAwaitingRecid: new Set(),
-    pdfParsingItems: new Set(),
-    pdfParsingPromises: new Map(),
-    pdfParseQueue: [],
-    pdfParseRunning: false,
+    pdfMappingCacheLoads: new Map(),
+    pdfMappingCacheLoadAttempted: new Set(),
   };
 }
 
@@ -91,6 +73,17 @@ function createInitialTransientState(): TransientState {
 // Set to false in production for better performance during text selection
 // ─────────────────────────────────────────────────────────────────────────────
 const DEBUG_READER_INTEGRATION = false;
+
+/**
+ * Native destination resolution must never become a gate in front of the
+ * established PDF-mapping path. Target pages are usually already available,
+ * but a Reader page-load promise can remain pending on malformed or very large
+ * PDFs. After this bounded opportunity the caller continues through the legacy
+ * matcher while the single-flight native load may still finish for a later
+ * interaction.
+ */
+const LINKED_REFERENCE_LOOKUP_BUDGET_MS = 750;
+const LINKED_REFERENCE_PREVIEW_BUDGET_MS = 200;
 
 /** Conditional debug logging - only logs when DEBUG_READER_INTEGRATION is true */
 function debugLog(message: string): void {
@@ -191,6 +184,9 @@ interface ReaderUIContext {
   parentItemID: number;
   readerTabID?: string;
   originAnchor?: NativeOriginAnchor;
+  linkedReferenceCapture?: NativeLinkedReferenceCapture;
+  linkedReferencePromise?: Promise<NativeLinkedReferenceEvidence>;
+  linkedReferencePreviewRetryScheduled?: boolean;
 }
 
 /**
@@ -205,7 +201,6 @@ export class ReaderIntegration {
   private initialized = false;
   /** Store bound handler reference for unregistration */
   private boundTextSelectionHandler?: (args: any) => void;
-  private boundToolbarHandler?: (args: any) => void;
   /** Unified transient state for easy cleanup */
   private transientState = createInitialTransientState();
   /** FTR-CITATION-FORMAT-DETECT: Notifier ID for tab events */
@@ -216,17 +211,12 @@ export class ReaderIntegration {
   private itemNotifierID?: string;
   /** FTR-RECID-AUTO-UPDATE: Track current reader tab's parent item ID */
   private currentReaderParentItemID?: number;
-  /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF numeric mapping per ATTACHMENT (not parent)
-   *  FTR-MULTI-PDF-FIX: Changed from parentItemID to attachmentItemID to support
-   *  items with multiple PDF attachments, each with different reference lists.
-   */
+  /** On-demand PDF mappings, scoped per attachment. */
   private static readonly PDF_MAPPING_CACHE_SIZE = 30;
   private pdfMappingCache = new LRUCache<number, PDFReferenceMapping>(
     ReaderIntegration.PDF_MAPPING_CACHE_SIZE,
   );
-  /** FTR-PDF-PARSE-PRELOAD: Cache preloaded PDF author-year mapping per ATTACHMENT (not parent)
-   *  FTR-MULTI-PDF-FIX: Changed from parentItemID to attachmentItemID.
-   */
+  /** On-demand author-year mappings, scoped per attachment. */
   private pdfAuthorYearMappingCache = new LRUCache<
     number,
     AuthorYearReferenceMapping
@@ -267,23 +257,12 @@ export class ReaderIntegration {
     }
 
     try {
-      const overlayCoordinator = initializeOverlayCoordinator(
+      initializeOverlayCoordinator(
         getPref("pdf_native_overlay_reuse") !== false,
       );
 
       // Store bound handler reference for later unregistration
       this.boundTextSelectionHandler = this.handleTextSelectionPopup.bind(this);
-      this.boundToolbarHandler = (args: any) => {
-        const reader = args?.reader;
-        if (reader && !this.isPresentationReader(reader)) {
-          getOverlayCoordinator().requestPrewarm(
-            reader,
-            undefined,
-            true,
-            "toolbar",
-          );
-        }
-      };
       // Mark ownership before registration so a partial failure can use the
       // normal idempotent cleanup path to roll back every acquired resource.
       this.initialized = true;
@@ -294,11 +273,11 @@ export class ReaderIntegration {
         this.boundTextSelectionHandler,
         config.addonID,
       );
-      Zotero.Reader.registerEventListener(
-        "renderToolbar",
-        this.boundToolbarHandler,
-        config.addonID,
-      );
+      // Never use `renderToolbar` as a preload trigger. Zotero constructs an
+      // embedded Reader for the library item pane's attachment Preview, so
+      // ordinary item selection emits that hook even when the user never opens
+      // a PDF tab. On a 2,270-page RPP PDF it turned simple selection into a
+      // whole-document overlay/parse prewarm.
 
       Zotero.debug(
         `[${config.addonName}] [PDF-ANNOTATE] Successfully registered renderTextSelectionPopup listener`,
@@ -318,8 +297,9 @@ export class ReaderIntegration {
       // FTR-RECID-AUTO-UPDATE: Register item notifier to detect when recid becomes available
       this.registerItemNotifier();
 
-      // Lifecycle listeners must exist before the one-time Reader snapshot.
-      overlayCoordinator.startupSweep();
+      // Do not scan already-open Reader overlays at startup. Marker-local
+      // citation text/link targets are read directly on the first real
+      // interaction; the global compatibility index is interaction-gated.
 
       return true;
     } catch (err) {
@@ -332,7 +312,6 @@ export class ReaderIntegration {
         shutdownOverlayCoordinator();
         this.initialized = false;
         this.boundTextSelectionHandler = undefined;
-        this.boundToolbarHandler = undefined;
       }
       return false;
     }
@@ -345,6 +324,13 @@ export class ReaderIntegration {
    * @param maxLabel - Maximum citation label number found in PDF
    */
   setMaxKnownLabel(itemID: number, maxLabel: number): void {
+    if (!Number.isSafeInteger(maxLabel) || maxLabel <= 0) return;
+    const existing = this.transientState.maxKnownLabelByItem.get(itemID) ?? 0;
+    // The cached INSPIRE list and a persisted/full PDF mapping are independent
+    // estimates of the largest printed label. Never let a later, smaller list
+    // estimate erase a mapping-derived bound: that could make a genuine high
+    // label look like a lost-dash range on the next interaction.
+    if (maxLabel <= existing) return;
     this.transientState.maxKnownLabelByItem.set(itemID, maxLabel);
     // Prevent unbounded growth if many PDFs are opened in one session.
     this.capMap(this.transientState.maxKnownLabelByItem, 300);
@@ -383,18 +369,6 @@ export class ReaderIntegration {
       }
       this.boundTextSelectionHandler = undefined;
     }
-    if (this.initialized && this.boundToolbarHandler) {
-      try {
-        Zotero.Reader.unregisterEventListener(
-          "renderToolbar",
-          this.boundToolbarHandler,
-        );
-      } catch {
-        // Coordinator shutdown below revokes all retained state.
-      }
-      this.boundToolbarHandler = undefined;
-    }
-
     // FTR-CITATION-FORMAT-DETECT: Unregister tab notifier
     this.unregisterTabNotifier();
     this.cancelAllReaderOpenTimers();
@@ -406,7 +380,6 @@ export class ReaderIntegration {
 
     const listenerCount = this.listeners.size;
     const stateCount = this.readerStates.size;
-    const preloadCount = this.transientState.preloadedRecids.size;
     const awaitingRecidCount = this.transientState.itemsAwaitingRecid.size;
 
     // Clear non-transient state
@@ -428,7 +401,7 @@ export class ReaderIntegration {
     this.initialized = false;
     ReaderIntegration.instance = null;
     Zotero.debug(
-      `[${config.addonName}] [PDF-ANNOTATE] Cleaned up: ${listenerCount} listeners, ${stateCount} reader states, ${preloadCount} preloaded recids, ${awaitingRecidCount} items awaiting recid`,
+      `[${config.addonName}] [PDF-ANNOTATE] Cleaned up: ${listenerCount} listeners, ${stateCount} reader states, ${awaitingRecidCount} items awaiting recid`,
     );
   }
 
@@ -473,8 +446,8 @@ export class ReaderIntegration {
   }): void {
     const { reader, doc, params, append } = args;
 
-    // S7: A "presentation" item has no reference list, so neither the citation
-    // buttons nor the reference/PDF preload apply — bail before either.
+    // A presentation has no reference list, so citation matching does not
+    // apply.
     if (this.isPresentationReader(reader)) {
       debugLog(
         `[${config.addonName}] [PDF-ANNOTATE] Skipping presentation reader (no reference list)`,
@@ -492,10 +465,6 @@ export class ReaderIntegration {
     debugLog(
       `[${config.addonName}] [PDF-ANNOTATE] args.params keys: ${Object.keys(params || {}).join(", ") || "(none)"}`,
     );
-
-    // FTR-CACHE-PRELOAD: Trigger background preload when user interacts with PDF
-    // This ensures references are cached before user clicks on a citation
-    this.triggerBackgroundPreload(reader);
 
     // Try to find selected text from params.annotation
     if (params?.annotation) {
@@ -652,7 +621,21 @@ export class ReaderIntegration {
       parentItemID: attachmentItem?.parentItemID || attachmentItemID,
       readerTabID: reader?.tabID ? String(reader.tabID) : undefined,
       originAnchor: selectionEvidence.originAnchor,
+      linkedReferenceCapture:
+        citation.type === "numeric" && citation.labels.length === 1
+          ? getOverlayCoordinator().captureLinkedReference(
+              reader,
+              attachmentItemID,
+              params?.annotation?.position,
+              citation.labels[0],
+            )
+          : undefined,
     };
+    // The appearance of a citation-specific lookup control is already a real
+    // user interaction. Start Zotero's bounded one-target-page resolution now
+    // so the first hover usually consumes a completed native result, without
+    // restoring Reader-open References/PDF prewarming.
+    this.primeLinkedReference(uiContext);
     const element = this.createLookupUI(doc, uiContext, citation);
     append(element);
 
@@ -779,7 +762,7 @@ export class ReaderIntegration {
         labels: [label],
         position: null,
       };
-      this.lookupCitation(context, singleCitation);
+      void this.lookupCitation(context, singleCitation);
     });
 
     return button;
@@ -852,7 +835,7 @@ export class ReaderIntegration {
       Zotero.debug(
         `[${config.addonName}] [PDF-ANNOTATE] Author-year button CLICKED: raw="${citation.raw}", labels=[${citation.labels.join(",")}]`,
       );
-      this.lookupCitation(context, citation);
+      void this.lookupCitation(context, citation);
     });
 
     return button;
@@ -948,7 +931,7 @@ export class ReaderIntegration {
           labels: subCitation.labels,
           position: null,
         };
-        this.lookupCitation(context, subCitationObj);
+        void this.lookupCitation(context, subCitationObj);
       });
 
       container.appendChild(button);
@@ -1057,7 +1040,7 @@ export class ReaderIntegration {
         labels: [label],
         position: null,
       };
-      this.lookupCitation(context, singleCitation);
+      void this.lookupCitation(context, singleCitation);
     });
 
     return button;
@@ -1155,12 +1138,17 @@ export class ReaderIntegration {
    * Look up citation and emit event to controller
    * FTR-MULTI-PDF-FIX: Now includes attachmentItemID for proper PDF-specific cache lookup
    */
-  private lookupCitation(
+  private async lookupCitation(
     context: ReaderUIContext,
     citation: ParsedCitation,
-  ): void {
+  ): Promise<void> {
     try {
       const liveReader = context.readerRef?.deref();
+      const linkedReference = await this.resolveLinkedReference(
+        context,
+        citation.labels.length === 1 ? citation.labels[0] : undefined,
+        LINKED_REFERENCE_LOOKUP_BUDGET_MS,
+      );
       const readToken = getOverlayCoordinator().validateOriginAnchorForEvent(
         liveReader,
         context.sourceAttachmentItemID,
@@ -1176,6 +1164,7 @@ export class ReaderIntegration {
         citation,
         readerTabID: context.readerTabID,
         readToken,
+        linkedReference,
       };
 
       Zotero.debug(
@@ -1274,7 +1263,13 @@ export class ReaderIntegration {
 
     this.previewShowTimeout = setTimeout(() => {
       this.currentPreviewButton = button;
-      this.emitPreviewRequest(button, context, label, citationType, labels);
+      void this.emitPreviewRequest(
+        button,
+        context,
+        label,
+        citationType,
+        labels,
+      );
     }, this.previewShowDelay);
   }
 
@@ -1304,15 +1299,32 @@ export class ReaderIntegration {
    * FTR-FIX: Now accepts labels array for proper author-year matching.
    * FTR-MULTI-PDF-FIX: Includes attachmentItemID for PDF-specific cache lookup.
    */
-  private emitPreviewRequest(
+  private async emitPreviewRequest(
     button: HTMLElement,
     context: ReaderUIContext,
     label: string,
     citationType: "numeric" | "author-year" | "arxiv",
     labels?: string[],
-  ): void {
+  ): Promise<void> {
     try {
       const liveReader = context.readerRef?.deref() as any;
+      const linkedReference = await this.resolveLinkedReference(
+        context,
+        citationType === "numeric" && (labels?.length ?? 1) === 1
+          ? label
+          : undefined,
+        LINKED_REFERENCE_PREVIEW_BUDGET_MS,
+      );
+      if (this.currentPreviewButton !== button || !button.isConnected) return;
+      if (linkedReference?.kind === "timeout") {
+        this.scheduleLinkedReferencePreviewRetry(
+          button,
+          context,
+          label,
+          citationType,
+          labels,
+        );
+      }
       const readToken = getOverlayCoordinator().validateOriginAnchorForEvent(
         liveReader,
         context.sourceAttachmentItemID,
@@ -1387,6 +1399,7 @@ export class ReaderIntegration {
         },
         readerTabID: context.readerTabID,
         readToken,
+        linkedReference,
       };
 
       Zotero.debug(
@@ -1399,6 +1412,71 @@ export class ReaderIntegration {
         `[${config.addonName}] [HOVER-PREVIEW] Error emitting preview request: ${err}`,
       );
     }
+  }
+
+  private resolveLinkedReference(
+    context: ReaderUIContext,
+    label: string | undefined,
+    budgetMs: number,
+  ): Promise<NativeLinkedReferenceEvidence | undefined> {
+    const capture = context.linkedReferenceCapture;
+    if (!capture || !label || capture.label !== label) {
+      return Promise.resolve(undefined);
+    }
+    if (!context.linkedReferencePromise) {
+      const liveReader = context.readerRef?.deref();
+      context.linkedReferencePromise =
+        getOverlayCoordinator().resolveLinkedReference(liveReader, capture);
+    }
+    return settleLinkedReferenceWithin(
+      context.linkedReferencePromise,
+      budgetMs,
+    ).then(
+      (evidence): NativeLinkedReferenceEvidence =>
+        evidence ?? { kind: "timeout", label: capture.label },
+    );
+  }
+
+  private primeLinkedReference(context: ReaderUIContext): void {
+    const capture = context.linkedReferenceCapture;
+    if (!capture || context.linkedReferencePromise) return;
+    const liveReader = context.readerRef?.deref();
+    context.linkedReferencePromise =
+      getOverlayCoordinator().resolveLinkedReference(liveReader, capture);
+    void context.linkedReferencePromise.catch(() => undefined);
+  }
+
+  private scheduleLinkedReferencePreviewRetry(
+    button: HTMLElement,
+    context: ReaderUIContext,
+    label: string,
+    citationType: "numeric" | "author-year" | "arxiv",
+    labels?: string[],
+  ): void {
+    const pending = context.linkedReferencePromise;
+    if (!pending || context.linkedReferencePreviewRetryScheduled) return;
+    context.linkedReferencePreviewRetryScheduled = true;
+    void pending
+      .then((evidence) => {
+        if (
+          evidence.kind !== "resolved" ||
+          this.currentPreviewButton !== button ||
+          !button.isConnected
+        ) {
+          return;
+        }
+        void this.emitPreviewRequest(
+          button,
+          context,
+          label,
+          citationType,
+          labels,
+        );
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        context.linkedReferencePreviewRetryScheduled = false;
+      });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1435,559 +1513,142 @@ export class ReaderIntegration {
     this.readerStates.delete(tabID);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // FTR-CACHE-PRELOAD: Background Preload for References
-  // ─────────────────────────────────────────────────────────────────────────────
-
   /**
-   * Trigger background preload of references for the current PDF's parent item.
-   * This is called when user interacts with the PDF (text selection popup appears).
-   * Non-blocking: runs in background without affecting UI responsiveness.
-   */
-  private triggerBackgroundPreload(reader: any): void {
-    try {
-      // Get parent item info from reader
-      const itemID = reader?.itemID;
-      if (!itemID) return;
-
-      const item = Zotero.Items.get(itemID);
-      if (!item) return;
-
-      // Get parent item (PDF attachment's parent)
-      const parentItemID = item.parentItemID || itemID;
-      const parentItem = Zotero.Items.get(parentItemID);
-      if (!parentItem || !parentItem.isRegularItem()) return;
-
-      // S7: Presentations have no reference list — nothing to preload/parse.
-      if (parentItem?.itemType === "presentation") return;
-
-      // Get recid from parent item
-      const recid = deriveRecidFromItem(parentItem);
-      if (!recid) return;
-
-      // Skip if already preloaded or currently preloading
-      if (this.transientState.preloadedRecids.has(recid)) return;
-      if (this.transientState.preloadingRecids.has(recid)) return;
-
-      // Start background preload (fire and forget)
-      // FTR-PDF-MATCHING: Pass itemID to set maxKnownLabel after fetch
-      const preloadPromise = this.preloadReferencesForRecid(recid, itemID);
-      this.transientState.preloadingRecids.set(recid, preloadPromise);
-      this.capMap(this.transientState.preloadingRecids, 100);
-
-      // Clean up after preload completes
-      preloadPromise
-        .then(() => {
-          this.transientState.preloadedRecids.add(recid);
-          this.capSet(this.transientState.preloadedRecids, 300);
-        })
-        .catch((err) => {
-          Zotero.debug(
-            `[${config.addonName}] [PRELOAD] Failed to preload refs for ${recid}: ${err}`,
-          );
-        })
-        .finally(() => {
-          this.transientState.preloadingRecids.delete(recid);
-        });
-    } catch (err) {
-      // Silently ignore errors - preload is best-effort
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] triggerBackgroundPreload error: ${err}`,
-      );
-    }
-  }
-
-  /**
-   * Preload references for a given recid.
-   * Checks cache first; if miss, fetches from INSPIRE and stores to cache.
-   * FTR-PDF-MATCHING: Also sets maxKnownLabel based on entry count.
-   * @param recid - INSPIRE record ID
-   * @param attachmentItemID - Optional Zotero attachment item ID for maxKnownLabel
-   */
-  private async preloadReferencesForRecid(
-    recid: string,
-    attachmentItemID?: number,
-  ): Promise<void> {
-    try {
-      // Check if local cache is enabled
-      if (!localCache.isEnabled()) {
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD] Cache disabled, skipping preload for ${recid}`,
-        );
-        return;
-      }
-
-      // Check if already in cache
-      const cached = await localCache.get<InspireReferenceEntry[]>(
-        "refs",
-        recid,
-      );
-      if (cached) {
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD] References for ${recid} already cached (age: ${cached.ageHours.toFixed(1)}h)`,
-        );
-        // FTR-PDF-MATCHING: Set maxKnownLabel from cached data
-        if (attachmentItemID && cached.data && cached.data.length > 0) {
-          this.setMaxKnownLabel(attachmentItemID, cached.data.length);
-        }
-        // FTR-PDF-PARSE-PRELOAD: Warm the PDF parse even on a refs-cache HIT.
-        // This early return previously skipped startPdfParsing (only the
-        // cache-miss path started it), so returning sessions kept a cold PDF
-        // mapping and the first click parsed synchronously. Idempotent call.
-        if (attachmentItemID && getPref("pdf_parse_refs_list") === true) {
-          this.startPdfParsing(attachmentItemID);
-        }
-        return;
-      }
-
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] Starting background fetch for ${recid}`,
-      );
-
-      // Fetch from INSPIRE
-      const entries = await fetchReferencesEntries(recid);
-      if (!entries || entries.length === 0) {
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD] No references found for ${recid}`,
-        );
-        return;
-      }
-
-      // Enrich with complete metadata (title, authors, etc.)
-      const enrichmentResult = await enrichReferencesEntries(entries);
-
-      // Only persist transport-complete enrichment results. A failed batch must
-      // remain retryable instead of becoming a permanent references cache.
-      if (enrichmentResult.complete) {
-        await localCache.set("refs", recid, entries, undefined, entries.length);
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD] Cached ${entries.length} references for ${recid}`,
-        );
-      } else {
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD] Skipping incomplete references cache for ${recid} (${enrichmentResult.failedRecids.length} failed recids)`,
-        );
-      }
-
-      // FTR-PDF-MATCHING: Set maxKnownLabel based on entry count for precise concatenated range detection
-      // This provides an early estimate before PDF is parsed
-      if (attachmentItemID && entries.length > 0) {
-        this.setMaxKnownLabel(attachmentItemID, entries.length);
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD] Set maxKnownLabel=${entries.length} for attachment ${attachmentItemID}`,
-        );
-      }
-
-      // FTR-PDF-PARSE-PRELOAD: Also preload PDF parsing in background
-      // This reduces first-click latency by having PDF mapping ready
-      // FTR-PRELOAD-AWAIT: Track the promise so callers can await it
-      if (attachmentItemID && getPref("pdf_parse_refs_list") === true) {
-        this.startPdfParsing(attachmentItemID);
-      }
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] Error preloading references for ${recid}: ${err}`,
-      );
-    }
-  }
-
-  /**
-   * Start PDF parsing and track the promise.
-   * FTR-PRELOAD-AWAIT: Separated from preloadPDFParsing to track promises by attachmentItemID.
-   * FTR-MULTI-PDF-FIX: Changed from parentItemID to attachmentItemID for cache keys.
-   */
-  private startPdfParsing(attachmentItemID: number): void {
-    const attachment = Zotero.Items.get(attachmentItemID);
-    if (!attachment) return;
-
-    const parentItemID = attachment.parentItemID;
-    if (!parentItemID) return;
-
-    // Skip if already parsing, cached, or already queued.
-    // FTR-MULTI-PDF-FIX: Each PDF attachment has its own cache entry
-    if (this.transientState.pdfParsingItems.has(attachmentItemID)) return;
-    if (this.pdfMappingCache.has(attachmentItemID)) return;
-    if (this.transientState.pdfParseQueue.includes(attachmentItemID)) return;
-
-    // S2: Serialize background PDF parses (concurrency = 1). A session restore
-    // re-opens every previously-open reader tab at once; without this a burst of
-    // tabs would each start a CPU-heavy parse simultaneously. Requests queue and
-    // drain one at a time, each scheduled on idle so the UI stays responsive.
-    this.transientState.pdfParseQueue.push(attachmentItemID);
-    this.pumpPdfParseQueue();
-  }
-
-  /**
-   * S2: Drain the background PDF-parse queue one item at a time (concurrency=1).
-   * `pdfParseRunning` is set synchronously before scheduling so a second pump
-   * (e.g. from a concurrent trigger) cannot start an overlapping parse during
-   * the idle-callback gap. Each parse re-pumps the queue when it settles.
-   */
-  private pumpPdfParseQueue(): void {
-    if (this.transientState.pdfParseRunning) return;
-
-    // Skip entries that became cached / in-flight while they sat in the queue.
-    // (A concurrent click on the active tab may inline-parse a still-queued
-    // item — safe: same mapping, and preloadPDFParsing re-checks the cache.)
-    let next = this.transientState.pdfParseQueue.shift();
-    while (
-      next !== undefined &&
-      (this.pdfMappingCache.has(next) ||
-        this.transientState.pdfParsingItems.has(next))
-    ) {
-      next = this.transientState.pdfParseQueue.shift();
-    }
-    if (next === undefined) return;
-
-    const attachmentItemID = next;
-    this.transientState.pdfParseRunning = true;
-    // Snapshot the state object; if cleanup() swaps transientState before the
-    // idle callback fires, bail rather than resurrect a parse into a fresh or
-    // torn-down session (flagged by both reviewers).
-    const stateAtSchedule = this.transientState;
-
-    const runParse = () => {
-      if (this.transientState !== stateAtSchedule) return;
-      const parsePromise = this.preloadPDFParsing(attachmentItemID);
-      this.transientState.pdfParsingPromises.set(
-        attachmentItemID,
-        parsePromise,
-      );
-      parsePromise
-        .catch((err) => {
-          Zotero.debug(
-            `[${config.addonName}] [PRELOAD] PDF parsing preload failed: ${err}`,
-          );
-        })
-        .finally(() => {
-          this.transientState.pdfParsingPromises.delete(attachmentItemID);
-          this.transientState.pdfParseRunning = false;
-          // Drain the next queued parse, if any.
-          this.pumpPdfParseQueue();
-        });
-    };
-
-    this.scheduleIdle(runParse);
-  }
-
-  /**
-   * S2: Run a callback when the main thread is idle, so CPU-heavy parse work
-   * yields to the UI. Falls back to a short timeout where requestIdleCallback is
-   * unavailable.
-   */
-  private scheduleIdle(fn: () => void): void {
-    try {
-      const win = Zotero.getMainWindow() as any;
-      if (win && typeof win.requestIdleCallback === "function") {
-        win.requestIdleCallback(fn, { timeout: 2000 });
-        return;
-      }
-      if (win && typeof win.setTimeout === "function") {
-        win.setTimeout(fn, 200);
-        return;
-      }
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD] scheduleIdle fell back to setTimeout: ${err}`,
-      );
-    }
-    setTimeout(fn, 200);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // FTR-PDF-PARSE-PRELOAD: Background PDF parsing for faster first-click
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Preload PDF parsing results in background.
-   * Parses the PDF's reference section and caches the mapping for later use.
-   * FTR-MULTI-PDF-FIX: Uses attachmentItemID as cache key instead of parentItemID.
-   * @param attachmentItemID - The PDF attachment item ID
-   */
-  private async preloadPDFParsing(attachmentItemID: number): Promise<void> {
-    // Get attachment and parent item
-    const attachment = Zotero.Items.get(attachmentItemID);
-    if (!attachment) return;
-
-    const parentItemID = attachment.parentItemID;
-    if (!parentItemID) return;
-
-    // Skip if already parsing or cached - use attachmentItemID as key
-    // FTR-MULTI-PDF-FIX: Each PDF attachment has its own cache entry
-    if (this.transientState.pdfParsingItems.has(attachmentItemID)) return;
-    if (this.pdfMappingCache.has(attachmentItemID)) {
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD-PDF] Already cached for attachment ${attachmentItemID} (parent=${parentItemID})`,
-      );
-      return;
-    }
-
-    this.transientState.pdfParsingItems.add(attachmentItemID);
-
-    try {
-      // Get PDF file path
-      const pdfPath = await attachment.getFilePathAsync();
-      if (!pdfPath) {
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] No PDF path for attachment ${attachmentItemID}`,
-        );
-        return;
-      }
-
-      // S5: Try the on-disk parse cache before the expensive extract + parse.
-      // A valid hit warms the in-memory caches and skips re-parsing entirely.
-      const persisted = await loadPersistedPdfParse(
-        pdfMappingCacheKey(attachment),
-        pdfPath,
-      );
-      if (persisted) {
-        if (persisted.numeric) {
-          this.pdfMappingCache.set(attachmentItemID, persisted.numeric);
-          const labelNums = Array.from(persisted.numeric.labelCounts.keys())
-            .map((l) => parseInt(l, 10))
-            .filter((n) => !isNaN(n));
-          if (labelNums.length > 0) {
-            this.setMaxKnownLabel(attachmentItemID, Math.max(...labelNums));
-          }
-        }
-        if (persisted.authorYear) {
-          this.pdfAuthorYearMappingCache.set(
-            attachmentItemID,
-            persisted.authorYear,
-          );
-        }
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] Loaded mapping from disk cache for attachment ${attachmentItemID}`,
-        );
-        return;
-      }
-
-      // Extract text from fulltext cache
-      const pdfText = await this.extractPDFTextFromCache(pdfPath);
-      if (!pdfText) {
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] No text extracted for ${attachmentItemID}`,
-        );
-        return;
-      }
-
-      const parser = getPDFReferencesParser();
-      const candidates = buildPdfTextCandidatesForReferenceParsing(pdfText);
-
-      let chosenText = pdfText;
-      let chosenCandidate = candidates[candidates.length - 1] ?? {
-        kind: "full" as const,
-        value: pdfText.length,
-        startIndex: 0,
-        text: pdfText,
-      };
-
-      // Prefer the smallest tail slice that still captures the beginning of the references list
-      // (i.e., includes low labels like 1–5). Fall back to full text to avoid regressions.
-      let mapping: PDFReferenceMapping | null = null;
-      for (const candidate of candidates) {
-        const candidateMapping = parser.parseReferencesSection(candidate.text);
-        if (!candidateMapping || candidateMapping.totalLabels <= 0) {
-          continue;
-        }
-
-        const labelNums = Array.from(candidateMapping.labelCounts.keys())
-          .map((l) => parseInt(l, 10))
-          .filter((n) => Number.isFinite(n));
-        const minLabel =
-          labelNums.length > 0
-            ? Math.min(...labelNums)
-            : Number.POSITIVE_INFINITY;
-        const hasLowStart =
-          candidateMapping.labelCounts.has("1") ||
-          (Number.isFinite(minLabel) && minLabel <= 5);
-
-        mapping = candidateMapping;
-        chosenText = candidate.text;
-        chosenCandidate = candidate;
-
-        if (hasLowStart || candidate.kind === "full") {
-          break;
-        }
-      }
-
-      if (mapping && mapping.totalLabels > 0) {
-        // FTR-MULTI-PDF-FIX: Cache under attachmentItemID, not parentItemID
-        this.pdfMappingCache.set(attachmentItemID, mapping);
-
-        // Update maxKnownLabel from PDF parsing result
-        const labelNums = Array.from(mapping.labelCounts.keys())
-          .map((l) => parseInt(l, 10))
-          .filter((n) => !isNaN(n));
-        if (labelNums.length > 0) {
-          const maxLabel = Math.max(...labelNums);
-          this.setMaxKnownLabel(attachmentItemID, maxLabel);
-        }
-
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] Cached numeric mapping (${mapping.totalLabels} labels) for attachment ${attachmentItemID} (parent=${parentItemID}), source=${chosenCandidate.kind}, startIndex=${chosenCandidate.startIndex}`,
-        );
-      }
-
-      // Also try author-year parsing
-      const authorYearMapping =
-        parser.parseAuthorYearReferencesSection(chosenText);
-      if (authorYearMapping && authorYearMapping.authorYearMap.size >= 5) {
-        // FTR-MULTI-PDF-FIX: Cache under attachmentItemID, not parentItemID
-        this.pdfAuthorYearMappingCache.set(attachmentItemID, authorYearMapping);
-        Zotero.debug(
-          `[${config.addonName}] [PRELOAD-PDF] Cached author-year mapping (${authorYearMapping.authorYearMap.size} entries) for attachment ${attachmentItemID} (parent=${parentItemID}), source=${chosenCandidate.kind}, startIndex=${chosenCandidate.startIndex}`,
-        );
-      }
-
-      // S5: Persist to disk so future sessions skip re-parsing this PDF.
-      const numericToPersist =
-        mapping && mapping.totalLabels > 0 ? mapping : null;
-      const authorYearToPersist =
-        authorYearMapping && authorYearMapping.authorYearMap.size >= 5
-          ? authorYearMapping
-          : null;
-      if (numericToPersist || authorYearToPersist) {
-        await persistPdfParse(
-          pdfMappingCacheKey(attachment),
-          pdfPath,
-          numericToPersist,
-          authorYearToPersist,
-        );
-      }
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] [PRELOAD-PDF] Error parsing PDF for attachment ${attachmentItemID}: ${err}`,
-      );
-    } finally {
-      this.transientState.pdfParsingItems.delete(attachmentItemID);
-    }
-  }
-
-  /**
-   * Extract PDF text from Zotero's fulltext cache.
-   * @param pdfPath - Path to the PDF file
-   */
-  private async extractPDFTextFromCache(
-    pdfPath: string,
-  ): Promise<string | null> {
-    try {
-      const cacheFileName = ".zotero-ft-cache";
-      const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf("/"));
-      const cachePath = `${pdfDir}/${cacheFileName}`;
-
-      const cacheExists = await IOUtils.exists(cachePath);
-      if (cacheExists) {
-        const cacheData = await IOUtils.read(cachePath);
-        const decoder = new TextDecoder("utf-8");
-        const text = decoder.decode(cacheData);
-        if (text && text.length > 100) {
-          return text;
-        }
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Get preloaded PDF numeric mapping for a specific PDF attachment.
+   * Get a cached PDF numeric mapping for a specific PDF attachment.
    * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
    * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    */
-  getPreloadedPDFMapping(
+  getCachedPDFMapping(
     attachmentItemID: number,
   ): PDFReferenceMapping | undefined {
     return this.pdfMappingCache.get(attachmentItemID);
   }
 
   /**
-   * Get preloaded PDF author-year mapping for a specific PDF attachment.
+   * Get a cached PDF author-year mapping for a specific PDF attachment.
    * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
    * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    */
-  getPreloadedAuthorYearMapping(
+  getCachedAuthorYearMapping(
     attachmentItemID: number,
   ): AuthorYearReferenceMapping | undefined {
     return this.pdfAuthorYearMappingCache.get(attachmentItemID);
   }
 
   /**
-   * Check if PDF parsing is in progress for a specific PDF attachment.
-   * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
-   * @param attachmentItemID - The PDF attachment item ID (NOT parent)
+   * Restore the complex parser's persisted result on the first real citation
+   * interaction. This reads only the attachment-scoped `pdfmap` cache after
+   * mtime/size validation; it never opens `.zotero-ft-cache` and never invokes
+   * the full reference parser.
    */
-  isPDFParsingInProgress(attachmentItemID: number): boolean {
-    return this.transientState.pdfParsingItems.has(attachmentItemID);
+  async ensureCachedPDFMappings(attachmentItemID: number): Promise<boolean> {
+    const state = this.transientState;
+    // A live mapping is already restored. Check this before the negative-load
+    // memo so a successful parser/install always wins.
+    if (
+      this.pdfMappingCache.has(attachmentItemID) ||
+      this.pdfAuthorYearMappingCache.has(attachmentItemID)
+    ) {
+      return true;
+    }
+    const existing = state.pdfMappingCacheLoads.get(attachmentItemID);
+    if (existing) return existing;
+    if (state.pdfMappingCacheLoadAttempted.has(attachmentItemID)) {
+      return false;
+    }
+
+    state.pdfMappingCacheLoadAttempted.add(attachmentItemID);
+    this.capSet(state.pdfMappingCacheLoadAttempted, 300);
+    const load = this.loadCachedPDFMappings(attachmentItemID, state);
+    state.pdfMappingCacheLoads.set(attachmentItemID, load);
+    this.capMap(state.pdfMappingCacheLoads, 100);
+    try {
+      const loaded = await load;
+      if (loaded && this.transientState === state) {
+        // Keep only negative probes memoized. Successful mappings live in the
+        // bounded LRUs; if an entry is later evicted, a new interaction may
+        // restore its persisted result instead of being blocked forever by an
+        // old "attempted" bit.
+        state.pdfMappingCacheLoadAttempted.delete(attachmentItemID);
+      }
+      return loaded;
+    } finally {
+      if (
+        this.transientState === state &&
+        state.pdfMappingCacheLoads.get(attachmentItemID) === load
+      ) {
+        state.pdfMappingCacheLoads.delete(attachmentItemID);
+      }
+    }
+  }
+
+  private async loadCachedPDFMappings(
+    attachmentItemID: number,
+    stateAtStart: TransientState,
+  ): Promise<boolean> {
+    try {
+      const attachment = Zotero.Items.get(attachmentItemID);
+      if (!attachment || typeof attachment.getFilePathAsync !== "function") {
+        return false;
+      }
+      const pdfPath = await attachment.getFilePathAsync();
+      if (!pdfPath) return false;
+      const persisted = await loadPersistedPdfParse(
+        pdfMappingCacheKey(attachment),
+        pdfPath,
+      );
+      if (this.transientState !== stateAtStart || !persisted) return false;
+
+      if (persisted.numeric) {
+        this.pdfMappingCache.set(attachmentItemID, persisted.numeric);
+        let maxLabel = 0;
+        for (const label of persisted.numeric.labelCounts.keys()) {
+          const parsed = Number.parseInt(label, 10);
+          if (Number.isFinite(parsed) && parsed > maxLabel) maxLabel = parsed;
+        }
+        if (maxLabel > 0) this.setMaxKnownLabel(attachmentItemID, maxLabel);
+      }
+      if (persisted.authorYear) {
+        this.pdfAuthorYearMappingCache.set(
+          attachmentItemID,
+          persisted.authorYear,
+        );
+      }
+      return !!(persisted.numeric || persisted.authorYear);
+    } catch (err) {
+      Zotero.debug(
+        `[${config.addonName}] [PDF-PARSE-PERSIST] Interaction cache load failed for attachment ${attachmentItemID}: ${err}`,
+      );
+      return false;
+    }
   }
 
   /**
-   * Set preloaded PDF mapping (for external callers to cache results).
+   * Cache an on-demand PDF mapping.
    * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
    * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    * @param mapping - The PDF reference mapping
    */
-  setPreloadedPDFMapping(
+  setCachedPDFMapping(
     attachmentItemID: number,
     mapping: PDFReferenceMapping,
   ): void {
     this.pdfMappingCache.set(attachmentItemID, mapping);
+    this.transientState.pdfMappingCacheLoadAttempted.delete(attachmentItemID);
   }
 
   /**
-   * Set preloaded author-year mapping (for external callers to cache results).
+   * Cache an on-demand author-year mapping.
    * FTR-MULTI-PDF-FIX: Changed to use attachmentItemID to support multiple PDFs per item.
    * @param attachmentItemID - The PDF attachment item ID (NOT parent)
    * @param mapping - The author-year mapping
    */
-  setPreloadedAuthorYearMapping(
+  setCachedAuthorYearMapping(
     attachmentItemID: number,
     mapping: AuthorYearReferenceMapping,
   ): void {
     this.pdfAuthorYearMappingCache.set(attachmentItemID, mapping);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // FTR-PRELOAD-AWAIT: Methods to await in-flight preloads
-  // Reduces first-click latency by allowing callers to wait for ongoing preloads
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Get the in-flight preload promise for a recid.
-   * If preload is in progress, returns the promise to await.
-   * If preload is completed or not started, returns undefined.
-   * @param recid - INSPIRE record ID
-   */
-  getPreloadPromise(recid: string): Promise<void> | undefined {
-    return this.transientState.preloadingRecids.get(recid);
-  }
-
-  /**
-   * Check if preload is in progress for a recid.
-   * @param recid - INSPIRE record ID
-   */
-  isPreloading(recid: string): boolean {
-    return this.transientState.preloadingRecids.has(recid);
-  }
-
-  /**
-   * Check if references have been preloaded for a recid.
-   * @param recid - INSPIRE record ID
-   */
-  isPreloaded(recid: string): boolean {
-    return this.transientState.preloadedRecids.has(recid);
-  }
-
-  /**
-   * Get the in-flight PDF parsing promise for a specific PDF attachment.
-   * If parsing is in progress, returns the promise to await.
-   * If parsing is completed or not started, returns undefined.
-   * FTR-MULTI-PDF-FIX-V2: Changed from parentItemID to attachmentItemID.
-   * @param attachmentItemID - The PDF attachment item ID (NOT parent)
-   */
-  getPdfParsePromise(attachmentItemID: number): Promise<void> | undefined {
-    return this.transientState.pdfParsingPromises.get(attachmentItemID);
+    this.transientState.pdfMappingCacheLoadAttempted.delete(attachmentItemID);
   }
 
   private capSet<T>(set: Set<T>, maxSize: number): void {
@@ -2009,12 +1670,12 @@ export class ReaderIntegration {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // FTR-CITATION-FORMAT-DETECT: Auto-detect citation format when PDF is opened
+  // Reader tab lifecycle and native completed-result admission
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
    * Register tab notifier to detect when reader tabs are opened/selected.
-   * Triggers background citation format detection for the opened PDF.
+   * Tracks Reader lifecycle and admits bounded reuse of completed native data.
    */
   private registerTabNotifier(): void {
     try {
@@ -2195,16 +1856,15 @@ export class ReaderIntegration {
 
   /**
    * Handle reader tab opened/selected event.
-   * Triggers background citation format detection.
+   * Registers bounded native reuse without starting plugin-owned cache loading
+   * or full-text reference parsing.
    * FTR-RECID-AUTO-UPDATE: Tracks items without recid for auto-update.
    */
-  private handleReaderTabOpened(tabID: string, readerHint?: any): void {
+  private handleReaderTabOpened(_tabID: string, readerHint?: any): void {
     try {
       const reader = readerHint;
       if (!reader) return;
       if (this.isPresentationReader(reader)) return;
-      const coordinator = getOverlayCoordinator();
-      coordinator.requestPrewarm(reader, undefined, true, "tab-select");
       if (!reader?.itemID) return;
 
       const itemID = reader.itemID;
@@ -2243,35 +1903,16 @@ export class ReaderIntegration {
         }
       }
 
-      // S7: Presentations have no reference list — skip the citation-lookup /
-      // reference-parse feature entirely (format detection, overlay pre-warm,
-      // preload). Recid tracking above still runs for the panel.
+      // Presentations have no reference list. Recid tracking above still runs
+      // for the panel.
       if (parentItem?.itemType === "presentation") {
         return;
       }
 
-      // S2: Only the ACTIVE reader tab warms citation-format detection and
-      // reference/PDF preload. On session restore Zotero fires an "add" event
-      // for every restored tab; without this gate each background tab would
-      // kick off a CPU-heavy PDF parse (a restore stampede). Background tabs
-      // warm lazily when the user switches to them — a later "select" event
-      // re-enters this handler with the tab now selected.
-      let exactSelectedReader = false;
-      try {
-        exactSelectedReader =
-          String(reader.tabID) === tabID &&
-          String(reader._window?.Zotero_Tabs?.selectedID) === tabID;
-      } catch {
-        exactSelectedReader = false;
-      }
-      if (!exactSelectedReader) {
-        return;
-      }
-
-      coordinator.reconcileTabSelection();
-
-      // Also trigger background preload
-      this.triggerBackgroundPreload(reader);
+      // Reader open is bookkeeping-only. Do not admit/schedule a plugin scan
+      // of the completed native overlay store here. A real citation hover or
+      // click reads its marker-local Zotero result directly and may then admit
+      // the separate global compatibility index on demand.
     } catch (err) {
       Zotero.debug(
         `[${config.addonName}] [FORMAT-DETECT] Error handling reader tab: ${err}`,
@@ -2294,17 +1935,11 @@ export class ReaderIntegration {
       // Clean transient per-item state to avoid long-session memory growth.
       const attachmentItemID = state.itemID;
       this.transientState.maxKnownLabelByItem.delete(attachmentItemID);
-      this.transientState.pdfParsingItems.delete(attachmentItemID);
-      this.transientState.pdfParsingPromises.delete(attachmentItemID);
-      const queueIdx =
-        this.transientState.pdfParseQueue.indexOf(attachmentItemID);
-      if (queueIdx !== -1) {
-        this.transientState.pdfParseQueue.splice(queueIdx, 1);
-      }
 
       // Best-effort: clear caches keyed by attachment item ID
       this.pdfMappingCache.delete(attachmentItemID);
       this.pdfAuthorYearMappingCache.delete(attachmentItemID);
+      this.transientState.pdfMappingCacheLoadAttempted.delete(attachmentItemID);
 
       // Clear recid tracking for this parent item (if applicable)
       const parentItemID = state.parentItemID;
