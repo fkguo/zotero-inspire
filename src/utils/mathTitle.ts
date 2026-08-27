@@ -740,8 +740,7 @@ function convertParticleNotation(text: string): string {
     lambda: "Λ",
     xi: "Ξ",
     delta: "Δ",
-    nu: "ν",
-    neutrino: "ν",
+    nu: "ν", // Keep the natural-language word "neutrino" unchanged
     gamma: "γ",
     upsilon: "Υ",
     psi: "ψ",
@@ -1013,7 +1012,6 @@ function convertAllCapsToTitleCase(text: string): string {
       "xi",
       "delta",
       "nu",
-      "neutrino",
       "gamma",
       "upsilon",
       "psi",
