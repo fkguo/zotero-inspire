@@ -28,7 +28,9 @@ function parse(result: [number, string, string]): ParsedResult {
   return { status, body: JSON.parse(body) };
 }
 
-function makeFile(opts: { exists?: boolean; isFile?: boolean; path?: string } = {}) {
+function makeFile(
+  opts: { exists?: boolean; isFile?: boolean; path?: string } = {},
+) {
   return {
     exists: () => opts.exists ?? true,
     isFile: () => opts.isFile ?? true,
@@ -55,10 +57,20 @@ let pathToFile: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   tokenMocks.ensureExternalToken.mockReset();
   tokenMocks.ensureExternalToken.mockReturnValue("SECRET-TOKEN");
-  linkFromFile = vi.fn(async () => ({ id: 99, key: "ATTACH99", attachmentLinkMode: 2 }));
-  importFromFile = vi.fn(async () => ({ id: 100, key: "ATTACH100", attachmentLinkMode: 0 }));
+  linkFromFile = vi.fn(async () => ({
+    id: 99,
+    key: "ATTACH99",
+    attachmentLinkMode: 2,
+  }));
+  importFromFile = vi.fn(async () => ({
+    id: 100,
+    key: "ATTACH100",
+    attachmentLinkMode: 0,
+  }));
   trashTx = vi.fn(async () => undefined);
-  getByLibraryAndKeyAsync = vi.fn(async (_lib: number, _key: string) => makeRegularItem());
+  getByLibraryAndKeyAsync = vi.fn(async (_lib: number, _key: string) =>
+    makeRegularItem(),
+  );
   pathToFile = vi.fn((_p: string) => makeFile());
 
   vi.stubGlobal("Zotero", {
@@ -353,7 +365,11 @@ describe("library_id resolution", () => {
   });
 
   it("honors an explicit numeric library_id", async () => {
-    await dispatchWriteOp({ op: "trash_item", item_key: "PARENT01", library_id: 7 });
+    await dispatchWriteOp({
+      op: "trash_item",
+      item_key: "PARENT01",
+      library_id: 7,
+    });
     expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(7, "PARENT01");
   });
 
@@ -387,7 +403,9 @@ describe("library_id resolution", () => {
 describe("endpoint token auth (init)", () => {
   function getEndpoint() {
     registerZInspireWriteEndpoint();
-    const Endpoint = (Zotero as any).Server.Endpoints["/connector/zinspireWrite"];
+    const Endpoint = (Zotero as any).Server.Endpoints[
+      "/connector/zinspireWrite"
+    ];
     return new Endpoint();
   }
 
@@ -403,7 +421,9 @@ describe("endpoint token auth (init)", () => {
 
   it("rejects requests without the token (403)", async () => {
     const ep = getEndpoint();
-    const { status, body } = parse(await ep.init({ headers: {}, data: { op: "ping" } }));
+    const { status, body } = parse(
+      await ep.init({ headers: {}, data: { op: "ping" } }),
+    );
     expect(status).toBe(403);
     expect(body.error).toBe("FORBIDDEN");
   });
@@ -411,7 +431,10 @@ describe("endpoint token auth (init)", () => {
   it("rejects requests with a wrong token (403)", async () => {
     const ep = getEndpoint();
     const { status } = parse(
-      await ep.init({ headers: { "x-zinspire-token": "WRONG" }, data: { op: "ping" } }),
+      await ep.init({
+        headers: { "x-zinspire-token": "WRONG" },
+        data: { op: "ping" },
+      }),
     );
     expect(status).toBe(403);
   });

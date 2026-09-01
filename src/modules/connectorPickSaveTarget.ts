@@ -14,7 +14,12 @@ let previousEndpoint: any;
 let hadPreviousEndpoint = false;
 let registered = false;
 
-type PickSaveTargetStatus = "pending" | "done" | "cancelled" | "error" | "expired";
+type PickSaveTargetStatus =
+  | "pending"
+  | "done"
+  | "cancelled"
+  | "error"
+  | "expired";
 
 type PickSaveTargetResponse =
   | { ok: true; cancelled: true }
@@ -123,9 +128,7 @@ function getRecentTargets(): { ids: Set<string>; ordered: string[] } {
       }
     }
   } catch (err) {
-    debug(
-      `[${config.addonName}] Failed to parse recentSaveTargets: ${err}`,
-    );
+    debug(`[${config.addonName}] Failed to parse recentSaveTargets: ${err}`);
     Zotero.Prefs.clear("recentSaveTargets");
   }
   return { ids, ordered };
@@ -145,9 +148,7 @@ function rememberRecentTarget(targetID: string) {
     entries.unshift({ id: targetID });
     Zotero.Prefs.set("recentSaveTargets", JSON.stringify(entries.slice(0, 5)));
   } catch (err) {
-    debug(
-      `[${config.addonName}] Failed to update recentSaveTargets: ${err}`,
-    );
+    debug(`[${config.addonName}] Failed to update recentSaveTargets: ${err}`);
     Zotero.Prefs.clear("recentSaveTargets");
   }
 }
@@ -159,7 +160,8 @@ function getDefaultTargetID(): string | null {
     return `C${selected.id}`;
   }
   const libraryID =
-    getPrimarySelectedLibraryID(pane) ?? Zotero.Libraries.userLibrary?.libraryID;
+    getPrimarySelectedLibraryID(pane) ??
+    Zotero.Libraries.userLibrary?.libraryID;
   return libraryID ? `L${libraryID}` : null;
 }
 
@@ -373,9 +375,7 @@ async function startPickSaveTargetRequest(options: {
       state.result = response;
       return response;
     } catch (err) {
-      debug(
-        `[${config.addonName}] Save-target picker failed: ${String(err)}`,
-      );
+      debug(`[${config.addonName}] Save-target picker failed: ${String(err)}`);
       state.status = "error";
       state.error = "Save-target selection failed";
       return { ok: true, cancelled: true } as const;

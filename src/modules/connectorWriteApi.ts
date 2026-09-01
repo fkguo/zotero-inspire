@@ -79,7 +79,11 @@ function debug(message: string): void {
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.trim()) {
-    throw new WriteError(400, "INVALID_PARAMS", `${field} is required (non-empty string)`);
+    throw new WriteError(
+      400,
+      "INVALID_PARAMS",
+      `${field} is required (non-empty string)`,
+    );
   }
   return value.trim();
 }
@@ -109,7 +113,10 @@ function resolveLibraryID(raw: unknown): number {
   );
 }
 
-async function resolveItem(libraryID: number, key: string): Promise<Zotero.Item> {
+async function resolveItem(
+  libraryID: number,
+  key: string,
+): Promise<Zotero.Item> {
   const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
   if (!item) {
     throw new WriteError(
@@ -138,10 +145,18 @@ function resolveExistingFile(filePath: string): { file: any; absPath: string } {
     );
   }
   if (!file || !file.exists()) {
-    throw new WriteError(404, "FILE_NOT_FOUND", `file_path does not exist: ${filePath}`);
+    throw new WriteError(
+      404,
+      "FILE_NOT_FOUND",
+      `file_path does not exist: ${filePath}`,
+    );
   }
   if (!file.isFile()) {
-    throw new WriteError(400, "NOT_A_FILE", `file_path is not a regular file: ${filePath}`);
+    throw new WriteError(
+      400,
+      "NOT_A_FILE",
+      `file_path is not a regular file: ${filePath}`,
+    );
   }
   return { file, absPath: file.path };
 }
@@ -174,7 +189,9 @@ async function handlePing(): Promise<EndpointResult> {
   });
 }
 
-async function handleAttachFile(body: Record<string, any>): Promise<EndpointResult> {
+async function handleAttachFile(
+  body: Record<string, any>,
+): Promise<EndpointResult> {
   const parentKey = requireString(body.parent_item_key, "parent_item_key");
   const filePath = requireString(body.file_path, "file_path");
   const libraryID = resolveLibraryID(body.library_id);
@@ -228,13 +245,17 @@ async function handleAttachFile(body: Record<string, any>): Promise<EndpointResu
   });
 }
 
-async function handleTrashItem(body: Record<string, any>): Promise<EndpointResult> {
+async function handleTrashItem(
+  body: Record<string, any>,
+): Promise<EndpointResult> {
   const key = requireString(body.item_key, "item_key");
   const libraryID = resolveLibraryID(body.library_id);
   const item = await resolveItem(libraryID, key);
 
   await Zotero.Items.trashTx(item.id);
-  debug(`[${config.addonName}] write trash_item ok: ${key} (library ${libraryID})`);
+  debug(
+    `[${config.addonName}] write trash_item ok: ${key} (library ${libraryID})`,
+  );
 
   return jsonResult(200, {
     ok: true,
@@ -246,14 +267,18 @@ async function handleTrashItem(body: Record<string, any>): Promise<EndpointResul
   });
 }
 
-async function handleEraseItem(body: Record<string, any>): Promise<EndpointResult> {
+async function handleEraseItem(
+  body: Record<string, any>,
+): Promise<EndpointResult> {
   const key = requireString(body.item_key, "item_key");
   const libraryID = resolveLibraryID(body.library_id);
   const item = await resolveItem(libraryID, key);
   const itemID = item.id;
 
   await item.eraseTx();
-  debug(`[${config.addonName}] write erase_item ok: ${key} (library ${libraryID})`);
+  debug(
+    `[${config.addonName}] write erase_item ok: ${key} (library ${libraryID})`,
+  );
 
   return jsonResult(200, {
     ok: true,
@@ -269,7 +294,9 @@ async function handleEraseItem(body: Record<string, any>): Promise<EndpointResul
  * Dispatch a validated, authenticated write request to the matching op handler.
  * Exported for unit testing without the connector server.
  */
-export async function dispatchWriteOp(body: Record<string, any>): Promise<EndpointResult> {
+export async function dispatchWriteOp(
+  body: Record<string, any>,
+): Promise<EndpointResult> {
   const rawOp = typeof body.op === "string" ? body.op : "";
   if (rawOp.length > 32) {
     return jsonResult(400, {
@@ -300,7 +327,12 @@ export async function dispatchWriteOp(body: Record<string, any>): Promise<Endpoi
     }
   } catch (err) {
     if (err instanceof WriteError) {
-      return jsonResult(err.status, { ok: false, op, code: err.code, error: err.message });
+      return jsonResult(err.status, {
+        ok: false,
+        op,
+        code: err.code,
+        error: err.message,
+      });
     }
     const message = err instanceof Error ? err.message : String(err);
     debug(`[${config.addonName}] write op=${op} failed: ${message}`);
