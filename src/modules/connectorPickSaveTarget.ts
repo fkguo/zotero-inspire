@@ -7,11 +7,19 @@ import {
 import { showTargetPickerUI, type SaveTargetRow } from "./pickerUI";
 
 const ENDPOINT_PATH = "/connector/zinspirePickSaveTarget";
+const MAX_RESPONSE_BYTES = 1024 * 1024;
+const REQUEST_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-let previousEndpoint: any | null = null;
+let previousEndpoint: any;
+let hadPreviousEndpoint = false;
 let registered = false;
 
-type PickSaveTargetStatus = "pending" | "done" | "cancelled" | "error" | "expired";
+type PickSaveTargetStatus =
+  | "pending"
+  | "done"
+  | "cancelled"
+  | "error"
+  | "expired";
 
 type PickSaveTargetResponse =
   | { ok: true; cancelled: true }
@@ -35,9 +43,37 @@ type PickSaveTargetState = {
   completion?: Promise<PickSaveTargetResponse>;
 };
 
+type EndpointResult = [number, string, string];
+
 const REQUEST_TTL_MS = 10 * 60 * 1000;
 const requestStates = new Map<string, PickSaveTargetState>();
 let activeRequestID: string | null = null;
+
+function jsonResult(
+  status: number,
+  body: Record<string, unknown>,
+): EndpointResult {
+  const serialized = JSON.stringify(body);
+  if (new TextEncoder().encode(serialized).byteLength > MAX_RESPONSE_BYTES) {
+    return [
+      413,
+      "application/json",
+      JSON.stringify({
+        ok: false,
+        error: "RESPONSE_TOO_LARGE",
+      }),
+    ];
+  }
+  return [status, "application/json", serialized];
+}
+
+function debug(message: string): void {
+  try {
+    Zotero.debug?.(message);
+  } catch (_err) {
+    // Diagnostics must not affect endpoint behavior.
+  }
+}
 
 function generateRequestID(): string {
   try {
@@ -92,9 +128,7 @@ function getRecentTargets(): { ids: Set<string>; ordered: string[] } {
       }
     }
   } catch (err) {
-    Zotero.debug?.(
-      `[${config.addonName}] Failed to parse recentSaveTargets: ${err}`,
-    );
+    debug(`[${config.addonName}] Failed to parse recentSaveTargets: ${err}`);
     Zotero.Prefs.clear("recentSaveTargets");
   }
   return { ids, ordered };
@@ -114,9 +148,7 @@ function rememberRecentTarget(targetID: string) {
     entries.unshift({ id: targetID });
     Zotero.Prefs.set("recentSaveTargets", JSON.stringify(entries.slice(0, 5)));
   } catch (err) {
-    Zotero.debug?.(
-      `[${config.addonName}] Failed to update recentSaveTargets: ${err}`,
-    );
+    debug(`[${config.addonName}] Failed to update recentSaveTargets: ${err}`);
     Zotero.Prefs.clear("recentSaveTargets");
   }
 }
@@ -128,7 +160,8 @@ function getDefaultTargetID(): string | null {
     return `C${selected.id}`;
   }
   const libraryID =
-    getPrimarySelectedLibraryID(pane) ?? Zotero.Libraries.userLibrary?.libraryID;
+    getPrimarySelectedLibraryID(pane) ??
+    Zotero.Libraries.userLibrary?.libraryID;
   return libraryID ? `L${libraryID}` : null;
 }
 
@@ -342,8 +375,9 @@ async function startPickSaveTargetRequest(options: {
       state.result = response;
       return response;
     } catch (err) {
+      debug(`[${config.addonName}] Save-target picker failed: ${String(err)}`);
       state.status = "error";
-      state.error = String(err);
+      state.error = "Save-target selection failed";
       return { ok: true, cancelled: true } as const;
     } finally {
       if (activeRequestID === requestID) {
@@ -364,75 +398,60 @@ class ZInspirePickSaveTargetEndpoint {
   async init(req: {
     headers: Record<string, string | undefined>;
     data: any;
-  }): Promise<[number, string, string]> {
+  }): Promise<EndpointResult> {
     const expectedToken = ensureExternalToken();
+    if (!expectedToken) {
+      return jsonResult(503, { ok: false, error: "TOKEN_UNAVAILABLE" });
+    }
     const headerMap = req?.headers ?? {};
     const providedToken =
       headerMap["x-zinspire-token"] ??
       (headerMap as any)["X-ZInspire-Token"] ??
       headerMap["X-ZINSPIRE-TOKEN"];
     if (!providedToken || providedToken !== expectedToken) {
-      return [
-        403,
-        "application/json",
-        JSON.stringify({ ok: false, error: "FORBIDDEN" }),
-      ];
+      return jsonResult(403, { ok: false, error: "FORBIDDEN" });
     }
 
     const body = req?.data && typeof req.data === "object" ? req.data : {};
-    const requestID =
-      typeof body.requestID === "string" && body.requestID.trim()
-        ? body.requestID.trim()
-        : null;
+    let requestID: string | null = null;
+    if (body.requestID !== undefined) {
+      if (
+        typeof body.requestID !== "string" ||
+        !REQUEST_ID_RE.test(body.requestID)
+      ) {
+        return jsonResult(400, { ok: false, error: "INVALID_REQUEST_ID" });
+      }
+      requestID = body.requestID;
+    }
 
     // Poll mode: return status/result without opening a new picker
     if (requestID) {
       cleanupExpiredRequests();
       const state = requestStates.get(requestID);
       if (!state) {
-        return [
-          200,
-          "application/json",
-          JSON.stringify({ ok: true, requestID, status: "expired" }),
-        ];
+        return jsonResult(200, { ok: true, requestID, status: "expired" });
       }
       const ageMs = Date.now() - state.createdAt;
       if (ageMs > REQUEST_TTL_MS) {
         requestStates.delete(requestID);
-        return [
-          200,
-          "application/json",
-          JSON.stringify({ ok: true, requestID, status: "expired" }),
-        ];
+        return jsonResult(200, { ok: true, requestID, status: "expired" });
       }
       if (state.status === "pending") {
-        return [
-          200,
-          "application/json",
-          JSON.stringify({ ok: true, requestID, status: "pending" }),
-        ];
+        return jsonResult(200, { ok: true, requestID, status: "pending" });
       }
       if (state.result) {
-        return [
-          200,
-          "application/json",
-          JSON.stringify({
-            ...state.result,
-            requestID,
-            status: state.status,
-          }),
-        ];
-      }
-      return [
-        200,
-        "application/json",
-        JSON.stringify({
-          ok: true,
+        return jsonResult(200, {
+          ...state.result,
           requestID,
           status: state.status,
-          error: state.error,
-        }),
-      ];
+        });
+      }
+      return jsonResult(200, {
+        ok: true,
+        requestID,
+        status: state.status,
+        error: state.error,
+      });
     }
 
     const multi = typeof body.multi === "boolean" ? body.multi : true;
@@ -444,35 +463,25 @@ class ZInspirePickSaveTargetEndpoint {
     try {
       state = await startPickSaveTargetRequest({ multi, includeTagsNote });
     } catch (err) {
-      const message = String(err);
-      if (message.includes("BUSY")) {
-        return [
-          409,
-          "application/json",
-          JSON.stringify({ ok: false, error: "BUSY" }),
-        ];
+      if (err instanceof Error && err.message === "BUSY") {
+        return jsonResult(409, { ok: false, error: "BUSY" });
       }
-      return [
-        500,
-        "application/json",
-        JSON.stringify({ ok: false, error: message }),
-      ];
+      debug(
+        `[${config.addonName}] Failed to start save-target picker: ${String(err)}`,
+      );
+      return jsonResult(500, { ok: false, error: "INTERNAL_ERROR" });
     }
 
     if (!wait) {
-      return [
-        200,
-        "application/json",
-        JSON.stringify({
-          ok: true,
-          requestID: state.requestID,
-          status: "pending",
-        }),
-      ];
+      return jsonResult(200, {
+        ok: true,
+        requestID: state.requestID,
+        status: "pending",
+      });
     }
 
     const response = await state.completion!;
-    return [200, "application/json", JSON.stringify(response)];
+    return jsonResult(200, response);
   }
 }
 
@@ -482,17 +491,19 @@ export function registerZInspirePickSaveTargetEndpoint(): void {
   }
   const endpoints = (Zotero.Server as any)?.Endpoints;
   if (!endpoints) {
-    Zotero.debug?.(
+    debug(
       `[${config.addonName}] Zotero.Server.Endpoints not available; cannot register ${ENDPOINT_PATH}`,
     );
     return;
   }
-  if (endpoints[ENDPOINT_PATH] && !previousEndpoint) {
-    previousEndpoint = endpoints[ENDPOINT_PATH];
-  }
+  hadPreviousEndpoint = Object.prototype.hasOwnProperty.call(
+    endpoints,
+    ENDPOINT_PATH,
+  );
+  previousEndpoint = endpoints[ENDPOINT_PATH];
   endpoints[ENDPOINT_PATH] = ZInspirePickSaveTargetEndpoint as any;
   registered = true;
-  Zotero.debug?.(
+  debug(
     `[${config.addonName}] Registered connector endpoint POST ${ENDPOINT_PATH}`,
   );
 }
@@ -503,14 +514,19 @@ export function unregisterZInspirePickSaveTargetEndpoint(): void {
   }
   const endpoints = (Zotero.Server as any)?.Endpoints;
   if (!endpoints) {
+    previousEndpoint = undefined;
+    hadPreviousEndpoint = false;
     registered = false;
     return;
   }
-  if (previousEndpoint) {
-    endpoints[ENDPOINT_PATH] = previousEndpoint;
-  } else {
-    delete endpoints[ENDPOINT_PATH];
+  if (endpoints[ENDPOINT_PATH] === ZInspirePickSaveTargetEndpoint) {
+    if (hadPreviousEndpoint) {
+      endpoints[ENDPOINT_PATH] = previousEndpoint;
+    } else {
+      delete endpoints[ENDPOINT_PATH];
+    }
   }
-  previousEndpoint = null;
+  previousEndpoint = undefined;
+  hadPreviousEndpoint = false;
   registered = false;
 }

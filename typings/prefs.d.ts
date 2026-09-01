@@ -26,6 +26,7 @@ declare namespace _ZoteroTypes {
       "citation_graph_max_results": number;
       "citation_graph_include_reviews": boolean;
       "external_token": string;
+      "external_read_token": string;
       "latex_render_mode": string;
       "search_history_days": number;
       "pdf_fuzzy_citation": boolean;

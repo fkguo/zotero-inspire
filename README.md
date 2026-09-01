@@ -300,13 +300,32 @@ Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences
 
 ---
 
-## External Write API (for local tools)
+## External APIs (for local tools)
 
-Since **3.0.3**, zotero-inspire registers an authenticated `POST /connector/zinspireWrite`
-endpoint so trusted local tools can do what Zotero's read-only Local API cannot:
-attach a local file to an item, and trash/erase items. This is what the
-**autoresearch `zotero-mcp` / `hep-mcp`** integration uses for PDF attachment and
-deletion. Full contract (auth, operations, errors, dependency notes):
+### Read-only INSPIRE BibTeX
+
+zotero-inspire registers an authenticated
+`POST /connector/zinspireBibtex` endpoint for trusted local clients such as
+`zotero-cite`. It resolves Better BibTeX/CAYW citation keys across personal and
+group libraries and rewrites each entry key to the requested citation key. The
+only INSPIRE lookup key is the recid stored by zotero-inspire as the canonical
+pair `archive = "INSPIRE"` and numeric `archiveLocation`. With that pair, the
+endpoint requests INSPIRE only by recid. Without a canonical recid, or when that
+recid returns an explicit INSPIRE `404`, it exports the same uniquely matched
+item through Better BibTeX as a narrow fallback. DOI, arXiv, URL, and Extra are
+not used to discover an INSPIRE record; other INSPIRE failures remain errors.
+Request handling does not modify Zotero items, libraries, or preferences and
+uses a dedicated read token, separate from the write API. Full versioned
+contract: [`docs/EXTERNAL_INSPIRE_BIBTEX_API.md`](docs/EXTERNAL_INSPIRE_BIBTEX_API.md).
+
+### Zotero writes
+
+Since **3.0.3**, zotero-inspire registers an authenticated
+`POST /connector/zinspireWrite` endpoint so trusted local tools can do what
+Zotero's read-only Local API cannot: attach a local file to an item, and
+trash/erase items. This is what the **autoresearch `zotero-mcp` / `hep-mcp`**
+integration uses for PDF attachment and deletion. Full contract (auth,
+operations, errors, dependency notes):
 [`docs/EXTERNAL_WRITE_API.md`](docs/EXTERNAL_WRITE_API.md).
 
 ---
