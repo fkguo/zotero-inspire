@@ -25,6 +25,7 @@ import { ensureExternalToken } from "../utils/externalToken";
  */
 
 const ENDPOINT_PATH = "/connector/zinspireWrite";
+const MAX_RESPONSE_BYTES = 1024 * 1024;
 
 const CAPABILITIES = [
   "ping",
@@ -33,7 +34,8 @@ const CAPABILITIES = [
   "erase_item",
 ] as const;
 
-let previousEndpoint: any | null = null;
+let previousEndpoint: any;
+let hadPreviousEndpoint = false;
 let registered = false;
 
 type WriteResponseBody = Record<string, unknown>;
@@ -52,7 +54,27 @@ class WriteError extends Error {
 }
 
 function jsonResult(status: number, body: WriteResponseBody): EndpointResult {
-  return [status, "application/json", JSON.stringify(body)];
+  const serialized = JSON.stringify(body);
+  if (new TextEncoder().encode(serialized).byteLength > MAX_RESPONSE_BYTES) {
+    return [
+      413,
+      "application/json",
+      JSON.stringify({
+        ok: false,
+        code: "RESPONSE_TOO_LARGE",
+        error: `Response exceeds the ${MAX_RESPONSE_BYTES}-byte JSON limit`,
+      }),
+    ];
+  }
+  return [status, "application/json", serialized];
+}
+
+function debug(message: string): void {
+  try {
+    Zotero.debug?.(message);
+  } catch (_err) {
+    // Diagnostics must not turn a completed write into an apparent failure.
+  }
 }
 
 function requireString(value: unknown, field: string): string {
@@ -68,13 +90,23 @@ function optionalString(value: unknown): string | undefined {
 
 /** Resolve an explicit library_id, defaulting to the user library. */
 function resolveLibraryID(raw: unknown): number {
-  if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) {
-    return raw;
+  if (raw === undefined) {
+    return Zotero.Libraries.userLibraryID;
   }
-  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
-    return Number.parseInt(raw.trim(), 10);
+  const libraryID =
+    typeof raw === "string" && /^\d+$/.test(raw)
+      ? Number(raw)
+      : typeof raw === "number"
+        ? raw
+        : Number.NaN;
+  if (Number.isSafeInteger(libraryID) && libraryID > 0) {
+    return libraryID;
   }
-  return Zotero.Libraries.userLibraryID;
+  throw new WriteError(
+    400,
+    "INVALID_LIBRARY_ID",
+    "library_id must be a positive integer when provided",
+  );
 }
 
 async function resolveItem(libraryID: number, key: string): Promise<Zotero.Item> {
@@ -146,7 +178,14 @@ async function handleAttachFile(body: Record<string, any>): Promise<EndpointResu
   const parentKey = requireString(body.parent_item_key, "parent_item_key");
   const filePath = requireString(body.file_path, "file_path");
   const libraryID = resolveLibraryID(body.library_id);
-  const mode = body.mode === "import" ? "import" : "link";
+  const mode = body.mode === undefined ? "link" : body.mode;
+  if (mode !== "import" && mode !== "link") {
+    throw new WriteError(
+      400,
+      "INVALID_PARAMS",
+      'mode must be either "import" or "link"',
+    );
+  }
   const title = optionalString(body.title);
   const contentType = optionalString(body.content_type);
 
@@ -171,7 +210,7 @@ async function handleAttachFile(body: Record<string, any>): Promise<EndpointResu
       : await Zotero.Attachments.linkFromFile(options);
 
   const linkMode = (attachment as any).attachmentLinkMode as number;
-  Zotero.debug(
+  debug(
     `[${config.addonName}] write attach_file ok: parent=${parentKey} mode=${mode} attachment=${attachment.key}`,
   );
 
@@ -195,7 +234,7 @@ async function handleTrashItem(body: Record<string, any>): Promise<EndpointResul
   const item = await resolveItem(libraryID, key);
 
   await Zotero.Items.trashTx(item.id);
-  Zotero.debug(`[${config.addonName}] write trash_item ok: ${key} (library ${libraryID})`);
+  debug(`[${config.addonName}] write trash_item ok: ${key} (library ${libraryID})`);
 
   return jsonResult(200, {
     ok: true,
@@ -214,7 +253,7 @@ async function handleEraseItem(body: Record<string, any>): Promise<EndpointResul
   const itemID = item.id;
 
   await item.eraseTx();
-  Zotero.debug(`[${config.addonName}] write erase_item ok: ${key} (library ${libraryID})`);
+  debug(`[${config.addonName}] write erase_item ok: ${key} (library ${libraryID})`);
 
   return jsonResult(200, {
     ok: true,
@@ -231,7 +270,16 @@ async function handleEraseItem(body: Record<string, any>): Promise<EndpointResul
  * Exported for unit testing without the connector server.
  */
 export async function dispatchWriteOp(body: Record<string, any>): Promise<EndpointResult> {
-  const op = typeof body.op === "string" ? body.op.trim() : "";
+  const rawOp = typeof body.op === "string" ? body.op : "";
+  if (rawOp.length > 32) {
+    return jsonResult(400, {
+      ok: false,
+      code: "INVALID_OP",
+      error: "Unsupported request op",
+      capabilities: [...CAPABILITIES],
+    });
+  }
+  const op = rawOp.trim();
   try {
     switch (op) {
       case "ping":
@@ -245,8 +293,8 @@ export async function dispatchWriteOp(body: Record<string, any>): Promise<Endpoi
       default:
         return jsonResult(400, {
           ok: false,
-          op: op || undefined,
-          error: `Unknown op: ${op || "(missing)"}`,
+          code: "INVALID_OP",
+          error: "Unsupported request op",
           capabilities: [...CAPABILITIES],
         });
     }
@@ -255,8 +303,12 @@ export async function dispatchWriteOp(body: Record<string, any>): Promise<Endpoi
       return jsonResult(err.status, { ok: false, op, code: err.code, error: err.message });
     }
     const message = err instanceof Error ? err.message : String(err);
-    Zotero.debug(`[${config.addonName}] write op=${op} failed: ${message}`);
-    return jsonResult(500, { ok: false, op, code: "INTERNAL_ERROR", error: message });
+    debug(`[${config.addonName}] write op=${op} failed: ${message}`);
+    return jsonResult(500, {
+      ok: false,
+      code: "INTERNAL_ERROR",
+      error: "Unexpected internal failure while processing the request",
+    });
   }
 }
 
@@ -270,6 +322,9 @@ class ZInspireWriteEndpoint {
     data: any;
   }): Promise<EndpointResult> {
     const expectedToken = ensureExternalToken();
+    if (!expectedToken) {
+      return jsonResult(503, { ok: false, error: "TOKEN_UNAVAILABLE" });
+    }
     const headerMap = req?.headers ?? {};
     const providedToken =
       headerMap["x-zinspire-token"] ??
@@ -290,17 +345,19 @@ export function registerZInspireWriteEndpoint(): void {
   }
   const endpoints = (Zotero.Server as any)?.Endpoints;
   if (!endpoints) {
-    Zotero.debug?.(
+    debug(
       `[${config.addonName}] Zotero.Server.Endpoints not available; cannot register ${ENDPOINT_PATH}`,
     );
     return;
   }
-  if (endpoints[ENDPOINT_PATH] && !previousEndpoint) {
-    previousEndpoint = endpoints[ENDPOINT_PATH];
-  }
+  hadPreviousEndpoint = Object.prototype.hasOwnProperty.call(
+    endpoints,
+    ENDPOINT_PATH,
+  );
+  previousEndpoint = endpoints[ENDPOINT_PATH];
   endpoints[ENDPOINT_PATH] = ZInspireWriteEndpoint as any;
   registered = true;
-  Zotero.debug?.(
+  debug(
     `[${config.addonName}] Registered connector endpoint POST ${ENDPOINT_PATH}`,
   );
 }
@@ -311,14 +368,19 @@ export function unregisterZInspireWriteEndpoint(): void {
   }
   const endpoints = (Zotero.Server as any)?.Endpoints;
   if (!endpoints) {
+    previousEndpoint = undefined;
+    hadPreviousEndpoint = false;
     registered = false;
     return;
   }
-  if (previousEndpoint) {
-    endpoints[ENDPOINT_PATH] = previousEndpoint;
-  } else {
-    delete endpoints[ENDPOINT_PATH];
+  if (endpoints[ENDPOINT_PATH] === ZInspireWriteEndpoint) {
+    if (hadPreviousEndpoint) {
+      endpoints[ENDPOINT_PATH] = previousEndpoint;
+    } else {
+      delete endpoints[ENDPOINT_PATH];
+    }
   }
-  previousEndpoint = null;
+  previousEndpoint = undefined;
+  hadPreviousEndpoint = false;
   registered = false;
 }

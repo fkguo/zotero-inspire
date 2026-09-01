@@ -29,7 +29,12 @@ import {
 } from "./modules/inspire/enrichConfig";
 import { getPref, setPref } from "./utils/prefs";
 import { registerPrefsScripts } from "./modules/prefScript";
-import { getExternalToken, ensureExternalToken } from "./utils/externalToken";
+import {
+  getExternalToken,
+  ensureExternalToken,
+  getExternalReadToken,
+  ensureExternalReadToken,
+} from "./utils/externalToken";
 import {
   registerZInspirePickSaveTargetEndpoint,
   unregisterZInspirePickSaveTargetEndpoint,
@@ -38,6 +43,10 @@ import {
   registerZInspireWriteEndpoint,
   unregisterZInspireWriteEndpoint,
 } from "./modules/connectorWriteApi";
+import {
+  registerZInspireBibtexEndpoint,
+  unregisterZInspireBibtexEndpoint,
+} from "./modules/connectorInspireBibtexApi";
 
 // Track background timers for cleanup on shutdown (PERF-FIX-1)
 let purgeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -79,8 +88,10 @@ async function onStartup() {
 
   // External tool integration: token + connector endpoints
   ensureExternalToken();
+  ensureExternalReadToken();
   registerZInspirePickSaveTargetEndpoint();
   registerZInspireWriteEndpoint();
+  registerZInspireBibtexEndpoint();
 
   // Purge expired local cache entries in background after startup (PERF-FIX-1: tracked timer)
   purgeTimer = setTimeout(() => {
@@ -115,6 +126,7 @@ function exposeConsoleCommands(): void {
       MemoryMonitor.getInstance().start(interval);
     instance.stopMemoryMonitor = () => MemoryMonitor.getInstance().stop();
     instance.getExternalToken = () => getExternalToken();
+    instance.getExternalReadToken = () => getExternalReadToken();
   }
 }
 
@@ -226,6 +238,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  unregisterZInspireBibtexEndpoint();
   unregisterZInspirePickSaveTargetEndpoint();
   unregisterZInspireWriteEndpoint();
 

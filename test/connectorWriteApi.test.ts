@@ -6,8 +6,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const tokenMocks = vi.hoisted(() => ({
+  ensureExternalToken: vi.fn(),
+}));
+
 vi.mock("../src/utils/externalToken", () => ({
-  ensureExternalToken: () => "SECRET-TOKEN",
+  ensureExternalToken: tokenMocks.ensureExternalToken,
 }));
 
 import {
@@ -49,6 +53,8 @@ let getByLibraryAndKeyAsync: ReturnType<typeof vi.fn>;
 let pathToFile: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  tokenMocks.ensureExternalToken.mockReset();
+  tokenMocks.ensureExternalToken.mockReturnValue("SECRET-TOKEN");
   linkFromFile = vi.fn(async () => ({ id: 99, key: "ATTACH99", attachmentLinkMode: 2 }));
   importFromFile = vi.fn(async () => ({ id: 100, key: "ATTACH100", attachmentLinkMode: 0 }));
   trashTx = vi.fn(async () => undefined);
@@ -91,13 +97,42 @@ describe("dispatchWriteOp: unknown / missing op", () => {
     const { status, body } = parse(await dispatchWriteOp({ op: "frobnicate" }));
     expect(status).toBe(400);
     expect(body.ok).toBe(false);
-    expect(body.error).toContain("Unknown op");
+    expect(body).toMatchObject({
+      code: "INVALID_OP",
+      error: "Unsupported request op",
+    });
+    expect(JSON.stringify(body)).not.toContain("frobnicate");
   });
 
   it("rejects missing op with 400", async () => {
     const { status, body } = parse(await dispatchWriteOp({}));
     expect(status).toBe(400);
     expect(body.ok).toBe(false);
+  });
+
+  it("does not reflect an oversized unknown op", async () => {
+    const unknownOp = "X".repeat(2 * 1024 * 1024);
+    const result = await dispatchWriteOp({ op: unknownOp });
+    const { status, body } = parse(result);
+    expect(status).toBe(400);
+    expect(body.code).toBe("INVALID_OP");
+    expect(result[2].length).toBeLessThan(1024);
+    expect(result[2]).not.toContain(unknownOp);
+  });
+
+  it("does not expose unexpected internal error messages", async () => {
+    getByLibraryAndKeyAsync.mockRejectedValueOnce(
+      new Error("private database detail"),
+    );
+    const { status, body } = parse(
+      await dispatchWriteOp({ op: "trash_item", item_key: "PARENT01" }),
+    );
+    expect(status).toBe(500);
+    expect(body).toMatchObject({
+      code: "INTERNAL_ERROR",
+      error: "Unexpected internal failure while processing the request",
+    });
+    expect(JSON.stringify(body)).not.toContain("private database detail");
   });
 });
 
@@ -136,6 +171,37 @@ describe("dispatchWriteOp: attach_file", () => {
     expect(body.link_mode_label).toBe("imported_file");
     expect(importFromFile).toHaveBeenCalledTimes(1);
     expect(linkFromFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid explicit mode without attaching the file", async () => {
+    const { status, body } = parse(
+      await dispatchWriteOp({
+        op: "attach_file",
+        parent_item_key: "PARENT01",
+        file_path: "/abs/paper.pdf",
+        mode: "improt",
+      }),
+    );
+    expect(status).toBe(400);
+    expect(body.code).toBe("INVALID_PARAMS");
+    expect(linkFromFile).not.toHaveBeenCalled();
+    expect(importFromFile).not.toHaveBeenCalled();
+  });
+
+  it("does not report a completed attachment as failed when logging throws", async () => {
+    (Zotero.debug as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("logger unavailable");
+    });
+    const { status, body } = parse(
+      await dispatchWriteOp({
+        op: "attach_file",
+        parent_item_key: "PARENT01",
+        file_path: "/abs/paper.pdf",
+      }),
+    );
+    expect(status).toBe(200);
+    expect(body.attachment_key).toBe("ATTACH99");
+    expect(linkFromFile).toHaveBeenCalledOnce();
   });
 
   it("passes through optional title and content_type", async () => {
@@ -209,6 +275,21 @@ describe("dispatchWriteOp: attach_file", () => {
     expect(body.code).toBe("FILE_NOT_FOUND");
   });
 
+  it("caps an error response that would otherwise reflect an oversized path", async () => {
+    pathToFile.mockReturnValueOnce(makeFile({ exists: false }));
+    const oversizedPath = `/${"x".repeat(2 * 1024 * 1024)}`;
+    const result = await dispatchWriteOp({
+      op: "attach_file",
+      parent_item_key: "PARENT01",
+      file_path: oversizedPath,
+    });
+    const { status, body } = parse(result);
+    expect(status).toBe(413);
+    expect(body.code).toBe("RESPONSE_TOO_LARGE");
+    expect(result[2].length).toBeLessThan(1024);
+    expect(linkFromFile).not.toHaveBeenCalled();
+  });
+
   it("400 when path is invalid / relative", async () => {
     pathToFile.mockImplementationOnce(() => {
       throw new Error("not absolute");
@@ -275,6 +356,32 @@ describe("library_id resolution", () => {
     await dispatchWriteOp({ op: "trash_item", item_key: "PARENT01", library_id: 7 });
     expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(7, "PARENT01");
   });
+
+  it.each([
+    null,
+    0,
+    -1,
+    1.5,
+    "0",
+    " 7 ",
+    "invalid",
+    {},
+    Number.MAX_SAFE_INTEGER + 1,
+  ])(
+    "rejects an invalid explicit library_id (%j) without changing an item",
+    async (libraryID) => {
+      const { status, body } = parse(
+        await dispatchWriteOp({
+          op: "erase_item",
+          item_key: "PARENT01",
+          library_id: libraryID,
+        }),
+      );
+      expect(status).toBe(400);
+      expect(body.code).toBe("INVALID_LIBRARY_ID");
+      expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("endpoint token auth (init)", () => {
@@ -283,6 +390,16 @@ describe("endpoint token auth (init)", () => {
     const Endpoint = (Zotero as any).Server.Endpoints["/connector/zinspireWrite"];
     return new Endpoint();
   }
+
+  it("fails closed when a secure token cannot be initialized", async () => {
+    tokenMocks.ensureExternalToken.mockReturnValue(null);
+    const ep = getEndpoint();
+    const { status, body } = parse(
+      await ep.init({ headers: {}, data: { op: "ping" } }),
+    );
+    expect(status).toBe(503);
+    expect(body.error).toBe("TOKEN_UNAVAILABLE");
+  });
 
   it("rejects requests without the token (403)", async () => {
     const ep = getEndpoint();
@@ -309,5 +426,33 @@ describe("endpoint token auth (init)", () => {
     );
     expect(status).toBe(200);
     expect(body.ok).toBe(true);
+  });
+});
+
+describe("write endpoint registration ownership", () => {
+  const path = "/connector/zinspireWrite";
+
+  it("restores an existing endpoint, including a falsey owner", () => {
+    (Zotero as any).Server.Endpoints[path] = null;
+    registerZInspireWriteEndpoint();
+    expect((Zotero as any).Server.Endpoints[path]).not.toBeNull();
+
+    unregisterZInspireWriteEndpoint();
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        (Zotero as any).Server.Endpoints,
+        path,
+      ),
+    ).toBe(true);
+    expect((Zotero as any).Server.Endpoints[path]).toBeNull();
+  });
+
+  it("does not clobber an endpoint installed by a later owner", () => {
+    registerZInspireWriteEndpoint();
+    const laterOwner = class LaterOwner {};
+    (Zotero as any).Server.Endpoints[path] = laterOwner;
+
+    unregisterZInspireWriteEndpoint();
+    expect((Zotero as any).Server.Endpoints[path]).toBe(laterOwner);
   });
 });

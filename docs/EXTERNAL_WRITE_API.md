@@ -26,9 +26,13 @@ x-zinspire-token: <token>
 
 - **Method:** `POST` only (JSON body).
 - **Auth:** every request must carry the `x-zinspire-token` header matching the
-  pref `extensions.zotero.inspiremeta.external_token`. The token is generated and
-  persisted automatically the first time the plugin runs. A missing/incorrect
-  token returns `403 {"ok":false,"error":"FORBIDDEN"}`.
+  pref `extensions.zotero.inspiremeta.external_token`. The token is generated
+  with a Web Crypto CSPRNG and persisted automatically the first time the plugin
+  runs. Legacy tokens that do not have the secure 43-character base64url format
+  are rotated before they can authorize a request. A missing/incorrect token
+  returns `403 {"ok":false,"error":"FORBIDDEN"}`. If no CSPRNG is available and
+  no compliant token already exists, the endpoint fails closed with
+  `503 {"ok":false,"error":"TOKEN_UNAVAILABLE"}`.
 - **Web-content protection:** `allowRequestsFromUnsafeWebContent` is intentionally
   not set, so Zotero's server layer keeps blocking requests that look like they
   come from web content (a `Mozilla/...` user agent or an `Origin` header). Native
@@ -56,7 +60,7 @@ Attach a local file to an existing regular item.
 |-------|----------|-------|
 | `parent_item_key` | yes | key of the regular (top-level) item to attach to |
 | `file_path` | yes | absolute path to an existing regular file |
-| `mode` | no | `"import"` or `"link"`. Treated as `"link"` unless exactly `"import"`. `import` copies the file into Zotero storage (`importFromFile`, source untouched); `link` references it in place (`linkFromFile`). |
+| `mode` | no | `"import"` or `"link"`; defaults to `"link"` when omitted, while any other explicit value is rejected. `import` copies the file into Zotero storage (`importFromFile`, source untouched); `link` references it in place (`linkFromFile`). |
 | `content_type` | no | MIME type override; otherwise sniffed |
 | `title` | no | attachment title override |
 | `library_id` | no | defaults to the user library |
@@ -87,14 +91,20 @@ Response: `{ "ok": true, "op": "erase_item", "library_id": 1, "item_key": "ABCD1
 
 ## Errors
 
-Failures return a non-2xx status with `{"ok": false, "op": "...", "code": "...", "error": "..."}`:
+Failures return a non-2xx status with `{"ok": false, "code": "...", "error": "..."}`.
+Recognized operations may also be named in `op`; unsupported operation text and
+unexpected internal exception messages are never reflected to the client. JSON
+responses are capped at 1 MiB.
 
 | status | `code` | meaning |
 |--------|--------|---------|
 | 403 | — | bad/missing `x-zinspire-token` |
+| 503 | — | no secure authentication token is available |
 | 404 | — | endpoint not registered (plugin < 3.0.3 / disabled) |
-| 400 | `INVALID_PARAMS` / `INVALID_PATH` / `INVALID_PARENT` / `NOT_A_FILE` | bad request |
+| 400 | `INVALID_OP` | missing or unsupported operation |
+| 400 | `INVALID_PARAMS` / `INVALID_LIBRARY_ID` / `INVALID_PATH` / `INVALID_PARENT` / `NOT_A_FILE` | bad request |
 | 404 | `ITEM_NOT_FOUND` / `FILE_NOT_FOUND` | target item or file does not exist |
+| 413 | `RESPONSE_TOO_LARGE` | response would exceed the 1 MiB JSON limit |
 | 500 | `INTERNAL_ERROR` | unexpected failure |
 
 ## Consumers / dependency note

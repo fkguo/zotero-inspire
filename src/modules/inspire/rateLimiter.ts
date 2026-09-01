@@ -30,6 +30,12 @@ export interface RateLimiterStatus {
   timeUntilNextToken: number;
 }
 
+export interface InspireFetchOptions extends RequestInit {
+  signal?: AbortSignal;
+  /** Return a 429 response immediately instead of applying the shared retry policy. */
+  retryOnRateLimit?: boolean;
+}
+
 type StatusChangeCallback = (status: RateLimiterStatus) => void;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,24 +113,22 @@ export class InspireRateLimiter {
    * ZERO overhead - just passes through to native fetch.
    * Only adds logic on 429 responses.
    */
-  async fetch(
-    url: string,
-    options?: RequestInit & { signal?: AbortSignal },
-  ): Promise<Response> {
+  async fetch(url: string, options?: InspireFetchOptions): Promise<Response> {
     // Direct pass-through to native fetch with retry on 429
     return this.executeWithRetry(url, options, 0);
   }
 
   private async executeWithRetry(
     url: string,
-    options: RequestInit | undefined,
+    options: InspireFetchOptions | undefined,
     retryCount: number,
   ): Promise<Response> {
     try {
-      const response = await fetch(url, options);
+      const { retryOnRateLimit = true, ...fetchOptions } = options ?? {};
+      const response = await fetch(url, fetchOptions);
 
       // Only handle 429 rate limit responses
-      if (response.status === 429) {
+      if (response.status === 429 && retryOnRateLimit) {
         if (retryCount >= MAX_RETRY_ATTEMPTS) {
           Zotero.debug(
             `[${config.addonName}] Rate limit: Max retries exceeded for ${url}`,
@@ -186,7 +190,7 @@ export class InspireRateLimiter {
  */
 export function inspireFetch(
   url: string,
-  options?: RequestInit & { signal?: AbortSignal },
+  options?: InspireFetchOptions,
 ): Promise<Response> {
   return InspireRateLimiter.getInstance().fetch(url, options);
 }
