@@ -330,9 +330,8 @@ Since **3.0.3**, zotero-inspire registers an authenticated
 Zotero's read-only Local API cannot: attach a local file to an item, and
 trash/erase items. This is what the
 **[nullius](https://github.com/fkguo/nullius) `zotero-mcp` / `hep-mcp`**
-integration (nullius is the renamed successor of autoresearch) uses for PDF
-attachment and deletion. Full contract (auth, operations, errors, dependency
-notes):
+integration uses for PDF attachment and deletion. Full contract (auth,
+operations, errors, dependency notes):
 [`docs/EXTERNAL_WRITE_API.md`](docs/EXTERNAL_WRITE_API.md).
 
 ---
