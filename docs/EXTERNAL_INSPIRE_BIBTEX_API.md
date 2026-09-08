@@ -1,15 +1,19 @@
 # External INSPIRE BibTeX API (`/connector/zinspireBibtex`)
 
 zotero-inspire exposes a versioned, read-only HTTP endpoint on Zotero's built-in
-Connector server for trusted local clients such as `zotero-cite`. Given one or
-more citation keys (normally selected through Better BibTeX CAYW), the endpoint
-locates the corresponding Zotero items across the personal and group libraries,
-tries to retrieve BibTeX from INSPIRE-HEP, and rewrites each BibTeX entry key to
-the requested citation key. The endpoint trusts only the INSPIRE recid stored by
-zotero-inspire as `archive = "INSPIRE"` plus a numeric `archiveLocation`; it
-does not use DOI, arXiv, URL, or Extra to discover an INSPIRE record. A narrowly
-gated Better BibTeX export of the same matched item is available only when that
-canonical recid is absent or its direct INSPIRE request returns `404`. Provider
+Connector server for trusted local clients such as
+[`fkguo/zotero-cite`](https://github.com/fkguo/zotero-cite), a fork of the
+`zotero-cite` VS Code extension with INSPIRE-HEP support (the upstream
+`zotero-cite` has no zotero-inspire settings and does not call this endpoint).
+Given one or more citation keys (normally selected through Better BibTeX CAYW),
+the endpoint locates the corresponding Zotero items across the personal and
+group libraries, tries to retrieve BibTeX from INSPIRE-HEP, and rewrites each
+BibTeX entry key to the requested citation key. The endpoint trusts only the
+INSPIRE recid stored by zotero-inspire as `archive = "INSPIRE"` plus a numeric
+`archiveLocation`; it does not use DOI, arXiv, URL, or Extra to discover an
+INSPIRE record. A narrowly gated Better BibTeX export of the same matched item
+is available only when that canonical recid is absent or its direct INSPIRE
+request returns `404`. Provider
 and field provenance are reported for every successful result.
 
 The API is supported on Zotero 7 through 10. Clients should probe `op: "ping"`
@@ -555,7 +559,9 @@ the endpoint cannot mutate Zotero data.
 
 ## Client integration guidance
 
-A `zotero-cite` client can use the API as follows:
+A `zotero-cite`-style client (the reference implementation is
+[`fkguo/zotero-cite`](https://github.com/fkguo/zotero-cite)) can use the API as
+follows:
 
 1. Obtain one or more citation keys from Better BibTeX CAYW.
 2. Probe `ping`, require `api_version: "1"`, and honor the advertised limits.
