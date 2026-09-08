@@ -311,17 +311,13 @@ zotero-inspire registers an authenticated
 [`fkguo/zotero-cite`](https://github.com/fkguo/zotero-cite), a fork of the
 `zotero-cite` VS Code extension with INSPIRE-HEP support. Use that fork: the
 upstream `zotero-cite` has no zotero-inspire settings and does not call this
-endpoint. The endpoint resolves Better BibTeX/CAYW citation keys across
-personal and group libraries and rewrites each entry key to the requested
-citation key. The only INSPIRE lookup key is the recid stored by zotero-inspire
-as the canonical pair `archive = "INSPIRE"` and numeric `archiveLocation`. With
-that pair, the endpoint requests INSPIRE only by recid. Without a canonical
-recid, or when that recid returns an explicit INSPIRE `404`, it exports the same
-uniquely matched item through Better BibTeX as a narrow fallback. DOI, arXiv,
-URL, and Extra are not used to discover an INSPIRE record; other INSPIRE
-failures remain errors. Request handling does not modify Zotero items,
-libraries, or preferences and uses a dedicated read token, separate from the
-write API. Full versioned contract: [`docs/EXTERNAL_INSPIRE_BIBTEX_API.md`](docs/EXTERNAL_INSPIRE_BIBTEX_API.md).
+endpoint. Given Better BibTeX/CAYW citation keys, the endpoint finds the
+matching items across personal and group libraries, fetches their BibTeX from
+INSPIRE using the record ID stored by zotero-inspire, and rewrites each entry
+key to the requested citation key. Items without an INSPIRE record fall back to
+a Better BibTeX export. The endpoint is read-only and uses its own token,
+separate from the write API. Full versioned contract:
+[`docs/EXTERNAL_INSPIRE_BIBTEX_API.md`](docs/EXTERNAL_INSPIRE_BIBTEX_API.md).
 
 ### Zotero writes
 
