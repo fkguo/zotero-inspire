@@ -6,6 +6,8 @@
 import { describe, it, expect } from "vitest";
 import {
   isArxivDoi,
+  isUnpublishedPreprint,
+  extractArxivIdFromItem,
   ARXIV_DOI_PREFIX,
 } from "../src/modules/inspire/preprintWatchService";
 
@@ -366,5 +368,81 @@ describe("extractArxivIdFromItem logic", () => {
       ),
     ).toBe(null);
     expect(extractArxivIdLogic("", "", "", "")).toBe(null);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Real isUnpublishedPreprint / extractArxivIdFromItem on fake items
+// Issue #7: Preprint items kept as Preprint must be monitored too.
+// Fields that do not exist for a type read back as "" (Zotero getField).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function fakeItem(itemType: string, fields: Record<string, string> = {}): any {
+  return {
+    id: 1,
+    itemType,
+    deleted: false,
+    getField: (field: string) => fields[field] ?? "",
+  };
+}
+
+describe("isUnpublishedPreprint with Preprint items", () => {
+  it("treats a preprint with an arXiv ID in Extra as unpublished", () => {
+    const item = fakeItem("preprint", { extra: "arXiv:2301.12345 [hep-ph]" });
+    expect(isUnpublishedPreprint(item)).toBe(true);
+    expect(extractArxivIdFromItem(item)).toBe("2301.12345");
+  });
+
+  it("finds the arXiv ID from URL, Archive ID, or arXiv DOI", () => {
+    expect(
+      isUnpublishedPreprint(
+        fakeItem("preprint", { url: "https://arxiv.org/abs/2302.00001" }),
+      ),
+    ).toBe(true);
+    const viaArchiveId = fakeItem("preprint", {
+      archiveID: "arXiv:2303.00002",
+    });
+    expect(isUnpublishedPreprint(viaArchiveId)).toBe(true);
+    expect(extractArxivIdFromItem(viaArchiveId)).toBe("2303.00002");
+    expect(
+      isUnpublishedPreprint(
+        fakeItem("preprint", { DOI: "10.48550/arXiv.2304.00003" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("handles old-style identifiers in Archive ID", () => {
+    const item = fakeItem("preprint", { archiveID: "arXiv:hep-ph/0001234" });
+    expect(extractArxivIdFromItem(item)).toBe("hep-ph/0001234");
+    expect(isUnpublishedPreprint(item)).toBe(true);
+  });
+
+  it("ignores a preprint without any arXiv identifier", () => {
+    expect(isUnpublishedPreprint(fakeItem("preprint", { title: "x" }))).toBe(
+      false,
+    );
+  });
+
+  it("keeps the journalArticle rules and skips other types", () => {
+    expect(
+      isUnpublishedPreprint(
+        fakeItem("journalArticle", {
+          journalAbbreviation: "Phys. Rev. D",
+          DOI: "10.1103/PhysRevD.100.012345",
+          volume: "100",
+          pages: "012345",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isUnpublishedPreprint(
+        fakeItem("journalArticle", { extra: "arXiv:2301.12345 [hep-ph]" }),
+      ),
+    ).toBe(true);
+    expect(
+      isUnpublishedPreprint(
+        fakeItem("report", { extra: "arXiv:2301.12345 [hep-ph]" }),
+      ),
+    ).toBe(false);
   });
 });

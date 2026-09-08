@@ -21,6 +21,11 @@
     type="bool"
   />
   <preference
+    id="pref-keep_preprint_type"
+    name="__prefsPrefix__.keep_preprint_type"
+    type="bool"
+  />
+  <preference
     id="pref-latex_render_mode"
     name="__prefsPrefix__.latex_render_mode"
     type="string"
@@ -272,13 +277,25 @@
       <radio data-l10n-id="meta-no" value="no" />
     </radiogroup>
     <!-- LaTeX sub-option: only meaningful when "With abstracts" is selected -->
-    <vbox id="zotero-prefpane-__addonRef__-latex_options" style="margin-top: 10px; margin-left: 20px; padding: 8px; background: var(--material-sidepane, rgba(0,0,0,0.03)); border-radius: 4px;">
+    <vbox
+      id="zotero-prefpane-__addonRef__-latex_options"
+      style="
+        margin-top: 10px;
+        margin-left: 20px;
+        padding: 8px;
+        background: var(--material-sidepane, rgba(0, 0, 0, 0.03));
+        border-radius: 4px;
+      "
+    >
       <hbox align="center">
-        <label data-l10n-id="pref-latex-label" style="font-weight: 500; margin-right: 8px;" />
+        <label
+          data-l10n-id="pref-latex-label"
+          style="font-weight: 500; margin-right: 8px"
+        />
         <menulist
           id="zotero-prefpane-__addonRef__-latex_render_mode"
           preference="extensions.zotero.inspiremeta.latex_render_mode"
-          style="min-width: 150px;"
+          style="min-width: 150px"
         >
           <menupopup>
             <menuitem value="unicode" label="Unicode (default)" />
@@ -286,7 +303,11 @@
           </menupopup>
         </menulist>
       </hbox>
-      <html:p class="zinspire-pref-desc" style="margin-left: 0;" data-l10n-id="pref-latex-mode-description"></html:p>
+      <html:p
+        class="zinspire-pref-desc"
+        style="margin-left: 0"
+        data-l10n-id="pref-latex-mode-description"
+      ></html:p>
     </vbox>
   </vbox>
 
@@ -345,6 +366,17 @@
       <html:p
         class="zinspire-pref-desc"
         data-l10n-id="pref-arxiv-in-journal-abbrev-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-keep_preprint_type"
+        preference="extensions.zotero.inspiremeta.keep_preprint_type"
+        data-l10n-id="pref-keep-preprint-type"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-keep-preprint-type-desc"
       ></html:p>
     </vbox>
   </vbox>
@@ -947,25 +979,31 @@
       ></html:p>
       <!-- Custom funder list: only meaningful when "Custom list" is selected -->
       <vbox
-        style="margin-top: 8px; margin-left: 20px; padding: 8px; background: var(--material-sidepane, rgba(0,0,0,0.03)); border-radius: 4px;"
+        style="
+          margin-top: 8px;
+          margin-left: 20px;
+          padding: 8px;
+          background: var(--material-sidepane, rgba(0, 0, 0, 0.03));
+          border-radius: 4px;
+        "
       >
         <hbox align="center">
           <label
             data-l10n-id="pref-funding-custom-label"
-            style="font-weight: 500; margin-right: 8px;"
+            style="font-weight: 500; margin-right: 8px"
           />
           <html:input
             type="text"
             id="zotero-prefpane-__addonRef__-funding_filter_custom"
             preference="extensions.zotero.inspiremeta.funding_filter_custom"
             class="zinspire-pref-input"
-            style="flex: 1;"
+            style="flex: 1"
             data-l10n-id="pref-funding-custom-placeholder"
           />
         </hbox>
         <html:p
           class="zinspire-pref-desc"
-          style="margin-left: 0;"
+          style="margin-left: 0"
           data-l10n-id="pref-funding-custom-desc"
         ></html:p>
       </vbox>

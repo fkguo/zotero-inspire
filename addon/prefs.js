@@ -6,6 +6,7 @@ pref("__prefsPrefix__.tag_enable", false);
 pref("__prefsPrefix__.extra_order", "citations_first");
 pref("__prefsPrefix__.cites_column_exclude_self", false); // Cites column uses w/o-self citation count
 pref("__prefsPrefix__.arxiv_in_journal_abbrev", false); // Legacy: write arXiv ID to Journal Abbreviation
+pref("__prefsPrefix__.keep_preprint_type", false); // Keep Preprint/Report item type until INSPIRE reports a journal publication (ignored while arxiv_in_journal_abbrev is on)
 pref("__prefsPrefix__.arxiv_tag_enable", false);
 pref("__prefsPrefix__.max_authors", 3);
 pref("__prefsPrefix__.reader_auto_reopen", false);

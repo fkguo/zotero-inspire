@@ -42,6 +42,10 @@ pref-arxiv-in-journal-abbrev =
     .label = Legacy: write arXiv ID into Journal Abbr.
 pref-arxiv-in-journal-abbrev-desc = For unpublished papers, store `arXiv:...` in the Journal Abbreviation field.
 
+pref-keep-preprint-type =
+    .label = Keep Preprint item type for unpublished papers
+pref-keep-preprint-type-desc = Preprint (and Report) items are not converted to Journal Article until INSPIRE reports a journal publication. Preprint Watch also monitors Preprint items. Not available while the legacy option above is on, because the Journal Abbr. field only exists for Journal Article.
+
 pref-arxiv-tag1 =
     .label = Add arXiv primary category as tag (e.g., hep-ph, nucl-th)
 

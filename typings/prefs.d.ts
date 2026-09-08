@@ -14,6 +14,7 @@ declare namespace _ZoteroTypes {
       "extra_order": string;
       "cites_column_exclude_self": boolean;
       "arxiv_in_journal_abbrev": boolean;
+      "keep_preprint_type": boolean;
       "arxiv_tag_enable": boolean;
       "max_authors": number;
       "reader_auto_reopen": boolean;

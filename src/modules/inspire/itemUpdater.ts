@@ -36,6 +36,11 @@ import {
 } from "./referencesService";
 import { inspireFetch } from "./rateLimiter";
 import {
+  resolveInspireItemType,
+  policyFromPrefs,
+  type ItemTypePolicy,
+} from "./itemTypePolicy";
+import {
   isSmartUpdateEnabled,
   shouldShowPreview,
   compareItemWithInspire,
@@ -875,15 +880,7 @@ export class ZInspire {
         if (item.hasTag(getPref("tag_norecid") as string)) {
           item.removeTag(getPref("tag_norecid") as string);
         }
-        if (item.itemType === "report" || item.itemType === "preprint") {
-          item.setType(Zotero.ItemTypes.getID("journalArticle") as number);
-        }
-        if (
-          item.itemType !== "book" &&
-          (metaInspire as jsobject).document_type == "book"
-        ) {
-          item.setType(Zotero.ItemTypes.getID("book") as number);
-        }
+        applyInspireItemType(item, metaInspire as jsobject);
 
         // Smart update mode: compare and filter changes
         if (isSmartUpdateEnabled()) {
@@ -989,15 +986,7 @@ export class ZInspire {
           item.removeTag(getPref("tag_norecid") as string);
           item.saveTx();
         }
-        if (item.itemType === "report" || item.itemType === "preprint") {
-          item.setType(Zotero.ItemTypes.getID("journalArticle") as number);
-        }
-        if (
-          item.itemType !== "book" &&
-          (metaInspire as jsobject).document_type == "book"
-        ) {
-          item.setType(Zotero.ItemTypes.getID("book") as number);
-        }
+        applyInspireItemType(item, metaInspire as jsobject);
         await setInspireMeta(item, metaInspire as jsobject, operation);
         await saveItemWithPendingInspireNote(item);
         this.counter++;
@@ -2229,6 +2218,57 @@ export class ZInspire {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Item Type Conversion
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Effective item-type policy from preferences.
+ * See `policyFromPrefs` for why the legacy Journal Abbr. option wins.
+ */
+export function getItemTypePolicy(): ItemTypePolicy {
+  return policyFromPrefs(
+    getPref("keep_preprint_type"),
+    getPref("arxiv_in_journal_abbrev"),
+  );
+}
+
+/**
+ * Convert the item type according to the INSPIRE record and the user's policy
+ * (preprint/report -> journalArticle once published, anything -> book for
+ * book records). Leaves the type alone when nothing needs to change.
+ */
+function applyInspireItemType(item: Zotero.Item, metaInspire: jsobject): void {
+  const targetType = resolveInspireItemType(
+    item.itemType,
+    metaInspire,
+    getItemTypePolicy(),
+  );
+  if (targetType) {
+    item.setType(Zotero.ItemTypes.getID(targetType) as number);
+  }
+}
+
+/**
+ * True when `field` exists for the item's current type.
+ * Zotero's setField throws for a non-empty value on a field the type does not
+ * have, and kept preprint/report items lack several journal/book fields.
+ */
+function canSetField(item: Zotero.Item, field: string): boolean {
+  try {
+    const fieldID = Zotero.ItemFields.getID(field);
+    if (!fieldID) return false;
+    const typeFieldID =
+      Zotero.ItemFields.getFieldIDFromTypeAndBase(item.itemTypeID, fieldID) ||
+      fieldID;
+    return Boolean(
+      Zotero.ItemFields.isValidForType(typeFieldID, item.itemTypeID),
+    );
+  } catch {
+    return true;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Item Metadata Setting
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2295,7 +2335,11 @@ export async function setInspireMeta(
         }
       }
 
-      if (metaInspire.isbns && !item.getField("ISBN")) {
+      if (
+        metaInspire.isbns &&
+        canSetField(item, "ISBN") &&
+        !item.getField("ISBN")
+      ) {
         item.setField("ISBN", metaInspire.isbns);
       }
       if (
@@ -2535,7 +2579,11 @@ export async function setInspireMetaSelective(
       }
 
       // ISBN (only if empty)
-      if (metaInspire.isbns && !item.getField("ISBN")) {
+      if (
+        metaInspire.isbns &&
+        canSetField(item, "ISBN") &&
+        !item.getField("ISBN")
+      ) {
         item.setField("ISBN", metaInspire.isbns);
       }
 

@@ -730,6 +730,26 @@ function updatePreprintWatchControls(doc: Document, syncFromPref = true) {
 }
 
 /**
+ * "Keep Preprint item type" only takes effect while the legacy
+ * "arXiv ID into Journal Abbr." option is off (the Journal Abbr. field exists
+ * only for Journal Article), so gray it out while the legacy option is on.
+ */
+function updateArxivLegacyControls(doc: Document, syncFromPref = true) {
+  const legacyCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-arxiv_in_journal_abbrev",
+  ) as HTMLInputElement | null;
+  const keepTypeCheckbox = doc.getElementById(
+    "zotero-prefpane-zoteroinspire-keep_preprint_type",
+  ) as HTMLInputElement | null;
+  if (!keepTypeCheckbox) return;
+
+  const legacyOn = syncFromPref
+    ? getPref("arxiv_in_journal_abbrev") === true
+    : (legacyCheckbox?.checked ?? false);
+  keepTypeCheckbox.disabled = legacyOn;
+}
+
+/**
  * This function is just an example of dispatcher for Preference UI events.
  * Any operations should be placed in a function to keep this funcion clear.
  * @param type event type
@@ -750,6 +770,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         updateSmartUpdateControls(doc);
         updatePreprintWatchControls(doc);
         updateCollabTagControls(doc);
+        updateArxivLegacyControls(doc);
         updateLatexOptionsVisibility(doc);
         updateRelatedPapersControls(doc);
         setTimeout(() => updateRelatedPapersControls(doc), 50);
@@ -830,6 +851,13 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
         ) as HTMLInputElement | null;
         collabTagCheckbox?.addEventListener("command", () => {
           updateCollabTagControls(doc, false);
+        });
+        // Legacy arXiv-in-Journal-Abbr. checkbox gates "keep preprint type"
+        const arxivLegacyCheckbox = doc.getElementById(
+          "zotero-prefpane-zoteroinspire-arxiv_in_journal_abbrev",
+        ) as HTMLInputElement | null;
+        arxivLegacyCheckbox?.addEventListener("command", () => {
+          updateArxivLegacyControls(doc, false);
         });
         const batchInput = doc.getElementById(
           "zotero-prefpane-zoteroinspire-local_cache_enrich_batch",

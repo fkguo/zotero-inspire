@@ -113,6 +113,8 @@ export type FluentMessageId =
   | 'pref-funding-mode-desc'
   | 'pref-funding-mode-nsfc'
   | 'pref-help'
+  | 'pref-keep-preprint-type'
+  | 'pref-keep-preprint-type-desc'
   | 'pref-keyboard-shortcuts-action'
   | 'pref-keyboard-shortcuts-desc'
   | 'pref-keyboard-shortcuts-nav'

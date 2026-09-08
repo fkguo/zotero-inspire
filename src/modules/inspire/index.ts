@@ -90,6 +90,14 @@ export {
   saveItemWithPendingInspireNote,
 } from "./itemUpdater";
 export { MemoryMonitor } from "./memoryMonitor";
+export {
+  resolveInspireItemType,
+  policyFromPrefs,
+  hasJournalPublicationInfo,
+  isBookRecord,
+  type ItemTypePolicy,
+  type ItemTypeMeta,
+} from "./itemTypePolicy";
 
 // Re-export CrossRef service
 export { crossrefFetch } from "./crossrefService";

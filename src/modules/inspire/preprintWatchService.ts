@@ -290,21 +290,33 @@ export function isArxivDoi(doi: string | null | undefined): boolean {
   return doi?.startsWith(ARXIV_DOI_PREFIX) ?? false;
 }
 
+/** Item types scanned by Preprint Watch. */
+const PREPRINT_WATCH_ITEM_TYPES: ReadonlySet<string> = new Set([
+  "journalArticle",
+  "preprint",
+]);
+
 /**
  * Check if a Zotero item is an unpublished arXiv preprint or needs metadata update.
  * Uses multiple signals: journalAbbreviation, DOI, Extra field, volume, pages.
  *
- * This plugin stores arXiv papers as journalArticle with:
- * - journalAbbreviation: "arXiv:2301.12345 [hep-ph]"
- * - DOI: may be arXiv DOI "10.48550/arXiv.2301.12345"
- *
- * A paper is considered needing update if ANY of these:
- * 1. journalAbbreviation starts with "arXiv:" (pure preprint)
- * 2. Has non-arXiv DOI but missing volume/pages (incomplete publication info)
- * 3. No journal info but has arXiv in Extra
- * 4. Only has arXiv DOI
+ * Two kinds of items qualify:
+ * - `preprint` items (kept as such by the "keep preprint type" option, or
+ *   created by Zotero's arXiv translator): unpublished by definition, they are
+ *   candidates whenever an arXiv ID can be found on the item.
+ * - `journalArticle` items that this plugin historically used for arXiv papers:
+ *   - journalAbbreviation: "arXiv:2301.12345 [hep-ph]" (legacy option)
+ *   - DOI: may be arXiv DOI "10.48550/arXiv.2301.12345"
+ *   They need an update if ANY of these holds:
+ *   1. journalAbbreviation starts with "arXiv:" (pure preprint)
+ *   2. Has non-arXiv DOI but missing volume/pages (incomplete publication info)
+ *   3. No journal info but has arXiv in Extra
+ *   4. Only has arXiv DOI
  */
 export function isUnpublishedPreprint(item: Zotero.Item): boolean {
+  if (item.itemType === "preprint") {
+    return extractArxivIdFromItem(item) !== null;
+  }
   // Skip non-journal articles
   if (item.itemType !== "journalArticle") return false;
 
@@ -343,7 +355,9 @@ export function isUnpublishedPreprint(item: Zotero.Item): boolean {
 
 /**
  * Extract arXiv ID from a Zotero item.
- * Priority: journalAbbreviation > Extra > URL > DOI
+ * Priority: journalAbbreviation > Extra > URL > Archive ID > DOI
+ * (fields that do not exist for the item type read back as "", so the same
+ * lookup works for journalArticle and preprint items).
  */
 export function extractArxivIdFromItem(item: Zotero.Item): string | null {
   // Try journalAbbreviation first (most reliable for our plugin)
@@ -367,6 +381,13 @@ export function extractArxivIdFromItem(item: Zotero.Item): string | null {
     if (match) return match[1];
   }
 
+  // Try Archive ID (Zotero's arXiv translator stores "arXiv:ID" there for preprints)
+  const archiveID = item.getField("archiveID") as string;
+  if (archiveID) {
+    const match = archiveID.match(ARXIV_ID_EXTRACT_REGEX);
+    if (match) return match[1];
+  }
+
   // Try DOI (arXiv DOI format: 10.48550/arXiv.2301.12345)
   const doi = item.getField("DOI") as string;
   if (doi && isArxivDoi(doi)) {
@@ -386,15 +407,21 @@ export function extractArxivIdFromItem(item: Zotero.Item): string | null {
  * Returns null if not found or deleted.
  */
 async function findItemByArxivId(arxivId: string): Promise<Zotero.Item | null> {
-  // Search in journalAbbreviation (most common case for this plugin)
-  const search = new Zotero.Search({
-    libraryID: Zotero.Libraries.userLibraryID,
-  });
-  search.addCondition("itemType", "is", "journalArticle");
-  search.addCondition("journalAbbreviation", "contains", `arXiv:${arxivId}`);
-  const ids = await search.search();
+  // journalArticle: legacy layout keeps the ID in journalAbbreviation.
+  // preprint: the ID lives in Extra (written by this plugin on every update).
+  const probes: Array<{ itemType: string; field: string }> = [
+    { itemType: "journalArticle", field: "journalAbbreviation" },
+    { itemType: "preprint", field: "extra" },
+  ];
+  for (const probe of probes) {
+    const search = new Zotero.Search({
+      libraryID: Zotero.Libraries.userLibraryID,
+    });
+    search.addCondition("itemType", "is", probe.itemType);
+    search.addCondition(probe.field, "contains", `arXiv:${arxivId}`);
+    const ids = await search.search();
+    if (ids.length === 0) continue;
 
-  if (ids.length > 0) {
     const items = await Zotero.Items.getAsync(ids);
     for (const item of items) {
       if (!item.deleted && extractArxivIdFromItem(item) === arxivId) {
@@ -404,6 +431,24 @@ async function findItemByArxivId(arxivId: string): Promise<Zotero.Item | null> {
   }
 
   return null;
+}
+
+/**
+ * IDs of all items in a library whose type is one of `types`
+ * (one search per type; Zotero ANDs conditions, so "is A" and "is B" cannot
+ * be combined in a single search).
+ */
+async function searchItemIDsByTypes(
+  libraryID: number,
+  types: Iterable<string>,
+): Promise<number[]> {
+  const ids: number[] = [];
+  for (const itemType of types) {
+    const search = new Zotero.Search({ libraryID });
+    search.addCondition("itemType", "is", itemType);
+    ids.push(...(await search.search()));
+  }
+  return ids;
 }
 
 /**
@@ -440,7 +485,7 @@ export async function findUnpublishedPreprints(
     }
     const allItems = collection
       .getChildItems()
-      .filter((item) => item.itemType === "journalArticle");
+      .filter((item) => PREPRINT_WATCH_ITEM_TYPES.has(item.itemType));
     const total = allItems.length;
 
     for (let i = 0; i < total; i += SCAN_BATCH_SIZE) {
@@ -512,9 +557,10 @@ export async function findUnpublishedPreprints(
   }
 
   // Full library scan (first run or forced refresh)
-  const search = new Zotero.Search({ libraryID: targetLibraryID });
-  search.addCondition("itemType", "is", "journalArticle");
-  const itemIDs = await search.search();
+  const itemIDs = await searchItemIDsByTypes(
+    targetLibraryID,
+    PREPRINT_WATCH_ITEM_TYPES,
+  );
 
   for (let i = 0; i < itemIDs.length; i += SCAN_BATCH_SIZE) {
     if (options?.signal?.aborted) break;
