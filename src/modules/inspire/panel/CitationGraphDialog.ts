@@ -23,7 +23,11 @@ import {
   buildFieldsParam,
 } from "../constants";
 import { createAbortControllerWithSignal, ReaderTabHelper } from "../utils";
-import { copyToClipboard, deriveRecidFromItem, findItemByRecid } from "../apiUtils";
+import {
+  copyToClipboard,
+  deriveRecidFromItem,
+  findItemByRecid,
+} from "../apiUtils";
 import { fetchReferencesEntries } from "../referencesService";
 import type {
   CitationGraphEdgeData,
@@ -41,12 +45,22 @@ import {
   fetchInspireTexkey,
 } from "../metadataService";
 import { localCache } from "../localCache";
-import { saveItemWithPendingInspireNote, setInspireMeta } from "../itemUpdater";
+import {
+  getItemTypePolicy,
+  saveItemWithPendingInspireNote,
+  setInspireMeta,
+} from "../itemUpdater";
+import { resolveNewItemType } from "../itemTypePolicy";
 import { HoverPreviewController } from "./HoverPreviewController";
 
 type RecidSnapshot = { recid: string; title?: string; authorLabel?: string };
 type NavSnapshot = { seeds: RecidSnapshot[]; currentRecid: string };
-type TimeZoomDomain = { fullMin: number; fullMax: number; zoomMin: number; zoomMax: number };
+type TimeZoomDomain = {
+  fullMin: number;
+  fullMax: number;
+  zoomMin: number;
+  zoomMax: number;
+};
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const ICON_SVG_NS = "http://www.w3.org/2000/svg";
@@ -559,7 +573,8 @@ export class CitationGraphDialog {
 
     const mostCitedBtn = this.doc.createElement("button");
     mostCitedBtn.type = "button";
-    mostCitedBtn.textContent = getString("references-panel-sort-mostcited") || "Most cited";
+    mostCitedBtn.textContent =
+      getString("references-panel-sort-mostcited") || "Most cited";
     mostCitedBtn.title = mostCitedBtn.textContent;
     mostCitedBtn.addEventListener("click", () => {
       this.setSort("mostcited");
@@ -568,7 +583,8 @@ export class CitationGraphDialog {
 
     const mostRecentBtn = this.doc.createElement("button");
     mostRecentBtn.type = "button";
-    mostRecentBtn.textContent = getString("references-panel-sort-mostrecent") || "Most recent";
+    mostRecentBtn.textContent =
+      getString("references-panel-sort-mostrecent") || "Most recent";
     mostRecentBtn.title = mostRecentBtn.textContent;
     mostRecentBtn.addEventListener("click", () => {
       this.setSort("mostrecent");
@@ -833,7 +849,8 @@ export class CitationGraphDialog {
   private updateReviewsButton(): void {
     if (!this.reviewsBtn) return;
     const label = this.includeReviews
-      ? getString("references-panel-citation-graph-toggle-reviews") || "Incl. reviews"
+      ? getString("references-panel-citation-graph-toggle-reviews") ||
+        "Incl. reviews"
       : getString("references-panel-citation-graph-toggle-reviews-exclude") ||
         "Excl. reviews";
     this.reviewsBtn.textContent = label;
@@ -970,7 +987,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           this.seeds.length > 1
             ? "references-panel-citation-graph-hint-multi"
             : "references-panel-citation-graph-hint",
-        ) || "Click to open · Right-click to expand · Cmd/Ctrl+click to add seed";
+        ) ||
+        "Click to open · Right-click to expand · Cmd/Ctrl+click to add seed";
 
       if (!result) {
         this.statusEl.textContent = hint;
@@ -978,8 +996,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         const connectionsHint = this.showAllConnections
           ? this.connectionsLoading
             ? ` · ${
-                getString("references-panel-citation-graph-connections-loading") ||
-                "Connections: loading…"
+                getString(
+                  "references-panel-citation-graph-connections-loading",
+                ) || "Connections: loading…"
               }`
             : ` · ${
                 getString("references-panel-citation-graph-connections-count", {
@@ -1086,7 +1105,11 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
   private async navigateToSeeds(
     seeds: RecidSnapshot[],
-    options: { pushHistory: boolean; preferredCurrentRecid?: string; forceRefresh?: boolean },
+    options: {
+      pushHistory: boolean;
+      preferredCurrentRecid?: string;
+      forceRefresh?: boolean;
+    },
   ): Promise<void> {
     const nextSeeds = this.normalizeSeeds(seeds);
     if (options.pushHistory) {
@@ -1142,14 +1165,18 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
   private getConnectionsGraphKey(): string {
     const maxPerSide = this.getMaxResultsPerSide();
-    const seedsKey = [...this.seeds].map((s) => s.recid).sort().join(",");
+    const seedsKey = [...this.seeds]
+      .map((s) => s.recid)
+      .sort()
+      .join(",");
     return `${seedsKey}|${this.sort}|${maxPerSide}|rv${this.includeReviews ? 1 : 0}`;
   }
 
   private toggleAllConnections(): void {
     if (!this.graphResult) {
       this.showToast(
-        getString("references-panel-citation-graph-no-graph") || "No graph loaded",
+        getString("references-panel-citation-graph-no-graph") ||
+          "No graph loaded",
       );
       return;
     }
@@ -1167,7 +1194,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
 
     const graphKey = this.getConnectionsGraphKey();
-    if (this.allConnectionsGraphKey === graphKey && this.allConnectionEdges.length) {
+    if (
+      this.allConnectionsGraphKey === graphKey &&
+      this.allConnectionEdges.length
+    ) {
       this.updateHeader(this.graphResult);
       this.renderGraph(this.graphResult);
       return;
@@ -1237,20 +1267,26 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           recid,
           cached.data
             .map((e) => e.recid)
-            .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+            .filter(
+              (v): v is string => typeof v === "string" && v.trim().length > 0,
+            )
             .map((v) => v.trim()),
         );
         return;
       }
 
-      const entries = await fetchReferencesEntries(recid, { signal }).catch(() => []);
+      const entries = await fetchReferencesEntries(recid, { signal }).catch(
+        () => [],
+      );
       if (signal.aborted) return;
 
       refsBySource.set(
         recid,
         entries
           .map((e) => e.recid)
-          .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+          .filter(
+            (v): v is string => typeof v === "string" && v.trim().length > 0,
+          )
           .map((v) => v.trim()),
       );
       void localCache.set("refs", recid, entries, undefined, entries.length);
@@ -1269,7 +1305,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     await Promise.all(workers);
 
     if (this.disposed || signal.aborted) return;
-    if (!this.showAllConnections || this.allConnectionsGraphKey !== graphKey) return;
+    if (!this.showAllConnections || this.allConnectionsGraphKey !== graphKey)
+      return;
 
     const edges: Array<{ source: string; target: string }> = [];
     const seen = new Set<string>();
@@ -1524,7 +1561,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       }
       entries = entries.filter((entry) => entry?.id !== targetID);
       entries.unshift({ id: targetID });
-      Zotero.Prefs.set("recentSaveTargets", JSON.stringify(entries.slice(0, 5)));
+      Zotero.Prefs.set(
+        "recentSaveTargets",
+        JSON.stringify(entries.slice(0, 5)),
+      );
     } catch (_err) {
       Zotero.Prefs.clear("recentSaveTargets");
     }
@@ -1558,7 +1598,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         filesEditable: library.filesEditable,
         recent: recentIDs.has(`L${libraryID}`),
       });
-      const collections = Zotero.Collections.getByLibrary(libraryID, true) || [];
+      const collections =
+        Zotero.Collections.getByLibrary(libraryID, true) || [];
       for (const collection of collections) {
         const rawLevel = (collection as any)?.level;
         const level = typeof rawLevel === "number" ? rawLevel + 1 : 1;
@@ -1660,12 +1701,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
   }
 
-  private async importEntryToLibrary(entry: InspireReferenceEntry): Promise<void> {
+  private async importEntryToLibrary(
+    entry: InspireReferenceEntry,
+  ): Promise<void> {
     if (this.disposed) return;
 
     const recid = typeof entry.recid === "string" ? entry.recid.trim() : "";
     if (!recid) {
-      this.showToast(getString("references-panel-toast-missing") || "Missing recid");
+      this.showToast(
+        getString("references-panel-toast-missing") || "Missing recid",
+      );
       return;
     }
 
@@ -1687,11 +1732,15 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     const meta = await fetchInspireMetaByRecid(recid);
     if (meta === -1) {
-      this.showToast(getString("references-panel-toast-missing") || "Record not found");
+      this.showToast(
+        getString("references-panel-toast-missing") || "Record not found",
+      );
       return;
     }
 
-    const newItem = new Zotero.Item("journalArticle");
+    const newItem = new Zotero.Item(
+      resolveNewItemType(meta as any, getItemTypePolicy()),
+    );
     newItem.libraryID = target.libraryID;
     const collectionIDs = Array.from(new Set(target.collectionIDs)).filter(
       (id): id is number => typeof id === "number",
@@ -1724,7 +1773,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     entry.localItemID = newItem.id;
     this.applyLocalItemId(recid, newItem.id);
 
-    this.showToast(getString("references-panel-toast-added") || "Added to Zotero");
+    this.showToast(
+      getString("references-panel-toast-added") || "Added to Zotero",
+    );
     if (this.graphResult) {
       this.updateHeader(this.graphResult);
       this.renderGraph(this.graphResult);
@@ -1866,7 +1917,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
 
     const container =
-      this.backdropEl || this.dialogEl || this.doc.body || this.doc.documentElement;
+      this.backdropEl ||
+      this.dialogEl ||
+      this.doc.body ||
+      this.doc.documentElement;
     if (!container) {
       return null;
     }
@@ -1900,7 +1954,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             return;
           }
           await copyToClipboard(bibtex);
-          this.showToast(getString("references-panel-bibtex-copied") || "BibTeX copied to clipboard");
+          this.showToast(
+            getString("references-panel-bibtex-copied") ||
+              "BibTeX copied to clipboard",
+          );
         },
         onCopyTexkey: async (entry) => {
           const resolved =
@@ -2051,8 +2108,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       },
       {
         label:
-          getString("references-panel-citation-graph-save-as") ||
-          "Save as…",
+          getString("references-panel-citation-graph-save-as") || "Save as…",
         disabled: !hasGraph,
         onClick: async () => this.saveAs(),
       },
@@ -2102,7 +2158,11 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
   private async showLoadMenu(anchor: HTMLElement): Promise<void> {
     const recent = await this.listRecentSavedGraphs(8);
-    const items: Array<{ label: string; disabled?: boolean; onClick: () => void | Promise<void> }> = [
+    const items: Array<{
+      label: string;
+      disabled?: boolean;
+      onClick: () => void | Promise<void>;
+    }> = [
       {
         label:
           getString("references-panel-citation-graph-load-from-file") ||
@@ -2199,15 +2259,27 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     };
 
     for (const edge of graph.seedEdges) {
-      pushEdge({ source: edge.source, target: edge.target, type: "seed-to-seed" });
+      pushEdge({
+        source: edge.source,
+        target: edge.target,
+        type: "seed-to-seed",
+      });
     }
     const bySeed = graph.bySeed || {};
     for (const [seedRecid, detail] of Object.entries(bySeed)) {
       for (const refRecid of detail.references) {
-        pushEdge({ source: seedRecid, target: refRecid, type: "seed-to-reference" });
+        pushEdge({
+          source: seedRecid,
+          target: refRecid,
+          type: "seed-to-reference",
+        });
       }
       for (const citedRecid of detail.citedBy) {
-        pushEdge({ source: citedRecid, target: seedRecid, type: "cited-by-to-seed" });
+        pushEdge({
+          source: citedRecid,
+          target: seedRecid,
+          type: "cited-by-to-seed",
+        });
       }
     }
 
@@ -2231,7 +2303,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const stamp = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
     const firstSeed = this.seeds[0]?.recid || "graph";
     const count = this.seeds.length;
-    const seedPart = count > 1 ? `${firstSeed}_and_${count - 1}_more` : firstSeed;
+    const seedPart =
+      count > 1 ? `${firstSeed}_and_${count - 1}_more` : firstSeed;
     return `citation-graph_${seedPart}_${stamp}${ext}`;
   }
 
@@ -2250,7 +2323,11 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
   }
 
-  private async listRecentSavedGraphs(limit: number): Promise<Array<{ path: string; displayName: string; lastModified: number }>> {
+  private async listRecentSavedGraphs(
+    limit: number,
+  ): Promise<
+    Array<{ path: string; displayName: string; lastModified: number }>
+  > {
     const dir = await this.getCitationGraphsDir();
     if (!dir) return [];
 
@@ -2259,13 +2336,17 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       if (!exists) return [];
 
       const children = await IOUtils.getChildren(dir);
-      const jsonFiles = children.filter((p) => String(p).toLowerCase().endsWith(".json"));
+      const jsonFiles = children.filter((p) =>
+        String(p).toLowerCase().endsWith(".json"),
+      );
 
       const stats = await Promise.all(
         jsonFiles.map(async (path) => {
           try {
             const stat = await IOUtils.stat(path);
-            const lastModified = (stat as any)?.lastModified as number | undefined;
+            const lastModified = (stat as any)?.lastModified as
+              | number
+              | undefined;
             return {
               path,
               lastModified: typeof lastModified === "number" ? lastModified : 0,
@@ -2361,7 +2442,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const path = PathUtils.join(dir, filename);
     await IOUtils.writeUTF8(path, JSON.stringify(saveData, null, 2));
     this.showToast(
-      getString("references-panel-citation-graph-save-success") || `Saved: ${filename}`,
+      getString("references-panel-citation-graph-save-success") ||
+        `Saved: ${filename}`,
     );
   }
 
@@ -2377,12 +2459,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     const filePath = await this.promptSaveFile(
       this.buildDefaultSaveFilename(".json"),
-      getString("references-panel-citation-graph-save-file-title") || "Save Citation Graph",
+      getString("references-panel-citation-graph-save-file-title") ||
+        "Save Citation Graph",
       [{ label: "JSON", pattern: "*.json" }],
     );
     if (!filePath) return;
 
-    await Zotero.File.putContentsAsync(filePath, JSON.stringify(saveData, null, 2));
+    await Zotero.File.putContentsAsync(
+      filePath,
+      JSON.stringify(saveData, null, 2),
+    );
     this.showToast(
       getString("references-panel-citation-graph-save-success") || "Saved",
     );
@@ -2396,7 +2482,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const escapeCell = (value: unknown) => {
       const s = value === null || value === undefined ? "" : String(value);
       if (/[",\n\r]/.test(s)) {
-        return `"${s.replace(/"/g, "\"\"")}"`;
+        return `"${s.replace(/"/g, '""')}"`;
       }
       return s;
     };
@@ -2420,7 +2506,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           escapeCell(n.kind),
           escapeCell(n.title || ""),
           escapeCell(n.year || ""),
-          escapeCell(typeof n.citationCount === "number" ? n.citationCount : ""),
+          escapeCell(
+            typeof n.citationCount === "number" ? n.citationCount : "",
+          ),
           escapeCell(typeof n.localItemID === "number" ? n.localItemID : ""),
           escapeCell(n.inspireUrl || ""),
           escapeCell(n.doi || ""),
@@ -2444,7 +2532,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const csv = this.buildCsv(saveData.graph.nodes);
     const filePath = await this.promptSaveFile(
       this.buildDefaultSaveFilename(".csv"),
-      getString("references-panel-citation-graph-export-file-title") || "Export Citation Graph",
+      getString("references-panel-citation-graph-export-file-title") ||
+        "Export Citation Graph",
       [{ label: "CSV", pattern: "*.csv" }],
     );
     if (!filePath) return;
@@ -2476,14 +2565,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const svg = this.buildStandaloneSvgString();
     if (!svg) {
       this.showToast(
-        getString("references-panel-citation-graph-export-failed") || "Export failed",
+        getString("references-panel-citation-graph-export-failed") ||
+          "Export failed",
       );
       return;
     }
 
     const filePath = await this.promptSaveFile(
       this.buildDefaultSaveFilename(".svg"),
-      getString("references-panel-citation-graph-export-file-title") || "Export Citation Graph",
+      getString("references-panel-citation-graph-export-file-title") ||
+        "Export Citation Graph",
       [{ label: "SVG", pattern: "*.svg" }],
     );
     if (!filePath) return;
@@ -2497,14 +2588,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const svg = this.buildStandaloneSvgString();
     if (!svg) {
       this.showToast(
-        getString("references-panel-citation-graph-export-failed") || "Export failed",
+        getString("references-panel-citation-graph-export-failed") ||
+          "Export failed",
       );
       return;
     }
 
     const filePath = await this.promptSaveFile(
       this.buildDefaultSaveFilename(".png"),
-      getString("references-panel-citation-graph-export-file-title") || "Export Citation Graph",
+      getString("references-panel-citation-graph-export-file-title") ||
+        "Export Citation Graph",
       [{ label: "PNG", pattern: "*.png" }],
     );
     if (!filePath) return;
@@ -2533,16 +2626,21 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       ctx.drawImage(img, 0, 0, w, h);
 
       const pngBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG encode failed"))), "image/png");
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("PNG encode failed"))),
+          "image/png",
+        );
       });
       const bytes = new Uint8Array(await pngBlob.arrayBuffer());
       await IOUtils.write(filePath, bytes);
       this.showToast(
-        getString("references-panel-citation-graph-export-success") || "Exported",
+        getString("references-panel-citation-graph-export-success") ||
+          "Exported",
       );
     } catch (e) {
       this.showToast(
-        getString("references-panel-citation-graph-export-failed") || `Export failed: ${e}`,
+        getString("references-panel-citation-graph-export-failed") ||
+          `Export failed: ${e}`,
       );
     } finally {
       URL.revokeObjectURL(url);
@@ -2576,7 +2674,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     const filePath = await this.promptSaveFile(
       this.buildDefaultSaveFilename(".bib"),
-      getString("references-panel-citation-graph-export-file-title") || "Export Citation Graph",
+      getString("references-panel-citation-graph-export-file-title") ||
+        "Export Citation Graph",
       [{ label: "BibTeX", pattern: "*.bib" }],
     );
     if (!filePath) return;
@@ -2607,9 +2706,15 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     );
   }
 
-  private buildGraphResultFromSaveData(saveData: CitationGraphSaveData): MultiSeedGraphResult {
-    const nodes = Array.isArray(saveData.graph?.nodes) ? saveData.graph.nodes : [];
-    const edges = Array.isArray(saveData.graph?.edges) ? saveData.graph.edges : [];
+  private buildGraphResultFromSaveData(
+    saveData: CitationGraphSaveData,
+  ): MultiSeedGraphResult {
+    const nodes = Array.isArray(saveData.graph?.nodes)
+      ? saveData.graph.nodes
+      : [];
+    const edges = Array.isArray(saveData.graph?.edges)
+      ? saveData.graph.edges
+      : [];
 
     const seedNodes = nodes
       .filter((n) => n.kind === "seed" && n.recid)
@@ -2649,7 +2754,11 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     const seedEdges = edges
       .filter((e) => e.type === "seed-to-seed" && e.source && e.target)
-      .map((e) => ({ source: e.source, target: e.target, type: "seed-to-seed" as const }));
+      .map((e) => ({
+        source: e.source,
+        target: e.target,
+        type: "seed-to-seed" as const,
+      }));
 
     const bySeed: NonNullable<MultiSeedGraphResult["bySeed"]> = {};
     for (const seed of seedNodes) {
@@ -2704,7 +2813,12 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
 
     const view = saveData.viewState;
-    if (view && typeof view.panX === "number" && typeof view.panY === "number" && typeof view.scale === "number") {
+    if (
+      view &&
+      typeof view.panX === "number" &&
+      typeof view.panY === "number" &&
+      typeof view.scale === "number"
+    ) {
       this.panX = view.panX;
       this.panY = view.panY;
       this.scale = view.scale;
@@ -2721,7 +2835,11 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const graph = this.buildGraphResultFromSaveData(saveData);
     if (!this.seeds.length) {
       this.seeds = this.normalizeSeeds(
-        graph.seeds.map((s) => ({ recid: s.recid, title: s.title, authorLabel: s.authorLabel })),
+        graph.seeds.map((s) => ({
+          recid: s.recid,
+          title: s.title,
+          authorLabel: s.authorLabel,
+        })),
       );
       this.current = this.seeds[0] || { recid: "" };
     }
@@ -2736,7 +2854,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
   private async loadFromFilePicker(): Promise<void> {
     const filePath = await this.promptOpenFile(
-      getString("references-panel-citation-graph-load-file-title") || "Load Citation Graph",
+      getString("references-panel-citation-graph-load-file-title") ||
+        "Load Citation Graph",
       [{ label: "JSON", pattern: "*.json" }],
     );
     if (!filePath) return;
@@ -2752,7 +2871,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       this.closeToolbarMenu();
       this.closeAddSeedDialog();
 
-      const saveData = (await IOUtils.readJSON(filePath)) as CitationGraphSaveData;
+      const saveData = (await IOUtils.readJSON(
+        filePath,
+      )) as CitationGraphSaveData;
       if (!saveData || typeof saveData !== "object") {
         this.showToast(
           getString("references-panel-citation-graph-load-failed") ||
@@ -2766,7 +2887,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       );
     } catch (e) {
       this.showToast(
-        getString("references-panel-citation-graph-load-failed") || `Load failed: ${e}`,
+        getString("references-panel-citation-graph-load-failed") ||
+          `Load failed: ${e}`,
       );
     }
   }
@@ -2834,7 +2956,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       const seedTitle = info?.title || seed.title || seed.recid;
       const authorLabel = info?.authorLabel || seed.authorLabel;
       const seedYear =
-        typeof info?.year === "string" && info.year.trim() ? info.year.trim() : "";
+        typeof info?.year === "string" && info.year.trim()
+          ? info.year.trim()
+          : "";
       const authorWithYear = (() => {
         const raw = typeof authorLabel === "string" ? authorLabel.trim() : "";
         if (!raw) return seedYear;
@@ -2883,7 +3007,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         text-overflow: ellipsis;
         white-space: nowrap;
       `;
-      line1.textContent = authorWithYear ? `${authorWithYear}: ${seedTitle}` : seedTitle;
+      line1.textContent = authorWithYear
+        ? `${authorWithYear}: ${seedTitle}`
+        : seedTitle;
 
       const line2 = this.doc.createElement("div");
       line2.style.cssText = `
@@ -2992,7 +3118,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const dark = isDarkMode();
     if (isSeed) {
       const label =
-        getString("references-panel-citation-graph-add-seed-remove") || "Remove";
+        getString("references-panel-citation-graph-add-seed-remove") ||
+        "Remove";
       btn.textContent = label;
       btn.title =
         getString("references-panel-citation-graph-seed-remove") ||
@@ -3087,14 +3214,22 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     if (!response || !response.ok || signal.aborted) {
       return;
     }
-    if (seq !== this.addSeedSearchSeq || this.addSeedSearchResultsEl !== targetEl) {
+    if (
+      seq !== this.addSeedSearchSeq ||
+      this.addSeedSearchResultsEl !== targetEl
+    ) {
       return;
     }
     const payload = (await response.json()) as any;
-    if (seq !== this.addSeedSearchSeq || this.addSeedSearchResultsEl !== targetEl) {
+    if (
+      seq !== this.addSeedSearchSeq ||
+      this.addSeedSearchResultsEl !== targetEl
+    ) {
       return;
     }
-    const hits: any[] = Array.isArray(payload?.hits?.hits) ? payload.hits.hits : [];
+    const hits: any[] = Array.isArray(payload?.hits?.hits)
+      ? payload.hits.hits
+      : [];
 
     if (!hits.length) {
       const empty = this.doc.createElement("div");
@@ -3119,7 +3254,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     const seenRecids = new Set<string>();
     for (const hit of hits) {
-      if (seq !== this.addSeedSearchSeq || this.addSeedSearchResultsEl !== targetEl) {
+      if (
+        seq !== this.addSeedSearchSeq ||
+        this.addSeedSearchResultsEl !== targetEl
+      ) {
         return;
       }
       const meta = hit?.metadata || hit || {};
@@ -3128,12 +3266,21 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       if (seenRecids.has(recid)) continue;
       seenRecids.add(recid);
       const rawTitle = meta?.titles?.[0]?.title;
-      const title = typeof rawTitle === "string" && rawTitle.trim() ? rawTitle.trim() : `INSPIRE:${recid}`;
-      const year = typeof meta?.earliest_date === "string" ? meta.earliest_date.slice(0, 4) : undefined;
+      const title =
+        typeof rawTitle === "string" && rawTitle.trim()
+          ? rawTitle.trim()
+          : `INSPIRE:${recid}`;
+      const year =
+        typeof meta?.earliest_date === "string"
+          ? meta.earliest_date.slice(0, 4)
+          : undefined;
       const authors = Array.isArray(meta?.authors)
         ? meta.authors
             .map((a: any) => a?.full_name)
-            .filter((v: any): v is string => typeof v === "string" && v.trim().length > 0)
+            .filter(
+              (v: any): v is string =>
+                typeof v === "string" && v.trim().length > 0,
+            )
         : [];
 
       const authorLabel = (() => {
@@ -3250,7 +3397,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
 
     const isStale = () =>
-      seq !== this.addSeedZoteroSearchSeq || this.addSeedZoteroSearchResultsEl !== targetEl;
+      seq !== this.addSeedZoteroSearchSeq ||
+      this.addSeedZoteroSearchResultsEl !== targetEl;
 
     let libraryID: number | undefined;
     try {
@@ -3343,7 +3491,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           (primary?.lastName as string | undefined) ??
           (primary?.name as string | undefined) ??
           "";
-        const lastName = typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
+        const lastName =
+          typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
         const authorPart = lastName
           ? creators.length > 1
             ? `${lastName} et al.`
@@ -3351,9 +3500,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           : "";
         const dateRaw = item.getField?.("date");
         const match =
-          typeof dateRaw === "string"
-            ? dateRaw.match(/(19|20)\d{2}/)
-            : null;
+          typeof dateRaw === "string" ? dateRaw.match(/(19|20)\d{2}/) : null;
         const year = match ? match[0] : "";
         if (year) {
           return authorPart ? `${authorPart} (${year})` : year;
@@ -3374,7 +3521,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
       const rawTitle = item.getField("title");
       const title =
-        typeof rawTitle === "string" && rawTitle.trim() ? rawTitle.trim() : recid;
+        typeof rawTitle === "string" && rawTitle.trim()
+          ? rawTitle.trim()
+          : recid;
       const authorLabel = buildAuthorLabelFromItem(item);
 
       const row = this.doc.createElement("div");
@@ -3658,7 +3807,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       }
     })();
 
-    const regularItems = selectedItems.filter((item) => item?.isRegularItem?.());
+    const regularItems = selectedItems.filter((item) =>
+      item?.isRegularItem?.(),
+    );
     const rows: HTMLDivElement[] = [];
     const seenRecids = new Set<string>();
 
@@ -3669,7 +3820,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       seenRecids.add(recid);
       const rawTitle = item.getField("title");
       const title =
-        typeof rawTitle === "string" && rawTitle.trim() ? rawTitle.trim() : recid;
+        typeof rawTitle === "string" && rawTitle.trim()
+          ? rawTitle.trim()
+          : recid;
       let authorLabel = "";
       try {
         const creators: any[] = (item as any)?.getCreators?.() ?? [];
@@ -3678,7 +3831,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           (primary?.lastName as string | undefined) ??
           (primary?.name as string | undefined) ??
           "";
-        const lastName = typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
+        const lastName =
+          typeof lastNameRaw === "string" ? lastNameRaw.trim() : "";
         const authorPart = lastName
           ? creators.length > 1
             ? `${lastName} et al.`
@@ -3686,11 +3840,13 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           : "";
         const dateRaw = item.getField?.("date");
         const match =
-          typeof dateRaw === "string"
-            ? dateRaw.match(/(19|20)\d{2}/)
-            : null;
+          typeof dateRaw === "string" ? dateRaw.match(/(19|20)\d{2}/) : null;
         const year = match ? match[0] : "";
-        authorLabel = year ? (authorPart ? `${authorPart} (${year})` : year) : authorPart;
+        authorLabel = year
+          ? authorPart
+            ? `${authorPart} (${year})`
+            : year
+          : authorPart;
       } catch {
         authorLabel = "";
       }
@@ -3804,8 +3960,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const inspireSearchInput = this.doc.createElement("input");
     inspireSearchInput.type = "text";
     inspireSearchInput.placeholder =
-      getString("references-panel-citation-graph-add-seed-search-placeholder") ||
-      "Search INSPIRE...";
+      getString(
+        "references-panel-citation-graph-add-seed-search-placeholder",
+      ) || "Search INSPIRE...";
     inspireSearchInput.style.cssText = `
       flex: 1 1 auto;
       min-width: 0;
@@ -3894,7 +4051,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }, 0);
   }
 
-  private getNodeTargetFromEventTarget(target: EventTarget | null): string | null {
+  private getNodeTargetFromEventTarget(
+    target: EventTarget | null,
+  ): string | null {
     const el = target as Element | null;
     if (!el) return null;
     const node = el.closest?.("[data-recid]") as HTMLElement | null;
@@ -3945,7 +4104,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       // Show a brief notification
       try {
         const pw = new Zotero.ProgressWindow({ closeOnClick: true });
-        pw.changeHeadline(getString("references-panel-citation-graph-title") || "Citation Graph");
+        pw.changeHeadline(
+          getString("references-panel-citation-graph-title") ||
+            "Citation Graph",
+        );
         pw.addDescription(message);
         pw.show();
         setTimeout(() => {
@@ -4061,10 +4223,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     if (!entry) {
       return;
     }
-    const rect = (anchorEl as unknown as { getBoundingClientRect?: () => DOMRect })
-      .getBoundingClientRect?.();
+    const rect = (
+      anchorEl as unknown as { getBoundingClientRect?: () => DOMRect }
+    ).getBoundingClientRect?.();
     const buttonRect = rect
-      ? { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right }
+      ? {
+          top: rect.top,
+          left: rect.left,
+          bottom: rect.bottom,
+          right: rect.right,
+        }
       : {
           top: fallbackPoint.y,
           left: fallbackPoint.x,
@@ -4083,7 +4251,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     this.hoverPreview?.hide();
     this.svgGroupEl.replaceChildren();
     const text = this.doc.createElementNS(SVG_NS, "text");
-    text.textContent = getString("references-panel-status-loading") || "Loading...";
+    text.textContent =
+      getString("references-panel-status-loading") || "Loading...";
     text.setAttribute("x", "20");
     text.setAttribute("y", "28");
     text.setAttribute("fill", "var(--fill-secondary, #64748b)");
@@ -4098,7 +4267,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     this.hoverPreview?.hide();
     this.svgGroupEl.replaceChildren();
     const text = this.doc.createElementNS(SVG_NS, "text");
-    text.textContent = message || (getString("references-panel-status-error") || "Error");
+    text.textContent =
+      message || getString("references-panel-status-error") || "Error";
     text.setAttribute("x", "20");
     text.setAttribute("y", "28");
     text.setAttribute("fill", "var(--fill-secondary, #64748b)");
@@ -4125,7 +4295,13 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
    * Calculate X position based on publication date (coordinate axis layout)
    * Supports fractional years for month-level precision
    */
-  private getXPosition(yearFraction: number, minYear: number, maxYear: number, width: number, padX: number): number {
+  private getXPosition(
+    yearFraction: number,
+    minYear: number,
+    maxYear: number,
+    width: number,
+    padX: number,
+  ): number {
     const availableWidth = width - padX * 2;
     const yearRange = maxYear - minYear || 1;
     return padX + ((yearFraction - minYear) / yearRange) * availableWidth;
@@ -4134,7 +4310,13 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
   /**
    * Calculate X position within a specific region (for split layout)
    */
-  private getXPositionInRegion(yearFraction: number, minYear: number, maxYear: number, regionMinX: number, regionMaxX: number): number {
+  private getXPositionInRegion(
+    yearFraction: number,
+    minYear: number,
+    maxYear: number,
+    regionMinX: number,
+    regionMaxX: number,
+  ): number {
     const availableWidth = regionMaxX - regionMinX;
     const yearRange = maxYear - minYear || 1;
     return regionMinX + ((yearFraction - minYear) / yearRange) * availableWidth;
@@ -4154,9 +4336,13 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       return year + 0.5;
     }
     const monthRaw = parseInt(match[2], 10);
-    const month = Number.isFinite(monthRaw) ? Math.max(1, Math.min(12, monthRaw)) : 1;
+    const month = Number.isFinite(monthRaw)
+      ? Math.max(1, Math.min(12, monthRaw))
+      : 1;
     const dayRaw = match[3] ? parseInt(match[3], 10) : 15; // Default to mid-month
-    const day = Number.isFinite(dayRaw) ? Math.max(1, Math.min(31, dayRaw)) : 15;
+    const day = Number.isFinite(dayRaw)
+      ? Math.max(1, Math.min(31, dayRaw))
+      : 15;
     // Calculate fractional year
     const daysInYear = 365;
     const dayOfYear = (month - 1) * 30.44 + day; // Approximate
@@ -4215,7 +4401,11 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       zoomMax = nextMin + minSpan;
     }
 
-    if (!Number.isFinite(zoomMin) || !Number.isFinite(zoomMax) || zoomMax <= zoomMin) {
+    if (
+      !Number.isFinite(zoomMin) ||
+      !Number.isFinite(zoomMax) ||
+      zoomMax <= zoomMin
+    ) {
       zoomMin = nextFullMin;
       zoomMax = nextFullMax;
     }
@@ -4240,7 +4430,13 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
   /**
    * Calculate Y position based on citation count (log scale, adaptive range)
    */
-  private getYPosition(citations: number, minCitations: number, maxCitations: number, height: number, padY: number): number {
+  private getYPosition(
+    citations: number,
+    minCitations: number,
+    maxCitations: number,
+    height: number,
+    padY: number,
+  ): number {
     const availableHeight = height - padY * 2;
     // Use log scale with adaptive min
     const logCitations = Math.log10(Math.max(minCitations, citations));
@@ -4248,7 +4444,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const logMax = Math.log10(Math.max(1, maxCitations));
     const logRange = logMax - logMin || 1;
     // Invert Y axis (higher citations = higher position)
-    return height - padY - ((logCitations - logMin) / logRange) * availableHeight;
+    return (
+      height - padY - ((logCitations - logMin) / logRange) * availableHeight
+    );
   }
 
   /**
@@ -4263,7 +4461,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     return 14;
   }
 
-  private getCitationAxisTicks(minCitations: number, maxCitations: number): number[] {
+  private getCitationAxisTicks(
+    minCitations: number,
+    maxCitations: number,
+  ): number[] {
     const min = Math.max(1, Math.floor(minCitations));
     const max = Math.max(min, Math.ceil(maxCitations));
 
@@ -4331,20 +4532,20 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     if (inZotero) {
       // Green color for items in Zotero
-      if (isNaN(yearNum)) return "#10b981";  // Standard green
+      if (isNaN(yearNum)) return "#10b981"; // Standard green
       const age = currentYear - yearNum;
-      if (age <= 1) return "#047857";  // Dark green (most recent)
-      if (age <= 3) return "#10b981";  // Standard green
-      if (age <= 5) return "#34d399";  // Light green
-      return "#6ee7b7";  // Lightest green (older)
+      if (age <= 1) return "#047857"; // Dark green (most recent)
+      if (age <= 3) return "#10b981"; // Standard green
+      if (age <= 5) return "#34d399"; // Light green
+      return "#6ee7b7"; // Lightest green (older)
     } else {
       // Blue color for items not in Zotero
-      if (isNaN(yearNum)) return "#3b82f6";  // Standard blue
+      if (isNaN(yearNum)) return "#3b82f6"; // Standard blue
       const age = currentYear - yearNum;
-      if (age <= 1) return "#1d4ed8";  // Dark blue (most recent)
-      if (age <= 3) return "#3b82f6";  // Standard blue
-      if (age <= 5) return "#60a5fa";  // Light blue
-      return "#93c5fd";  // Lightest blue (older)
+      if (age <= 1) return "#1d4ed8"; // Dark blue (most recent)
+      if (age <= 3) return "#3b82f6"; // Standard blue
+      if (age <= 5) return "#60a5fa"; // Light blue
+      return "#93c5fd"; // Lightest blue (older)
     }
   }
 
@@ -4352,16 +4553,30 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
    * Label position info for collision detection
    */
   private calculateLabelBounds(
-    x: number, y: number, text: string, anchor: "start" | "end", fontSize = 10
+    x: number,
+    y: number,
+    text: string,
+    anchor: "start" | "end",
+    fontSize = 10,
   ): { x1: number; y1: number; x2: number; y2: number } {
     const charWidth = fontSize * 0.6;
     const textWidth = text.length * charWidth;
     const textHeight = fontSize * 1.2;
 
     if (anchor === "start") {
-      return { x1: x, y1: y - textHeight / 2, x2: x + textWidth, y2: y + textHeight / 2 };
+      return {
+        x1: x,
+        y1: y - textHeight / 2,
+        x2: x + textWidth,
+        y2: y + textHeight / 2,
+      };
     } else {
-      return { x1: x - textWidth, y1: y - textHeight / 2, x2: x, y2: y + textHeight / 2 };
+      return {
+        x1: x - textWidth,
+        y1: y - textHeight / 2,
+        x2: x,
+        y2: y + textHeight / 2,
+      };
     }
   }
 
@@ -4371,10 +4586,14 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
   private rectsOverlap(
     a: { x1: number; y1: number; x2: number; y2: number },
     b: { x1: number; y1: number; x2: number; y2: number },
-    margin = 2
+    margin = 2,
   ): boolean {
-    return !(a.x2 + margin < b.x1 || b.x2 + margin < a.x1 ||
-             a.y2 + margin < b.y1 || b.y2 + margin < a.y1);
+    return !(
+      a.x2 + margin < b.x1 ||
+      b.x2 + margin < a.x1 ||
+      a.y2 + margin < b.y1 ||
+      b.y2 + margin < a.y1
+    );
   }
 
   /**
@@ -4382,19 +4601,36 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
    */
   private resolveLabelPositions(
     nodes: Array<{
-      x: number; y: number; r: number;
-      label: string; regionMinX: number; regionMaxX: number;
-    }>
+      x: number;
+      y: number;
+      r: number;
+      label: string;
+      regionMinX: number;
+      regionMaxX: number;
+    }>,
   ): Array<{ labelX: number; labelY: number; anchor: "start" | "end" }> {
-    const results: Array<{ labelX: number; labelY: number; anchor: "start" | "end" }> = [];
-    const placedBounds: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    const results: Array<{
+      labelX: number;
+      labelY: number;
+      anchor: "start" | "end";
+    }> = [];
+    const placedBounds: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+    }> = [];
 
     for (const node of nodes) {
       const { x, y, r, label, regionMinX, regionMaxX } = node;
       const gap = 4;
 
       // Try positions in order: right, left, above-right, below-right, above-left, below-left
-      const candidates: Array<{ lx: number; ly: number; anchor: "start" | "end" }> = [
+      const candidates: Array<{
+        lx: number;
+        ly: number;
+        anchor: "start" | "end";
+      }> = [
         { lx: x + r + gap, ly: y, anchor: "start" },
         { lx: x - r - gap, ly: y, anchor: "end" },
         { lx: x + r + gap, ly: y - 12, anchor: "start" },
@@ -4407,10 +4643,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       let foundNoOverlap = false;
 
       for (const cand of candidates) {
-        const bounds = this.calculateLabelBounds(cand.lx, cand.ly, label, cand.anchor);
+        const bounds = this.calculateLabelBounds(
+          cand.lx,
+          cand.ly,
+          label,
+          cand.anchor,
+        );
 
         // Check if within region bounds
-        if (bounds.x1 < regionMinX - 10 || bounds.x2 > regionMaxX + 10) continue;
+        if (bounds.x1 < regionMinX - 10 || bounds.x2 > regionMaxX + 10)
+          continue;
 
         // Check overlap with placed labels
         let hasOverlap = false;
@@ -4429,10 +4671,17 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       }
 
       const finalBounds = this.calculateLabelBounds(
-        bestCandidate.lx, bestCandidate.ly, label, bestCandidate.anchor
+        bestCandidate.lx,
+        bestCandidate.ly,
+        label,
+        bestCandidate.anchor,
       );
       placedBounds.push(finalBounds);
-      results.push({ labelX: bestCandidate.lx, labelY: bestCandidate.ly, anchor: bestCandidate.anchor });
+      results.push({
+        labelX: bestCandidate.lx,
+        labelY: bestCandidate.ly,
+        anchor: bestCandidate.anchor,
+      });
     }
 
     return results;
@@ -4509,14 +4758,21 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     // Y-axis labels (citations - log scale, adaptive range)
     const citationLabels = [1, 10, 100, 1000, 10000].filter(
-      c => c >= minCitations && c <= maxCitations * 1.5
+      (c) => c >= minCitations && c <= maxCitations * 1.5,
     );
     for (const citations of citationLabels) {
-      const y = this.getYPosition(citations, minCitations, maxCitations, height, padY);
+      const y = this.getYPosition(
+        citations,
+        minCitations,
+        maxCitations,
+        height,
+        padY,
+      );
       if (y < padY - 10 || y > height - padY + 10) continue;
 
       const label = this.doc.createElementNS(SVG_NS, "text");
-      label.textContent = citations >= 1000 ? `${citations / 1000}k` : String(citations);
+      label.textContent =
+        citations >= 1000 ? `${citations / 1000}k` : String(citations);
       label.setAttribute("x", String(padX - 8));
       label.setAttribute("y", String(y + 3));
       label.setAttribute("fill", textColor);
@@ -4550,13 +4806,24 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
   }
 
   private renderSplitLayout(
-    width: number, height: number, padX: number, padY: number, midGap: number,
-    leftMinX: number, leftMaxX: number, rightMinX: number, rightMaxX: number,
-    refsTime: TimeZoomDomain, citedTime: TimeZoomDomain,
-    refsMinCitations: number, refsMaxCitations: number,
-    citedMinCitations: number, citedMaxCitations: number,
+    width: number,
+    height: number,
+    padX: number,
+    padY: number,
+    midGap: number,
+    leftMinX: number,
+    leftMaxX: number,
+    rightMinX: number,
+    rightMaxX: number,
+    refsTime: TimeZoomDomain,
+    citedTime: TimeZoomDomain,
+    refsMinCitations: number,
+    refsMaxCitations: number,
+    citedMinCitations: number,
+    citedMaxCitations: number,
     textColor: string,
-    refsCount: number, citedCount: number
+    refsCount: number,
+    citedCount: number,
   ): void {
     if (!this.svgGroupEl) return;
 
@@ -4575,10 +4842,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     leftGradient.setAttribute("y2", "100%");
     const leftStop1 = this.doc.createElementNS(SVG_NS, "stop");
     leftStop1.setAttribute("offset", "0%");
-    leftStop1.setAttribute("stop-color", dark ? "rgba(59, 130, 246, 0.08)" : "rgba(59, 130, 246, 0.04)");
+    leftStop1.setAttribute(
+      "stop-color",
+      dark ? "rgba(59, 130, 246, 0.08)" : "rgba(59, 130, 246, 0.04)",
+    );
     const leftStop2 = this.doc.createElementNS(SVG_NS, "stop");
     leftStop2.setAttribute("offset", "100%");
-    leftStop2.setAttribute("stop-color", dark ? "rgba(59, 130, 246, 0.02)" : "rgba(59, 130, 246, 0.01)");
+    leftStop2.setAttribute(
+      "stop-color",
+      dark ? "rgba(59, 130, 246, 0.02)" : "rgba(59, 130, 246, 0.01)",
+    );
     leftGradient.appendChild(leftStop1);
     leftGradient.appendChild(leftStop2);
     defs.appendChild(leftGradient);
@@ -4592,10 +4865,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     rightGradient.setAttribute("y2", "100%");
     const rightStop1 = this.doc.createElementNS(SVG_NS, "stop");
     rightStop1.setAttribute("offset", "0%");
-    rightStop1.setAttribute("stop-color", dark ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.04)");
+    rightStop1.setAttribute(
+      "stop-color",
+      dark ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.04)",
+    );
     const rightStop2 = this.doc.createElementNS(SVG_NS, "stop");
     rightStop2.setAttribute("offset", "100%");
-    rightStop2.setAttribute("stop-color", dark ? "rgba(245, 158, 11, 0.02)" : "rgba(245, 158, 11, 0.01)");
+    rightStop2.setAttribute(
+      "stop-color",
+      dark ? "rgba(245, 158, 11, 0.02)" : "rgba(245, 158, 11, 0.01)",
+    );
     rightGradient.appendChild(rightStop1);
     rightGradient.appendChild(rightStop2);
     defs.appendChild(rightGradient);
@@ -4610,7 +4889,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     // Keep the bottom border aligned with the x-axis to avoid a "double axis" line.
     leftBg.setAttribute("height", String(height - padY * 2 + 10));
     leftBg.setAttribute("fill", "url(#refs-bg-gradient)");
-    leftBg.setAttribute("stroke", dark ? "rgba(59, 130, 246, 0.15)" : "rgba(59, 130, 246, 0.1)");
+    leftBg.setAttribute(
+      "stroke",
+      dark ? "rgba(59, 130, 246, 0.15)" : "rgba(59, 130, 246, 0.1)",
+    );
     leftBg.setAttribute("stroke-width", "1");
     leftBg.setAttribute("rx", "6");
     this.svgGroupEl.appendChild(leftBg);
@@ -4623,7 +4905,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     // Keep the bottom border aligned with the x-axis to avoid a "double axis" line.
     rightBg.setAttribute("height", String(height - padY * 2 + 10));
     rightBg.setAttribute("fill", "url(#cited-bg-gradient)");
-    rightBg.setAttribute("stroke", dark ? "rgba(245, 158, 11, 0.15)" : "rgba(245, 158, 11, 0.1)");
+    rightBg.setAttribute(
+      "stroke",
+      dark ? "rgba(245, 158, 11, 0.15)" : "rgba(245, 158, 11, 0.1)",
+    );
     rightBg.setAttribute("stroke-width", "1");
     rightBg.setAttribute("rx", "6");
     this.svgGroupEl.appendChild(rightBg);
@@ -4728,9 +5013,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     if (!this.svgGroupEl) return;
 
     const yAxisX =
-      side === "left"
-        ? Math.max(18, regionMinX - 14)
-        : regionMaxX + 14;
+      side === "left" ? Math.max(18, regionMinX - 14) : regionMaxX + 14;
     const tickDir = side === "left" ? -1 : 1;
     const labelX = yAxisX + tickDir * 6;
     const labelAnchor = side === "left" ? "end" : "start";
@@ -4746,9 +5029,18 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     this.svgGroupEl.appendChild(yAxis);
 
     // Y-axis tick labels: only "nice" ticks (1/2/5 × 10^n) to avoid irregular labels.
-    const citationLabels = this.getCitationAxisTicks(minCitations, maxCitations);
+    const citationLabels = this.getCitationAxisTicks(
+      minCitations,
+      maxCitations,
+    );
     for (const citations of citationLabels) {
-      const y = this.getYPosition(citations, minCitations, maxCitations, height, padY);
+      const y = this.getYPosition(
+        citations,
+        minCitations,
+        maxCitations,
+        height,
+        padY,
+      );
       if (y < padY - 10 || y > height - padY + 10) continue;
 
       const label = this.doc.createElementNS(SVG_NS, "text");
@@ -4770,9 +5062,14 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
   }
 
   private renderRegionXAxis(
-    minX: number, maxX: number, height: number, padY: number,
-    minYear: number, maxYear: number,
-    textColor: string, axisColor: string
+    minX: number,
+    maxX: number,
+    height: number,
+    padY: number,
+    minYear: number,
+    maxYear: number,
+    textColor: string,
+    axisColor: string,
   ): void {
     if (!this.svgGroupEl) return;
 
@@ -4954,7 +5251,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         const center = (a + b) / 2;
         const minAllowed = domain.fullMin;
         const maxAllowed = domain.fullMax - minSpan;
-        const nextA = clampValue(Math.max(minAllowed, Math.min(maxAllowed, center - minSpan / 2)));
+        const nextA = clampValue(
+          Math.max(minAllowed, Math.min(maxAllowed, center - minSpan / 2)),
+        );
         a = nextA;
         b = nextA + minSpan;
       }
@@ -5052,8 +5351,11 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
   }
 
   private renderLegend(
-    width: number, padX: number, textFill: string, textSecondary: string,
-    nodePositions?: Array<{x: number; y: number; r: number}>
+    width: number,
+    padX: number,
+    textFill: string,
+    textSecondary: string,
+    nodePositions?: Array<{ x: number; y: number; r: number }>,
   ): void {
     if (!this.svgGroupEl) return;
 
@@ -5073,13 +5375,15 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const rowGap = 11;
 
     const legendW = Math.ceil(pad + iconR * 2 + gap + maxLabelWidth + pad);
-    const legendH = Math.ceil(pad * 2 + iconR * 2 + rowGap * (legendLabels.length - 1));
+    const legendH = Math.ceil(
+      pad * 2 + iconR * 2 + rowGap * (legendLabels.length - 1),
+    );
 
     // Find best position for legend (avoid overlapping with nodes)
     const candidates = [
-      { x: width / 2 - legendW / 2, y: 45 },  // Top center
-      { x: width - padX - legendW - 10, y: 45 },  // Top right
-      { x: padX + 10, y: 45 },  // Top left
+      { x: width / 2 - legendW / 2, y: 45 }, // Top center
+      { x: width - padX - legendW - 10, y: 45 }, // Top right
+      { x: padX + 10, y: 45 }, // Top left
     ];
 
     let bestPos = candidates[0];
@@ -5090,7 +5394,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         for (const node of nodePositions) {
           const dx = Math.abs(node.x - (pos.x + legendW / 2));
           const dy = Math.abs(node.y - (pos.y + legendH / 2));
-          if (dx < legendW / 2 + node.r + 10 && dy < legendH / 2 + node.r + 10) {
+          if (
+            dx < legendW / 2 + node.r + 10 &&
+            dy < legendH / 2 + node.r + 10
+          ) {
             overlap++;
           }
         }
@@ -5282,7 +5589,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     );
     const seedYJitterMax = Math.min(12, Math.max(2, availableHeight / 220));
 
-    const seedsKey = [...seeds].map((s) => s.recid).sort().join(",");
+    const seedsKey = [...seeds]
+      .map((s) => s.recid)
+      .sort()
+      .join(",");
     if (this.timeZoomSeedsKey !== seedsKey) {
       this.timeZoomSeedsKey = seedsKey;
       this.refsTimeZoom = undefined;
@@ -5299,13 +5609,29 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       .map((e) => this.getEntryTimeValue(e))
       .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
 
-    const refsFullMin = refsTimeValues.length ? Math.min(...refsTimeValues) : now - 10;
-    const refsFullMax = refsTimeValues.length ? Math.max(...refsTimeValues, now) : now;
-    const citedFullMin = citedTimeValues.length ? Math.min(...citedTimeValues) : now - 5;
-    const citedFullMax = citedTimeValues.length ? Math.max(...citedTimeValues, now) : now;
+    const refsFullMin = refsTimeValues.length
+      ? Math.min(...refsTimeValues)
+      : now - 10;
+    const refsFullMax = refsTimeValues.length
+      ? Math.max(...refsTimeValues, now)
+      : now;
+    const citedFullMin = citedTimeValues.length
+      ? Math.min(...citedTimeValues)
+      : now - 5;
+    const citedFullMax = citedTimeValues.length
+      ? Math.max(...citedTimeValues, now)
+      : now;
 
-    const refsTime = this.normalizeTimeZoom(this.refsTimeZoom, refsFullMin, refsFullMax);
-    const citedTime = this.normalizeTimeZoom(this.citedTimeZoom, citedFullMin, citedFullMax);
+    const refsTime = this.normalizeTimeZoom(
+      this.refsTimeZoom,
+      refsFullMin,
+      refsFullMax,
+    );
+    const citedTime = this.normalizeTimeZoom(
+      this.citedTimeZoom,
+      citedFullMin,
+      citedFullMax,
+    );
     this.refsTimeZoom = refsTime;
     this.citedTimeZoom = citedTime;
 
@@ -5352,13 +5678,17 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       citationCount?: number;
     }): number => {
       const raw = entry.citationCountWithoutSelf ?? entry.citationCount ?? 0;
-      return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
+      return typeof raw === "number" && Number.isFinite(raw) && raw > 0
+        ? raw
+        : 0;
     };
 
     const refsCitations = refsVisibleEntries.map((e) => getEntryCitations(e));
     const citedCitations = citedVisibleEntries.map((e) => getEntryCitations(e));
     const seedCitations = seeds.map((s) =>
-      typeof s.citationCount === "number" && Number.isFinite(s.citationCount) && s.citationCount > 0
+      typeof s.citationCount === "number" &&
+      Number.isFinite(s.citationCount) &&
+      s.citationCount > 0
         ? s.citationCount
         : 0,
     );
@@ -5416,13 +5746,24 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     // Render split layout with two regions
     this.renderSplitLayout(
-      width, height, padX, padY, midGap,
-      leftMinX, leftMaxX, rightMinX, rightMaxX,
-      refsTime, citedTime,
-      refsCitationRange.min, refsCitationRange.max,
-      citedCitationRange.min, citedCitationRange.max,
+      width,
+      height,
+      padX,
+      padY,
+      midGap,
+      leftMinX,
+      leftMaxX,
+      rightMinX,
+      rightMaxX,
+      refsTime,
+      citedTime,
+      refsCitationRange.min,
+      refsCitationRange.max,
+      citedCitationRange.min,
+      citedCitationRange.max,
       textSecondary,
-      refs.length, cited.length
+      refs.length,
+      cited.length,
     );
 
     const dark = isDarkMode();
@@ -5486,12 +5827,12 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     this.svgGroupEl.appendChild(nodesLayer);
 
     // Collect node positions for legend placement (will be populated during node rendering)
-    const nodePositions: Array<{x: number; y: number; r: number}> = [];
+    const nodePositions: Array<{ x: number; y: number; r: number }> = [];
 
     const makeNode = (opts: {
       recid: string;
       title: string;
-      authorLabel: string;  // "Author et al. (Year)" format
+      authorLabel: string; // "Author et al. (Year)" format
       x: number;
       y: number;
       r: number;
@@ -5511,11 +5852,13 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       // Green for in library, gray for online (consistent with References panel marker concept)
       const seedLabelColor = dark ? "#a78bfa" : "#6d28d9";
       const inLibrary = typeof opts.localItemID === "number";
-      const localColor = dark ? "#22c55e" : "#1a8f4d";  // Green
-      const onlineColor = dark ? "#6b7280" : "#9ca3af";  // Gray
+      const localColor = dark ? "#22c55e" : "#1a8f4d"; // Green
+      const onlineColor = dark ? "#6b7280" : "#9ca3af"; // Gray
       const fillColor = opts.isSeed
         ? seedFill
-        : inLibrary ? localColor : onlineColor;
+        : inLibrary
+          ? localColor
+          : onlineColor;
 
       // Use circle for references/seeds, pentagon for cited-by
       if (opts.kind === "citedBy" && !opts.isSeed) {
@@ -5556,11 +5899,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
       // Hover handlers: reuse HoverPreviewController (same as PDF annotate / panel).
       group.addEventListener("mouseenter", (e: MouseEvent) => {
-        this.scheduleHoverPreview(
-          opts.recid,
-          e.currentTarget as Element,
-          { x: e.clientX, y: e.clientY },
-        );
+        this.scheduleHoverPreview(opts.recid, e.currentTarget as Element, {
+          x: e.clientX,
+          y: e.clientY,
+        });
       });
       group.addEventListener("mouseleave", () => {
         this.hoverPreview?.cancelShow();
@@ -5612,7 +5954,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             }
           } else if (raw.includes(",")) {
             const firstSeg = raw.split(",")[0].trim();
-            const last = firstSeg.split(/\s+/).filter(Boolean).pop() || firstSeg;
+            const last =
+              firstSeg.split(/\s+/).filter(Boolean).pop() || firstSeg;
             if (!last || /^al\.?$/i.test(last) || /^et\.?$/i.test(last)) {
               authorPart = firstSeg || raw;
             } else {
@@ -5699,7 +6042,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             .map((r) => r.trim()),
         ),
       );
-      recids.sort((a, b) => stableUnit(a, "ref-x-order") - stableUnit(b, "ref-x-order"));
+      recids.sort(
+        (a, b) => stableUnit(a, "ref-x-order") - stableUnit(b, "ref-x-order"),
+      );
       const span = Math.max(1, leftMaxX - leftMinX);
       const denom = Math.max(1, recids.length);
       refsBaseXByRecid = new Map<string, number>();
@@ -5718,7 +6063,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             .map((r) => r.trim()),
         ),
       );
-      recids.sort((a, b) => stableUnit(a, "cited-x-order") - stableUnit(b, "cited-x-order"));
+      recids.sort(
+        (a, b) =>
+          stableUnit(a, "cited-x-order") - stableUnit(b, "cited-x-order"),
+      );
       const span = Math.max(1, rightMaxX - rightMinX);
       const denom = Math.max(1, recids.length);
       citedBaseXByRecid = new Map<string, number>();
@@ -5739,7 +6087,10 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       ? Math.max(...seedYears, currentYear)
       : currentYear;
     const centerWidth = Math.max(1, centerMaxX - centerMinX);
-    const seedFallbackStep = Math.min(14, Math.max(10, centerWidth / (seedCount + 1)));
+    const seedFallbackStep = Math.min(
+      14,
+      Math.max(10, centerWidth / (seedCount + 1)),
+    );
     const seedMaxXShift = Math.max(12, Math.min(centerWidth * 0.35, 90));
 
     for (let i = 0; i < seeds.length; i++) {
@@ -5748,9 +6099,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       const citations = seed.citationCount ?? 0;
       let x = (centerMinX + centerMaxX) / 2;
       if (centerMaxX > centerMinX + 20) {
-        x = yearFraction === null
-          ? centerMinX + seedFallbackStep * (i + 1)
-          : this.getXPositionInRegion(yearFraction, seedMinYear, seedMaxYear, centerMinX, centerMaxX);
+        x =
+          yearFraction === null
+            ? centerMinX + seedFallbackStep * (i + 1)
+            : this.getXPositionInRegion(
+                yearFraction,
+                seedMinYear,
+                seedMaxYear,
+                centerMinX,
+                centerMaxX,
+              );
       }
       if (seedCount > 1) {
         x = clamp(
@@ -5775,7 +6133,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             )
           : baseY;
       const seedYear =
-        typeof seed.year === "string" && seed.year.trim() ? seed.year.trim() : "";
+        typeof seed.year === "string" && seed.year.trim()
+          ? seed.year.trim()
+          : "";
       const seedAuthorLabel =
         typeof seed.authorLabel === "string" && seed.authorLabel.trim()
           ? seed.authorLabel.trim()
@@ -5841,7 +6201,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       if (!isInRefsZoom(yearFraction)) {
         continue;
       }
-      const citations = entry.citationCountWithoutSelf ?? entry.citationCount ?? 0;
+      const citations =
+        entry.citationCountWithoutSelf ?? entry.citationCount ?? 0;
       const baseX =
         yearFraction === null || !useRefsTimeAxis
           ? (refsBaseXByRecid?.get(recid) ??
@@ -5900,7 +6261,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       if (!isInCitedZoom(yearFraction)) {
         continue;
       }
-      const citations = entry.citationCountWithoutSelf ?? entry.citationCount ?? 0;
+      const citations =
+        entry.citationCountWithoutSelf ?? entry.citationCount ?? 0;
       const baseX =
         yearFraction === null || !useCitedTimeAxis
           ? (citedBaseXByRecid?.get(recid) ??
@@ -5992,7 +6354,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             let uy = 0;
             if (!dist) {
               const theta =
-                stableUnit(`${a.recid}|${b.recid}`, "relax-angle") * Math.PI * 2;
+                stableUnit(`${a.recid}|${b.recid}`, "relax-angle") *
+                Math.PI *
+                2;
               ux = Math.cos(theta);
               uy = Math.sin(theta);
               // Prefer horizontal dispersion for dense "bottom row" clusters.
@@ -6008,10 +6372,26 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
             }
 
             const push = overlap * 0.5;
-            const aMinX = clamp(a.baseX - a.maxXShift, a.regionMinX, a.regionMaxX);
-            const aMaxX = clamp(a.baseX + a.maxXShift, a.regionMinX, a.regionMaxX);
-            const bMinX = clamp(b.baseX - b.maxXShift, b.regionMinX, b.regionMaxX);
-            const bMaxX = clamp(b.baseX + b.maxXShift, b.regionMinX, b.regionMaxX);
+            const aMinX = clamp(
+              a.baseX - a.maxXShift,
+              a.regionMinX,
+              a.regionMaxX,
+            );
+            const aMaxX = clamp(
+              a.baseX + a.maxXShift,
+              a.regionMinX,
+              a.regionMaxX,
+            );
+            const bMinX = clamp(
+              b.baseX - b.maxXShift,
+              b.regionMinX,
+              b.regionMaxX,
+            );
+            const bMaxX = clamp(
+              b.baseX + b.maxXShift,
+              b.regionMinX,
+              b.regionMaxX,
+            );
             a.x = clamp(a.x - ux * push, aMinX, aMaxX);
             b.x = clamp(b.x + ux * push, bMinX, bMaxX);
 
@@ -6029,18 +6409,27 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       }
     };
 
-    relaxNodes(allNodes.filter((n) => n.kind === "seed"), {
-      padding: 2,
-      iterations: 18,
-    });
-    relaxNodes(allNodes.filter((n) => n.kind === "reference"), {
-      padding: 3,
-      iterations: 28,
-    });
-    relaxNodes(allNodes.filter((n) => n.kind === "citedBy"), {
-      padding: enableCitedSpread ? 5 : 3,
-      iterations: enableCitedSpread ? 64 : 34,
-    });
+    relaxNodes(
+      allNodes.filter((n) => n.kind === "seed"),
+      {
+        padding: 2,
+        iterations: 18,
+      },
+    );
+    relaxNodes(
+      allNodes.filter((n) => n.kind === "reference"),
+      {
+        padding: 3,
+        iterations: 28,
+      },
+    );
+    relaxNodes(
+      allNodes.filter((n) => n.kind === "citedBy"),
+      {
+        padding: enableCitedSpread ? 5 : 3,
+        iterations: enableCitedSpread ? 64 : 34,
+      },
+    );
 
     // Second pass: resolve label positions to avoid overlaps
     const labelPositions = this.resolveLabelPositions(
@@ -6051,11 +6440,14 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         label: n.label,
         regionMinX: n.regionMinX,
         regionMaxX: n.regionMaxX,
-      }))
+      })),
     );
 
     // Build position map before drawing edges/nodes.
-    const posByRecid = new Map<string, { x: number; y: number; r: number; kind: NodeData["kind"] }>();
+    const posByRecid = new Map<
+      string,
+      { x: number; y: number; r: number; kind: NodeData["kind"] }
+    >();
     for (let i = 0; i < allNodes.length; i++) {
       const n = allNodes[i];
       posByRecid.set(n.recid, { x: n.x, y: n.y, r: n.r, kind: n.kind });
@@ -6065,13 +6457,21 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const edgeList: Array<{
       source: string;
       target: string;
-      type: "seed-to-seed" | "seed-to-reference" | "cited-by-to-seed" | "node-to-node";
+      type:
+        | "seed-to-seed"
+        | "seed-to-reference"
+        | "cited-by-to-seed"
+        | "node-to-node";
     }> = [];
     const pairSeen = new Set<string>();
     const pushEdge = (edge: {
       source: string;
       target: string;
-      type: "seed-to-seed" | "seed-to-reference" | "cited-by-to-seed" | "node-to-node";
+      type:
+        | "seed-to-seed"
+        | "seed-to-reference"
+        | "cited-by-to-seed"
+        | "node-to-node";
     }) => {
       const key = `${edge.source}->${edge.target}`;
       if (pairSeen.has(key)) return;
@@ -6080,19 +6480,33 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     };
 
     const seedRecidSet = new Set(
-      this.seeds.map((s) => s.recid).filter((r) => typeof r === "string" && r.length > 0),
+      this.seeds
+        .map((s) => s.recid)
+        .filter((r) => typeof r === "string" && r.length > 0),
     );
 
     for (const edge of result.seedEdges) {
-      pushEdge({ source: edge.source, target: edge.target, type: "seed-to-seed" });
+      pushEdge({
+        source: edge.source,
+        target: edge.target,
+        type: "seed-to-seed",
+      });
     }
     const bySeed = result.bySeed || {};
     for (const [seedRecid, detail] of Object.entries(bySeed)) {
       for (const refRecid of detail.references) {
-        pushEdge({ source: seedRecid, target: refRecid, type: "seed-to-reference" });
+        pushEdge({
+          source: seedRecid,
+          target: refRecid,
+          type: "seed-to-reference",
+        });
       }
       for (const citedRecid of detail.citedBy) {
-        pushEdge({ source: citedRecid, target: seedRecid, type: "cited-by-to-seed" });
+        pushEdge({
+          source: citedRecid,
+          target: seedRecid,
+          type: "cited-by-to-seed",
+        });
       }
     }
     const currentKey = this.getConnectionsGraphKey();
@@ -6180,7 +6594,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       const style =
         edge.type === "seed-to-seed"
           ? seedEdgeStyle
-          : edge.type === "seed-to-reference" || edge.type === "cited-by-to-seed"
+          : edge.type === "seed-to-reference" ||
+              edge.type === "cited-by-to-seed"
             ? seedOutEdgeStyle
             : edge.type === "node-to-node"
               ? connectionsEdgeStyle

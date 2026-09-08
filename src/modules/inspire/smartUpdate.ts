@@ -718,13 +718,17 @@ function buildArxivInfoString(arxiv: {
 
 /**
  * Compare local Zotero item with INSPIRE metadata
+ * @param effectiveItemType item type the item will have when the changes are
+ *   applied (the updater may convert it first); defaults to the current type
  */
 export function compareItemWithInspire(
   item: Zotero.Item,
   metaInspire: jsobject,
+  effectiveItemType?: string,
 ): SmartUpdateDiff {
   const changes: FieldChange[] = [];
   const extra = (item.getField("extra") as string) || "";
+  const itemType = effectiveItemType ?? item.itemType;
 
   // Determine effective journalAbbreviation value from INSPIRE
   // If no journal info but has arXiv, use arXiv as fallback (matches setInspireMeta logic)
@@ -733,7 +737,7 @@ export function compareItemWithInspire(
     getPref("arxiv_in_journal_abbrev") === true &&
     !effectiveJournalAbbr &&
     metaInspire.arxiv?.value &&
-    item.itemType === "journalArticle"
+    itemType === "journalArticle"
   ) {
     effectiveJournalAbbr = buildArxivInfoString(metaInspire.arxiv);
   }

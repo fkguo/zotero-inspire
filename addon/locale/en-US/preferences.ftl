@@ -44,7 +44,7 @@ pref-arxiv-in-journal-abbrev-desc = For unpublished papers, store `arXiv:...` in
 
 pref-keep-preprint-type =
     .label = Keep Preprint item type for unpublished papers
-pref-keep-preprint-type-desc = Preprint (and Report) items are not converted to Journal Article until INSPIRE reports a journal publication. Preprint Watch also monitors Preprint items. Not available while the legacy option above is on, because the Journal Abbr. field only exists for Journal Article.
+pref-keep-preprint-type-desc = Preprint (and Report) items are not converted to Journal Article until INSPIRE reports a journal publication. Unpublished arXiv papers stored as Journal Article are turned back into Preprint on their next metadata update, and papers imported from the panel are created as Preprint. Preprint Watch also monitors Preprint items. Not available while the legacy option above is on, because the Journal Abbr. field only exists for Journal Article.
 
 pref-arxiv-tag1 =
     .label = Add arXiv primary category as tag (e.g., hep-ph, nucl-th)

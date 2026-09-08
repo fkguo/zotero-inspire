@@ -11,7 +11,24 @@ export interface ItemTypeMeta {
   journalAbbreviation?: string;
   /** INSPIRE document_type (normally an array such as ["article"]). */
   document_type?: string[] | string;
+  /** arXiv identifier of the record, when it has one. */
+  arxiv?: { value?: string } | null;
 }
+
+/**
+ * Journal-related fields of the Zotero item itself. Used to make sure an
+ * item is only turned back into a Preprint when neither INSPIRE nor the
+ * item carries journal publication data.
+ */
+export interface LocalPublicationFields {
+  journalAbbreviation?: string;
+  publicationTitle?: string;
+  volume?: string;
+  pages?: string;
+  DOI?: string;
+}
+
+export type TargetItemType = "journalArticle" | "book" | "preprint";
 
 export interface ItemTypePolicy {
   /**
@@ -56,6 +73,37 @@ export function hasJournalPublicationInfo(meta: ItemTypeMeta): boolean {
   );
 }
 
+/** arXiv DOIs (10.48550/arXiv.xxxx) are not journal DOIs. */
+const ARXIV_DOI_REGEX = /^10\.48550\/arXiv\./i;
+
+/**
+ * True when the Zotero item itself already holds journal publication data:
+ * a journal name (not an "arXiv:..." placeholder), a volume, pages, or a
+ * non-arXiv DOI. Such an item is never turned back into a Preprint.
+ */
+export function hasLocalPublicationInfo(
+  fields: LocalPublicationFields,
+): boolean {
+  const journalAbbrev = (fields.journalAbbreviation ?? "").trim();
+  if (journalAbbrev && !/^arXiv:/i.test(journalAbbrev)) return true;
+  const publicationTitle = (fields.publicationTitle ?? "").trim();
+  if (publicationTitle && !/arxiv/i.test(publicationTitle)) return true;
+  if ((fields.volume ?? "").trim()) return true;
+  if ((fields.pages ?? "").trim()) return true;
+  const doi = (fields.DOI ?? "").trim();
+  if (doi && !ARXIV_DOI_REGEX.test(doi)) return true;
+  return false;
+}
+
+/** True when the record is an unpublished arXiv paper (not a book). */
+function isUnpublishedArxivRecord(meta: ItemTypeMeta): boolean {
+  return (
+    Boolean(meta.arxiv?.value) &&
+    !hasJournalPublicationInfo(meta) &&
+    !isBookRecord(meta)
+  );
+}
+
 /**
  * True when the INSPIRE record is a book.
  * Mirrors the historical `document_type == "book"` loose comparison, which is
@@ -70,10 +118,16 @@ export function isBookRecord(meta: ItemTypeMeta): boolean {
 /**
  * Resolve the item type an item should be converted to after an INSPIRE match.
  *
- * Rules (applied in order, matching the historical behaviour):
+ * Rules (applied in order; 1 and 3 match the historical behaviour):
  * 1. `preprint` / `report` become `journalArticle`, unless the policy keeps
  *    them and INSPIRE has no journal publication info yet.
- * 2. Anything that is not already a `book` becomes `book` when INSPIRE says
+ * 2. With the keep-preprint policy, a `journalArticle` that is an unpublished
+ *    arXiv paper on INSPIRE and carries no journal data locally becomes
+ *    `preprint` again (undoes the historical conversion). This needs the
+ *    item's own journal fields (`local`); when they are not supplied, e.g.
+ *    for citation-count-only requests that carry no publication data, the
+ *    rule is skipped.
+ * 3. Anything that is not already a `book` becomes `book` when INSPIRE says
  *    the record is a book.
  *
  * @returns the target item type, or `null` when the type must stay unchanged.
@@ -82,7 +136,8 @@ export function resolveInspireItemType(
   currentType: string,
   meta: ItemTypeMeta,
   policy: ItemTypePolicy,
-): "journalArticle" | "book" | null {
+  local?: LocalPublicationFields,
+): TargetItemType | null {
   let type = currentType;
 
   if (PREPRINT_LIKE_TYPES.has(type)) {
@@ -91,10 +146,36 @@ export function resolveInspireItemType(
     }
   }
 
+  if (
+    policy.keepPreprintType &&
+    type === "journalArticle" &&
+    currentType === "journalArticle" &&
+    local !== undefined &&
+    isUnpublishedArxivRecord(meta) &&
+    !hasLocalPublicationInfo(local)
+  ) {
+    type = "preprint";
+  }
+
   if (type !== "book" && isBookRecord(meta)) {
     type = "book";
   }
 
   if (type === currentType) return null;
-  return type as "journalArticle" | "book";
+  return type as TargetItemType;
+}
+
+/**
+ * Item type for a brand-new Zotero item created from an INSPIRE record
+ * (panel import). Unpublished arXiv papers become `preprint` under the
+ * keep-preprint policy; everything else keeps the historical `journalArticle`.
+ */
+export function resolveNewItemType(
+  meta: ItemTypeMeta,
+  policy: ItemTypePolicy,
+): "journalArticle" | "preprint" {
+  if (policy.keepPreprintType && isUnpublishedArxivRecord(meta)) {
+    return "preprint";
+  }
+  return "journalArticle";
 }

@@ -183,11 +183,11 @@ Zotero's main item list (Item Tree) supports two custom columns:
 
 **Preferences**:
 
-| Preference                  | Type    | Default | Description                                                                                                                                                                |
-| --------------------------- | ------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cites_column_exclude_self` | boolean | false   | Show citation counts without self-citations when available. If the items list doesn't update, switch collections or restart Zotero.                                        |
-| `arxiv_in_journal_abbrev`   | boolean | false   | Legacy: write `arXiv:...` into `journalAbbreviation` for unpublished papers (kept for backward compatibility).                                                             |
-| `keep_preprint_type`        | boolean | false   | Keep `preprint` / `report` items as they are until INSPIRE reports a journal publication, then convert to `journalArticle`. Ignored while `arxiv_in_journal_abbrev` is on. |
+| Preference                  | Type    | Default | Description                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cites_column_exclude_self` | boolean | false   | Show citation counts without self-citations when available. If the items list doesn't update, switch collections or restart Zotero.                                                                                                                                                                                                                                      |
+| `arxiv_in_journal_abbrev`   | boolean | false   | Legacy: write `arXiv:...` into `journalAbbreviation` for unpublished papers (kept for backward compatibility).                                                                                                                                                                                                                                                           |
+| `keep_preprint_type`        | boolean | true    | Keep `preprint` / `report` items as they are until INSPIRE reports a journal publication, then convert to `journalArticle`; unpublished arXiv `journalArticle` items (no journal data locally or on INSPIRE) become `preprint` again on a full update, and panel imports of unpublished papers are created as `preprint`. Ignored while `arxiv_in_journal_abbrev` is on. |
 
 ---
 
@@ -282,7 +282,7 @@ A dedicated `localCache` service stores References/Cited By/Author Papers JSON f
 - **Concurrent processing**: 4 parallel workers for batch updates
 - **Progress window**: Shows update progress
 - **CrossRef fallback**: Falls back to CrossRef for citation counts if INSPIRE fails
-- **Item type conversion**: `preprint` / `report` items become `journalArticle` as soon as an INSPIRE record is found (historical default), or only once INSPIRE reports a journal publication when `keep_preprint_type` is on; records typed `book` on INSPIRE become `book`
+- **Item type conversion**: with `keep_preprint_type` (default on), `preprint` / `report` items become `journalArticle` only once INSPIRE reports a journal publication, and unpublished arXiv `journalArticle` items are turned back into `preprint`; with it off, `preprint` / `report` become `journalArticle` as soon as an INSPIRE record is found (historical behaviour). Records typed `book` on INSPIRE become `book`. The `preprint` -> `journalArticle` / `journalArticle` -> `preprint` decisions need the full record, so they only run for full / no-abstract updates, never for citation-count-only requests
 - **Tag support**: Can tag items without INSPIRE recid
 
 ### 4.2 Smart Update Mode

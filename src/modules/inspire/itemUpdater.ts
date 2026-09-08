@@ -39,6 +39,8 @@ import {
   resolveInspireItemType,
   policyFromPrefs,
   type ItemTypePolicy,
+  type LocalPublicationFields,
+  type TargetItemType,
 } from "./itemTypePolicy";
 import {
   isSmartUpdateEnabled,
@@ -880,14 +882,25 @@ export class ZInspire {
         if (item.hasTag(getPref("tag_norecid") as string)) {
           item.removeTag(getPref("tag_norecid") as string);
         }
-        applyInspireItemType(item, metaInspire as jsobject);
+        // Decide the item type first but apply it only once the item is
+        // going to be saved, so a cancelled preview leaves it untouched.
+        const targetType = resolveTargetItemType(
+          item,
+          metaInspire as jsobject,
+          operation,
+        );
 
         // Smart update mode: compare and filter changes
         if (isSmartUpdateEnabled()) {
-          const diff = compareItemWithInspire(item, metaInspire as jsobject);
+          const diff = compareItemWithInspire(
+            item,
+            metaInspire as jsobject,
+            targetType ?? undefined,
+          );
+          let allowedChanges: FieldChange[] = [];
           if (diff.hasChanges) {
             const protectionConfig = getFieldProtectionConfig();
-            let allowedChanges = filterProtectedChanges(diff, protectionConfig);
+            allowedChanges = filterProtectedChanges(diff, protectionConfig);
             const skippedCount = diff.changes.length - allowedChanges.length;
 
             if (skippedCount > 0) {
@@ -896,52 +909,59 @@ export class ZInspire {
               );
             }
 
-            if (allowedChanges.length > 0) {
-              // Show preview dialog only for single-item updates (not batch)
-              if (shouldShowPreview() && this.toUpdate === 1) {
-                const result = await showSmartUpdatePreviewDialog(
-                  diff,
-                  allowedChanges,
-                );
-                if (!result.confirmed) {
-                  Zotero.debug(
-                    `[${config.addonName}] Smart update: user cancelled preview`,
-                  );
-                  return;
-                }
-                // Filter to only user-selected fields
-                allowedChanges = allowedChanges.filter((c) =>
-                  result.selectedFields.includes(c.field),
-                );
-                if (allowedChanges.length === 0) {
-                  Zotero.debug(
-                    `[${config.addonName}] Smart update: no fields selected by user`,
-                  );
-                  return;
-                }
-              }
-
-              // Apply only allowed changes
-              await setInspireMetaSelective(
-                item,
-                metaInspire as jsobject,
-                operation,
+            // Show preview dialog only for single-item updates (not batch)
+            if (
+              allowedChanges.length > 0 &&
+              shouldShowPreview() &&
+              this.toUpdate === 1
+            ) {
+              const result = await showSmartUpdatePreviewDialog(
+                diff,
                 allowedChanges,
               );
-              await saveItemWithPendingInspireNote(item);
-              this.counter++;
-            } else {
-              Zotero.debug(
-                `[${config.addonName}] Smart update: no changes to apply after filtering`,
+              if (!result.confirmed) {
+                Zotero.debug(
+                  `[${config.addonName}] Smart update: user cancelled preview`,
+                );
+                return;
+              }
+              // Filter to only user-selected fields
+              allowedChanges = allowedChanges.filter((c) =>
+                result.selectedFields.includes(c.field),
               );
+              if (allowedChanges.length === 0) {
+                Zotero.debug(
+                  `[${config.addonName}] Smart update: no fields selected by user`,
+                );
+                return;
+              }
             }
+          }
+
+          if (allowedChanges.length > 0) {
+            // Apply only allowed changes
+            applyItemType(item, targetType);
+            await setInspireMetaSelective(
+              item,
+              metaInspire as jsobject,
+              operation,
+              allowedChanges,
+            );
+            await saveItemWithPendingInspireNote(item);
+            this.counter++;
+          } else if (targetType) {
+            // No field changes, but the item type still has to change
+            applyItemType(item, targetType);
+            await item.saveTx();
+            this.counter++;
           } else {
             Zotero.debug(
-              `[${config.addonName}] Smart update: no changes detected`,
+              `[${config.addonName}] Smart update: no changes to apply`,
             );
           }
         } else {
           // Standard update mode
+          applyItemType(item, targetType);
           await setInspireMeta(item, metaInspire as jsobject, operation);
           await saveItemWithPendingInspireNote(item);
           this.counter++;
@@ -986,7 +1006,10 @@ export class ZInspire {
           item.removeTag(getPref("tag_norecid") as string);
           item.saveTx();
         }
-        applyInspireItemType(item, metaInspire as jsobject);
+        applyItemType(
+          item,
+          resolveTargetItemType(item, metaInspire as jsobject, operation),
+        );
         await setInspireMeta(item, metaInspire as jsobject, operation);
         await saveItemWithPendingInspireNote(item);
         this.counter++;
@@ -2232,19 +2255,66 @@ export function getItemTypePolicy(): ItemTypePolicy {
   );
 }
 
+/** Journal-related fields of the item, read type-agnostically ("" if absent). */
+function readLocalPublicationFields(item: Zotero.Item): LocalPublicationFields {
+  return {
+    journalAbbreviation: item.getField("journalAbbreviation") as string,
+    publicationTitle: item.getField("publicationTitle") as string,
+    volume: item.getField("volume") as string,
+    pages: item.getField("pages") as string,
+    DOI: item.getField("DOI") as string,
+  };
+}
+
 /**
- * Convert the item type according to the INSPIRE record and the user's policy
- * (preprint/report -> journalArticle once published, anything -> book for
- * book records). Leaves the type alone when nothing needs to change.
+ * Item type the item should get for this INSPIRE match, or null.
+ * The Journal Article -> Preprint direction needs the full record (journal
+ * info and arXiv ID), so it is only considered for full/noabstract updates;
+ * citation-count-only requests carry no publication data.
  */
-function applyInspireItemType(item: Zotero.Item, metaInspire: jsobject): void {
-  const targetType = resolveInspireItemType(
+function resolveTargetItemType(
+  item: Zotero.Item,
+  metaInspire: jsobject,
+  operation: string,
+): TargetItemType | null {
+  const local =
+    operation === "full" || operation === "noabstract"
+      ? readLocalPublicationFields(item)
+      : undefined;
+  return resolveInspireItemType(
     item.itemType,
     metaInspire,
     getItemTypePolicy(),
+    local,
   );
-  if (targetType) {
+}
+
+/** Change the item type (Zotero drops fields the new type lacks). */
+function applyItemType(
+  item: Zotero.Item,
+  targetType: TargetItemType | null,
+): void {
+  if (targetType && targetType !== item.itemType) {
     item.setType(Zotero.ItemTypes.getID(targetType) as number);
+  }
+}
+
+/**
+ * Preprint items: fill the fields Zotero's own arXiv translator uses
+ * (Archive ID "arXiv:ID", Repository "arXiv") when they are still empty.
+ */
+function setPreprintArxivFields(
+  item: Zotero.Item,
+  metaInspire: jsobject,
+): void {
+  if (item.itemType !== "preprint") return;
+  const arxivId = metaInspire.arxiv?.value;
+  if (!arxivId) return;
+  if (!item.getField("archiveID")) {
+    item.setField("archiveID", `arXiv:${arxivId}`);
+  }
+  if (!item.getField("repository")) {
+    item.setField("repository", "arXiv");
   }
 }
 
@@ -2286,6 +2356,7 @@ export async function setInspireMeta(
     if (operation === "full" || operation === "noabstract") {
       item.setField("archive", "INSPIRE");
       item.setField("archiveLocation", metaInspire.recid);
+      setPreprintArxivFields(item, metaInspire);
 
       if (metaInspire.journalAbbreviation) {
         if (item.itemType === "journalArticle") {
@@ -2492,6 +2563,8 @@ export async function setInspireMetaSelective(
     item.setField("archiveLocation", metaInspire.recid);
 
     if (operation === "full" || operation === "noabstract") {
+      setPreprintArxivFields(item, metaInspire);
+
       // Journal / Publication info
       // Note: If no journal info but has arXiv, use arXiv as fallback (matches setInspireMeta logic)
       if (allowedFields.has("journalAbbreviation")) {

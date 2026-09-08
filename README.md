@@ -105,7 +105,7 @@ Enable them via the column picker in the items list header. Preferences:
 
 - **Cites column: exclude self-citations** — Switch between total vs. without self-citations. If the list doesn't update immediately, switch collections or restart Zotero.
 - **Legacy: write arXiv ID into Journal Abbr.** — Disabled by default now that an `arXiv` column exists (kept for backward compatibility).
-- **Keep Preprint item type for unpublished papers** — Preprint (and Report) items are left as they are until INSPIRE reports a journal publication, at which point they become Journal Article with the journal data. Preprint Watch monitors Preprint items as well. Ignored while the legacy option above is on, because the Journal Abbr. field exists only for Journal Article.
+- **Keep Preprint item type for unpublished papers** (on by default) — Preprint (and Report) items are left as they are until INSPIRE reports a journal publication, at which point they become Journal Article with the journal data. Unpublished arXiv papers that earlier versions stored as Journal Article are turned back into Preprint on their next metadata update, and papers imported from the panel are created as Preprint. Preprint Watch monitors Preprint items as well. Ignored while the legacy option above is on, because the Journal Abbr. field exists only for Journal Article. Untick it to keep converting everything to Journal Article.
 
 ---
 
@@ -267,19 +267,19 @@ Add this to your Zotero `engines.json` for quick INSPIRE lookups:
 
 Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences`:
 
-| Setting                               | Description                                                                                          |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Auto-fetch for new items**          | Fetch metadata automatically when adding items                                                       |
-| **Use INSPIRE Citekey**               | Write INSPIRE texkey to Citation Key (Zotero 8+) or Extra (Zotero 7)                                 |
-| **Max authors**                       | Number of authors shown before "et al."                                                              |
-| **Statistics chart**                  | Show year/citation distribution chart                                                                |
-| **Local cache**                       | Enable persistent disk cache for offline use                                                         |
-| **Smart Update**                      | Preserve manual edits during updates                                                                 |
-| **Preprint Watch**                    | Monitor unpublished preprints                                                                        |
-| **Keep Preprint item type**           | Keep Preprint/Report items until INSPIRE reports a journal publication; Preprint Watch monitors them |
-| **Fuzzy citation detection**          | For PDFs with broken text layers                                                                     |
-| **Reuse Zotero 10 citation analysis** | Background reuse of completed Zotero 10.0 results; restart required                                  |
-| **Abstract LaTeX mode**               | KaTeX (full rendering, default) or Unicode                                                           |
+| Setting                               | Description                                                                                                                                    |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Auto-fetch for new items**          | Fetch metadata automatically when adding items                                                                                                 |
+| **Use INSPIRE Citekey**               | Write INSPIRE texkey to Citation Key (Zotero 8+) or Extra (Zotero 7)                                                                           |
+| **Max authors**                       | Number of authors shown before "et al."                                                                                                        |
+| **Statistics chart**                  | Show year/citation distribution chart                                                                                                          |
+| **Local cache**                       | Enable persistent disk cache for offline use                                                                                                   |
+| **Smart Update**                      | Preserve manual edits during updates                                                                                                           |
+| **Preprint Watch**                    | Monitor unpublished preprints                                                                                                                  |
+| **Keep Preprint item type**           | On by default: Preprint/Report items stay until INSPIRE reports a journal publication; unpublished Journal Article items become Preprint again |
+| **Fuzzy citation detection**          | For PDFs with broken text layers                                                                                                               |
+| **Reuse Zotero 10 citation analysis** | Background reuse of completed Zotero 10.0 results; restart required                                                                            |
+| **Abstract LaTeX mode**               | KaTeX (full rendering, default) or Unicode                                                                                                     |
 
 ---
 

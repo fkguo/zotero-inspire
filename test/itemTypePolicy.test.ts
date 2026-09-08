@@ -6,8 +6,10 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveInspireItemType,
+  resolveNewItemType,
   policyFromPrefs,
   hasJournalPublicationInfo,
+  hasLocalPublicationInfo,
   isBookRecord,
 } from "../src/modules/inspire/itemTypePolicy";
 
@@ -126,5 +128,148 @@ describe("resolveInspireItemType — keep preprint type (option on)", () => {
     expect(resolveInspireItemType("journalArticle", published, KEEP)).toBe(
       null,
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Journal Article -> Preprint (undo the historical conversion)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const noLocalInfo = {
+  journalAbbreviation: "",
+  publicationTitle: "",
+  volume: "",
+  pages: "",
+  DOI: "",
+};
+const legacyLocalInfo = {
+  journalAbbreviation: "arXiv:2301.12345 [hep-ph]",
+  publicationTitle: "arXiv",
+  volume: "",
+  pages: "",
+  DOI: "10.48550/arXiv.2301.12345",
+};
+
+describe("hasLocalPublicationInfo", () => {
+  it("ignores empty fields and arXiv placeholders", () => {
+    expect(hasLocalPublicationInfo({})).toBe(false);
+    expect(hasLocalPublicationInfo(noLocalInfo)).toBe(false);
+    expect(hasLocalPublicationInfo(legacyLocalInfo)).toBe(false);
+  });
+
+  it("treats a journal name, volume, pages, or journal DOI as publication data", () => {
+    expect(
+      hasLocalPublicationInfo({ journalAbbreviation: "Phys. Rev. D" }),
+    ).toBe(true);
+    expect(
+      hasLocalPublicationInfo({ publicationTitle: "Physical Review D" }),
+    ).toBe(true);
+    expect(hasLocalPublicationInfo({ volume: "108" })).toBe(true);
+    expect(hasLocalPublicationInfo({ pages: "034001" })).toBe(true);
+    expect(
+      hasLocalPublicationInfo({ DOI: "10.1103/PhysRevD.108.034001" }),
+    ).toBe(true);
+  });
+});
+
+describe("resolveInspireItemType — journalArticle back to preprint", () => {
+  it("converts an unpublished arXiv journalArticle without local journal data", () => {
+    expect(
+      resolveInspireItemType("journalArticle", unpublished, KEEP, noLocalInfo),
+    ).toBe("preprint");
+    expect(
+      resolveInspireItemType(
+        "journalArticle",
+        unpublished,
+        KEEP,
+        legacyLocalInfo,
+      ),
+    ).toBe("preprint");
+  });
+
+  it("never converts when the item or INSPIRE carries journal data", () => {
+    expect(
+      resolveInspireItemType("journalArticle", published, KEEP, noLocalInfo),
+    ).toBe(null);
+    expect(
+      resolveInspireItemType("journalArticle", unpublished, KEEP, {
+        ...noLocalInfo,
+        volume: "108",
+      }),
+    ).toBe(null);
+    expect(
+      resolveInspireItemType("journalArticle", unpublished, KEEP, {
+        ...noLocalInfo,
+        DOI: "10.1103/PhysRevD.108.034001",
+      }),
+    ).toBe(null);
+    expect(
+      resolveInspireItemType("journalArticle", unpublished, KEEP, {
+        ...noLocalInfo,
+        journalAbbreviation: "Phys. Rev. D",
+      }),
+    ).toBe(null);
+  });
+
+  it("needs an arXiv ID on the INSPIRE record", () => {
+    expect(
+      resolveInspireItemType(
+        "journalArticle",
+        { document_type: ["article"] },
+        KEEP,
+        noLocalInfo,
+      ),
+    ).toBe(null);
+  });
+
+  it("is skipped without local fields (citation-count-only requests)", () => {
+    expect(resolveInspireItemType("journalArticle", unpublished, KEEP)).toBe(
+      null,
+    );
+  });
+
+  it("is skipped when the option is off, and books still win", () => {
+    expect(
+      resolveInspireItemType(
+        "journalArticle",
+        unpublished,
+        CONVERT,
+        noLocalInfo,
+      ),
+    ).toBe(null);
+    expect(
+      resolveInspireItemType(
+        "journalArticle",
+        { ...book, arxiv: { value: "2301.12345" } },
+        KEEP,
+        noLocalInfo,
+      ),
+    ).toBe("book");
+  });
+
+  it("does not touch other item types", () => {
+    expect(
+      resolveInspireItemType("conferencePaper", unpublished, KEEP, noLocalInfo),
+    ).toBe(null);
+    expect(
+      resolveInspireItemType("thesis", unpublished, KEEP, noLocalInfo),
+    ).toBe(null);
+  });
+});
+
+describe("resolveNewItemType (panel import)", () => {
+  it("creates unpublished arXiv papers as preprint under the keep policy", () => {
+    expect(resolveNewItemType(unpublished, KEEP)).toBe("preprint");
+  });
+
+  it("creates journalArticle otherwise", () => {
+    expect(resolveNewItemType(published, KEEP)).toBe("journalArticle");
+    expect(resolveNewItemType(unpublished, CONVERT)).toBe("journalArticle");
+    expect(resolveNewItemType({ document_type: ["article"] }, KEEP)).toBe(
+      "journalArticle",
+    );
+    expect(
+      resolveNewItemType({ ...book, arxiv: { value: "2301.12345" } }, KEEP),
+    ).toBe("journalArticle");
   });
 });

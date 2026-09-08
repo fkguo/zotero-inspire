@@ -44,7 +44,7 @@ pref-arxiv-in-journal-abbrev-desc = 对未发表论文，将 `arXiv:...` 写入 
 
 pref-keep-preprint-type =
     .label = 未发表论文保留 Preprint 条目类型
-pref-keep-preprint-type-desc = Preprint（及 Report）条目不再改为 Journal Article，直到 INSPIRE 给出期刊发表信息才转换。Preprint Watch 也会监测 Preprint 类型条目。上方兼容选项开启时本选项不可用，因为 Journal Abbr. 字段只存在于 Journal Article 类型。
+pref-keep-preprint-type-desc = Preprint（及 Report）条目不再改为 Journal Article，直到 INSPIRE 给出期刊发表信息才转换；已存为 Journal Article 的未发表 arXiv 文章会在下次更新元数据时改回 Preprint，从面板导入的未发表文章也直接建为 Preprint。Preprint Watch 也会监测 Preprint 类型条目。上方兼容选项开启时本选项不可用，因为 Journal Abbr. 字段只存在于 Journal Article 类型。
 
 pref-arxiv-tag1 =
     .label = 添加 arXiv 主分类作为标签（如 hep-ph、nucl-th）

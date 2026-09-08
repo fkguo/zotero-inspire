@@ -35,10 +35,13 @@ describe("compareItemWithInspire (arXiv journalAbbreviation fallback)", () => {
       journalAbbreviation: "",
     });
 
-    const diff = compareItemWithInspire(item as any, {
-      title: "Test Paper",
-      arxiv: { value: "1234.5678", categories: ["hep-ph"] },
-    } as any);
+    const diff = compareItemWithInspire(
+      item as any,
+      {
+        title: "Test Paper",
+        arxiv: { value: "1234.5678", categories: ["hep-ph"] },
+      } as any,
+    );
 
     expect(getPref).toHaveBeenCalledWith("arxiv_in_journal_abbrev");
     expect(diff.hasChanges).toBe(false);
@@ -54,10 +57,13 @@ describe("compareItemWithInspire (arXiv journalAbbreviation fallback)", () => {
       journalAbbreviation: "",
     });
 
-    const diff = compareItemWithInspire(item as any, {
-      title: "Test Paper",
-      arxiv: { value: "1234.5678", categories: ["hep-ph"] },
-    } as any);
+    const diff = compareItemWithInspire(
+      item as any,
+      {
+        title: "Test Paper",
+        arxiv: { value: "1234.5678", categories: ["hep-ph"] },
+      } as any,
+    );
 
     expect(getPref).toHaveBeenCalledWith("arxiv_in_journal_abbrev");
     expect(diff.hasChanges).toBe(true);
@@ -66,3 +72,31 @@ describe("compareItemWithInspire (arXiv journalAbbreviation fallback)", () => {
   });
 });
 
+describe("compareItemWithInspire (effective item type)", () => {
+  beforeEach(() => {
+    vi.mocked(getPref).mockReset();
+  });
+
+  it("uses the type the updater is about to apply for the arXiv fallback", () => {
+    vi.mocked(getPref).mockReturnValue(true);
+
+    const item = createItem({
+      title: "Test Paper",
+      extra: "arXiv:1234.5678 [hep-ph]\n",
+      journalAbbreviation: "",
+    });
+    item.itemType = "preprint";
+
+    const meta = {
+      title: "Test Paper",
+      arxiv: { value: "1234.5678", categories: ["hep-ph"] },
+    } as any;
+
+    // Still a preprint: no journalAbbreviation fallback
+    expect(compareItemWithInspire(item as any, meta).hasChanges).toBe(false);
+    // About to become a journalArticle: the fallback applies
+    const diff = compareItemWithInspire(item as any, meta, "journalArticle");
+    expect(diff.hasChanges).toBe(true);
+    expect(diff.changes[0].field).toBe("journalAbbreviation");
+  });
+});
