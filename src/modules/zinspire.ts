@@ -995,11 +995,11 @@ export class ZInspireReferencePane {
     btn.type = "button";
     const dark = isDarkMode();
     const label =
-      getString("references-panel-citation-graph-title") || "Citation Graph";
+      getString("connections-graph-title") || "Connections Graph";
     btn.setAttribute("aria-label", label);
     btn.title =
       getString("references-panel-citation-graph-tooltip") ||
-      "Open citation graph";
+      "Open Connections Graph";
     btn.innerHTML = this.buildCitationGraphIconSvg(dark);
     // FIX-WINDOWS-TOOLBAR-GRAPH-BUTTON: Add appearance:none to disable OS theme padding on Windows
     // Same fix as panel graphBtn (line ~1846)
@@ -2220,11 +2220,11 @@ export class InspireReferencePanelController {
     graphBtn.innerHTML =
       ZInspireReferencePane.buildCitationGraphIconSvg(graphBtnDark);
     const graphLabel =
-      getString("references-panel-citation-graph-button") || "Citation Graph";
+      getString("references-panel-citation-graph-button") || "Connections Graph";
     graphBtn.setAttribute("aria-label", graphLabel);
     graphBtn.title =
       getString("references-panel-citation-graph-tooltip") ||
-      "Open citation graph";
+      "Open Connections Graph";
     // FIX-WINDOWS-GRAPH-BUTTON: Add appearance:none to disable OS theme padding on Windows
     graphBtn.style.cssText = `
       appearance: none;

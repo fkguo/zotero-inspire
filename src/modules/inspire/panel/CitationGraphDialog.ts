@@ -695,7 +695,11 @@ export class CitationGraphDialog {
 
     const modes = this.doc.createElement("div");
     modes.style.cssText =
-      "display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--fill-quinary,#ddd);cursor:move;flex-shrink:0";
+      "display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--fill-quinary,#ddd);cursor:move;flex-shrink:0";
+    const windowTitle = this.doc.createElement("span");
+    windowTitle.textContent = getString("connections-graph-title");
+    windowTitle.style.cssText =
+      "font-weight:600;white-space:nowrap;margin-right:4px;color:var(--fill-primary,#1e293b)";
     const citationsMode = this.doc.createElement("button");
     citationsMode.type = "button";
     citationsMode.textContent = getString(
@@ -710,7 +714,7 @@ export class CitationGraphDialog {
     maximize.title = getString("academic-tree-maximize");
     maximize.style.marginLeft = "auto";
     maximize.addEventListener("click", toggleMaximized);
-    modes.append(citationsMode, academicMode, maximize, closeBtn);
+    modes.append(windowTitle, citationsMode, academicMode, maximize, closeBtn);
     const modeDragCleanup = makeGraphWindowDraggable(this.doc, dialog, modes);
     const headerDragCleanup = this.dialogDragCleanup;
     this.dialogDragCleanup = () => {
@@ -745,9 +749,7 @@ export class CitationGraphDialog {
       applyPillButtonStyle(academicMode, academic, isDarkMode());
       dialog.setAttribute(
         "aria-label",
-        academic
-          ? academicMode.textContent || ""
-          : citationsMode.textContent || "",
+        `${windowTitle.textContent}: ${academic ? academicMode.textContent : citationsMode.textContent}`,
       );
       if (!academic && !this.graphResult) void this.loadSeeds(this.seeds);
     };
@@ -757,7 +759,10 @@ export class CitationGraphDialog {
     academicMode.addEventListener("click", () => this.switchGraphMode?.(true));
     applyPillButtonStyle(citationsMode, true, dark);
     applyPillButtonStyle(academicMode, false, dark);
-    dialog.setAttribute("aria-label", citationsMode.textContent || "");
+    dialog.setAttribute(
+      "aria-label",
+      `${windowTitle.textContent}: ${citationsMode.textContent}`,
+    );
     dialog.append(modes, citationContent);
     backdrop.appendChild(dialog);
     (this.doc.body || this.doc.documentElement).appendChild(backdrop);

@@ -105,12 +105,12 @@ Select an item with an INSPIRE record, then find the **INSPIRE** section in the 
 | **⭐ Favorites**  | Your favorite authors and papers                                                                         |
 
 - **Related**: hybrid ranking = weighted bibliographic coupling (shared refs) + optional co-citation re-ranking; by default it ignores the PDG _Review of Particle Physics_ as a seed anchor (too generic).
-- **Academic Tree**: explore advisor–student relationships in the shared graph window. See [Explore Academic Tree](#explore-academic-tree-new-in-320).
-- **Citation Graph**: a 1-hop visualization (refs/cited-by configurable up to 200 per side). Open via the panel button or the main toolbar button next to the search box; with no selection it opens an empty canvas where you can add seeds. Drag the time-range sliders under each x-axis to zoom the time window. Use the Reviews toggle to include/exclude review articles (incl. PDG).
+- **Academic Tree**: explore advisor–student relationships in the shared **Connections Graph** window. See [Explore Academic Tree](#explore-academic-tree-new-in-320).
+- **Citation Graph**: a 1-hop visualization (refs/cited-by configurable up to 200 per side). Open **Connections Graph** via the panel button or the main toolbar button next to the search box; with no selection it opens an empty canvas where you can add seeds. Drag the time-range sliders under each x-axis to zoom the time window. Use the Reviews toggle to include/exclude review articles (incl. PDG).
 
 ### Explore Academic Tree (new in 3.2.0)
 
-Open **Academic Tree** from an author preview card or the **Author Papers** profile. You can also switch to **Academic Tree** at the top of the Citation Graph window and search for an author. The shared window can be resized or maximized.
+Open **Academic Tree** from an author preview card or the **Author Papers** profile. You can also switch to **Academic Tree** at the top of the Connections Graph window and search for an author. The shared window can be resized or maximized.
 
 - **Choose generations**: set ancestors and descendants independently from **0 to 6**, with **2 in each direction** by default. Zero hides that direction.
 - **Follow a name**: click an author's name to make them the tree's center and display their author page in the sidebar. Hover for the usual author preview, including favorites and paper actions.

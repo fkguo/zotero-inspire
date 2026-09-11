@@ -149,7 +149,7 @@ The **Citation Graph** dialog provides a 1-hop visualization of **References** (
 
 ### Academic Tree
 
-Open **Academic Tree** from an author preview card or the Author Papers profile, or switch to **Academic Tree** at the top of the Citation Graph window and search for an author.
+Open **Academic Tree** from an author preview card or the Author Papers profile, or switch to **Academic Tree** at the top of the Connections Graph window and search for an author.
 
 - Set ancestor and descendant depths independently from **0 to 6**, with **2 generations in each direction** by default. Zero hides that direction. Branch expansion also stops at six generations from the current root; click a boundary author's name to continue from a new center.
 - Click an author's name to trace their tree and display their author page in the sidebar while keeping the window open. Hovering over a name shows the same author preview card used in the sidebar.

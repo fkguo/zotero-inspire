@@ -58,6 +58,7 @@ export type FluentMessageId =
   | 'collab-tag-no-selection'
   | 'collab-tag-progress'
   | 'collab-tag-result'
+  | 'connections-graph-title'
   | 'copy-error-bibtex-failed'
   | 'copy-error-clipboard-failed'
   | 'copy-error-no-citation-key'
