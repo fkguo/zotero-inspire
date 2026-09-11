@@ -11,6 +11,7 @@ import type {
   AcademicTreeNode,
   AcademicDegreeFilter,
   AcademicDirection,
+  AcademicTreeSource,
 } from "../academicTreeTypes";
 import {
   ACADEMIC_TREE_DEFAULT_DEPTH,
@@ -20,11 +21,26 @@ import {
 } from "../academicTreeTypes";
 import {
   academicTreeSource,
+  createAcademicTreeSession,
   searchAcademicAuthors,
 } from "../academicTreeDataService";
 import { buildAcademicTree } from "../academicTreeService";
 import { AcademicTreeCanvas } from "./AcademicTreeCanvas";
 import { NAVIGATION_STACK_LIMIT } from "../constants";
+
+interface AcademicTreeLoad {
+  source: AcademicTreeSource;
+  recid: string;
+  expansion?: AcademicDirection;
+  anchorId?: string;
+  existing?: AcademicTreeGraph;
+  refresh: boolean;
+  expansions?: Array<{
+    id: string;
+    direction: AcademicDirection;
+    remaining?: number;
+  }>;
+}
 
 interface AcademicTreeSnapshot {
   author: AuthorSearchInfo;
@@ -39,6 +55,8 @@ interface AcademicTreeSnapshot {
   viewport: ReturnType<AcademicTreeCanvas["captureViewport"]>;
   status: string;
   moreHidden: boolean;
+  pending?: AcademicTreeLoad;
+  recovery?: "retry" | "continue";
 }
 
 /** Author genealogy content hosted in the citation graph's resizable window. */
@@ -55,6 +73,10 @@ export class AcademicTreeView {
   private down: HTMLSelectElement;
   private degree: HTMLSelectElement;
   private stop: HTMLButtonElement;
+  private refresh: HTMLButtonElement;
+  private recover: HTMLButtonElement;
+  private pending?: AcademicTreeLoad;
+  private recovery?: "retry" | "continue";
   private more: HTMLButtonElement;
   private back: HTMLButtonElement;
   private forward: HTMLButtonElement;
@@ -172,14 +194,20 @@ export class AcademicTreeView {
     this.stop.disabled = true;
     this.more = this.button("academic-tree-more", () => {
       this.limit = Math.min(ACADEMIC_TREE_MAX_NODES, this.limit + 200);
-      void this.load(this.lastExpansion?.direction, this.lastExpansion?.id);
+      void this.load(undefined, undefined, "resume");
     });
     this.more.hidden = true;
-    controls.append(
-      this.button("academic-tree-reload", () => void this.load()),
-      this.stop,
-      this.more,
+    this.refresh = this.button(
+      "academic-tree-refresh",
+      () => void this.load(undefined, undefined, "refresh"),
     );
+    this.refresh.title = getString("academic-tree-refresh-hint");
+    this.recover = this.button(
+      "academic-tree-retry",
+      () => void this.load(undefined, undefined, "resume"),
+    );
+    controls.append(this.refresh, this.recover, this.stop, this.more);
+    this.updateLoadControls();
     this.status = doc.createElement("div");
     this.status.setAttribute("role", "status");
     this.status.style.cssText =
@@ -376,6 +404,8 @@ export class AcademicTreeView {
         ? getString("academic-tree-stopped")
         : this.status.textContent || "",
       moreHidden: this.more.hidden,
+      pending: this.pending,
+      recovery: this.busy ? "continue" : this.recovery,
     };
   }
   private pushHistory(
@@ -414,6 +444,9 @@ export class AcademicTreeView {
     this.degree.value = entry.degree;
     this.limit = entry.limit;
     this.lastExpansion = entry.expansion;
+    this.pending = entry.pending;
+    this.recovery = entry.recovery;
+    this.updateLoadControls();
     this.actions.replaceChildren();
     this.details.textContent = getString("academic-tree-canvas-help");
     this.canvas.clear();
@@ -430,7 +463,9 @@ export class AcademicTreeView {
     }
     // A visit interrupted before its first graph snapshot can be retried safely.
     await Promise.all([
-      this.graph ? Promise.resolve() : this.load(),
+      this.graph
+        ? Promise.resolve()
+        : this.load(undefined, undefined, "resume"),
       this.viewPapers({
         id: entry.author.recid!,
         recid: entry.author.recid,
@@ -459,11 +494,30 @@ export class AcademicTreeView {
     this.graph = undefined;
     this.selected = undefined;
     this.limit = ACADEMIC_TREE_INITIAL_LIMIT;
+    this.pending = undefined;
+    this.recovery = undefined;
     this.candidates.replaceChildren();
     this.updateNavigation();
     await this.load();
   }
-  private async load(expansion?: AcademicDirection, anchorId?: string) {
+  private updateLoadControls() {
+    this.refresh.disabled = this.busy || !this.initialAuthor?.recid;
+    this.stop.hidden = !this.busy;
+    this.stop.disabled = !this.busy;
+    this.recover.hidden = this.busy || !this.recovery;
+    const key =
+      this.recovery === "continue"
+        ? "academic-tree-continue"
+        : "academic-tree-retry";
+    this.recover.textContent = getString(key);
+    this.recover.setAttribute("aria-label", getString(key));
+    this.recover.title = getString(key);
+  }
+  private async load(
+    expansion?: AcademicDirection,
+    anchorId?: string,
+    mode: "normal" | "refresh" | "resume" = "normal",
+  ) {
     const anchor = expansion
       ? this.graph?.nodes.find(
           (node) => node.id === (anchorId || this.selected),
@@ -471,80 +525,156 @@ export class AcademicTreeView {
       : undefined;
     const recid =
       anchor?.recid || this.root?.recid || this.initialAuthor?.recid;
-    this.lastExpansion =
-      expansion && anchor ? { id: anchor.id, direction: expansion } : undefined;
     if (!recid) {
       this.status.textContent = getString("academic-tree-choose");
       return;
     }
+    const priorExpansion = this.lastExpansion;
+    const failedBranches =
+      this.graph?.failures.map((task) => {
+        const level =
+          this.graph!.nodes.find((node) => node.id === task.id)?.level || 0;
+        return {
+          ...task,
+          remaining: Math.max(
+            1,
+            task.direction === "up"
+              ? Number(this.up.value) + level
+              : Number(this.down.value) - level,
+          ),
+        };
+      }) ?? [];
+    const operation: AcademicTreeLoad =
+      mode === "resume" && this.pending
+        ? this.pending
+        : {
+            source: createAcademicTreeSession(mode === "refresh"),
+            recid,
+            expansion,
+            anchorId: anchor?.id,
+            existing: expansion ? this.graph : undefined,
+            refresh: mode === "refresh",
+            expansions:
+              mode === "refresh" && this.graph
+                ? [
+                    ...this.graph.expanded.up.map((id) => ({
+                      id,
+                      direction: "up" as const,
+                    })),
+                    ...this.graph.expanded.down.map((id) => ({
+                      id,
+                      direction: "down" as const,
+                    })),
+                    ...failedBranches,
+                    ...(priorExpansion ? [priorExpansion] : []),
+                  ]
+                : expansion
+                  ? failedBranches
+                  : undefined,
+          };
     this.cancel(false);
+    this.pending = operation;
+    this.lastExpansion =
+      operation.expansion && operation.anchorId
+        ? { id: operation.anchorId, direction: operation.expansion }
+        : undefined;
     const controller = createAbortController();
     if (!controller) {
+      this.recovery = "retry";
+      this.updateLoadControls();
       this.status.textContent = getString("academic-tree-load-error");
       return;
     }
+    const keepGraph = operation.refresh || mode === "resume";
+    const viewport = this.graph ? this.canvas.captureViewport() : undefined;
     this.abort = controller;
     const seq = ++this.sequence;
     this.busy = true;
-    this.stop.disabled = false;
+    this.recovery = undefined;
+    this.updateLoadControls();
     this.more.hidden = true;
-    this.actions.replaceChildren();
-    if (!expansion) {
+    if (!keepGraph) this.actions.replaceChildren();
+    if (!operation.expansion && !keepGraph) {
       this.graph = undefined;
       this.selected = undefined;
       this.canvas.clear();
       this.details.textContent = getString("academic-tree-canvas-help");
     }
-    this.status.textContent = getString("academic-tree-loading");
+    this.status.textContent = getString(
+      operation.refresh ? "academic-tree-refreshing" : "academic-tree-loading",
+    );
+    const current = () =>
+      !this.disposed && !controller.signal.aborted && seq === this.sequence;
     try {
-      const profile = await academicTreeSource.profile(
-        recid,
+      const profile = await operation.source.profile(
+        operation.recid,
         controller.signal,
       );
-      if (this.disposed || controller.signal.aborted || seq !== this.sequence)
-        return;
-      if (!expansion) {
-        this.root = profile;
-        this.selected = profile.recid;
-      }
-      await buildAcademicTree(profile, {
-        upDepth: expansion ? Number(expansion === "up") : Number(this.up.value),
-        downDepth: expansion
-          ? Number(expansion === "down")
+      if (!current()) return;
+      const graph = await buildAcademicTree(profile, {
+        upDepth: operation.expansion
+          ? Number(operation.expansion === "up")
+          : Number(this.up.value),
+        downDepth: operation.expansion
+          ? Number(operation.expansion === "down")
           : Number(this.down.value),
         maxNodes: this.limit,
         degreeFilter: this.degree.value as AcademicDegreeFilter,
-        existing: expansion ? this.graph : undefined,
+        existing: operation.existing,
+        expansions: operation.expansions,
+        source: operation.source,
+        hydrateProfiles: true,
         signal: controller.signal,
         onProgress: (graph) => {
-          if (
-            this.disposed ||
-            controller.signal.aborted ||
-            seq !== this.sequence
-          )
-            return;
+          if (!current() || keepGraph) return;
+          if (!operation.expansion) this.root = profile;
+          this.selected ||= graph.rootId;
           this.graph = graph;
           this.canvas.render(graph, this.selected);
           this.updateStatus(true);
         },
       });
-    } catch {
-      if (this.disposed || controller.signal.aborted || seq !== this.sequence)
+      if (!current()) return;
+      const failures =
+        graph.failures.length + (graph.profileFailures?.length || 0);
+      if (failures) this.recovery = "retry";
+      // A failed refresh must not replace the previously usable tree with an incomplete one.
+      if (operation.refresh && failures && this.graph) {
+        this.status.textContent = getString("academic-tree-refresh-error", {
+          args: { count: failures },
+        });
         return;
+      }
+      if (!operation.expansion) {
+        this.root = profile;
+        this.initialAuthor = {
+          ...this.initialAuthor,
+          recid: profile.recid,
+          fullName: profile.name,
+        };
+        this.searchInput.value = profile.name;
+      }
+      this.graph = graph;
+      if (!graph.nodes.some((node) => node.id === this.selected))
+        this.selected = graph.rootId;
+      this.canvas.render(graph, this.selected);
+      if (keepGraph && viewport) this.canvas.restoreViewport(viewport);
+      this.updateStatus(false);
+    } catch {
+      if (!current()) return;
+      this.recovery = "retry";
       this.status.textContent = getString("academic-tree-load-error");
-      return;
     } finally {
-      if (!this.disposed && seq === this.sequence) {
+      if (current()) {
         this.busy = false;
-        this.stop.disabled = true;
+        this.abort = undefined;
+        this.updateLoadControls();
         const node = this.graph?.nodes.find(
           (node) => node.id === this.selected,
         );
         if (node) this.select(node);
       }
     }
-    if (!this.disposed && !controller.signal.aborted && seq === this.sequence)
-      this.updateStatus(false);
   }
   private updateStatus(loading: boolean) {
     if (!this.graph) return;
@@ -561,6 +691,12 @@ export class AcademicTreeView {
       parts.push(
         getString("academic-tree-partial-error", {
           args: { count: this.graph.failures.length },
+        }),
+      );
+    if (this.graph.profileFailures?.length)
+      parts.push(
+        getString("academic-tree-profile-error", {
+          args: { count: this.graph.profileFailures.length },
         }),
       );
     if (this.graph.limited)
@@ -671,7 +807,8 @@ export class AcademicTreeView {
     this.abort = undefined;
     ++this.sequence;
     this.busy = false;
-    if (this.stop) this.stop.disabled = true;
+    if (showStatus && wasBusy) this.recovery = "continue";
+    this.updateLoadControls();
     if (showStatus && wasBusy && !this.disposed) {
       this.status.textContent = getString("academic-tree-stopped");
       const node = this.graph?.nodes.find((node) => node.id === this.selected);

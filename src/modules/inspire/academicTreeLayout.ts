@@ -10,9 +10,9 @@ export interface AcademicTreeLayout {
   height: number;
 }
 export const ACADEMIC_NODE_WIDTH = 148;
-export const ACADEMIC_NODE_HEIGHT = 40;
+export const ACADEMIC_NODE_HEIGHT = 54;
 const COLUMN_STEP = ACADEMIC_NODE_WIDTH + 24;
-const ROW_STEP = ACADEMIC_NODE_HEIGHT + 52;
+const ROW_STEP = ACADEMIC_NODE_HEIGHT + 38;
 
 /** Fit a label to two lines, preferring word boundaries and keeping Unicode code points intact. */
 export function wrapAcademicName(

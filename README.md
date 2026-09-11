@@ -112,13 +112,13 @@ Select an item with an INSPIRE record, then find the **INSPIRE** section in the 
 
 Open **Academic Tree** from an author preview card or the **Author Papers** profile. You can also switch to **Academic Tree** at the top of the Connections Graph window and search for an author. The shared window can be resized or maximized.
 
-- **Choose generations**: set ancestors and descendants independently from **0 to 6**, with **2 in each direction** by default. Zero hides that direction.
+- **Choose generations**: set ancestors and descendants independently from **0 to 8**, with **2 in each direction** by default. Zero hides that direction.
 - **Follow a name**: click an author's name to make them the tree's center and display their author page in the sidebar. Hover for the usual author preview, including favorites and paper actions.
-- **Explore a branch**: click a card's background to select the person, then expand **one generation of advisors or students**. If those direct relationships are already visible, select a boundary person to continue. Expansion stops at six generations from the current center; click a boundary name to trace further from a new center.
+- **Explore a branch**: click a card's background to select the person, then expand **one generation of advisors or students**. If those direct relationships are already visible, select a boundary person to continue. Expansion stops at eight generations from the current center; click a boundary name to trace further from a new center.
 - **Revisit a tree**: Back and Forward restore previous authors, expanded branches, generation settings, relationship filters, selection, and pan/zoom position.
 - **Read a dense tree**: aligned branches, centered names, and highlighted relationships help follow connections. Drag to pan, scroll to zoom, or use the controls in the canvas corner to fit the whole graph or center the root.
 
-Shared advisors and multiple training relationships are retained. Use the relationship filter to show PhD, master, bachelor, or other/unspecified relationships. Results appear progressively; loading can be stopped or retried.
+Shared advisors and multiple training relationships are retained. Use the relationship filter to show PhD, master, bachelor, or other/unspecified relationships. Results appear progressively. **Refresh from INSPIRE** bypasses the cache for the current tree, including expanded branches, while retaining the previous graph until fresh data is ready. **Retry** appears after failures and **Continue loading** after **Stop**; both reuse successful requests. Author cards show current affiliations reported by INSPIRE beneath the name; long affiliations are shortened, with the full text available on hover.
 
 Relationships come from **public INSPIRE author records**. Arrows point from advisor to student. Dashed cards have no linked author record and cannot be expanded automatically; matching names are not treated as proof of identity. Missing records do not establish the absence of a relationship.
 

@@ -151,13 +151,15 @@ The **Citation Graph** dialog provides a 1-hop visualization of **References** (
 
 Open **Academic Tree** from an author preview card or the Author Papers profile, or switch to **Academic Tree** at the top of the Connections Graph window and search for an author.
 
-- Set ancestor and descendant depths independently from **0 to 6**, with **2 generations in each direction** by default. Zero hides that direction. Branch expansion also stops at six generations from the current root; click a boundary author's name to continue from a new center.
+- Set ancestor and descendant depths independently from **0 to 8**, with **2 generations in each direction** by default. Zero hides that direction. Branch expansion also stops at eight generations from the current root; click a boundary author's name to continue from a new center.
 - Click an author's name to trace their tree and display their author page in the sidebar while keeping the window open. Hovering over a name shows the same author preview card used in the sidebar.
 - **Back / Forward** revisit authors and restore expanded branches, depth and relationship filters, selection, and the canvas position while updating the sidebar author page. Up to 20 visits are retained; selecting a different author after going back clears the forward history.
 - Select a card's background for branch actions: expand one generation of advisors or students, set the person as the center, view papers, or open their INSPIRE profile.
 - Names are centered horizontally and vertically within each card. Branches align advisors with their students to reduce crossings. Hover, focus, or select a card to highlight its relationships in blue while keeping the rest visible.
 - Shared advisors and multiple training relationships are retained. Filter PhD, master, bachelor, or other/unspecified relationships. Arrows run from advisor to student.
 - Drag to pan, scroll to zoom, fit the whole graph, center the root, resize or maximize the window. Keyboard shortcuts: arrows to pan, +/− to zoom, and 0 to fit.
+- **Refresh from INSPIRE** fetches fresh records for the current tree and expanded branches, retaining the previous graph while loading or if refresh fails. **Retry** appears after failures; **Continue loading** appears after **Stop**. Both reuse successful requests. Refresh preserves generation and relationship settings and the view position.
+- Author cards show affiliations explicitly marked current by INSPIRE beneath the name. Historical or missing affiliations are omitted; hover over shortened text to read it in full.
 - Results load progressively and can be stopped. The initial budget is 200 people; **Load more** increases it up to 1000. Focus on a branch to explore larger genealogies.
 - Data comes from public INSPIRE author records. People are merged by author ID. Dashed cards contain names without linked author records and cannot be expanded automatically. Missing records do not establish that a relationship does not exist; failed branches can be retried.
 

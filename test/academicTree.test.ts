@@ -54,13 +54,115 @@ const opts = (source: AcademicTreeSource) => ({
 });
 
 describe("academic tree traversal", () => {
-  it("defaults to two generations and allows only 0–6", () => {
+  it("refreshes manually expanded branches from new records without retaining removed relationships", async () => {
+    const profiles = [
+      person(1),
+      person(2, [advisor(1)]),
+      person(3, [advisor(2)]),
+    ];
+    const source = sourceFor(profiles);
+    const graph = await buildAcademicTree(profiles[0], {
+      ...opts(source),
+      upDepth: 0,
+      downDepth: 1,
+      expansions: [{ id: "2", direction: "down" }],
+    });
+    expect(graph.nodes.map((n) => n.id)).toContain("3");
+    const changed = sourceFor([
+      profiles[0],
+      profiles[1],
+      person(4, [advisor(2)]),
+    ]);
+    const fresh = await buildAcademicTree(profiles[0], {
+      ...opts(changed),
+      upDepth: 0,
+      downDepth: 1,
+      expansions: [{ id: "2", direction: "down" }],
+    });
+    expect(fresh.nodes.map((n) => n.id)).toContain("4");
+    expect(fresh.nodes.map((n) => n.id)).not.toContain("3");
+  });
+  it("hydrates boundary mentors' current affiliations without expanding past the selected depth", async () => {
+    const mentor = {
+      ...person(2, [advisor(3)]),
+      currentPosition: { institution: "Current Institute" },
+    };
+    const root = person(1, [advisor(2)]);
+    const graph = await buildAcademicTree(root, {
+      ...opts(sourceFor([root, mentor, person(3)])),
+      upDepth: 1,
+      downDepth: 0,
+      hydrateProfiles: true,
+    });
+    expect(graph.nodes.map((n) => n.id)).toEqual(["1", "2"]);
+    expect(graph.nodes.find((n) => n.id === "2")?.institution).toBe(
+      "Current Institute",
+    );
+  });
+  it("does not rehydrate existing students when expanding a single branch", async () => {
+    const profiles = [
+      person(1),
+      ...Array.from({ length: 150 }, (_, i) => person(i + 2, [advisor(1)])),
+      person(152, [advisor(2)]),
+    ];
+    const source = sourceFor(profiles);
+    const initial = await buildAcademicTree(profiles[0], {
+      ...opts(source),
+      upDepth: 0,
+      downDepth: 1,
+      hydrateProfiles: true,
+    });
+    vi.mocked(source.profile).mockClear();
+    const expanded = await buildAcademicTree(profiles[1], {
+      ...opts(source),
+      upDepth: 0,
+      downDepth: 1,
+      existing: initial,
+      hydrateProfiles: true,
+    });
+    expect(expanded.nodes.some((n) => n.id === "152")).toBe(true);
+    expect(source.profile).not.toHaveBeenCalled();
+  });
+  it("retries hydration budget omissions and excludes completed requests from the next request budget", async () => {
+    const root = person(
+      1,
+      Array.from({ length: 601 }, (_, i) => advisor(i + 2)),
+    );
+    const completed = new Set<string>();
+    const source: AcademicTreeSource = {
+      hasProfile: (id) => completed.has(id),
+      profile: async (id) => {
+        completed.add(id);
+        return {
+          ...person(Number(id)),
+          currentPosition: { institution: "Institute" },
+        };
+      },
+      students: async () => ({ profiles: [], total: 0, hasMore: false }),
+    };
+    const options = {
+      ...opts(source),
+      maxNodes: 1000,
+      upDepth: 1,
+      downDepth: 0,
+      hydrateProfiles: true,
+    };
+    const first = await buildAcademicTree(root, options);
+    expect(first.limited).toBe(false);
+    expect(first.profileFailures).toHaveLength(101);
+    const retry = await buildAcademicTree(root, options);
+    expect(retry.profileFailures).toHaveLength(0);
+    expect(retry.nodes.find((n) => n.id === "602")?.institution).toBe(
+      "Institute",
+    );
+  });
+  it("defaults to two generations and allows only 0–8", () => {
     expect(ACADEMIC_TREE_DEFAULT_DEPTH).toBe(2);
-    expect([-3, 0, 2, 6, 20, NaN].map(clampAcademicDepth)).toEqual([
-      0, 0, 2, 6, 6, 2,
+    expect([-3, 0, 2, 6, 8, 20, NaN].map(clampAcademicDepth)).toEqual([
+      0, 0, 2, 6, 8, 8, 2,
     ]);
   });
-  it("honors independent zero, two and six generation bounds", async () => {
+  it("honors independent zero, two and eight generation bounds", async () => {
     const profiles = Array.from({ length: 25 }, (_, i) =>
       person(i + 1, i ? [advisor(i)] : []),
     );
@@ -68,9 +170,9 @@ describe("academic tree traversal", () => {
     for (const [up, down] of [
       [0, 0],
       [2, 2],
-      [6, 0],
-      [0, 6],
-      [6, 6],
+      [8, 0],
+      [0, 8],
+      [8, 8],
     ]) {
       const graph = await buildAcademicTree(profiles[12], {
         ...opts(source),
@@ -83,7 +185,7 @@ describe("academic tree traversal", () => {
       expect(graph.nodes.find((n) => n.id === "13")?.level).toBe(0);
     }
   });
-  it("prevents local expansion past six generations, but allows tracing from a new root", async () => {
+  it("prevents local expansion past eight generations, but allows tracing from a new root", async () => {
     const profiles = Array.from({ length: 25 }, (_, i) =>
       person(i + 1, i ? [advisor(i)] : []),
     );
@@ -95,10 +197,10 @@ describe("academic tree traversal", () => {
     });
     expect(
       initial.nodes.map((node) => Number(node.id)).sort((a, b) => a - b),
-    ).toEqual(Array.from({ length: 13 }, (_, i) => i + 7));
+    ).toEqual(Array.from({ length: 17 }, (_, i) => i + 5));
     for (const [id, direction] of [
-      [7, "up"],
-      [19, "down"],
+      [5, "up"],
+      [21, "down"],
     ] as const) {
       vi.mocked(source.profile).mockClear();
       vi.mocked(source.students).mockClear();
@@ -113,15 +215,15 @@ describe("academic tree traversal", () => {
       expect(source.students).not.toHaveBeenCalled();
       const recentered = await buildAcademicTree(profiles[id - 1], {
         ...opts(source),
-        upDepth: 6,
-        downDepth: 6,
+        upDepth: 8,
+        downDepth: 8,
       });
       expect(
         recentered.nodes.some(
           (node) => node.id === String(id + (direction === "up" ? -1 : 1)),
         ),
       ).toBe(true);
-      expect(recentered.nodes.every((node) => Math.abs(node.level) <= 6)).toBe(
+      expect(recentered.nodes.every((node) => Math.abs(node.level) <= 8)).toBe(
         true,
       );
     }
@@ -171,13 +273,13 @@ describe("academic tree traversal", () => {
     });
     expect(graph.nodes.map((n) => n.id).sort()).toEqual(["1", "3"]);
   });
-  it("deduplicates cyclic records and terminates six-generation traversal", async () => {
+  it("deduplicates cyclic records and terminates eight-generation traversal", async () => {
     const profiles = [person(1, [advisor(2)]), person(2, [advisor(1)])];
     const source = sourceFor(profiles);
     const graph = await buildAcademicTree(profiles[0], {
       ...opts(source),
-      upDepth: 6,
-      downDepth: 6,
+      upDepth: 8,
+      downDepth: 8,
     });
     expect(graph.nodes).toHaveLength(2);
     expect(graph.edges).toHaveLength(2);
@@ -381,7 +483,7 @@ describe("academic tree metadata and layout", () => {
     );
     const graph = await buildAcademicTree(profiles[0], {
       ...opts(sourceFor(profiles)),
-      downDepth: 6,
+      downDepth: 8,
     });
     const layout = layoutAcademicTree(graph);
     for (const [i, a] of layout.nodes.entries()) {

@@ -59,7 +59,7 @@ describe("academic tree data source", () => {
     );
     expect(mocks.set).toHaveBeenCalledWith(
       "academic_tree",
-      "v1-profile-2",
+      "v2-profile-2",
       expect.anything(),
       undefined,
       1,
@@ -132,6 +132,72 @@ describe("academic tree data source", () => {
     expect(results[0].advisors).toEqual([
       { name: "Public", degreeType: "other", recid: undefined },
     ]);
+  });
+  it("forced refresh bypasses memory and disk, updates caches, and resumes successful requests without refetching", async () => {
+    const { academicTreeSource, createAcademicTreeSession } =
+      await import("../src/modules/inspire/academicTreeDataService");
+    mocks.get.mockResolvedValue({
+      data: { data: { recid: "1", name: "Old" }, at: Date.now() },
+    });
+    expect((await academicTreeSource.profile("1", signal())).name).toBe("Old");
+    mocks.get.mockClear();
+    mocks.fetch
+      .mockResolvedValueOnce(response(row("1")))
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce(response({ hits: { hits: [], total: 0 } }));
+    const session = createAcademicTreeSession(true);
+    expect((await session.profile("1", signal())).name).toBe("Author 1");
+    await expect(session.students("1", 1, signal())).rejects.toThrow("503");
+    await session.profile("1", signal());
+    await session.students("1", 1, signal());
+    expect(mocks.fetch).toHaveBeenCalledTimes(3);
+    expect(mocks.get).not.toHaveBeenCalled();
+    expect(
+      mocks.fetch.mock.calls.every(
+        ([, options]) => options.cache === "no-store",
+      ),
+    ).toBe(true);
+    expect((await academicTreeSource.profile("1", signal())).name).toBe(
+      "Author 1",
+    );
+    expect(mocks.set).toHaveBeenCalledTimes(2);
+    const nextRefresh = createAcademicTreeSession(true);
+    mocks.fetch.mockResolvedValueOnce(response(row("1")));
+    await nextRefresh.profile("1", signal());
+    expect(mocks.fetch).toHaveBeenCalledTimes(4);
+  });
+  it("never labels historical positions current and retains multiple explicitly current affiliations", async () => {
+    const { academicTreeSource } =
+      await import("../src/modules/inspire/academicTreeDataService");
+    mocks.fetch.mockResolvedValueOnce(
+      response({
+        ...row("10"),
+        metadata: {
+          name: { value: "Former" },
+          positions: [{ institution: "Former Institute", current: false }],
+        },
+      }),
+    );
+    expect(
+      (await academicTreeSource.profile("10", signal())).currentPosition,
+    ).toBeUndefined();
+    mocks.fetch.mockResolvedValueOnce(
+      response({
+        ...row("11"),
+        metadata: {
+          name: { value: "Current" },
+          positions: [
+            { institution: "Old" },
+            { institution: "Institute A", current: true },
+            { institution: "Institute B", current: true },
+          ],
+        },
+      }),
+    );
+    expect(
+      (await academicTreeSource.profile("11", signal())).currentPosition
+        ?.institution,
+    ).toBe("Institute A; Institute B");
   });
   it("rejects cancellation before cache access and after a late response", async () => {
     const { academicTreeSource } =

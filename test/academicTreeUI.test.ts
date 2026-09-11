@@ -21,9 +21,11 @@ const fixture = vi.hoisted(() => ({
   profile: vi.fn(),
   students: vi.fn(),
   search: vi.fn(),
+  session: vi.fn(),
 }));
 vi.mock("../src/modules/inspire/academicTreeDataService", () => ({
   academicTreeSource: { profile: fixture.profile, students: fixture.students },
+  createAcademicTreeSession: fixture.session,
   searchAcademicAuthors: fixture.search,
   checkAcademicAbort: (signal: AbortSignal) => {
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -68,7 +70,29 @@ const setSelect = (label: string, value: string) => {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  fixture.session.mockImplementation(() => {
+    const done = new Map<string, unknown>();
+    const get = async (
+      key: string,
+      signal: AbortSignal,
+      fn: () => Promise<unknown>,
+    ) => {
+      if (done.has(key)) return done.get(key);
+      const value = await fn();
+      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+      done.set(key, value);
+      return value;
+    };
+    return {
+      profile: (id: string, signal: AbortSignal) =>
+        get(`p:${id}`, signal, () => fixture.profile(id, signal)),
+      students: (id: string, page: number, signal: AbortSignal) =>
+        get(`s:${id}:${page}`, signal, () =>
+          fixture.students(id, page, signal),
+        ),
+    };
+  });
   vi.spyOn(win.HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   fixture.profile.mockImplementation(
     async (id: string, signal: AbortSignal) => {
@@ -145,18 +169,164 @@ describe("Academic Tree window interactions", () => {
     for (const id of ["1", "2"]) {
       const rect = doc.querySelector(`[data-author-id="${id}"] rect`)!;
       expect(rect.getAttribute("width")).toBe("148");
-      expect(rect.getAttribute("height")).toBe("40");
+      expect(rect.getAttribute("height")).toBe("54");
       expect(nameElement(id).getAttribute("font-size")).toBe("13");
       for (const line of nameElement(id).querySelectorAll("tspan"))
         expect(line.textContent!.length * 7).toBeLessThanOrEqual(124);
     }
     expect(nameElement("1").querySelectorAll("tspan")).toHaveLength(1);
-    expect(nameElement("1").getAttribute("y")).toBe("24");
+    expect(nameElement("1").getAttribute("y")).toBe("31");
     expect(nameElement("2").querySelectorAll("tspan")).toHaveLength(2);
-    expect(nameElement("2").getAttribute("y")).toBe("16");
+    expect(nameElement("2").getAttribute("y")).toBe("23");
     expect(
       nameElement("2").querySelectorAll("tspan")[1].getAttribute("dy"),
     ).toBe("16");
+  });
+  it("shows current affiliations below names, truncating long labels with a full tooltip", async () => {
+    const institution =
+      "Institute of Theoretical Physics and Advanced Research ".repeat(3);
+    fixture.profile.mockImplementation(async (id: string) => ({
+      ...fixture.profiles.find((p) => p.recid === id),
+      currentPosition: id === "2" ? { institution } : undefined,
+    }));
+    open();
+    await rootIs("1");
+    const label = doc.querySelector('[data-author-id="2"] [data-affiliation]')!;
+    expect(label.getAttribute("data-affiliation")).toBe(institution);
+    expect(label.firstChild?.textContent).toMatch(/…$/);
+    expect(label.querySelector("title")?.textContent).toBe(institution);
+    expect(label.getAttribute("y")).toBe("44");
+    expect(Number(nameElement("2").getAttribute("y"))).toBeLessThan(44);
+    expect(
+      doc.querySelector('[data-author-id="1"] [data-affiliation]'),
+    ).toBeNull();
+  });
+  it("refreshes without clearing the old tree and preserves the viewport on success", async () => {
+    open();
+    await rootIs("1");
+    expect(button("academic-tree-retry").hidden).toBe(true);
+    expect(button("academic-tree-stop").hidden).toBe(true);
+    const canvas = doc.querySelector('[data-root-author-id="1"]')!;
+    canvas.dispatchEvent(
+      new win.KeyboardEvent("keydown", { key: "+", bubbles: true }),
+    );
+    const transform = canvas.querySelector("g")!.getAttribute("transform");
+    let finish!: (value: unknown) => void;
+    fixture.profile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    click(button("academic-tree-refresh"));
+    expect(fixture.session).toHaveBeenLastCalledWith(true);
+    expect(nameElement("1").getAttribute("aria-label")).toBe("Root Author");
+    expect(button("academic-tree-stop").hidden).toBe(false);
+    expect(button("academic-tree-refresh").disabled).toBe(true);
+    finish({ ...fixture.profiles[0], name: "Updated Author", advisors: [] });
+    await waitLoaded();
+    expect(nameElement("1").getAttribute("aria-label")).toBe("Updated Author");
+    expect(
+      doc.querySelector<HTMLInputElement>('input[type="search"]')?.value,
+    ).toBe("Updated Author");
+    expect(nameElement("2")).toBeNull();
+    expect(canvas.querySelector("g")!.getAttribute("transform")).toBe(
+      transform,
+    );
+  });
+  it("retains the old tree after a partial refresh failure and retries only failed requests", async () => {
+    open();
+    await rootIs("1");
+    fixture.profile.mockClear();
+    fixture.students.mockClear();
+    const students = fixture.students.getMockImplementation()!;
+    fixture.students.mockImplementation(
+      async (id: string, ...args: unknown[]) => {
+        if (id === "1") throw new Error("503");
+        return students(id, ...args);
+      },
+    );
+    click(button("academic-tree-refresh"));
+    await waitLoaded();
+    expect(nameElement("3")).toBeTruthy();
+    expect(button("academic-tree-retry").hidden).toBe(false);
+    expect(doc.querySelector('[role="status"]')?.textContent).toBe(
+      "academic-tree-refresh-error",
+    );
+    const profilesBefore = fixture.profile.mock.calls.length;
+    fixture.students.mockImplementation(students);
+    click(button("academic-tree-retry"));
+    await waitLoaded();
+    expect(fixture.profile).toHaveBeenCalledTimes(profilesBefore);
+    expect(button("academic-tree-retry").hidden).toBe(true);
+    expect(nameElement("3")).toBeTruthy();
+  });
+  it("retries an earlier failed branch after expanding a different person", async () => {
+    const original = fixture.profile.getMockImplementation()!;
+    fixture.profile.mockImplementation(
+      async (id: string, signal: AbortSignal) => {
+        if (id === "2") throw new Error("503");
+        return original(id, signal);
+      },
+    );
+    open();
+    await rootIs("1");
+    expect(button("academic-tree-retry").hidden).toBe(false);
+    click(doc.querySelector('[data-author-id="3"] rect')!);
+    click(button("academic-tree-expand-down"));
+    await waitLoaded();
+    expect(button("academic-tree-retry").hidden).toBe(false);
+    const studentCalls = fixture.students.mock.calls.length;
+    fixture.profile.mockClear();
+    fixture.profile.mockImplementation(
+      async (id: string, signal: AbortSignal) => {
+        if (id === "2")
+          return {
+            ...fixture.profiles[1],
+            advisors: [{ recid: "4", name: "Older Mentor", degreeType: "phd" }],
+          };
+        if (id === "4")
+          return { recid: "4", name: "Older Mentor", advisors: [] };
+        return original(id, signal);
+      },
+    );
+    click(button("academic-tree-retry"));
+    await waitLoaded();
+    expect(fixture.profile.mock.calls.some(([id]) => id === "2")).toBe(true);
+    expect(fixture.students).toHaveBeenCalledTimes(studentCalls);
+    expect(nameElement("4")).toBeTruthy();
+    expect(button("academic-tree-retry").hidden).toBe(true);
+  });
+  it("continues a stopped expansion at its original anchor and restores recovery controls on Back", async () => {
+    open();
+    await rootIs("1");
+    click(doc.querySelector('[data-author-id="3"] rect')!);
+    fixture.students.mockClear();
+    let late!: (value: unknown) => void;
+    fixture.students.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          late = resolve;
+        }),
+    );
+    click(button("academic-tree-expand-down"));
+    await vi.waitFor(() =>
+      expect(fixture.students.mock.calls.at(-1)?.[0]).toBe("3"),
+    );
+    click(button("academic-tree-stop"));
+    expect(button("academic-tree-continue").hidden).toBe(false);
+    late({ profiles: [], total: 0, hasMore: false });
+    click(nameElement("2"));
+    await rootIs("2");
+    click(button("academic-tree-back"));
+    await rootIs("1");
+    expect(button("academic-tree-continue").hidden).toBe(false);
+    fixture.students.mockClear();
+    click(button("academic-tree-continue"));
+    await waitLoaded();
+    expect(fixture.students).toHaveBeenCalledTimes(1);
+    expect(fixture.students.mock.calls[0][0]).toBe("3");
+    expect(button("academic-tree-continue")).toBeUndefined();
   });
   it("highlights the inspected relationships and preserves keyboard focus when selecting a card", async () => {
     open();
@@ -188,8 +358,8 @@ describe("Academic Tree window interactions", () => {
     expect(text.style.textDecoration).toBe("none");
     expect(doc.querySelectorAll("path[data-source]")).toHaveLength(2);
   });
-  it("disables expansion at six generations and lets a boundary name become a new center", async () => {
-    const profiles = Array.from({ length: 15 }, (_, i) => ({
+  it("disables expansion at eight generations and lets a boundary name become a new center", async () => {
+    const profiles = Array.from({ length: 19 }, (_, i) => ({
       recid: String(i + 1),
       name: `Author ${i + 1}`,
       advisors: i
@@ -207,26 +377,26 @@ describe("Academic Tree window interactions", () => {
     });
     view = new AcademicTreeView(
       doc,
-      { recid: "8", fullName: "Author 8" },
+      { recid: "10", fullName: "Author 10" },
       vi.fn(),
     );
     doc.body.append(view.element);
-    await rootIs("8");
-    setSelect("academic-tree-up", "6");
-    setSelect("academic-tree-down", "6");
-    await rootIs("8");
+    await rootIs("10");
+    setSelect("academic-tree-up", "8");
+    setSelect("academic-tree-down", "8");
+    await rootIs("10");
     expect(nameElement("1")).toBeNull();
-    expect(nameElement("15")).toBeNull();
+    expect(nameElement("19")).toBeNull();
     click(doc.querySelector('[data-author-id="2"] rect')!);
     expect(button("academic-tree-expand-up").disabled).toBe(true);
-    click(doc.querySelector('[data-author-id="14"] rect')!);
+    click(doc.querySelector('[data-author-id="18"] rect')!);
     expect(button("academic-tree-expand-down").disabled).toBe(true);
     expect(button("academic-tree-expand-down").title).toBe(
       "academic-tree-depth-limit",
     );
-    click(nameElement("14"));
-    await rootIs("14");
-    expect(nameElement("15")).toBeTruthy();
+    click(nameElement("18"));
+    await rootIs("18");
+    expect(nameElement("19")).toBeTruthy();
   });
   it("dismisses search candidates when choosing the current author without adding a history visit", async () => {
     const sidebar = open();
@@ -388,7 +558,7 @@ describe("Academic Tree window interactions", () => {
     expect(button("academic-tree-back").disabled).toBe(true);
     expect(button("academic-tree-forward").disabled).toBe(false);
   });
-  it("shares citation graph chrome, defaults both controls to two, and offers 0–6", async () => {
+  it("shares citation graph chrome, defaults both controls to two, and offers 0–8", async () => {
     open();
     await vi.waitFor(() => expect(nameElement("2")).toBeTruthy());
     await waitLoaded();
@@ -399,7 +569,7 @@ describe("Academic Tree window interactions", () => {
       )!;
       expect(select.value).toBe("2");
       expect([...select.options].map((o) => o.value)).toEqual(
-        Array.from({ length: 7 }, (_, i) => String(i)),
+        Array.from({ length: 9 }, (_, i) => String(i)),
       );
     }
     click(button("references-panel-citation-graph-title"));

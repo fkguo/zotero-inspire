@@ -23,6 +23,13 @@ export interface AcademicTreeOptions {
   signal: AbortSignal;
   source?: AcademicTreeSource;
   existing?: AcademicTreeGraph;
+  /** Revisit manually opened branches when rebuilding from fresh records. */
+  expansions?: Array<{
+    id: string;
+    direction: AcademicDirection;
+    remaining?: number;
+  }>;
+  hydrateProfiles?: boolean;
   onProgress?: (graph: AcademicTreeGraph) => void;
 }
 
@@ -72,6 +79,7 @@ export async function buildAcademicTree(
         limited: false,
       };
   graph.limited = false;
+  graph.profileFailures = [];
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   const profiles = new Map<string, InspireAuthorProfile>([[root.recid, root]]);
   const edges = new Map(
@@ -126,7 +134,8 @@ export async function buildAcademicTree(
   };
   type Task = { id: string; direction: AcademicDirection; remaining: number };
   let queue: Task[] = [];
-  const visited = new Set<string>();
+  const visited = new Map<string, number>();
+  const queued = new Map<string, Task>();
   const enqueue = (
     id: string,
     direction: AcademicDirection,
@@ -140,17 +149,30 @@ export async function buildAcademicTree(
     )
       return;
     const key = `${direction}:${id}`;
-    if (remaining <= 0 || visited.has(key)) return;
-    visited.add(key);
-    queue.push({ id, direction, remaining });
+    if (remaining <= 0 || remaining <= (visited.get(key) ?? 0)) return;
+    visited.set(key, remaining);
+    const pending = queued.get(key);
+    if (pending) pending.remaining = remaining;
+    else {
+      const task = { id, direction, remaining };
+      queued.set(key, task);
+      queue.push(task);
+    }
   };
   enqueue(root.recid, "up", clampAcademicDepth(options.upDepth));
   enqueue(root.recid, "down", clampAcademicDepth(options.downDepth));
+  const enqueueExpansions = () => {
+    for (const task of options.expansions ?? [])
+      if (nodes.has(task.id))
+        enqueue(task.id, task.direction, task.remaining ?? 1);
+  };
+  enqueueExpansions();
   let requests = 0;
-  const budget = () => {
+  const budget = (cached = false, limitGraph = true) => {
     checkAcademicAbort(signal);
+    if (cached) return true;
     if (++requests > 500) {
-      graph.limited = true;
+      if (limitGraph) graph.limited = true;
       return false;
     }
     return true;
@@ -173,7 +195,7 @@ export async function buildAcademicTree(
       if (direction === "up") {
         let profile = profiles.get(id);
         if (!profile) {
-          if (!budget()) return;
+          if (!budget(source.hasProfile?.(id))) return;
           profile = await source.profile(id, signal);
           checkAcademicAbort(signal);
           profiles.set(id, profile);
@@ -195,7 +217,7 @@ export async function buildAcademicTree(
       } else {
         let found = false;
         for (let page = 1; page <= 40; page++) {
-          if (!budget()) return;
+          if (!budget(source.hasStudentsPage?.(id, page))) return;
           const result = await source.students(id, page, signal);
           checkAcademicAbort(signal);
           for (const student of result.profiles) {
@@ -244,16 +266,54 @@ export async function buildAcademicTree(
     checkAcademicAbort(signal);
     const layer = queue;
     queue = [];
+    queued.clear();
     for (let offset = 0; offset < layer.length; offset += 3) {
       await Promise.all(layer.slice(offset, offset + 3).map(expand));
       publish();
       checkAcademicAbort(signal);
+      enqueueExpansions();
       if (graph.limited) {
         queue = [];
         break;
       }
     }
     if (graph.limited) break;
+  }
+  if (options.hydrateProfiles) {
+    const existingIds = new Set(options.existing?.nodes.map((node) => node.id));
+    const failedProfiles = new Set(options.existing?.profileFailures);
+    const missing = [...nodes.values()].filter(
+      (node) =>
+        node.recid &&
+        !profiles.has(node.id) &&
+        (!existingIds.has(node.id) || failedProfiles.has(node.id)),
+    );
+    for (let offset = 0; offset < missing.length; offset += 3) {
+      checkAcademicAbort(signal);
+      await Promise.all(
+        missing.slice(offset, offset + 3).map(async (node) => {
+          if (!budget(source.hasProfile?.(node.recid!), false)) {
+            graph.profileFailures!.push(node.id);
+            return;
+          }
+          try {
+            const profile = await source.profile(node.recid!, signal);
+            checkAcademicAbort(signal);
+            addNode(node.id, profile.name, node.level, profile);
+          } catch {
+            checkAcademicAbort(signal);
+            graph.profileFailures!.push(node.id);
+          }
+        }),
+      );
+      publish();
+      if (requests > 500) {
+        graph.profileFailures!.push(
+          ...missing.slice(offset + 3).map((node) => node.id),
+        );
+        break;
+      }
+    }
   }
   publish();
   return graph;

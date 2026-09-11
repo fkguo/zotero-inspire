@@ -353,7 +353,16 @@ export class AcademicTreeCanvas {
       text.setAttribute("font-size", "13");
       text.setAttribute("font-family", "system-ui,sans-serif");
       const lines = wrapAcademicName(node.name, this.measureName);
-      text.setAttribute("y", String(H / 2 + 4 - ((lines.length - 1) * 16) / 2));
+      text.setAttribute(
+        "y",
+        String(
+          node.institution
+            ? lines.length > 1
+              ? 15
+              : 23
+            : H / 2 + 4 - ((lines.length - 1) * 16) / 2,
+        ),
+      );
       lines.forEach((line, index) => {
         const span = this.doc.createElementNS(NS, "tspan");
         span.setAttribute("x", String(W / 2));
@@ -403,6 +412,29 @@ export class AcademicTreeCanvas {
       text.addEventListener("mouseenter", () => this.hover(node, text));
       text.addEventListener("mouseleave", () => this.leave());
       g.appendChild(text);
+      if (node.institution) {
+        const affiliation = this.doc.createElementNS(NS, "text");
+        affiliation.setAttribute("data-affiliation", node.institution);
+        affiliation.setAttribute("x", String(W / 2));
+        affiliation.setAttribute("y", "44");
+        affiliation.setAttribute("text-anchor", "middle");
+        affiliation.setAttribute("font-size", "10");
+        affiliation.setAttribute("font-family", "system-ui,sans-serif");
+        affiliation.setAttribute("fill", "var(--fill-secondary,#64748b)");
+        const chars = Array.from(node.institution.trim().replace(/\s+/g, " "));
+        const fits = (label: string) =>
+          (this.measureName(label) * 10) / 13 <= W - 24;
+        let label = chars.join("");
+        if (!fits(label)) {
+          while (chars.length && !fits(chars.join("") + "…")) chars.pop();
+          label = chars.join("") + "…";
+        }
+        affiliation.textContent = label;
+        const full = this.doc.createElementNS(NS, "title");
+        full.textContent = node.institution;
+        affiliation.appendChild(full);
+        g.appendChild(affiliation);
+      }
       const activate = () => {
         if (!this.moved) this.select(node);
       };

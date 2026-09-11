@@ -26,6 +26,7 @@ export interface AcademicTreeGraph {
   expanded: Record<AcademicDirection, string[]>;
   empty: Record<AcademicDirection, string[]>;
   failures: Array<{ id: string; direction: AcademicDirection }>;
+  profileFailures?: string[];
   limited: boolean;
 }
 export interface AcademicStudentsPage {
@@ -34,6 +35,8 @@ export interface AcademicStudentsPage {
   hasMore: boolean;
 }
 export interface AcademicTreeSource {
+  hasProfile?(recid: string): boolean;
+  hasStudentsPage?(recid: string, page: number): boolean;
   profile(recid: string, signal: AbortSignal): Promise<InspireAuthorProfile>;
   students(
     recid: string,
@@ -42,6 +45,6 @@ export interface AcademicTreeSource {
   ): Promise<AcademicStudentsPage>;
 }
 export const ACADEMIC_TREE_DEFAULT_DEPTH = 2;
-export const ACADEMIC_TREE_MAX_DEPTH = 6;
+export const ACADEMIC_TREE_MAX_DEPTH = 8;
 export const ACADEMIC_TREE_INITIAL_LIMIT = 200;
 export const ACADEMIC_TREE_MAX_NODES = 1000;
