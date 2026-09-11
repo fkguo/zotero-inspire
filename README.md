@@ -8,6 +8,31 @@ A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a communi
 
 > 📖 **[中文功能说明](docs/FEATURES_CN.md)** | **[Technical Reference](docs/FEATURES_REFERENCE.md)**
 
+## New features
+
+- **[INSPIRE BibTeX export API](#read-only-inspire-bibtex)** for external tools such as [zotero-cite](https://github.com/fkguo/zotero-cite).
+- **[Academic family tree](#explore-academic-tree-new-in-320)**: trace advisor–student relationships in the Academic Tree view.
+
+<details>
+<summary>Contents</summary>
+
+- [Screenshots](#screenshots)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+  - [Academic Tree](#explore-academic-tree-new-in-320)
+- [Panel Features](#panel-features)
+- [PDF Reader Integration](#pdf-reader-integration)
+- [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Tips & Tricks](#tips--tricks)
+- [Preferences](#preferences)
+- [Troubleshooting](#troubleshooting)
+- [External APIs](#external-apis-for-local-tools)
+  - [INSPIRE BibTeX export API](#read-only-inspire-bibtex)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+
+</details>
+
 ---
 
 ## Screenshots
