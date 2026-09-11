@@ -1051,7 +1051,13 @@ export class ZInspireReferencePane {
         }
 
         this.mainToolbarGraphDialog?.dispose();
+        const authorCallbacks =
+          InspireReferencePanelController.getGraphAuthorCallbacks(doc);
         const dialog = new CitationGraphDialog(doc, seeds, {
+          authorPreviewCallbacks: authorCallbacks,
+          onViewAuthorPapers: (author) => {
+            void authorCallbacks.onViewPapers?.(author);
+          },
           onDispose: () => {
             if (this.mainToolbarGraphDialog === dialog) {
               this.mainToolbarGraphDialog = undefined;
@@ -1748,6 +1754,24 @@ export class InspireReferencePanelController {
   static getInstances(): Set<InspireReferencePanelController> {
     return this.instances;
   }
+  static getGraphAuthorCallbacks(doc: Document): AuthorPreviewCallbacks {
+    const candidates = [...this.instances].filter(
+      (instance) => instance.body.ownerDocument === doc,
+    );
+    const controller =
+      candidates.find(
+        (instance) => instance.body.getBoundingClientRect().width > 0,
+      ) || candidates[0];
+    return (
+      controller?.getAuthorPreviewCallbacks() || {
+        onViewPapers: async (author) => {
+          if (author.recid)
+            Zotero.launchURL(`https://inspirehep.net/authors/${author.recid}`);
+        },
+      }
+    );
+  }
+
   private static pickControllerForEvent(
     event: CitationLookupEvent,
   ): InspireReferencePanelController | undefined {
@@ -14903,6 +14927,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    */
   private getAuthorPreviewCallbacks(): AuthorPreviewCallbacks {
     return {
+      onAcademicTree: (authorInfo: AuthorSearchInfo) =>
+        this.openAcademicTreeDialog(authorInfo),
       onViewPapers: async (authorInfo: AuthorSearchInfo) => {
         this.authorPreview?.hide();
         await this.showAuthorPapersTab(authorInfo);
@@ -16055,6 +16081,15 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       nameEl.textContent = `📚 ${displayName}`;
     }
     header.appendChild(nameEl);
+    const treeBtn = doc.createElement("button");
+    treeBtn.type = "button";
+    treeBtn.textContent = getString("academic-tree-title");
+    treeBtn.style.cssText =
+      "margin-left:auto;flex-shrink:0;padding:3px 7px;border:1px solid var(--fill-quinary,#cbd5e1);border-radius:4px;background:var(--material-background,#fff);color:var(--fill-primary,#1e293b);cursor:pointer";
+    treeBtn.addEventListener("click", () =>
+      this.openAcademicTreeDialog(authorInfo),
+    );
+    header.appendChild(treeBtn);
 
     // Favorite star button
     const isFavorite = this.isCurrentAuthorFavorite();
@@ -18023,6 +18058,27 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     );
   }
 
+  private openAcademicTreeDialog(authorInfo: AuthorSearchInfo) {
+    this.authorPreview?.hide();
+    this.citationGraphDialog?.dispose();
+    const dialog = new CitationGraphDialog(
+      this.body.ownerDocument,
+      this.currentRecid ? [{ recid: this.currentRecid }] : [],
+      {
+        academicAuthor: authorInfo,
+        authorPreviewCallbacks: this.getAuthorPreviewCallbacks(),
+        onViewAuthorPapers: (author) => {
+          void this.showAuthorPapersTab(author);
+        },
+        onDispose: () => {
+          if (this.citationGraphDialog === dialog)
+            this.citationGraphDialog = undefined;
+        },
+      },
+    );
+    this.citationGraphDialog = dialog;
+  }
+
   private openCitationGraphDialog() {
     const seedRecid = this.currentRecid;
     if (!seedRecid) {
@@ -18070,6 +18126,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       this.body.ownerDocument,
       { recid: seedRecid, title: seedTitle, authorLabel },
       {
+        authorPreviewCallbacks: this.getAuthorPreviewCallbacks(),
+        onViewAuthorPapers: (author) => {
+          void this.showAuthorPapersTab(author);
+        },
         onDispose: () => {
           if (this.citationGraphDialog === dialog) {
             this.citationGraphDialog = undefined;

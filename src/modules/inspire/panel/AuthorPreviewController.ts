@@ -34,6 +34,7 @@ import { applyAuthorPreviewCardStyle, positionFloatingElement } from "../../pick
 export interface AuthorPreviewCallbacks {
   /** Called when "View Papers" is clicked */
   onViewPapers?: (authorInfo: AuthorSearchInfo) => Promise<void>;
+  onAcademicTree?: (authorInfo: AuthorSearchInfo) => void;
   /** Called when preview is shown */
   onShow?: (authorInfo: AuthorSearchInfo) => void;
   /** Called when preview is hidden */
@@ -113,7 +114,7 @@ export class AuthorPreviewController {
 
   // State
   private currentKey?: string;
-  private anchor?: HTMLElement;
+  private anchor?: Element;
 
   // Timers
   private showTimeout?: ReturnType<typeof setTimeout>;
@@ -147,12 +148,21 @@ export class AuthorPreviewController {
     authorIndex: number,
     anchor: HTMLElement,
   ): void {
+    const authorInfo = this.buildAuthorInfo(entry, authorIndex);
+    if (authorInfo) this.scheduleAuthor(authorInfo, anchor);
+  }
+
+  /** The same preview card can be anchored to a graph's SVG author name. */
+  scheduleAuthor(
+    authorInfo: AuthorSearchInfo,
+    anchor: Element,
+    loadProfile = fetchAuthorProfile,
+  ): void {
     this.cancelShow();
     this.cancelHide();
     this.anchor = anchor;
-
     this.showTimeout = setTimeout(() => {
-      this.show(entry, authorIndex, anchor);
+      this.showAuthor(authorInfo, anchor, loadProfile);
     }, this.showDelay);
   }
 
@@ -223,16 +233,11 @@ export class AuthorPreviewController {
   /**
    * Show author preview for an author in an entry.
    */
-  private show(
-    entry: InspireReferenceEntry,
-    authorIndex: number,
-    anchor: HTMLElement,
+  private showAuthor(
+    authorInfo: AuthorSearchInfo,
+    anchor: Element,
+    loadProfile = fetchAuthorProfile,
   ): void {
-    const authorInfo = this.buildAuthorInfo(entry, authorIndex);
-    if (!authorInfo) {
-      return;
-    }
-
     const key = this.getAuthorKey(authorInfo);
     const card = this.getCard();
     this.currentKey = key;
@@ -248,7 +253,7 @@ export class AuthorPreviewController {
     this.abortController = createAbortController();
     const signal = this.abortController?.signal;
 
-    fetchAuthorProfile(authorInfo, signal)
+    loadProfile(authorInfo, signal)
       .then((profile) => {
         if (this.currentKey !== key) {
           return;
@@ -476,6 +481,19 @@ export class AuthorPreviewController {
     });
     actions.appendChild(viewLink);
 
+    if (this.callbacks.onAcademicTree) {
+      const treeLink = doc.createElement("a");
+      applyMetaLinkStyle(treeLink, dark);
+      treeLink.href = "#";
+      treeLink.textContent = getString("academic-tree-title");
+      treeLink.addEventListener("click", event => {
+        event.preventDefault();
+        this.hide();
+        this.callbacks.onAcademicTree?.(authorInfo);
+      });
+      actions.appendChild(treeLink);
+    }
+
     // Favorite button
     if (this.callbacks.isFavorite && this.callbacks.toggleFavorite) {
       const isFav = this.callbacks.isFavorite(authorInfo);
@@ -516,7 +534,7 @@ export class AuthorPreviewController {
   /**
    * Position the card relative to anchor.
    */
-  private positionCard(card: HTMLDivElement, anchor: HTMLElement): void {
+  private positionCard(card: HTMLDivElement, anchor: Element): void {
     positionFloatingElement(card, anchor, {
       spacing: 8,
       edgeMargin: 8,

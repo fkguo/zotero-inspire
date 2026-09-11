@@ -647,7 +647,7 @@ export interface FloatingPositionOptions {
  */
 export function positionFloatingElement(
   floating: HTMLElement,
-  anchor: HTMLElement,
+  anchor: Element,
   options: FloatingPositionOptions = {},
 ): boolean {
   const {

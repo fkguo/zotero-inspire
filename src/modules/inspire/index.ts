@@ -488,3 +488,11 @@ export {
   clearFundingCache,
   copyFundingInfo,
 } from "./funding";
+
+export * from "./academicTreeTypes";
+export { buildAcademicTree, clampAcademicDepth } from "./academicTreeService";
+export {
+  academicTreeSource,
+  searchAcademicAuthors,
+} from "./academicTreeDataService";
+export { layoutAcademicTree } from "./academicTreeLayout";

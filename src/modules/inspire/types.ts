@@ -350,6 +350,7 @@ export type ItemWithPendingInspireNote = Zotero.Item & {
  * Cache type identifier for file naming
  */
 export type LocalCacheType =
+  | "academic_tree"
   | "refs"
   | "citation_graph" // FTR-CITATION-GRAPH: One-hop citation graph snapshots (permanent)
   | "cited"

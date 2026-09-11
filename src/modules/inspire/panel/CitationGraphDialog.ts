@@ -1,3 +1,7 @@
+import type { AuthorPreviewCallbacks } from "./AuthorPreviewController";
+import { createGraphWindow, makeGraphWindowDraggable } from "./graphWindow";
+import { AcademicTreeView } from "./AcademicTreeView";
+import type { AuthorSearchInfo } from "../types";
 import { getString } from "../../../utils/locale";
 import { getPref, setPref } from "../../../utils/prefs";
 import {
@@ -113,6 +117,11 @@ export class CitationGraphDialog {
   private maxResultsValueEl?: HTMLSpanElement;
   private logoEl?: HTMLDivElement;
 
+  private academicTreeView?: AcademicTreeView;
+  private switchGraphMode?: (academic: boolean) => void;
+  private academicAuthor?: AuthorSearchInfo;
+  private authorPreviewCallbacks?: AuthorPreviewCallbacks;
+  private onViewAuthorPapers?: (author: AuthorSearchInfo) => void;
   private disposed = false;
   private abort?: AbortController;
   private loadSeq = 0;
@@ -179,10 +188,18 @@ export class CitationGraphDialog {
   constructor(
     doc: Document,
     seed: RecidSnapshot | RecidSnapshot[],
-    options?: { onDispose?: () => void },
+    options?: {
+      onDispose?: () => void;
+      academicAuthor?: AuthorSearchInfo;
+      authorPreviewCallbacks?: AuthorPreviewCallbacks;
+      onViewAuthorPapers?: (author: AuthorSearchInfo) => void;
+    },
   ) {
     this.doc = doc;
     this.onDispose = options?.onDispose;
+    this.academicAuthor = options?.academicAuthor;
+    this.authorPreviewCallbacks = options?.authorPreviewCallbacks;
+    this.onViewAuthorPapers = options?.onViewAuthorPapers;
     try {
       this.includeReviews = getPref("citation_graph_include_reviews") === true;
     } catch {
@@ -192,7 +209,8 @@ export class CitationGraphDialog {
     this.seeds = this.normalizeSeeds(seeds);
     this.current = this.seeds[0] ?? { recid: "" };
     this.buildUI();
-    void this.loadSeeds(this.seeds);
+    if (this.academicAuthor) this.switchGraphMode?.(true);
+    else void this.loadSeeds(this.seeds);
   }
 
   dispose(): void {
@@ -200,6 +218,9 @@ export class CitationGraphDialog {
       return;
     }
     this.disposed = true;
+    this.academicTreeView?.dispose();
+    this.academicTreeView = undefined;
+    this.switchGraphMode = undefined;
     this.themeCleanup?.();
     this.themeCleanup = undefined;
     this.abort?.abort();
@@ -263,43 +284,10 @@ export class CitationGraphDialog {
   private buildUI(): void {
     const dark = isDarkMode();
 
-    const backdrop = this.doc.createElement("div");
-    backdrop.className = "zinspire-citation-graph-backdrop";
-    backdrop.style.cssText = `
-      position: fixed;
-      inset: 0;
-      z-index: 2147483000;
-      background: rgba(0, 0, 0, 0.35);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      box-sizing: border-box;
-    `;
-
-    const dialog = this.doc.createElement("div");
-    dialog.className = "zinspire-citation-graph-dialog";
-    dialog.style.cssText = `
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      width: min(1100px, 92vw);
-      height: min(720px, 82vh);
-      min-width: 560px;
-      min-height: 420px;
-      max-width: 96vw;
-      max-height: 92vh;
-      background: var(--material-background, #ffffff);
-      border: 1px solid var(--fill-quinary, #d1d5db);
-      border-radius: 10px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      resize: both;
-    `;
-
+    const { backdrop, dialog, toggleMaximized } = createGraphWindow(
+      this.doc,
+      "zinspire-citation-graph",
+    );
     const header = this.doc.createElement("div");
     header.style.cssText = `
       display: flex;
@@ -313,66 +301,8 @@ export class CitationGraphDialog {
       user-select: none;
     `;
 
-    // Make dialog draggable by the header (ResearchRabbit-like floating window).
     const win = this.doc.defaultView;
-    const isDragBlocked = (target: EventTarget | null) => {
-      const el = target as Element | null;
-      if (!el) return false;
-      return Boolean(el.closest("button, input, textarea, select, a"));
-    };
-    let dragging = false;
-    let dragStartX = 0;
-    let dragStartY = 0;
-    let dialogStartLeft = 0;
-    let dialogStartTop = 0;
-
-    const onDragMove = (e: MouseEvent) => {
-      if (!dragging || this.disposed) return;
-      const dx = e.clientX - dragStartX;
-      const dy = e.clientY - dragStartY;
-      const rect = dialog.getBoundingClientRect();
-      const viewportW = this.doc.documentElement?.clientWidth || 800;
-      const viewportH = this.doc.documentElement?.clientHeight || 600;
-      const maxLeft = Math.max(10, viewportW - rect.width - 10);
-      const maxTop = Math.max(10, viewportH - rect.height - 10);
-      const nextLeft = Math.max(10, Math.min(dialogStartLeft + dx, maxLeft));
-      const nextTop = Math.max(10, Math.min(dialogStartTop + dy, maxTop));
-      dialog.style.left = `${nextLeft}px`;
-      dialog.style.top = `${nextTop}px`;
-      dialog.style.transform = "none";
-    };
-
-    const onDragEnd = () => {
-      if (!dragging) return;
-      dragging = false;
-      win?.removeEventListener("mousemove", onDragMove, true);
-      win?.removeEventListener("mouseup", onDragEnd, true);
-    };
-
-    const onDragStart = (e: MouseEvent) => {
-      if (e.button !== 0 || this.disposed) return;
-      if (isDragBlocked(e.target)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const rect = dialog.getBoundingClientRect();
-      dragStartX = e.clientX;
-      dragStartY = e.clientY;
-      dialogStartLeft = rect.left;
-      dialogStartTop = rect.top;
-      dialog.style.left = `${rect.left}px`;
-      dialog.style.top = `${rect.top}px`;
-      dialog.style.transform = "none";
-      dragging = true;
-      win?.addEventListener("mousemove", onDragMove, true);
-      win?.addEventListener("mouseup", onDragEnd, true);
-    };
-
-    header.addEventListener("mousedown", onDragStart);
-    this.dialogDragCleanup = () => {
-      header.removeEventListener("mousedown", onDragStart);
-      onDragEnd();
-    };
-
+    this.dialogDragCleanup = makeGraphWindowDraggable(this.doc, dialog, header);
     const headerLeft = this.doc.createElement("div");
     headerLeft.style.cssText = `
       display: flex;
@@ -763,8 +693,72 @@ export class CitationGraphDialog {
     body.appendChild(graphArea);
     body.appendChild(seedsPanel);
 
-    dialog.appendChild(header);
-    dialog.appendChild(body);
+    const modes = this.doc.createElement("div");
+    modes.style.cssText =
+      "display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--fill-quinary,#ddd);cursor:move;flex-shrink:0";
+    const citationsMode = this.doc.createElement("button");
+    citationsMode.type = "button";
+    citationsMode.textContent = getString(
+      "references-panel-citation-graph-title",
+    );
+    const academicMode = this.doc.createElement("button");
+    academicMode.type = "button";
+    academicMode.textContent = getString("academic-tree-title");
+    const maximize = this.doc.createElement("button");
+    maximize.type = "button";
+    maximize.textContent = "⛶";
+    maximize.title = getString("academic-tree-maximize");
+    maximize.style.marginLeft = "auto";
+    maximize.addEventListener("click", toggleMaximized);
+    modes.append(citationsMode, academicMode, maximize, closeBtn);
+    const modeDragCleanup = makeGraphWindowDraggable(this.doc, dialog, modes);
+    const headerDragCleanup = this.dialogDragCleanup;
+    this.dialogDragCleanup = () => {
+      headerDragCleanup?.();
+      modeDragCleanup();
+    };
+    const citationContent = this.doc.createElement("div");
+    citationContent.style.cssText =
+      "display:flex;flex-direction:column;flex:1;min-height:0";
+    citationContent.append(header, body);
+    this.switchGraphMode = (academic) => {
+      if (academic && !this.academicTreeView) {
+        this.academicTreeView = new AcademicTreeView(
+          this.doc,
+          this.academicAuthor,
+          this.onViewAuthorPapers,
+          backdrop,
+          this.authorPreviewCallbacks,
+        );
+        dialog.appendChild(this.academicTreeView.element);
+      }
+      citationContent.style.display = academic ? "none" : "flex";
+      if (this.academicTreeView)
+        this.academicTreeView.element.style.display = academic
+          ? "flex"
+          : "none";
+      if (!academic) this.academicTreeView?.cancel();
+      else this.hoverPreview?.hide();
+      citationsMode.setAttribute("aria-pressed", String(!academic));
+      academicMode.setAttribute("aria-pressed", String(academic));
+      applyPillButtonStyle(citationsMode, !academic, isDarkMode());
+      applyPillButtonStyle(academicMode, academic, isDarkMode());
+      dialog.setAttribute(
+        "aria-label",
+        academic
+          ? academicMode.textContent || ""
+          : citationsMode.textContent || "",
+      );
+      if (!academic && !this.graphResult) void this.loadSeeds(this.seeds);
+    };
+    citationsMode.addEventListener("click", () =>
+      this.switchGraphMode?.(false),
+    );
+    academicMode.addEventListener("click", () => this.switchGraphMode?.(true));
+    applyPillButtonStyle(citationsMode, true, dark);
+    applyPillButtonStyle(academicMode, false, dark);
+    dialog.setAttribute("aria-label", citationsMode.textContent || "");
+    dialog.append(modes, citationContent);
     backdrop.appendChild(dialog);
     (this.doc.body || this.doc.documentElement).appendChild(backdrop);
 

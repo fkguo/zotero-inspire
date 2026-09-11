@@ -396,7 +396,8 @@ export function parseAuthorProfile(
 
   if (Array.isArray(metadata.advisors)) {
     profile.advisors = metadata.advisors
-      .map((advisor: any) => {
+      .filter((advisor) => !advisor.hidden)
+      .map((advisor) => {
         // Extract recid from record.$ref (e.g., "https://inspirehep.net/api/authors/1011904")
         let recid: string | undefined;
         const ref = advisor?.record?.$ref;

@@ -558,7 +558,7 @@ class InspireLocalCache {
       type === "pdfmap"
     ) {
       ttl = DEFAULT_TTL_REFS; // keep indefinitely (pdfmap invalidated by file mtime/size)
-    } else if (type === "author_profile") {
+    } else if (type === "author_profile" || type === "academic_tree") {
       ttl = DEFAULT_TTL_AUTHOR_PROFILE; // 2 hours for author profiles (offline fallback)
     } else {
       ttl = this.getTTLHours();
@@ -840,6 +840,7 @@ class InspireLocalCache {
       const CONCURRENCY = 4;
 
       const cacheTypeOrder: LocalCacheType[] = [
+        "academic_tree",
         "author_profile",
         "author_papers",
         "preprintCandidates",
@@ -868,7 +869,7 @@ class InspireLocalCache {
           t === "pdfmap"
         )
           return DEFAULT_TTL_REFS;
-        if (t === "author_profile") return DEFAULT_TTL_AUTHOR_PROFILE;
+        if (t === "author_profile" || t === "academic_tree") return DEFAULT_TTL_AUTHOR_PROFILE;
         return this.getTTLHours();
       };
 

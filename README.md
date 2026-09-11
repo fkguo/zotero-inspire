@@ -4,7 +4,7 @@
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 [![GitHub downloads, all releases](https://img.shields.io/github/downloads/fkguo/zotero-inspire/total?style=flat-square&logo=github&label=downloads)](https://github.com/fkguo/zotero-inspire/releases)
 
-A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a community maintained database for **high energy physics and related fields**, into your reference management workflow. Browse references, citations, and author papers directly in Zotero without leaving your library.
+A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a community maintained database for **high energy physics and related fields**, into your reference management workflow. Browse references, citations, author papers, and academic lineages directly in Zotero without leaving your library.
 
 > 📖 **[中文功能说明](docs/FEATURES_CN.md)** | **[Technical Reference](docs/FEATURES_REFERENCE.md)**
 
@@ -80,7 +80,22 @@ Select an item with an INSPIRE record, then find the **INSPIRE** section in the 
 | **⭐ Favorites**  | Your favorite authors and papers                                                                         |
 
 - **Related**: hybrid ranking = weighted bibliographic coupling (shared refs) + optional co-citation re-ranking; by default it ignores the PDG _Review of Particle Physics_ as a seed anchor (too generic).
+- **Academic Tree**: explore advisor–student relationships in the shared graph window. See [Explore Academic Tree](#explore-academic-tree-new-in-320).
 - **Citation Graph**: a 1-hop visualization (refs/cited-by configurable up to 200 per side). Open via the panel button or the main toolbar button next to the search box; with no selection it opens an empty canvas where you can add seeds. Drag the time-range sliders under each x-axis to zoom the time window. Use the Reviews toggle to include/exclude review articles (incl. PDG).
+
+### Explore Academic Tree (new in 3.2.0)
+
+Open **Academic Tree** from an author preview card or the **Author Papers** profile. You can also switch to **Academic Tree** at the top of the Citation Graph window and search for an author. The shared window can be resized or maximized.
+
+- **Choose generations**: set ancestors and descendants independently from **0 to 6**, with **2 in each direction** by default. Zero hides that direction.
+- **Follow a name**: click an author's name to make them the tree's center and display their author page in the sidebar. Hover for the usual author preview, including favorites and paper actions.
+- **Explore a branch**: click a card's background to select the person, then expand **one generation of advisors or students**. If those direct relationships are already visible, select a boundary person to continue. Expansion stops at six generations from the current center; click a boundary name to trace further from a new center.
+- **Revisit a tree**: Back and Forward restore previous authors, expanded branches, generation settings, relationship filters, selection, and pan/zoom position.
+- **Read a dense tree**: aligned branches, centered names, and highlighted relationships help follow connections. Drag to pan, scroll to zoom, or use the controls in the canvas corner to fit the whole graph or center the root.
+
+Shared advisors and multiple training relationships are retained. Use the relationship filter to show PhD, master, bachelor, or other/unspecified relationships. Results appear progressively; loading can be stopped or retried.
+
+Relationships come from **public INSPIRE author records**. Arrows point from advisor to student. Dashed cards have no linked author record and cannot be expanded automatically; matching names are not treated as proof of identity. Missing records do not establish the absence of a relationship.
 
 ### Search INSPIRE
 

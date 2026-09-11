@@ -347,7 +347,12 @@ export interface InspireAuthorMetadata {
   urls?: Array<{ value?: string; description?: string }>;
   email_addresses?: Array<{ value?: string; current?: boolean }>;
   status?: string;
-  advisors?: Array<{ name?: string; degree_type?: string }>;
+  advisors?: Array<{
+    name?: string;
+    degree_type?: string;
+    record?: { $ref?: string };
+    hidden?: boolean;
+  }>;
 }
 
 /**

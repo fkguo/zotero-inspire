@@ -360,9 +360,13 @@ export class ZInspire {
         return;
       }
 
-      void import("./panel/CitationGraphDialog")
-        .then(({ CitationGraphDialog }) => {
-          new CitationGraphDialog(doc, seeds);
+      void Promise.all([import("./panel/CitationGraphDialog"), import("../zinspire")])
+        .then(([{ CitationGraphDialog }, { InspireReferencePanelController }]) => {
+          const authorCallbacks = InspireReferencePanelController.getGraphAuthorCallbacks(doc);
+          new CitationGraphDialog(doc, seeds, {
+            authorPreviewCallbacks: authorCallbacks,
+            onViewAuthorPapers: author => { void authorCallbacks.onViewPapers?.(author); },
+          });
         })
         .catch((err) => {
           Zotero.debug(
@@ -433,9 +437,13 @@ export class ZInspire {
         return;
       }
 
-      void import("./panel/CitationGraphDialog")
-        .then(({ CitationGraphDialog }) => {
-          new CitationGraphDialog(doc, seeds);
+      void Promise.all([import("./panel/CitationGraphDialog"), import("../zinspire")])
+        .then(([{ CitationGraphDialog }, { InspireReferencePanelController }]) => {
+          const authorCallbacks = InspireReferencePanelController.getGraphAuthorCallbacks(doc);
+          new CitationGraphDialog(doc, seeds, {
+            authorPreviewCallbacks: authorCallbacks,
+            onViewAuthorPapers: author => { void authorCallbacks.onViewPapers?.(author); },
+          });
         })
         .catch((err) => {
           Zotero.debug(
