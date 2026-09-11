@@ -155,6 +155,120 @@ function open(onViewAuthorPapers = vi.fn()) {
 }
 
 describe("Academic Tree window interactions", () => {
+  it("restores collapsed branches and local view settings on history navigation", async () => {
+    open();
+    await rootIs("1");
+    click(button("academic-tree-collapse"));
+    expect(doc.querySelector('[data-author-id="3"]')).toBeNull();
+    expect(doc.querySelector('[data-author-id="2"]')).not.toBeNull();
+    const co = doc.querySelector<HTMLInputElement>(
+      '[aria-label="academic-tree-co-advisors"]',
+    )!;
+    co.checked = false;
+    co.dispatchEvent(new win.Event("change"));
+    click(nameElement("2"));
+    await rootIs("2");
+    click(button("academic-tree-back"));
+    await rootIs("1");
+    expect(co.checked).toBe(false);
+    expect(doc.querySelector('[data-author-id="3"]')).toBeNull();
+    const requests =
+      fixture.profile.mock.calls.length + fixture.students.mock.calls.length;
+    click(button("academic-tree-restore-branches"));
+    expect(doc.querySelector('[data-author-id="3"]')).not.toBeNull();
+    expect(
+      fixture.profile.mock.calls.length + fixture.students.mock.calls.length,
+    ).toBe(requests);
+  });
+  it("locates a hidden person without reroot, network requests or sidebar navigation", async () => {
+    const sidebar = open();
+    await rootIs("1");
+    click(button("academic-tree-collapse"));
+    const requests =
+      fixture.profile.mock.calls.length + fixture.students.mock.calls.length;
+    const sidebarCalls = sidebar.mock.calls.length;
+    const input = doc.querySelector<HTMLInputElement>(
+      '[aria-label="academic-tree-find-placeholder"]',
+    )!;
+    input.value = "Student";
+    input.dispatchEvent(
+      new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    click(doc.querySelector("[data-academic-locate]")!);
+    expect(
+      doc.querySelector('[data-author-id="3"][aria-pressed="true"]'),
+    ).not.toBeNull();
+    expect(doc.querySelector('[data-root-author-id="1"]')).not.toBeNull();
+    expect(
+      fixture.profile.mock.calls.length + fixture.students.mock.calls.length,
+    ).toBe(requests);
+    expect(sidebar).toHaveBeenCalledTimes(sidebarCalls);
+    expect(button("academic-tree-back").disabled).toBe(true);
+  });
+  it("highlights the relationship path and preserves its original direction", async () => {
+    open();
+    await rootIs("1");
+    setSelect("academic-tree-path-from", "3");
+    setSelect("academic-tree-path-to", "2");
+    click(button("academic-tree-show-path"));
+    expect(doc.body.textContent).toContain(
+      "Student Author ← Root Author ← Mentor Author",
+    );
+    expect(
+      doc
+        .querySelector('path[data-source="1"][data-target="3"]')
+        ?.getAttribute("stroke-width"),
+    ).toBe("1.6");
+    expect(
+      doc
+        .querySelector('path[data-source="2"][data-target="1"]')
+        ?.getAttribute("stroke-width"),
+    ).toBe("1.6");
+    expect(doc.querySelector('[data-root-author-id="1"]')).not.toBeNull();
+    click(button("academic-tree-clear-path"));
+    expect(doc.body.textContent).not.toContain(
+      "Student Author ← Root Author ← Mentor Author",
+    );
+  });
+  it("expands the visible ancestors' students by one generation and refreshes the added branches", async () => {
+    const cousin = {
+      recid: "4",
+      name: "Peer Author",
+      advisors: [{ recid: "2", name: "Mentor Author", degreeType: "phd" }],
+    };
+    const grandchild = {
+      recid: "5",
+      name: "Peer Student",
+      advisors: [{ recid: "4", name: "Peer Author", degreeType: "phd" }],
+    };
+    const original = fixture.profile.getMockImplementation()!;
+    fixture.profile.mockImplementation(async (id, signal) =>
+      id === "4" ? cousin : id === "5" ? grandchild : original(id, signal),
+    );
+    fixture.students.mockImplementation(async (id) => {
+      const profiles = [...fixture.profiles, cousin, grandchild].filter((p) =>
+        p.advisors.some((a) => a.recid === id),
+      );
+      return { profiles, total: profiles.length, hasMore: false };
+    });
+    open();
+    await rootIs("1");
+    expect(doc.querySelector('[data-author-id="4"]')).toBeNull();
+    click(button("academic-tree-expand-ancestors"));
+    await waitLoaded();
+    expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
+    expect(doc.querySelector('[data-author-id="5"]')).toBeNull();
+    const co = doc.querySelector<HTMLInputElement>(
+      '[aria-label="academic-tree-co-advisors"]',
+    )!;
+    co.checked = false;
+    co.dispatchEvent(new win.Event("change"));
+    expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
+    click(button("academic-tree-refresh"));
+    await waitLoaded();
+    expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
+    expect(doc.querySelector('[data-author-id="5"]')).toBeNull();
+  });
   it("renders compact cards with centered single-line and two-line labels at the existing font size", async () => {
     vi.mocked(win.HTMLCanvasElement.prototype.getContext).mockReturnValue({
       font: "",
@@ -416,6 +530,49 @@ describe("Academic Tree window interactions", () => {
     expect(button("academic-tree-forward").disabled).toBe(true);
     expect(doc.querySelector('[role="status"]')!.textContent).toBe(
       "academic-tree-count",
+    );
+  });
+  it("Set as center recenters the current root without reloading and switches a different selected author", async () => {
+    const sidebar = open();
+    await rootIs("1");
+    const canvas = doc.querySelector(".zinspire-academic-tree svg")!;
+    const transform = () =>
+      canvas.querySelector("g")!.getAttribute("transform");
+    canvas.dispatchEvent(
+      new win.KeyboardEvent("keydown", { key: "+", bubbles: true }),
+    );
+    const centered = transform();
+    canvas.dispatchEvent(
+      new win.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+    );
+    expect(transform()).not.toBe(centered);
+    const requests = fixture.profile.mock.calls.length;
+    const sidebarCalls = sidebar.mock.calls.length;
+    click(button("academic-tree-reroot"));
+    expect(transform()).toBe(centered);
+    expect(fixture.profile).toHaveBeenCalledTimes(requests);
+    expect(sidebar).toHaveBeenCalledTimes(sidebarCalls);
+    expect(button("academic-tree-back").disabled).toBe(true);
+    click(doc.querySelector('[data-author-id="2"] rect')!);
+    click(button("academic-tree-reroot"));
+    await rootIs("2");
+    expect(sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({ recid: "2" }),
+    );
+    expect(button("academic-tree-back").disabled).toBe(false);
+    const newCenter = transform();
+    canvas.dispatchEvent(
+      new win.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+    );
+    const callsAfterReroot = sidebar.mock.calls.length;
+    click(button("academic-tree-reroot"));
+    expect(transform()).toBe(newCenter);
+    expect(sidebar).toHaveBeenCalledTimes(callsAfterReroot);
+    click(doc.querySelector('[data-author-id="1"] rect')!);
+    click(button("academic-tree-reroot"));
+    await rootIs("1");
+    expect(sidebar).toHaveBeenLastCalledWith(
+      expect.objectContaining({ recid: "1" }),
     );
   });
   it("keeps history empty when the current author is clicked again", async () => {

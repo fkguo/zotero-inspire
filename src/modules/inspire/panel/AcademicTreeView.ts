@@ -26,6 +26,12 @@ import {
 } from "../academicTreeDataService";
 import { buildAcademicTree } from "../academicTreeService";
 import { AcademicTreeCanvas } from "./AcademicTreeCanvas";
+import { AcademicTreeTools } from "./AcademicTreeTools";
+import { exportAcademicTree } from "./AcademicTreeExport";
+import {
+  academicReachable,
+  type AcademicTreeViewState,
+} from "../academicTreeExploration";
 import { NAVIGATION_STACK_LIMIT } from "../constants";
 
 interface AcademicTreeLoad {
@@ -35,6 +41,7 @@ interface AcademicTreeLoad {
   anchorId?: string;
   existing?: AcademicTreeGraph;
   refresh: boolean;
+  batch?: boolean;
   expansions?: Array<{
     id: string;
     direction: AcademicDirection;
@@ -57,12 +64,14 @@ interface AcademicTreeSnapshot {
   moreHidden: boolean;
   pending?: AcademicTreeLoad;
   recovery?: "retry" | "continue";
+  exploration: AcademicTreeViewState;
 }
 
 /** Author genealogy content hosted in the citation graph's resizable window. */
 export class AcademicTreeView {
   readonly element: HTMLDivElement;
   private canvas: AcademicTreeCanvas;
+  private tools: AcademicTreeTools;
   private authorPreview: AuthorPreviewController;
   private status: HTMLDivElement;
   private details: HTMLDivElement;
@@ -237,6 +246,61 @@ export class AcademicTreeView {
       },
       () => this.authorPreview.scheduleHide(),
     );
+    this.tools = new AcademicTreeTools(doc, {
+      graph: () => this.graph,
+      selected: () => this.selected,
+      changed: () => {
+        this.renderGraph();
+        this.updateStatus(this.busy);
+      },
+      locate: (id) => {
+        const node = this.graph?.nodes.find((node) => node.id === id);
+        if (node) {
+          this.select(node);
+          this.canvas.center(id);
+        }
+      },
+      fitPath: (ids) => this.canvas.fitPeople(ids),
+      expandAncestors: () => {
+        if (!this.graph || this.busy) return;
+        const ancestors = academicReachable(
+          this.tools.project(this.graph),
+          this.graph.rootId,
+          "up",
+        );
+        ancestors.delete(this.graph.rootId);
+        const tasks = [...ancestors]
+          .filter((id) =>
+            this.graph!.nodes.some((node) => node.id === id && node.recid),
+          )
+          .map((id) => ({ id, direction: "down" as const }));
+        if (tasks.length)
+          void this.load("down", this.graph.rootId, "normal", tasks);
+      },
+      export: async (format, full) => {
+        if (!this.graph) return;
+        try {
+          const saved = await exportAcademicTree(
+            this.doc,
+            full ? this.graph : this.tools.project(this.graph),
+            this.canvas,
+            this.tools.state,
+            {
+              up: Number(this.up.value),
+              down: Number(this.down.value),
+              degree: this.degree.value,
+            },
+            format,
+            full,
+          );
+          if (saved && !this.disposed)
+            this.status.textContent = getString("academic-tree-export-success");
+        } catch {
+          if (!this.disposed)
+            this.status.textContent = getString("academic-tree-export-error");
+        }
+      },
+    });
     const stage = doc.createElement("div");
     stage.style.cssText =
       "position:relative;display:flex;flex:1;min-height:200px;overflow:hidden";
@@ -270,6 +334,7 @@ export class AcademicTreeView {
     this.element.append(
       toolbar,
       controls,
+      this.tools.element,
       this.candidates,
       stage,
       this.details,
@@ -406,6 +471,11 @@ export class AcademicTreeView {
       moreHidden: this.more.hidden,
       pending: this.pending,
       recovery: this.busy ? "continue" : this.recovery,
+      exploration: {
+        ...this.tools.state,
+        collapsed: [...this.tools.state.collapsed],
+        path: [...this.tools.state.path],
+      },
     };
   }
   private pushHistory(
@@ -437,6 +507,7 @@ export class AcademicTreeView {
     this.initialAuthor = entry.author;
     this.root = entry.root;
     this.graph = entry.graph;
+    this.tools.restore(entry.exploration);
     this.selected = entry.selected;
     this.searchInput.value = entry.author.fullName;
     this.up.value = entry.up;
@@ -453,7 +524,7 @@ export class AcademicTreeView {
     this.more.hidden = entry.moreHidden;
     this.updateNavigation();
     if (this.graph) {
-      this.canvas.render(this.graph, this.selected);
+      this.renderGraph();
       const selected = this.graph.nodes.find(
         (node) => node.id === this.selected,
       );
@@ -492,6 +563,7 @@ export class AcademicTreeView {
     this.searchInput.value = node.name;
     this.root = undefined;
     this.graph = undefined;
+    this.tools.restore();
     this.selected = undefined;
     this.limit = ACADEMIC_TREE_INITIAL_LIMIT;
     this.pending = undefined;
@@ -501,6 +573,7 @@ export class AcademicTreeView {
     await this.load();
   }
   private updateLoadControls() {
+    this.tools?.sync(this.graph, this.busy);
     this.refresh.disabled = this.busy || !this.initialAuthor?.recid;
     this.stop.hidden = !this.busy;
     this.stop.disabled = !this.busy;
@@ -517,6 +590,7 @@ export class AcademicTreeView {
     expansion?: AcademicDirection,
     anchorId?: string,
     mode: "normal" | "refresh" | "resume" = "normal",
+    batch?: AcademicTreeLoad["expansions"],
   ) {
     const anchor = expansion
       ? this.graph?.nodes.find(
@@ -551,6 +625,7 @@ export class AcademicTreeView {
             source: createAcademicTreeSession(mode === "refresh"),
             recid,
             expansion,
+            batch: !!batch,
             anchorId: anchor?.id,
             existing: expansion ? this.graph : undefined,
             refresh: mode === "refresh",
@@ -569,13 +644,13 @@ export class AcademicTreeView {
                     ...(priorExpansion ? [priorExpansion] : []),
                   ]
                 : expansion
-                  ? failedBranches
+                  ? [...failedBranches, ...(batch || [])]
                   : undefined,
           };
     this.cancel(false);
     this.pending = operation;
     this.lastExpansion =
-      operation.expansion && operation.anchorId
+      !operation.batch && operation.expansion && operation.anchorId
         ? { id: operation.anchorId, direction: operation.expansion }
         : undefined;
     const controller = createAbortController();
@@ -612,12 +687,16 @@ export class AcademicTreeView {
       );
       if (!current()) return;
       const graph = await buildAcademicTree(profile, {
-        upDepth: operation.expansion
-          ? Number(operation.expansion === "up")
-          : Number(this.up.value),
-        downDepth: operation.expansion
-          ? Number(operation.expansion === "down")
-          : Number(this.down.value),
+        upDepth: operation.batch
+          ? 0
+          : operation.expansion
+            ? Number(operation.expansion === "up")
+            : Number(this.up.value),
+        downDepth: operation.batch
+          ? 0
+          : operation.expansion
+            ? Number(operation.expansion === "down")
+            : Number(this.down.value),
         maxNodes: this.limit,
         degreeFilter: this.degree.value as AcademicDegreeFilter,
         existing: operation.existing,
@@ -630,7 +709,7 @@ export class AcademicTreeView {
           if (!operation.expansion) this.root = profile;
           this.selected ||= graph.rootId;
           this.graph = graph;
-          this.canvas.render(graph, this.selected);
+          this.renderGraph();
           this.updateStatus(true);
         },
       });
@@ -657,7 +736,7 @@ export class AcademicTreeView {
       this.graph = graph;
       if (!graph.nodes.some((node) => node.id === this.selected))
         this.selected = graph.rootId;
-      this.canvas.render(graph, this.selected);
+      this.renderGraph();
       if (keepGraph && viewport) this.canvas.restoreViewport(viewport);
       this.updateStatus(false);
     } catch {
@@ -676,6 +755,21 @@ export class AcademicTreeView {
       }
     }
   }
+  private renderGraph() {
+    if (!this.graph) return;
+    const visible = this.tools.project(this.graph);
+    if (!visible.nodes.some((node) => node.id === this.selected)) {
+      this.selected = visible.rootId;
+      const node = visible.nodes.find((node) => node.id === this.selected);
+      if (node) {
+        this.select(node);
+        return;
+      }
+    }
+    this.tools.sync(this.graph, this.busy);
+    this.canvas.render(visible, this.selected);
+    this.canvas.highlightPath(this.tools.state.path);
+  }
   private updateStatus(loading: boolean) {
     if (!this.graph) return;
     const parts = [
@@ -686,6 +780,13 @@ export class AcademicTreeView {
         },
       }),
     ];
+    const visible = this.tools.project(this.graph);
+    if (visible.nodes.length !== this.graph.nodes.length)
+      parts.push(
+        getString("academic-tree-visible-count", {
+          args: { count: visible.nodes.length },
+        }),
+      );
     if (loading) parts.push(getString("academic-tree-loading"));
     if (this.graph.failures.length)
       parts.push(
@@ -743,7 +844,7 @@ export class AcademicTreeView {
     this.selected = node.id;
     this.details.textContent = this.describe(node);
     this.actions.replaceChildren();
-    if (this.graph) this.canvas.render(this.graph, this.selected);
+    if (this.graph) this.renderGraph();
     if (!node.recid || this.busy) return;
     const expandUp = this.button(
       "academic-tree-expand-up",
@@ -764,7 +865,10 @@ export class AcademicTreeView {
     this.actions.append(
       expandUp,
       expandDown,
-      this.button("academic-tree-reroot", () => void this.followName(node)),
+      this.button("academic-tree-reroot", () => {
+        if (node.id === this.graph?.rootId) this.canvas.center(node.id);
+        else void this.followName(node);
+      }),
       this.button("academic-tree-inspire", () =>
         Zotero.launchURL(`https://inspirehep.net/authors/${node.recid}`),
       ),
@@ -826,6 +930,7 @@ export class AcademicTreeView {
     this.cleanup = [];
     this.backStack = [];
     this.forwardStack = [];
+    this.tools.dispose();
     this.authorPreview.dispose();
     this.canvas.dispose();
     this.element.remove();

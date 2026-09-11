@@ -94,33 +94,112 @@ function inversions(values: number[]): number {
   return count;
 }
 
+/** Discovery depth is not a generation: a student can first appear as a co-advisor.
+ * Rank the displayed relationships independently, keeping cycles on one row and
+ * retaining the original discovery depths for traversal and expansion limits.
+ */
+function displayRanks(graph: AcademicTreeGraph): Map<string, number> {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const outgoing = new Map(
+    graph.nodes.map((node) => [node.id, new Set<string>()]),
+  );
+  for (const edge of graph.edges)
+    if (byId.has(edge.source) && byId.has(edge.target))
+      outgoing.get(edge.source)!.add(edge.target);
+  const index = new Map<string, number>(),
+    low = new Map<string, number>();
+  const stack: string[] = [],
+    active = new Set<string>();
+  const components: string[][] = [];
+  const visit = (id: string) => {
+    index.set(id, index.size);
+    low.set(id, index.get(id)!);
+    stack.push(id);
+    active.add(id);
+    for (const next of [...outgoing.get(id)!].sort()) {
+      if (!index.has(next)) {
+        visit(next);
+        low.set(id, Math.min(low.get(id)!, low.get(next)!));
+      } else if (active.has(next))
+        low.set(id, Math.min(low.get(id)!, index.get(next)!));
+    }
+    if (low.get(id) === index.get(id)) {
+      const members: string[] = [];
+      let member: string;
+      do {
+        member = stack.pop()!;
+        active.delete(member);
+        members.push(member);
+      } while (member !== id);
+      components.push(members.sort());
+    }
+  };
+  for (const id of [...byId.keys()].sort()) if (!index.has(id)) visit(id);
+  const componentOf = new Map<string, number>();
+  components.forEach((members, i) =>
+    members.forEach((id) => componentOf.set(id, i)),
+  );
+  const next = components.map(() => new Set<number>());
+  const indegree = components.map(() => 0);
+  const rank = components.map((members) =>
+    Math.min(...members.map((id) => byId.get(id)!.level)),
+  );
+  for (const [id, children] of outgoing)
+    for (const child of children) {
+      const from = componentOf.get(id)!,
+        to = componentOf.get(child)!;
+      if (from !== to && !next[from].has(to)) {
+        next[from].add(to);
+        indegree[to]++;
+      }
+    }
+  const queue = components.map((_, i) => i).filter((i) => !indegree[i]);
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    const from = queue[cursor];
+    for (const to of next[from]) {
+      rank[to] = Math.max(rank[to], rank[from] + 1);
+      if (--indegree[to] === 0) queue.push(to);
+    }
+  }
+  const root = componentOf.get(graph.rootId);
+  const offset = root === undefined ? 0 : rank[root];
+  return new Map(
+    graph.nodes.map((node) => [
+      node.id,
+      rank[componentOf.get(node.id)!] - offset,
+    ]),
+  );
+}
+
 /** Layered layout with crossing reduction and parent/child alignment. Never merges identities. */
 export function layoutAcademicTree(
   graph: AcademicTreeGraph,
 ): AcademicTreeLayout {
   const layers = new Map<number, AcademicTreeNode[]>();
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const ranks = displayRanks(graph);
   const incoming = new Map<string, string[]>(),
     outgoing = new Map<string, string[]>();
   const bands = new Map<number, typeof graph.edges>();
   for (const node of graph.nodes) {
-    const layer = layers.get(node.level) ?? [];
+    const level = ranks.get(node.id)!;
+    const layer = layers.get(level) ?? [];
     layer.push(node);
-    layers.set(node.level, layer);
+    layers.set(level, layer);
     incoming.set(node.id, []);
     outgoing.set(node.id, []);
   }
   for (const edge of graph.edges) {
     const from = byId.get(edge.source),
       to = byId.get(edge.target);
-    // Cyclic or same-generation relationships remain in the graph, but cannot order a DAG.
-    if (!from || !to || from.level >= to.level) continue;
+    // Only relationships inside a cycle remain on one row.
+    if (!from || !to || ranks.get(from.id)! >= ranks.get(to.id)!) continue;
     outgoing.get(from.id)!.push(to.id);
     incoming.get(to.id)!.push(from.id);
-    if (to.level === from.level + 1) {
-      const band = bands.get(from.level) ?? [];
+    if (ranks.get(to.id)! === ranks.get(from.id)! + 1) {
+      const band = bands.get(ranks.get(from.id)!) ?? [];
       band.push(edge);
-      bands.set(from.level, band);
+      bands.set(ranks.get(from.id)!, band);
     }
   }
   for (const neighbours of [incoming, outgoing])
@@ -184,10 +263,10 @@ export function layoutAcademicTree(
   // Barycentric sorting can leave small groups inverted around shared advisors.
   // Swap adjacent cards only when the total number of crossings strictly falls.
   const adjacent = (id: string, direction: "up" | "down") => {
-    const level = byId.get(id)!.level + (direction === "up" ? -1 : 1);
+    const level = ranks.get(id)! + (direction === "up" ? -1 : 1);
     return (direction === "up" ? incoming : outgoing)
       .get(id)!
-      .filter((other) => byId.get(other)!.level === level);
+      .filter((other) => ranks.get(other)! === level);
   };
   const above = new Map(
     graph.nodes.map((node) => [node.id, adjacent(node.id, "up")]),

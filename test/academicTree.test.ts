@@ -398,6 +398,69 @@ describe("academic tree metadata and layout", () => {
       { name: "Public", recid: "4", degreeType: "master" },
     ]);
   });
+  it("places a co-advisor below their own mentors and keeps the other mentor close to the shared student", async () => {
+    const profiles = [
+      { ...person(1), name: "Ulf-G. Meissner" },
+      { ...person(2, [advisor(1), advisor(3)]), name: "Shared Student" },
+      { ...person(3, [advisor(1), advisor(4)]), name: "Feng-Kun Guo" },
+      { ...person(4), name: "Peng Nian Shen" },
+      ...Array.from({ length: 20 }, (_, i) =>
+        person(i + 5, [advisor(i < 10 ? 1 : 3)]),
+      ),
+    ];
+    const graph = await buildAcademicTree(profiles[0], {
+      ...opts(sourceFor(profiles)),
+      downDepth: 2,
+    });
+    // Guo is discovered as the co-advisor of person 2 before his own student record.
+    expect(graph.nodes.find((node) => node.id === "3")?.level).toBe(0);
+    const original = JSON.stringify(graph);
+    const layout = layoutAcademicTree(graph);
+    const node = (id: string) => layout.nodes.find((node) => node.id === id)!;
+    expect(node("3").y).toBeGreaterThan(node("1").y);
+    expect(node("3").y).toBeGreaterThan(node("4").y);
+    expect(Math.abs(node("3").x - node("4").x)).toBeLessThan(
+      ACADEMIC_NODE_WIDTH + 24,
+    );
+    for (const edge of graph.edges)
+      expect(node(edge.source).y).toBeLessThan(node(edge.target).y);
+    expect(JSON.stringify(graph)).toBe(original);
+    expect(layout.nodes.map((n) => [n.id, n.level]).sort()).toEqual(
+      graph.nodes.map((n) => [n.id, n.level]).sort(),
+    );
+    expect(
+      layoutAcademicTree({
+        ...graph,
+        nodes: [...graph.nodes].reverse(),
+        edges: [...graph.edges].reverse(),
+      }),
+    ).toEqual(layout);
+  });
+  it("keeps cyclic identities separate while ranking their incoming and outgoing relationships", () => {
+    const graph: AcademicTreeGraph = {
+      rootId: "b",
+      nodes: ["a", "b", "c", "d"].map((id) => ({ id, name: id, level: 0 })),
+      edges: [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "b"],
+        ["c", "d"],
+      ].map(([source, target]) => ({ source, target, degreeTypes: [] })),
+      expanded: { up: [], down: [] },
+      empty: { up: [], down: [] },
+      failures: [],
+      limited: false,
+    };
+    const nodes = layoutAcademicTree(graph).nodes;
+    const node = (id: string) => nodes.find((node) => node.id === id)!;
+    expect(nodes).toHaveLength(4);
+    expect(node("a").y).toBeLessThan(node("b").y);
+    expect(node("b").y).toBe(node("c").y);
+    expect(Math.abs(node("b").x - node("c").x)).toBeGreaterThanOrEqual(
+      ACADEMIC_NODE_WIDTH,
+    );
+    expect(node("d").y).toBeGreaterThan(node("c").y);
+  });
   it("keeps uneven family branches contiguous and aligns mentors with their students", async () => {
     const profiles = [
       person(1),

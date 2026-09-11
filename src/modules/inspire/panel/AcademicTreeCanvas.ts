@@ -1,3 +1,4 @@
+import { serializeAcademicSVG } from "../academicTreeSVG";
 import type { AcademicTreeGraph, AcademicTreeNode } from "../academicTreeTypes";
 import {
   layoutAcademicTree,
@@ -20,6 +21,7 @@ export class AcademicTreeCanvas {
   private rootId = "";
   private renderedGraph?: AcademicTreeGraph;
   private selected?: string;
+  private relationshipPath: string[] = [];
   private hovered?: string;
   private focused?: string;
   private cards = new Map<string, SVGRectElement>();
@@ -174,10 +176,32 @@ export class AcademicTreeCanvas {
     this.y = rect.height / 2 - (node.y + H / 2) * this.scale;
     this.transform();
   }
+  fitPeople(ids: string[]) {
+    const nodes = this.layout?.nodes.filter((node) => ids.includes(node.id));
+    if (!nodes?.length) return;
+    const left = Math.min(...nodes.map((node) => node.x));
+    const top = Math.min(...nodes.map((node) => node.y));
+    const width = Math.max(...nodes.map((node) => node.x + W)) - left;
+    const height = Math.max(...nodes.map((node) => node.y + H)) - top;
+    const rect = this.element.getBoundingClientRect();
+    this.scale = Math.max(
+      0.04,
+      Math.min(1.5, (rect.width - 40) / width, (rect.height - 40) / height),
+    );
+    this.x = (rect.width - width * this.scale) / 2 - left * this.scale;
+    this.y = (rect.height - height * this.scale) / 2 - top * this.scale;
+    this.transform();
+  }
   private emphasize() {
     const active = this.hovered || this.focused || this.selected;
     for (const { source, target, path } of this.links) {
-      const highlighted = source === active || target === active;
+      const highlighted = this.relationshipPath.length
+        ? this.relationshipPath.some(
+            (id, i, ids) =>
+              (id === source && ids[i + 1] === target) ||
+              (id === target && ids[i + 1] === source),
+          )
+        : source === active || target === active;
       path.setAttribute(
         "stroke",
         highlighted
@@ -199,7 +223,7 @@ export class AcademicTreeCanvas {
         root = id === this.rootId;
       rect.setAttribute(
         "stroke",
-        selected || root || id === active
+        selected || root || id === active || this.relationshipPath.includes(id)
           ? "var(--color-accent,#0060df)"
           : "var(--fill-quaternary,#cbd5e1)",
       );
@@ -212,6 +236,24 @@ export class AcademicTreeCanvas {
           : "var(--material-background,#fff)",
       );
     }
+  }
+  highlightPath(ids: string[]) {
+    this.relationshipPath = [...ids];
+    this.emphasize();
+  }
+  /** Portable light-theme SVG; no Zotero CSS variables or external resources. */
+  exportSVG(full: boolean): { svg: string; width: number; height: number } {
+    if (!this.layout) throw new Error("No graph");
+    const rect = this.element.getBoundingClientRect();
+    const width = Math.max(
+      1,
+      Math.ceil(full ? this.layout.width : rect.width || 800),
+    );
+    const height = Math.max(
+      1,
+      Math.ceil(full ? this.layout.height : rect.height || 600),
+    );
+    return serializeAcademicSVG(this.doc, this.element, full, width, height);
   }
   render(graph: AcademicTreeGraph, selected?: string) {
     this.selected = selected;
