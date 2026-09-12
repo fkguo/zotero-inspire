@@ -113,7 +113,7 @@ beforeEach(() => {
     debug: vi.fn(),
     getMainWindow: () => win,
     launchURL: vi.fn(),
-    Prefs: { get: vi.fn() },
+    Prefs: { get: vi.fn(), set: vi.fn() },
     getActiveZoteroPane: () => ({ getSelectedItems: () => [] }),
   });
   vi.stubGlobal("addon", { data: {} });
@@ -155,22 +155,142 @@ function open(onViewAuthorPapers = vi.fn()) {
 }
 
 describe("Academic Tree window interactions", () => {
+  it("switches surname/year order without fetching and restores the mode on Back", async () => {
+    const children = [
+      {
+        recid: "3",
+        name: "Zoe Alpha",
+        canonicalName: "Alpha, Zoe",
+        positions: [{ institution: "A", rank: "PHD", endDate: "2012" }],
+        advisors: [{ recid: "1", name: "Root", degreeType: "phd" }],
+      },
+      {
+        recid: "4",
+        name: "Amy Beta",
+        canonicalName: "Beta, Amy",
+        positions: [{ institution: "B", rank: "PHD", endDate: "2005" }],
+        advisors: [{ recid: "1", name: "Root", degreeType: "phd" }],
+      },
+    ];
+    const original = fixture.profile.getMockImplementation()!;
+    fixture.profile.mockImplementation(
+      async (id, signal) =>
+        children.find((p) => p.recid === id) || original(id, signal),
+    );
+    fixture.students.mockImplementation(async (id) => {
+      const profiles =
+        id === "1"
+          ? children
+          : fixture.profiles.filter((p) =>
+              p.advisors.some((a) => a.recid === id),
+            );
+      return { profiles, total: profiles.length, hasMore: false };
+    });
+    open();
+    await rootIs("1");
+    const x = (id: string) =>
+      Number(
+        doc
+          .querySelector(`[data-author-id="${id}"]`)!
+          .getAttribute("transform")!
+          .match(/translate\(([^, ]+)/)![1],
+      );
+    expect(x("3")).toBeLessThan(x("4"));
+    fixture.profile.mockClear();
+    fixture.students.mockClear();
+    setSelect("academic-tree-sort", "year");
+    expect(x("4")).toBeLessThan(x("3"));
+    expect(fixture.profile).not.toHaveBeenCalled();
+    expect(fixture.students).not.toHaveBeenCalled();
+    click(nameElement("3"));
+    await rootIs("3");
+    click(button("academic-tree-back"));
+    await rootIs("1");
+    expect(
+      (
+        doc.querySelector(
+          '[aria-label="academic-tree-sort"]',
+        ) as HTMLSelectElement
+      ).value,
+    ).toBe("year");
+    expect(x("4")).toBeLessThan(x("3"));
+  });
+  it("remembers author searches across reopening, completes them and clears history", async () => {
+    const prefs = new Map<string, unknown>();
+    vi.mocked(Zotero.Prefs.get).mockImplementation(((key: string) =>
+      prefs.get(key)) as typeof Zotero.Prefs.get);
+    vi.mocked(Zotero.Prefs.set).mockImplementation(((
+      key: string,
+      value: unknown,
+    ) => prefs.set(key, value)) as typeof Zotero.Prefs.set);
+    open();
+    await rootIs("1");
+    let input = doc.querySelector<HTMLInputElement>(
+      'input[aria-label="academic-tree-search-placeholder"]',
+    )!;
+    input.value = "Feng-Kun Guo";
+    click(button("academic-tree-search"));
+    await vi.waitFor(() =>
+      expect(fixture.search).toHaveBeenCalledWith(
+        "Feng-Kun Guo",
+        expect.anything(),
+      ),
+    );
+    dialog!.dispose();
+    open();
+    await rootIs("1");
+    input = doc.querySelector<HTMLInputElement>(
+      'input[aria-label="academic-tree-search-placeholder"]',
+    )!;
+    input.value = "Feng";
+    input.dispatchEvent(new win.Event("input"));
+    input.setSelectionRange(4, 4);
+    input.dispatchEvent(
+      new win.KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(input.value).toBe("Feng-Kun Guo");
+    click(button("references-panel-search-history-tooltip"));
+    expect(doc.querySelector('[role="menu"]')?.textContent).toContain(
+      "Feng-Kun Guo",
+    );
+    fixture.search.mockClear();
+    click(button("Feng-Kun Guo"));
+    await vi.waitFor(() =>
+      expect(fixture.search).toHaveBeenCalledWith(
+        "Feng-Kun Guo",
+        expect.anything(),
+      ),
+    );
+    click(button("references-panel-search-history-tooltip"));
+    click(button("references-panel-search-clear-history"));
+    await vi.waitFor(() => expect([...prefs.values()]).toContain("[]"));
+    input.value = "Feng";
+    input.dispatchEvent(new win.Event("input"));
+    input.setSelectionRange(4, 4);
+    input.dispatchEvent(
+      new win.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+    );
+    expect(input.value).toBe("Feng");
+    click(button("references-panel-search-history-tooltip"));
+    expect(doc.querySelector('[role="menu"]')).toBeNull();
+  });
   it("restores collapsed branches and local view settings on history navigation", async () => {
     open();
     await rootIs("1");
     click(button("academic-tree-collapse"));
     expect(doc.querySelector('[data-author-id="3"]')).toBeNull();
     expect(doc.querySelector('[data-author-id="2"]')).not.toBeNull();
-    const co = doc.querySelector<HTMLInputElement>(
-      '[aria-label="academic-tree-co-advisors"]',
-    )!;
-    co.checked = false;
-    co.dispatchEvent(new win.Event("change"));
+    const co = button("academic-tree-co-advisors");
+    click(co);
     click(nameElement("2"));
     await rootIs("2");
     click(button("academic-tree-back"));
     await rootIs("1");
-    expect(co.checked).toBe(false);
+    expect(co.getAttribute("aria-pressed")).toBe("false");
     expect(doc.querySelector('[data-author-id="3"]')).toBeNull();
     const requests =
       fixture.profile.mock.calls.length + fixture.students.mock.calls.length;
@@ -258,11 +378,8 @@ describe("Academic Tree window interactions", () => {
     await waitLoaded();
     expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
     expect(doc.querySelector('[data-author-id="5"]')).toBeNull();
-    const co = doc.querySelector<HTMLInputElement>(
-      '[aria-label="academic-tree-co-advisors"]',
-    )!;
-    co.checked = false;
-    co.dispatchEvent(new win.Event("change"));
+    const co = button("academic-tree-co-advisors");
+    click(co);
     expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
     click(button("academic-tree-refresh"));
     await waitLoaded();
@@ -282,16 +399,18 @@ describe("Academic Tree window interactions", () => {
     await rootIs("1");
     for (const id of ["1", "2"]) {
       const rect = doc.querySelector(`[data-author-id="${id}"] rect`)!;
-      expect(rect.getAttribute("width")).toBe("148");
-      expect(rect.getAttribute("height")).toBe("54");
+      const width = Number(rect.getAttribute("width"));
+      expect(width).toBeGreaterThanOrEqual(100);
+      expect(width).toBeLessThanOrEqual(144);
+      expect(Number(rect.getAttribute("height"))).toBeLessThan(54);
       expect(nameElement(id).getAttribute("font-size")).toBe("13");
       for (const line of nameElement(id).querySelectorAll("tspan"))
-        expect(line.textContent!.length * 7).toBeLessThanOrEqual(124);
+        expect(line.textContent!.length * 7).toBeLessThanOrEqual(width - 20);
     }
     expect(nameElement("1").querySelectorAll("tspan")).toHaveLength(1);
-    expect(nameElement("1").getAttribute("y")).toBe("31");
+    expect(nameElement("1").getAttribute("y")).toBe("18");
     expect(nameElement("2").querySelectorAll("tspan")).toHaveLength(2);
-    expect(nameElement("2").getAttribute("y")).toBe("23");
+    expect(nameElement("2").getAttribute("y")).toBe("18");
     expect(
       nameElement("2").querySelectorAll("tspan")[1].getAttribute("dy"),
     ).toBe("16");
@@ -309,8 +428,11 @@ describe("Academic Tree window interactions", () => {
     expect(label.getAttribute("data-affiliation")).toBe(institution);
     expect(label.firstChild?.textContent).toMatch(/…$/);
     expect(label.querySelector("title")?.textContent).toBe(institution);
-    expect(label.getAttribute("y")).toBe("44");
-    expect(Number(nameElement("2").getAttribute("y"))).toBeLessThan(44);
+    const height = Number(
+      doc.querySelector('[data-author-id="2"] rect')!.getAttribute("height"),
+    );
+    expect(Number(label.getAttribute("y"))).toBe(height - 7);
+    expect(Number(nameElement("2").getAttribute("y"))).toBeLessThan(height - 7);
     expect(
       doc.querySelector('[data-author-id="1"] [data-affiliation]'),
     ).toBeNull();
@@ -364,7 +486,7 @@ describe("Academic Tree window interactions", () => {
     await waitLoaded();
     expect(nameElement("3")).toBeTruthy();
     expect(button("academic-tree-retry").hidden).toBe(false);
-    expect(doc.querySelector('[role="status"]')?.textContent).toBe(
+    expect(doc.querySelector("[data-academic-status]")?.textContent).toBe(
       "academic-tree-refresh-error",
     );
     const profilesBefore = fixture.profile.mock.calls.length;
@@ -455,9 +577,19 @@ describe("Academic Tree window interactions", () => {
     const text = nameElement("2");
     expect(text.style.textDecoration).toBe("none");
     card.dispatchEvent(new win.MouseEvent("mouseenter"));
-    expect(Number(related.getAttribute("stroke-opacity"))).toBeGreaterThan(
-      Number(unrelated.getAttribute("stroke-opacity")),
+    expect(Number(related.getAttribute("stroke-width"))).toBeGreaterThan(
+      Number(unrelated.getAttribute("stroke-width")),
     );
+    expect(
+      doc
+        .querySelector('[data-edge-highlight="2|1"]')
+        ?.getAttribute("visibility"),
+    ).toBe("visible");
+    expect(
+      doc
+        .querySelector('[data-edge-highlight="1|3"]')
+        ?.getAttribute("visibility"),
+    ).toBe("hidden");
     card.dispatchEvent(new win.MouseEvent("mouseleave"));
     card.focus();
     card.dispatchEvent(
@@ -471,6 +603,32 @@ describe("Academic Tree window interactions", () => {
     text.blur();
     expect(text.style.textDecoration).toBe("none");
     expect(doc.querySelectorAll("path[data-source]")).toHaveLength(2);
+  });
+  it("isolates a hovered edge above the other links without changing selection", async () => {
+    open();
+    await rootIs("1");
+    const hit = doc.querySelector('[data-edge-hit="2|1"]')!;
+    expect(hit.textContent).toContain("Mentor Author → Root Author");
+    hit.dispatchEvent(new win.MouseEvent("mouseenter"));
+    expect(
+      doc
+        .querySelector('[data-edge-highlight="2|1"]')
+        ?.getAttribute("visibility"),
+    ).toBe("visible");
+    expect(
+      doc
+        .querySelector('[data-edge-highlight="1|3"]')
+        ?.getAttribute("visibility"),
+    ).toBe("hidden");
+    expect(
+      doc.querySelector('[data-author-id="1"]')?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    hit.dispatchEvent(new win.MouseEvent("mouseleave"));
+    expect(
+      doc
+        .querySelector('[data-edge-highlight="1|3"]')
+        ?.getAttribute("visibility"),
+    ).toBe("visible");
   });
   it("disables expansion at eight generations and lets a boundary name become a new center", async () => {
     const profiles = Array.from({ length: 19 }, (_, i) => ({
@@ -528,7 +686,7 @@ describe("Academic Tree window interactions", () => {
     expect(button("Root Author — Root.Author.1")).toBeUndefined();
     expect(button("academic-tree-back").disabled).toBe(true);
     expect(button("academic-tree-forward").disabled).toBe(true);
-    expect(doc.querySelector('[role="status"]')!.textContent).toBe(
+    expect(doc.querySelector("[data-academic-status]")!.textContent).toBe(
       "academic-tree-count",
     );
   });
@@ -840,4 +998,180 @@ describe("Academic Tree window interactions", () => {
     expect(signal.aborted).toBe(true);
     expect(doc.querySelector('[role="dialog"]')).toBeNull();
   });
+});
+
+it("keeps exploration and export controls visible in the shared pill toolbar, with dismissible popups", async () => {
+  open();
+  await rootIs("1");
+  for (const label of [
+    "academic-tree-export",
+    "academic-tree-co-advisors",
+    "academic-tree-expand-menu",
+  ]) {
+    const control = button(label);
+    expect(control.closest("[hidden]")).toBeNull();
+    expect(control.style.borderRadius).toBe("12px");
+  }
+  click(button("academic-tree-export"));
+  const popup = doc.querySelector('[role="menu"]')!;
+  expect(popup).not.toBeNull();
+  expect(popup.querySelectorAll('button[role="menuitem"]')).toHaveLength(8);
+  expect(doc.activeElement?.textContent).toContain("SVG");
+  win.dispatchEvent(
+    new win.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+  );
+  expect(doc.activeElement?.textContent).toContain("PNG");
+  win.dispatchEvent(
+    new win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(doc.querySelector('[role="menu"]')).toBeNull();
+  expect(doc.activeElement).toBe(button("academic-tree-export"));
+  click(button("academic-tree-expand-menu"));
+  expect(
+    button("academic-tree-expand-menu").getAttribute("aria-expanded"),
+  ).toBe("true");
+  doc.body.dispatchEvent(new win.MouseEvent("mousedown", { bubbles: true }));
+  expect(
+    button("academic-tree-expand-menu").getAttribute("aria-expanded"),
+  ).toBe("false");
+});
+
+it("exports the requested format and scope using the menu and shared native save picker", async () => {
+  const writes = vi.fn();
+  (Zotero as any).File = { putContentsAsync: writes };
+  class Picker {
+    modeSave = 1;
+    returnOK = 0;
+    returnReplace = 2;
+    filterAll = 9;
+    file = "/tmp/tree-export";
+    defaultString = "";
+    init = vi.fn();
+    appendFilter = vi.fn();
+    appendFilters = vi.fn();
+    async show() {
+      return this.returnOK;
+    }
+  }
+  (win as any).FilePicker = Picker;
+  try {
+    open();
+    await rootIs("1");
+    click(button("academic-tree-collapse"));
+    click(button("academic-tree-export"));
+    const currentJSON = [...doc.querySelectorAll('[role="menuitem"]')].find(
+      (el) => el.textContent === "JSON — academic-tree-export-view…",
+    )!;
+    click(currentJSON);
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(1));
+    expect(
+      JSON.parse(writes.mock.calls[0][1]).graph.nodes.map((n: any) => n.id),
+    ).not.toContain("3");
+    click(button("academic-tree-export"));
+    click(
+      [...doc.querySelectorAll('[role="menuitem"]')].find(
+        (el) => el.textContent === "JSON — academic-tree-export-full…",
+      )!,
+    );
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(2));
+    expect(
+      JSON.parse(writes.mock.calls[1][1]).graph.nodes.map((n: any) => n.id),
+    ).toContain("3");
+    click(button("academic-tree-export"));
+    click(
+      [...doc.querySelectorAll('[role="menuitem"]')].find(
+        (el) => el.textContent === "SVG — academic-tree-export-full…",
+      )!,
+    );
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(3));
+    const exported = new win.DOMParser().parseFromString(
+      writes.mock.calls[2][1],
+      "image/svg+xml",
+    );
+    expect(exported.querySelector("parsererror")).toBeNull();
+    expect(exported.querySelectorAll("[data-author-id]")).toHaveLength(3);
+    expect(writes.mock.calls[2][1]).not.toContain("var(");
+  } finally {
+    delete (win as any).FilePicker;
+  }
+});
+
+it("closes academic popups when switching graph tabs", async () => {
+  open();
+  await rootIs("1");
+  click(button("academic-tree-export"));
+  expect(doc.querySelector('[role="menu"]')).not.toBeNull();
+  const citationTab = [...doc.querySelectorAll("button")].find(
+    (el) => el.textContent === "references-panel-citation-graph-title",
+  )!;
+  click(citationTab);
+  expect(doc.querySelector('[role="menu"]')).toBeNull();
+});
+
+it("refreshes all academic button palettes without changing icon sizes", async () => {
+  const { invalidateDarkModeCache } =
+    await import("../src/modules/inspire/styles");
+  doc.documentElement.setAttribute("data-color-scheme", "light");
+  invalidateDarkModeCache();
+  view = new AcademicTreeView(doc, { recid: "1", fullName: "Root Author" });
+  doc.body.append(view.element);
+  try {
+    await rootIs("1");
+    const refresh = button("academic-tree-refresh"),
+      action = button("academic-tree-expand-up");
+    const color = refresh.style.background;
+    const size = refresh.style.fontSize,
+      padding = refresh.style.padding;
+    doc.documentElement.setAttribute("data-color-scheme", "dark");
+    invalidateDarkModeCache();
+    view.refreshAppearance();
+    expect(refresh.style.background).not.toBe(color);
+    expect(action.style.background).toBe(refresh.style.background);
+    expect(refresh.style.fontSize).toBe(size);
+    expect(refresh.style.padding).toBe(padding);
+  } finally {
+    doc.documentElement.removeAttribute("data-color-scheme");
+    invalidateDarkModeCache();
+  }
+});
+
+it("ignores repeated export activation until the native save picker completes", async () => {
+  let resolve!: (value: number) => void;
+  const show = vi.fn(
+    () =>
+      new Promise<number>((done) => {
+        resolve = done;
+      }),
+  );
+  class Picker {
+    modeSave = 1;
+    returnOK = 0;
+    returnReplace = 2;
+    filterAll = 9;
+    file = "/tmp/tree-export";
+    defaultString = "";
+    init = vi.fn();
+    appendFilter = vi.fn();
+    appendFilters = vi.fn();
+    show = show;
+  }
+  (win as any).FilePicker = Picker;
+  try {
+    open();
+    await rootIs("1");
+    click(button("academic-tree-export"));
+    const item = [...doc.querySelectorAll('[role="menuitem"]')].find((el) =>
+      el.textContent?.startsWith("SVG"),
+    )!;
+    click(item);
+    click(item);
+    await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
+    expect(button("academic-tree-export").disabled).toBe(true);
+    resolve(1); // cancel
+    await vi.waitFor(() =>
+      expect(button("academic-tree-export").disabled).toBe(false),
+    );
+  } finally {
+    delete (win as any).FilePicker;
+  }
 });

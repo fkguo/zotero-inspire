@@ -1,3 +1,4 @@
+import { academicEducationYears } from "./academicTreeSorting";
 import type { InspireAuthorProfile } from "./types";
 import type {
   AcademicTreeGraph,
@@ -100,6 +101,9 @@ export async function buildAcademicTree(
     if (existing) {
       if (profile) {
         existing.name = profile.name;
+        existing.canonicalName = profile.canonicalName;
+        if (profile.positions)
+          existing.educationYears = academicEducationYears(profile);
         existing.institution = profile.currentPosition?.institution;
       }
       return existing;
@@ -112,6 +116,11 @@ export async function buildAcademicTree(
     const node = {
       id,
       name,
+      canonicalName:
+        profile?.canonicalName || (name.includes(",") ? name : undefined),
+      educationYears: profile?.positions
+        ? academicEducationYears(profile)
+        : undefined,
       recid: /^\d+$/.test(id) ? id : undefined,
       institution: profile?.currentPosition?.institution,
       level,

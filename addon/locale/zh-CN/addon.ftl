@@ -631,8 +631,8 @@ academic-tree-stopped = 加载已停止，已加载的师承关系仍保留。
 academic-tree-canvas-help = 点击姓名追溯其学术谱系，同时在侧边栏显示作者页面；悬浮姓名显示作者预览卡。点击卡片空白处选择分支操作。拖动平移，滚轮缩放；方向键、+/− 和 0 也可操作。
 academic-tree-source-note = 来源：INSPIRE 公开作者记录。箭头由导师指向学生；虚线人物卡片尚未关联作者 ID。缺少记录不代表不存在师承关系。 蓝色连线突出所选师承路径；未启用路径时突出选中或悬浮作者的师承关系。
 
-academic-tree-view-menu = 视图
-academic-tree-expand-menu = 展开
+academic-tree-view-menu = 查找 / 路径
+academic-tree-expand-menu = 分支
 academic-tree-co-advisors = 显示共同导师
 academic-tree-co-advisors-hint = 隐藏中心人物谱系和已展开祖先分支以外的共同导师；保留中心人物自己的导师。
 academic-tree-find-placeholder = 在已加载谱系中查找姓名、ID、单位
@@ -659,3 +659,11 @@ academic-tree-visible-count = 显示 { $count } 人
 academic-tree-selection = 当前选择：{ $name }
 academic-tree-revealed = 已恢复显示相关的隐藏分支。
 academic-tree-find-more = 另有 { $count } 个匹配，请缩小搜索范围。
+
+academic-tree-legend = INSPIRE · 导师 → 学生 · 灰底：补充共同导师 · 虚线：无作者链接 · 中心链对齐；每位导师的学生按姓氏或教育年份排序 · 悬浮连线追踪关系 · 缺少记录不代表不存在师承关系。
+
+academic-tree-sort = 组内排序
+academic-tree-sort-name = 姓氏 A–Z
+academic-tree-sort-year = 教育年份 ↑
+academic-tree-sort-hint = 同一导师在同一代的所有学生统一排序，包括有共同导师的学生。年份按该条师生关系的学位类型读取；未知年份排末尾，同年按姓氏排序。不同师生组的顺序矛盾时，优先满足离中心最近的导师。
+academic-tree-education-year = 教育经历结束于 { $year } 年（INSPIRE）

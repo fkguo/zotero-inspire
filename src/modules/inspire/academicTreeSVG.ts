@@ -18,9 +18,14 @@ export function serializeAcademicSVG(
     "--color-accent": "#0060df",
     "--fill-primary": "#1e293b",
     "--fill-secondary": "#64748b",
+    "--fill-tertiary": "#94a3b8",
     "--fill-quaternary": "#cbd5e1",
     "--material-background": "#ffffff",
   };
+  for (const hit of Array.from(
+    clone.querySelectorAll("[data-edge-hit]"),
+  ) as Element[])
+    hit.remove();
   for (const el of [
     clone,
     ...Array.from(clone.querySelectorAll("*")),
@@ -28,7 +33,14 @@ export function serializeAcademicSVG(
     el.removeAttribute("tabindex");
     for (const attribute of [...el.attributes]) {
       if (attribute.value.includes("color-mix("))
-        el.setAttribute(attribute.name, "#ebf2fc");
+        el.setAttribute(
+          attribute.name,
+          attribute.value.includes("--color-accent")
+            ? "#ebf2fc"
+            : attribute.name === "stroke"
+              ? "#dde4ec"
+              : "#f8f9f9",
+        );
       else if (attribute.value.includes("var("))
         el.setAttribute(
           attribute.name,

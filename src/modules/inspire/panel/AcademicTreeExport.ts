@@ -1,3 +1,4 @@
+import { promptGraphSaveFile, saveGraphPNG } from "./graphFileIO";
 import { getString } from "../../../utils/locale";
 import type { AcademicTreeGraph } from "../academicTreeTypes";
 import {
@@ -5,19 +6,6 @@ import {
   type AcademicTreeViewState,
 } from "../academicTreeExploration";
 import { AcademicTreeCanvas } from "./AcademicTreeCanvas";
-
-interface SavePicker {
-  modeSave: number;
-  returnOK: number;
-  returnReplace: number;
-  filterAll: number;
-  defaultString: string;
-  file: string;
-  init(win: Window, title: string, mode: number): void;
-  appendFilter(label: string, pattern: string): void;
-  appendFilters(filters: number): void;
-  show(): Promise<number>;
-}
 
 export async function exportAcademicTree(
   doc: Document,
@@ -58,86 +46,19 @@ export async function exportAcademicTree(
       () => {},
     );
     try {
-      temporary.render(graph);
+      temporary.render(graph, undefined, undefined, state.sort || "name");
       picture = temporary.exportSVG(true);
     } finally {
       temporary.dispose();
     }
   } else picture = canvas.exportSVG(false);
-  const win = Zotero.getMainWindow() as Window & {
-    FilePicker?: new () => SavePicker;
-  };
-  if (!win?.FilePicker) throw new Error("File picker unavailable");
-  const picker = new win.FilePicker();
-  picker.init(win, getString("academic-tree-export"), picker.modeSave);
-  picker.appendFilter(format.toUpperCase(), `*.${format}`);
-  picker.appendFilters(picker.filterAll);
-  picker.defaultString = `academic-tree-${graph.rootId}.${format}`;
-  const result = await picker.show();
-  if (result !== picker.returnOK && result !== picker.returnReplace)
-    return false;
-  if (format !== "png") {
-    await Zotero.File.putContentsAsync(picker.file, picture?.svg || contents);
-    return true;
-  }
-  const { svg, width, height } = picture!;
-  // Bound raster memory for broad trees; SVG remains resolution-independent.
-  const scale = Math.min(
-    2,
-    8192 / width,
-    8192 / height,
-    Math.sqrt(16_000_000 / (width * height)),
+  const filePath = await promptGraphSaveFile(
+    `academic-tree-${graph.rootId}.${format}`,
+    getString("academic-tree-export"),
+    [{ label: format.toUpperCase(), pattern: `*.${format}` }],
   );
-  const pngWidth = Math.max(1, Math.floor(width * scale));
-  const pngHeight = Math.max(1, Math.floor(height * scale));
-  const imageDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
-  imageDocument.documentElement.setAttribute("width", String(pngWidth));
-  imageDocument.documentElement.setAttribute("height", String(pngHeight));
-  const rasterSVG = new XMLSerializer().serializeToString(imageDocument);
-  const url = URL.createObjectURL(
-    new Blob([rasterSVG], { type: "image/svg+xml;charset=utf-8" }),
-  );
-  const img = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "img",
-  ) as HTMLImageElement;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error("Image load timeout")),
-        15000,
-      );
-      img.onload = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      img.onerror = () => {
-        clearTimeout(timer);
-        reject(new Error("SVG decode failed"));
-      };
-      img.src = url;
-    });
-    const raster = doc.createElementNS(
-      "http://www.w3.org/1999/xhtml",
-      "canvas",
-    ) as HTMLCanvasElement;
-    raster.width = pngWidth;
-    raster.height = pngHeight;
-    const context = raster.getContext("2d");
-    if (!context) throw new Error("Canvas unavailable");
-    context.drawImage(img, 0, 0, raster.width, raster.height);
-    const blob = await new Promise<Blob>((resolve, reject) =>
-      raster.toBlob(
-        (value) =>
-          value ? resolve(value) : reject(new Error("PNG encode failed")),
-        "image/png",
-      ),
-    );
-    await IOUtils.write(picker.file, new Uint8Array(await blob.arrayBuffer()));
-    return true;
-  } finally {
-    img.onload = img.onerror = null;
-    img.removeAttribute("src");
-    URL.revokeObjectURL(url);
-  }
+  if (!filePath) return false;
+  if (format === "png") await saveGraphPNG(doc, filePath, picture!);
+  else await Zotero.File.putContentsAsync(filePath, picture?.svg || contents);
+  return true;
 }

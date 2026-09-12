@@ -41,9 +41,9 @@ A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a communi
 
 ![INSPIRE References panel screenshot](images/screenshot1.png)
 
-### Citation Graph
+### Connections Graph
 
-![Citation graph screenshot](images/citation_graph.png)
+![Connections Graph screenshot](images/citation_graph.png)
 
 ## Installation
 
@@ -110,16 +110,22 @@ Select an item with an INSPIRE record, then find the **INSPIRE** section in the 
 
 ### Explore Academic Tree (new in 3.2.0)
 
+**3.2.1** improves family sorting and compact layout, remembers author searches, and shares the Citation Graph toolbar, menus, and export controls.
+
 Open **Academic Tree** from an author preview card or the **Author Papers** profile. You can also switch to **Academic Tree** at the top of the Connections Graph window and search for an author. The shared window can be resized or maximized.
 
 - **Choose generations**: set ancestors and descendants independently from **0 to 8**, with **2 in each direction** by default. Zero hides that direction.
+- **Sort within families**: all students of the same advisor on a generation row follow **Surname A–Z** (canonical INSPIRE name, default) or **Education year ↑**, including students who have additional advisors. Years use the degree type on that advisor–student relationship and a uniquely matching completed education record; unknown years come last, and ties use surname. If overlapping families require contradictory year orders, the advisor closest to the center takes priority. Card tooltips show education end years and their source. Navigation history and exports retain the selected order.
+- Author profiles and caches are shared with the sidebar and hover cards, including canonical names and public education histories. Simultaneous requests for the same author share one network call; older incomplete cache entries are refreshed when needed.
+- **Remember searches**: the ▾ button beside the author search box opens recent queries; choose one to search again or clear the list. Tab or Right Arrow at the end of the input accepts an inline suggestion, and Down Arrow opens history. Author searches are stored separately from sidebar literature queries and survive reopening or restarting Zotero; both share the history retention setting (30 days by default, up to 50 entries).
 - **Follow a name**: click an author's name to make them the tree's center and display their author page in the sidebar. Hover for the usual author preview, including favorites and paper actions.
 - **Explore a branch**: click a card's background to select the person, then expand **one generation of advisors or students**. If those direct relationships are already visible, select a boundary person to continue. Expansion stops at eight generations from the current center; click a boundary name to trace further from a new center.
 - **Revisit a tree**: Back and Forward restore previous authors, expanded branches, generation settings, relationship filters, selection, visibility settings, path highlighting, and pan/zoom position.
-- **Read a dense tree**: aligned branches, centered names, and highlighted relationships help follow connections. Drag to pan, scroll to zoom, or use the controls in the canvas corner to fit the whole graph or center the root.
-- **View**: hide supplemental co-advisors while retaining the center’s own advisors and expanded ancestor branches. Search the loaded tree by name, INSPIRE ID, or affiliation to locate a person without changing the center. Choose two people to highlight and fit their shortest relationship path; arrows keep their original directions, including paths through a common advisor.
-- **Expand**: load one generation of students for the ancestors currently shown. Collapse the selected person’s student branch, restore it, or restore all branches. A shared descendant remains visible when another route still connects them to the tree. The center’s ancestral chain cannot be collapsed.
-- **Export**: choose SVG, PNG, JSON, or CSV and **Current view** or **Full loaded tree**. SVG/PNG capture the viewport or the full tree; JSON/CSV include the visible or all loaded people and relationships. JSON also records settings and the viewport; CSV uses separate person and relationship rows. Full-tree export includes hidden branches and makes no additional INSPIRE requests. Images use a portable light theme; PNG resolution is capped for large trees, for which SVG is recommended.
+- **Read a dense tree**: cards fit their names and affiliations without reducing the name font size. The center stays above the middle of its direct students after expansion, with its single-supervisor ancestor chain vertical. This alignment takes priority over name order; other same-advisor siblings use the selected surname or education-year order. Supplemental advisors stay near their students. Orthogonal links have separated arrowheads for multiple advisors and small gaps at crossings; hover a line to highlight that relationship and its endpoints. Drag to pan, scroll to zoom, or use the canvas controls to fit the whole graph or center the root.
+- **Co-advisors**: supplemental co-advisors have a very light gray card background and a softer border; names remain fully readable. The center and selected card retain their blue emphasis. Use the toolbar toggle to hide supplemental co-advisors while retaining the center’s own advisors and expanded ancestor branches.
+- **Find / path**: search the loaded tree by name, INSPIRE ID, or affiliation to locate a person without changing the center. Choose two people to highlight and fit their shortest relationship path; arrows keep their original directions, including paths through a common advisor.
+- **Branches**: load one generation of students for the ancestors currently shown. Collapse the selected person’s student branch, restore it, or restore all branches. A shared descendant remains visible when another route still connects them to the tree. The center’s ancestral chain cannot be collapsed.
+- **📤 Export▼**: open the same popup menu used by Citation Graph, then choose SVG, PNG, JSON, or CSV with **Current view** or **Full loaded tree**. SVG/PNG capture the viewport or the full tree; JSON/CSV include the visible or all loaded people and relationships. JSON also records settings and the viewport; CSV uses separate person and relationship rows. Full-tree export includes hidden branches and makes no additional INSPIRE requests. Images use a portable light theme; PNG resolution is capped for large trees, for which SVG is recommended.
 
 Shared advisors and multiple training relationships are retained. The layout accounts for multiple advisors when arranging generations. **Set as center** follows the selected person; for the existing center, it brings that person back into view. Use the relationship filter to show PhD, master, bachelor, or other/unspecified relationships. Results appear progressively. **Refresh from INSPIRE** bypasses the cache for the current tree, including expanded branches, while retaining the previous graph until fresh data is ready. **Retry** appears after failures and **Continue loading** after **Stop**; both reuse successful requests. Author cards show current affiliations reported by INSPIRE beneath the name; long affiliations are shortened, with the full text available on hover.
 

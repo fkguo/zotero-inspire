@@ -2,6 +2,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
   academicReachable,
+  academicPrimaryLineage,
   academicRelationshipPath,
   academicTreeCSV,
   projectAcademicTree,
@@ -130,6 +131,9 @@ describe("academic tree exploration", () => {
       "cousin",
     ]);
     expect(projected.edges.every((edge) => edge.source !== "c")).toBe(true);
+    expect([...academicPrimaryLineage(original)].sort()).toEqual(
+      projected.nodes.map((node) => node.id).sort(),
+    );
     expect(original).toEqual(before);
   });
   it("collapses exclusive descendants and retains shared descendants connected by another route", () => {
@@ -243,6 +247,26 @@ describe("academic tree exports", () => {
       expect(parsed.querySelector("parsererror")).toBeNull();
       expect(picture.svg).not.toMatch(/var\(|color-mix\(/);
       expect(
+        parsed.querySelector('[data-author-id="c"] rect')?.getAttribute("fill"),
+      ).toBe("#f8f9f9");
+      expect(
+        parsed
+          .querySelector('[data-author-id="c"] rect')
+          ?.getAttribute("stroke"),
+      ).toBe("#dde4ec");
+      expect(
+        parsed
+          .querySelector('[data-author-id="cousin"] rect')
+          ?.getAttribute("fill"),
+      ).toBe("#ffffff");
+      expect(
+        parsed.querySelector('[data-author-id="r"] rect')?.getAttribute("fill"),
+      ).toBe("#ebf2fc");
+      expect(parsed.querySelector("[data-edge-hit]")).toBeNull();
+      expect(parsed.querySelectorAll("path[data-source]").length).toBe(
+        original.edges.length,
+      );
+      expect(
         parsed.querySelector('g[data-author-id="a"] title')?.textContent,
       ).toBe("A & B <C>\u00a0D");
       expect(parsed.querySelector("svg > g")?.hasAttribute("transform")).toBe(
@@ -250,6 +274,19 @@ describe("academic tree exports", () => {
       );
     }
     expect(canvas.captureViewport()).toEqual(viewport);
+    canvas.render(original, "c");
+    const selected = new DOMParser().parseFromString(
+      canvas.exportSVG(true).svg,
+      "image/svg+xml",
+    );
+    expect(
+      selected.querySelector('[data-author-id="c"] rect')?.getAttribute("fill"),
+    ).toBe("#ebf2fc");
+    expect(
+      selected
+        .querySelector('[data-author-id="c"] rect')
+        ?.getAttribute("stroke"),
+    ).toBe("#0060df");
   });
   it("exports JSON with graph identity and settings, CSV relations and full SVG despite a filtered canvas", async () => {
     const original = graph();

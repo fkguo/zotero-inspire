@@ -336,11 +336,15 @@ export interface InspireAuthorsHit {
  */
 export interface InspireAuthorMetadata {
   control_number?: number;
+  deleted?: boolean;
   name?: { value?: string; preferred_name?: string };
   positions?: Array<{
     institution?: string;
     rank?: string;
     current?: boolean;
+    hidden?: boolean;
+    start_date?: string;
+    end_date?: string;
   }>;
   ids?: Array<{ schema?: string; value?: string }>;
   arxiv_categories?: string[];

@@ -1,4 +1,11 @@
+import {
+  graphButton,
+  styleGraphSelect,
+  styleGraphToolbar,
+} from "./graphControls";
 import { createAbortController } from "../utils";
+import { academicSearchHistory } from "../searchHistory";
+import { SearchHistoryInput } from "./SearchHistoryInput";
 import {
   AuthorPreviewController,
   type AuthorPreviewCallbacks,
@@ -30,6 +37,7 @@ import { AcademicTreeTools } from "./AcademicTreeTools";
 import { exportAcademicTree } from "./AcademicTreeExport";
 import {
   academicReachable,
+  academicPrimaryLineage,
   type AcademicTreeViewState,
 } from "../academicTreeExploration";
 import { NAVIGATION_STACK_LIMIT } from "../constants";
@@ -78,6 +86,7 @@ export class AcademicTreeView {
   private actions: HTMLDivElement;
   private candidates: HTMLDivElement;
   private searchInput: HTMLInputElement;
+  private searchHistory: SearchHistoryInput;
   private up: HTMLSelectElement;
   private down: HTMLSelectElement;
   private degree: HTMLSelectElement;
@@ -144,6 +153,8 @@ export class AcademicTreeView {
       },
     });
     const toolbar = this.row();
+    styleGraphToolbar(toolbar);
+    toolbar.style.flexWrap = "wrap";
     this.back = this.button(
       "academic-tree-back",
       () => void this.navigate("back"),
@@ -164,7 +175,7 @@ export class AcademicTreeView {
     this.searchInput.setAttribute("aria-label", this.searchInput.placeholder);
     this.searchInput.value = initialAuthor?.fullName || "";
     this.searchInput.style.cssText =
-      "flex:1;min-width:140px;max-width:280px;background:var(--material-background,#fff);color:inherit;border:1px solid var(--fill-quinary,#ccc);padding:5px;border-radius:4px";
+      "flex:1;min-width:140px;max-width:210px;background:var(--material-background,#fff);color:inherit;border:1px solid var(--fill-quinary,#ccc);padding:4px 9px;border-radius:12px;font-size:12px";
     const search = this.button(
       "academic-tree-search",
       () => void this.search(),
@@ -175,7 +186,25 @@ export class AcademicTreeView {
         void this.search();
       }
     });
-    toolbar.append(this.searchInput, search);
+    const searchWrapper = doc.createElement("div");
+    searchWrapper.style.cssText =
+      "position:relative;display:flex;flex:1;min-width:140px;max-width:210px;overflow:hidden";
+    this.searchInput.style.width = "100%";
+    this.searchInput.style.boxSizing = "border-box";
+    searchWrapper.append(this.searchInput);
+    const historyButton = this.button(
+      "references-panel-search-history-tooltip",
+      () => {},
+    );
+    historyButton.textContent = "▾";
+    this.searchHistory = new SearchHistoryInput(
+      this.searchInput,
+      searchWrapper,
+      historyButton,
+      academicSearchHistory,
+      (query) => void this.search(query),
+    );
+    toolbar.append(searchWrapper, historyButton, search);
     this.up = this.depth(toolbar, "academic-tree-up");
     this.down = this.depth(toolbar, "academic-tree-down");
     this.degree = doc.createElement("select");
@@ -211,14 +240,19 @@ export class AcademicTreeView {
       () => void this.load(undefined, undefined, "refresh"),
     );
     this.refresh.title = getString("academic-tree-refresh-hint");
+    this.refresh.textContent = "↻";
+    this.refresh.style.fontSize = "18px";
+    this.refresh.style.padding = "0 8px";
     this.recover = this.button(
       "academic-tree-retry",
       () => void this.load(undefined, undefined, "resume"),
     );
-    controls.append(this.refresh, this.recover, this.stop, this.more);
+    toolbar.prepend(this.refresh);
+    controls.append(this.recover, this.stop, this.more);
     this.updateLoadControls();
     this.status = doc.createElement("div");
     this.status.setAttribute("role", "status");
+    this.status.setAttribute("data-academic-status", "");
     this.status.style.cssText =
       "color:var(--fill-secondary,#64748b);flex:1;min-width:180px;font-size:12px";
     this.status.textContent = getString("academic-tree-choose");
@@ -301,6 +335,7 @@ export class AcademicTreeView {
         }
       },
     });
+    toolbar.append(this.tools.element);
     const stage = doc.createElement("div");
     stage.style.cssText =
       "position:relative;display:flex;flex:1;min-height:200px;overflow:hidden";
@@ -328,17 +363,22 @@ export class AcademicTreeView {
     this.details.textContent = getString("academic-tree-canvas-help");
     this.actions = this.row();
     const note = doc.createElement("div");
-    note.textContent = getString("academic-tree-source-note");
+    note.textContent = getString("academic-tree-legend");
+    note.title = getString("academic-tree-source-note");
     note.style.cssText =
       "padding:4px 12px 8px;color:var(--fill-secondary,#64748b);font-size:11px;flex-shrink:0";
+    const footer = this.row();
+    footer.style.borderTop = "1px solid var(--fill-quinary,#e2e8f0)";
+    this.details.style.cssText =
+      "white-space:pre-line;font-size:12px;flex:1;min-width:200px;max-height:64px;overflow:auto";
+    this.actions.style.padding = "0";
+    footer.append(this.details, this.actions);
     this.element.append(
       toolbar,
       controls,
-      this.tools.element,
       this.candidates,
       stage,
-      this.details,
-      this.actions,
+      footer,
       note,
     );
     const unload = () => this.dispose();
@@ -363,24 +403,16 @@ export class AcademicTreeView {
     return row;
   }
   private button(key: FluentMessageId, action: () => void) {
-    const button = this.doc.createElement("button");
-    button.type = "button";
-    button.textContent = getString(key);
-    button.title = button.textContent;
-    button.setAttribute("aria-label", button.textContent);
-    button.style.cssText =
-      "border:1px solid var(--fill-quinary,#cbd5e1);border-radius:5px;padding:4px 9px;background:var(--material-background,#fff);color:inherit;cursor:pointer";
-    button.addEventListener("click", action);
-    return button;
+    return graphButton(this.doc, getString(key), action);
   }
   private styleSelect(select: HTMLSelectElement) {
-    select.style.cssText =
-      "font:inherit;color:inherit;background:var(--material-background,#fff);border:1px solid var(--fill-quinary,#cbd5e1);border-radius:5px;padding:4px 6px;max-width:100%";
+    styleGraphSelect(select);
   }
   private depth(toolbar: HTMLElement, key: FluentMessageId) {
     const label = this.doc.createElement("label");
     label.textContent = `${getString(key)} `;
-    label.style.cssText = "display:flex;align-items:center;gap:5px";
+    label.style.cssText =
+      "display:flex;align-items:center;gap:4px;font-size:12px;color:var(--fill-secondary,#64748b)";
     const select = this.doc.createElement("select");
     select.setAttribute("aria-label", getString(key));
     for (let depth = 0; depth <= ACADEMIC_TREE_MAX_DEPTH; depth++) {
@@ -400,6 +432,9 @@ export class AcademicTreeView {
     return select;
   }
   private async search(query = this.searchInput.value) {
+    query = query.trim();
+    if (!query || this.disposed) return;
+    this.searchHistory.remember(query);
     this.searchAbort?.abort();
     const controller = createAbortController();
     if (!controller) {
@@ -767,7 +802,12 @@ export class AcademicTreeView {
       }
     }
     this.tools.sync(this.graph, this.busy);
-    this.canvas.render(visible, this.selected);
+    this.canvas.render(
+      visible,
+      this.selected,
+      academicPrimaryLineage(this.graph),
+      this.tools.state.sort || "name",
+    );
     this.canvas.highlightPath(this.tools.state.path);
   }
   private updateStatus(loading: boolean) {
@@ -827,7 +867,11 @@ export class AcademicTreeView {
             other: "academic-tree-other",
             unknown: "academic-tree-unknown",
           }[degree];
-          return key ? getString(key as FluentMessageId) : degree;
+          const label = key ? getString(key as FluentMessageId) : degree;
+          const year = node.educationYears?.[degree];
+          return year === undefined
+            ? label
+            : `${label} — ${getString("academic-tree-education-year", { args: { year } })}`;
         });
         lines.push(`${mentor?.name} → ${node.name}: ${degrees.join(" / ")}`);
       }
@@ -904,6 +948,13 @@ export class AcademicTreeView {
         this.status.textContent = getString("academic-tree-load-error");
     }
   }
+  closeMenus() {
+    this.searchHistory.close();
+    this.tools.closeMenus();
+  }
+  refreshAppearance() {
+    this.tools.refreshAppearance();
+  }
   cancel(showStatus = true) {
     this.authorPreview?.hide();
     const wasBusy = this.busy;
@@ -931,6 +982,7 @@ export class AcademicTreeView {
     this.backStack = [];
     this.forwardStack = [];
     this.tools.dispose();
+    this.searchHistory.dispose();
     this.authorPreview.dispose();
     this.canvas.dispose();
     this.element.remove();

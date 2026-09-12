@@ -1,11 +1,8 @@
+import { createAcademicRouter } from "../academicTreeRouting";
+import { academicPrimaryLineage } from "../academicTreeExploration";
 import { serializeAcademicSVG } from "../academicTreeSVG";
 import type { AcademicTreeGraph, AcademicTreeNode } from "../academicTreeTypes";
-import {
-  layoutAcademicTree,
-  wrapAcademicName,
-  ACADEMIC_NODE_WIDTH as W,
-  ACADEMIC_NODE_HEIGHT as H,
-} from "../academicTreeLayout";
+import { layoutAcademicTree, wrapAcademicName } from "../academicTreeLayout";
 
 const NS = "http://www.w3.org/2000/svg";
 /** SVG canvas with mouse/keyboard pan and zoom. All labels are plain text. */
@@ -21,14 +18,18 @@ export class AcademicTreeCanvas {
   private rootId = "";
   private renderedGraph?: AcademicTreeGraph;
   private selected?: string;
+  private sort: import("../academicTreeTypes").AcademicSortMode = "name";
+  private primaryLineage = new Set<string>();
   private relationshipPath: string[] = [];
   private hovered?: string;
+  private hoveredEdge?: { source: string; target: string };
   private focused?: string;
   private cards = new Map<string, SVGRectElement>();
   private links: Array<{
     source: string;
     target: string;
     path: SVGPathElement;
+    overlay: SVGGElement;
   }> = [];
   private measureName: (text: string) => number;
   private cleanup: Array<() => void> = [];
@@ -139,9 +140,11 @@ export class AcademicTreeCanvas {
     this.layout = undefined;
     this.rootId = "";
     this.renderedGraph = undefined;
+    this.primaryLineage = new Set();
     this.cards.clear();
     this.links = [];
     this.hovered = this.focused = undefined;
+    this.hoveredEdge = undefined;
     this.group.replaceChildren();
     this.element.removeAttribute("data-root-author-id");
   }
@@ -172,8 +175,8 @@ export class AcademicTreeCanvas {
     const node = this.layout?.nodes.find((node) => node.id === id);
     if (!node) return;
     const rect = this.element.getBoundingClientRect();
-    this.x = rect.width / 2 - (node.x + W / 2) * this.scale;
-    this.y = rect.height / 2 - (node.y + H / 2) * this.scale;
+    this.x = rect.width / 2 - (node.x + node.width / 2) * this.scale;
+    this.y = rect.height / 2 - (node.y + node.height / 2) * this.scale;
     this.transform();
   }
   fitPeople(ids: string[]) {
@@ -181,8 +184,8 @@ export class AcademicTreeCanvas {
     if (!nodes?.length) return;
     const left = Math.min(...nodes.map((node) => node.x));
     const top = Math.min(...nodes.map((node) => node.y));
-    const width = Math.max(...nodes.map((node) => node.x + W)) - left;
-    const height = Math.max(...nodes.map((node) => node.y + H)) - top;
+    const width = Math.max(...nodes.map((node) => node.x + node.width)) - left;
+    const height = Math.max(...nodes.map((node) => node.y + node.height)) - top;
     const rect = this.element.getBoundingClientRect();
     this.scale = Math.max(
       0.04,
@@ -194,38 +197,47 @@ export class AcademicTreeCanvas {
   }
   private emphasize() {
     const active = this.hovered || this.focused || this.selected;
-    for (const { source, target, path } of this.links) {
-      const highlighted = this.relationshipPath.length
-        ? this.relationshipPath.some(
-            (id, i, ids) =>
-              (id === source && ids[i + 1] === target) ||
-              (id === target && ids[i + 1] === source),
-          )
-        : source === active || target === active;
+    for (const { source, target, path, overlay } of this.links) {
+      const highlighted = this.hoveredEdge
+        ? source === this.hoveredEdge.source &&
+          target === this.hoveredEdge.target
+        : this.relationshipPath.length
+          ? this.relationshipPath.some(
+              (id, i, ids) =>
+                (id === source && ids[i + 1] === target) ||
+                (id === target && ids[i + 1] === source),
+            )
+          : source === active || target === active;
       path.setAttribute(
         "stroke",
-        highlighted
-          ? "var(--color-accent,#0060df)"
+        active || this.hoveredEdge
+          ? "var(--fill-tertiary,#94a3b8)"
           : "var(--fill-secondary,#64748b)",
       );
-      path.setAttribute(
-        "stroke-opacity",
-        highlighted ? "0.85" : active ? "0.28" : "0.48",
-      );
+      // Opaque strokes avoid dark accumulation along a shared family's bus.
       path.setAttribute("stroke-width", highlighted ? "1.6" : "1.1");
-      path.setAttribute(
-        "marker-end",
-        `url(#${this.markerId}${highlighted ? "-active" : ""})`,
-      );
+      overlay.setAttribute("visibility", highlighted ? "visible" : "hidden");
     }
     for (const [id, rect] of this.cards) {
+      const supplemental = !this.primaryLineage.has(id);
+      rect.setAttribute(
+        "data-academic-role",
+        supplemental ? "co-advisor" : "lineage",
+      );
       const selected = id === this.selected,
         root = id === this.rootId;
       rect.setAttribute(
         "stroke",
-        selected || root || id === active || this.relationshipPath.includes(id)
+        selected ||
+          root ||
+          id === active ||
+          id === this.hoveredEdge?.source ||
+          id === this.hoveredEdge?.target ||
+          this.relationshipPath.includes(id)
           ? "var(--color-accent,#0060df)"
-          : "var(--fill-quaternary,#cbd5e1)",
+          : supplemental
+            ? "color-mix(in srgb,var(--fill-quaternary,#cbd5e1) 65%,var(--material-background,#fff))"
+            : "var(--fill-quaternary,#cbd5e1)",
       );
       rect.parentElement?.setAttribute("aria-pressed", String(selected));
       rect.setAttribute("stroke-width", selected ? "2" : "1");
@@ -233,7 +245,9 @@ export class AcademicTreeCanvas {
         "fill",
         selected || root
           ? "color-mix(in srgb,var(--color-accent,#0060df) 8%,var(--material-background,#fff))"
-          : "var(--material-background,#fff)",
+          : supplemental
+            ? "color-mix(in srgb,var(--fill-primary,#1e293b) 3%,var(--material-background,#fff))"
+            : "var(--material-background,#fff)",
       );
     }
   }
@@ -255,22 +269,31 @@ export class AcademicTreeCanvas {
     );
     return serializeAcademicSVG(this.doc, this.element, full, width, height);
   }
-  render(graph: AcademicTreeGraph, selected?: string) {
+  render(
+    graph: AcademicTreeGraph,
+    selected?: string,
+    primaryLineage?: Set<string>,
+    sort: import("../academicTreeTypes").AcademicSortMode = "name",
+  ) {
     this.selected = selected;
+    if (primaryLineage || this.renderedGraph !== graph)
+      this.primaryLineage = primaryLineage ?? academicPrimaryLineage(graph);
     // Selection changes should preserve the focused DOM node and its hover card.
-    if (this.renderedGraph === graph) {
+    if (this.renderedGraph === graph && this.sort === sort) {
       this.emphasize();
       return;
     }
+    this.sort = sort;
     this.renderedGraph = graph;
     this.cards.clear();
     this.links = [];
     this.hovered = this.focused = undefined;
+    this.hoveredEdge = undefined;
     const oldRoot = this.layout?.nodes.find((node) => node.id === graph.rootId);
     const rootChanged = this.rootId !== graph.rootId;
     this.rootId = graph.rootId;
     this.element.setAttribute("data-root-author-id", graph.rootId);
-    this.layout = layoutAcademicTree(graph);
+    this.layout = layoutAcademicTree(graph, this.measureName, sort);
     const positions = new Map(this.layout.nodes.map((node) => [node.id, node]));
     const fragment = this.doc.createDocumentFragment();
     const defs = this.doc.createElementNS(NS, "defs");
@@ -294,65 +317,72 @@ export class AcademicTreeCanvas {
           ? "var(--color-accent,#0060df)"
           : "var(--fill-secondary,#64748b)",
       );
-      tip.setAttribute("fill-opacity", active ? "0.85" : "0.48");
+      tip.setAttribute("fill-opacity", "1");
       marker.appendChild(tip);
       defs.appendChild(marker);
     }
     fragment.appendChild(defs);
-    const ports = new Map<string, number>();
-    for (const direction of ["source", "target"] as const) {
-      const groups = new Map<string, typeof graph.edges>();
-      for (const edge of graph.edges) {
-        const group = groups.get(edge[direction]) ?? [];
-        group.push(edge);
-        groups.set(edge[direction], group);
-      }
-      const other = direction === "source" ? "target" : "source";
-      for (const [id, edges] of groups) {
-        const node = positions.get(id);
-        if (!node) continue;
-        edges.sort(
-          (a, b) =>
-            (positions.get(a[other])?.x ?? 0) -
-              (positions.get(b[other])?.x ?? 0) ||
-            a[other].localeCompare(b[other]),
-        );
-        const span = Math.min(56, (edges.length - 1) * 8);
-        edges.forEach((edge, i) =>
-          ports.set(
-            `${direction}:${edge.source}|${edge.target}`,
-            node.x +
-              W / 2 +
-              (edges.length > 1 ? (i / (edges.length - 1) - 0.5) * span : 0),
-          ),
-        );
-      }
-    }
+    const edgeLayer = this.doc.createElementNS(NS, "g");
+    const overlayLayer = this.doc.createElementNS(NS, "g");
+    overlayLayer.setAttribute("pointer-events", "none");
+    fragment.append(edgeLayer, overlayLayer);
+    const route = createAcademicRouter(this.layout.nodes, graph.edges);
     for (const edge of graph.edges) {
       const from = positions.get(edge.source),
         to = positions.get(edge.target);
       if (!from || !to) continue;
       const path = this.doc.createElementNS(NS, "path");
-      const x1 = ports.get(`source:${edge.source}|${edge.target}`)!,
-        y1 = from.y + H,
-        x2 = ports.get(`target:${edge.source}|${edge.target}`)!,
-        y2 = to.y;
-      const bend = Math.max(18, Math.abs(y2 - y1) / 2);
-      path.setAttribute(
-        "d",
-        `M${x1},${y1} C${x1},${y1 + bend} ${x2},${y2 - bend} ${x2},${y2}`,
-      );
+      path.setAttribute("d", route(from, to));
       path.setAttribute("fill", "none");
       path.setAttribute("stroke", "var(--fill-secondary,#64748b)");
       path.setAttribute("stroke-width", "1.1");
       path.setAttribute("data-source", edge.source);
       path.setAttribute("data-target", edge.target);
-      this.links.push({ source: edge.source, target: edge.target, path });
       path.setAttribute("marker-end", `url(#${this.markerId})`);
+      path.setAttribute("pointer-events", "none");
+      const halo = path.cloneNode(false) as SVGPathElement;
+      halo.removeAttribute("data-source");
+      halo.removeAttribute("data-target");
+      halo.removeAttribute("marker-end");
+      halo.setAttribute("stroke", "var(--material-background,#fff)");
+      halo.setAttribute("stroke-width", "3.5");
+      halo.setAttribute("stroke-linejoin", "round");
+      const hit = halo.cloneNode(false) as SVGPathElement;
+      hit.setAttribute("stroke", "transparent");
+      hit.setAttribute("stroke-width", "8");
+      hit.setAttribute("pointer-events", "stroke");
+      hit.setAttribute("data-edge-hit", `${edge.source}|${edge.target}`);
+      hit.addEventListener("mouseenter", () => {
+        this.hoveredEdge = edge;
+        this.emphasize();
+      });
+      hit.addEventListener("mouseleave", () => {
+        this.hoveredEdge = undefined;
+        this.emphasize();
+      });
       const title = this.doc.createElementNS(NS, "title");
       title.textContent = `${from.name} → ${to.name}: ${edge.degreeTypes.join(", ")}`;
-      path.appendChild(title);
-      fragment.appendChild(path);
+      hit.appendChild(title);
+      edgeLayer.append(halo, path, hit);
+      const overlay = this.doc.createElementNS(NS, "g");
+      overlay.setAttribute(
+        "data-edge-highlight",
+        `${edge.source}|${edge.target}`,
+      );
+      const emphasized = path.cloneNode(false) as SVGPathElement;
+      emphasized.removeAttribute("data-source");
+      emphasized.removeAttribute("data-target");
+      emphasized.setAttribute("stroke", "var(--color-accent,#0060df)");
+      emphasized.setAttribute("stroke-width", "1.6");
+      emphasized.setAttribute("marker-end", `url(#${this.markerId}-active)`);
+      overlay.append(halo.cloneNode(false), emphasized);
+      overlayLayer.appendChild(overlay);
+      this.links.push({
+        source: edge.source,
+        target: edge.target,
+        path,
+        overlay,
+      });
     }
     for (const node of this.layout.nodes) {
       const g = this.doc.createElementNS(NS, "g");
@@ -363,8 +393,8 @@ export class AcademicTreeCanvas {
       g.setAttribute("aria-label", this.describe(node));
       g.style.cursor = "pointer";
       const rect = this.doc.createElementNS(NS, "rect");
-      rect.setAttribute("width", String(W));
-      rect.setAttribute("height", String(H));
+      rect.setAttribute("width", String(node.width));
+      rect.setAttribute("height", String(node.height));
       rect.setAttribute("rx", "6");
       this.cards.set(node.id, rect);
       g.addEventListener("mouseenter", () => {
@@ -389,25 +419,27 @@ export class AcademicTreeCanvas {
       title.textContent = this.describe(node);
       g.appendChild(title);
       const text = this.doc.createElementNS(NS, "text");
-      text.setAttribute("x", String(W / 2));
+      text.setAttribute("x", String(node.width / 2));
       text.setAttribute("text-anchor", "middle");
       text.setAttribute("fill", "var(--fill-primary,#1e293b)");
       text.setAttribute("font-size", "13");
       text.setAttribute("font-family", "system-ui,sans-serif");
-      const lines = wrapAcademicName(node.name, this.measureName);
+      const lines = wrapAcademicName(
+        node.name,
+        this.measureName,
+        node.width - 20,
+      );
       text.setAttribute(
         "y",
         String(
-          node.institution
-            ? lines.length > 1
-              ? 15
-              : 23
-            : H / 2 + 4 - ((lines.length - 1) * 16) / 2,
+          node.height / 2 +
+            4 -
+            ((lines.length - 1) * 16 + (node.institution ? 11 : 0)) / 2,
         ),
       );
       lines.forEach((line, index) => {
         const span = this.doc.createElementNS(NS, "tspan");
-        span.setAttribute("x", String(W / 2));
+        span.setAttribute("x", String(node.width / 2));
         span.setAttribute("dy", index ? "16" : "0");
         span.textContent = line;
         text.appendChild(span);
@@ -457,15 +489,15 @@ export class AcademicTreeCanvas {
       if (node.institution) {
         const affiliation = this.doc.createElementNS(NS, "text");
         affiliation.setAttribute("data-affiliation", node.institution);
-        affiliation.setAttribute("x", String(W / 2));
-        affiliation.setAttribute("y", "44");
+        affiliation.setAttribute("x", String(node.width / 2));
+        affiliation.setAttribute("y", String(node.height - 7));
         affiliation.setAttribute("text-anchor", "middle");
         affiliation.setAttribute("font-size", "10");
         affiliation.setAttribute("font-family", "system-ui,sans-serif");
         affiliation.setAttribute("fill", "var(--fill-secondary,#64748b)");
         const chars = Array.from(node.institution.trim().replace(/\s+/g, " "));
         const fits = (label: string) =>
-          (this.measureName(label) * 10) / 13 <= W - 24;
+          (this.measureName(label) * 10) / 13 <= node.width - 20;
         let label = chars.join("");
         if (!fits(label)) {
           while (chars.length && !fits(chars.join("") + "…")) chars.pop();

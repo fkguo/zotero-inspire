@@ -57,12 +57,27 @@ export function applyPillButtonStyle(
   el.style.transition = "background-color 0.15s ease, color 0.15s ease";
   el.style.whiteSpace = "nowrap";
 
+  applyPillButtonColors(el, isActive, isDark);
+}
+
+/** Update a pill's palette without resetting its size, icon or spacing. */
+export function applyPillButtonColors(
+  el: HTMLElement,
+  isActive: boolean,
+  isDark: boolean,
+): void {
   if (isActive) {
-    el.style.background = isDark ? BUTTON_ACTIVE_BG_DARK : BUTTON_ACTIVE_BG_LIGHT;
+    el.style.background = isDark
+      ? BUTTON_ACTIVE_BG_DARK
+      : BUTTON_ACTIVE_BG_LIGHT;
     el.style.color = BUTTON_ACTIVE_COLOR;
   } else {
-    el.style.background = isDark ? BUTTON_INACTIVE_BG_DARK : BUTTON_INACTIVE_BG_LIGHT;
-    el.style.color = isDark ? BUTTON_INACTIVE_COLOR_DARK : BUTTON_INACTIVE_COLOR_LIGHT;
+    el.style.background = isDark
+      ? BUTTON_INACTIVE_BG_DARK
+      : BUTTON_INACTIVE_BG_LIGHT;
+    el.style.color = isDark
+      ? BUTTON_INACTIVE_COLOR_DARK
+      : BUTTON_INACTIVE_COLOR_LIGHT;
   }
 }
 

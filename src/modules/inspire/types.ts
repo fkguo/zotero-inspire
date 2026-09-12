@@ -26,6 +26,16 @@ export interface AuthorSearchInfo {
 export interface InspireAuthorProfile {
   recid: string;
   name: string;
+  /** Version of the retained public author fields; absent in legacy caches. */
+  profileVersion?: number;
+  canonicalName?: string;
+  positions?: Array<{
+    institution: string;
+    rank?: string;
+    current?: boolean;
+    startDate?: string;
+    endDate?: string;
+  }>;
   currentPosition?: {
     institution: string;
     rank?: string;

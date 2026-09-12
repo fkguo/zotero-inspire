@@ -1,6 +1,7 @@
 import type { AcademicTreeGraph } from "./academicTreeTypes";
 
 export interface AcademicTreeViewState {
+  sort?: import("./academicTreeTypes").AcademicSortMode;
   showCoAdvisors: boolean;
   collapsed: string[];
   path: string[];
@@ -28,6 +29,20 @@ export function academicReachable(
   return seen;
 }
 
+/** People retained by the co-advisor filter, also used for card appearance. */
+export function academicPrimaryLineage(graph: AcademicTreeGraph): Set<string> {
+  const ancestors = academicReachable(graph, graph.rootId, "up");
+  const primary = new Set([
+    ...ancestors,
+    ...academicReachable(graph, graph.rootId, "down"),
+  ]);
+  for (const id of graph.expanded.down)
+    if (ancestors.has(id))
+      for (const child of academicReachable(graph, id, "down"))
+        primary.add(child);
+  return primary;
+}
+
 /** Display-only projection. Shared branches survive if another visible route exists. */
 export function projectAcademicTree(
   graph: AcademicTreeGraph,
@@ -37,15 +52,7 @@ export function projectAcademicTree(
   const ancestors = academicReachable(graph, graph.rootId, "up");
   const allowed = state.showCoAdvisors
     ? new Set(graph.nodes.map((node) => node.id))
-    : new Set([
-        ...ancestors,
-        ...academicReachable(graph, graph.rootId, "down"),
-      ]);
-  if (!state.showCoAdvisors)
-    for (const id of graph.expanded.down)
-      if (ancestors.has(id))
-        for (const child of academicReachable(graph, id, "down"))
-          allowed.add(child);
+    : academicPrimaryLineage(graph);
   const collapsed = new Set(state.collapsed);
   // Never cut the center's own ancestral chain, including after history restoration.
   const edges = graph.edges.filter(
@@ -134,6 +141,8 @@ export function academicTreeCSV(graph: AcademicTreeGraph): string {
       "source",
       "target",
       "degree_types",
+      "canonical_name",
+      "education_end_years",
     ],
   ];
   for (const node of graph.nodes)
@@ -145,6 +154,8 @@ export function academicTreeCSV(graph: AcademicTreeGraph): string {
       "",
       "",
       "",
+      node.canonicalName || "",
+      JSON.stringify(node.educationYears || {}),
     ]);
   for (const edge of graph.edges)
     rows.push([
@@ -155,6 +166,8 @@ export function academicTreeCSV(graph: AcademicTreeGraph): string {
       edge.source,
       edge.target,
       edge.degreeTypes.join(";"),
+      "",
+      "",
     ]);
   return rows.map((row) => row.map(cell).join(",")).join("\r\n");
 }

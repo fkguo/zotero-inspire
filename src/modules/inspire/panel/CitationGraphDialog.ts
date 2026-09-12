@@ -1,3 +1,9 @@
+import {
+  GraphMenu,
+  styleGraphToolbar,
+  type GraphMenuItem,
+} from "./graphControls";
+import { promptGraphSaveFile, saveGraphPNG } from "./graphFileIO";
 import type { AuthorPreviewCallbacks } from "./AuthorPreviewController";
 import { createGraphWindow, makeGraphWindowDraggable } from "./graphWindow";
 import { AcademicTreeView } from "./AcademicTreeView";
@@ -139,8 +145,7 @@ export class CitationGraphDialog {
   private exportBtn?: HTMLButtonElement;
   private loadBtn?: HTMLButtonElement;
   private connectionsBtn?: HTMLButtonElement;
-  private toolbarMenuEl?: HTMLDivElement;
-  private toolbarMenuCleanup?: () => void;
+  private toolbarMenu?: GraphMenu;
   private seedsPanelEl?: HTMLDivElement;
   private graphResult?: MultiSeedGraphResult;
   private showAllConnections = false;
@@ -269,10 +274,8 @@ export class CitationGraphDialog {
     this.saveBtn = undefined;
     this.exportBtn = undefined;
     this.loadBtn = undefined;
-    this.toolbarMenuCleanup?.();
-    this.toolbarMenuCleanup = undefined;
-    this.toolbarMenuEl?.remove();
-    this.toolbarMenuEl = undefined;
+    this.toolbarMenu?.close();
+    this.toolbarMenu = undefined;
 
     try {
       this.onDispose?.();
@@ -289,17 +292,11 @@ export class CitationGraphDialog {
       "zinspire-citation-graph",
     );
     const header = this.doc.createElement("div");
-    header.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--fill-quinary, #e2e8f0);
-      background: var(--material-sidepane, #f8fafc);
-      cursor: move;
-      user-select: none;
-    `;
+    styleGraphToolbar(header);
+    header.style.justifyContent = "space-between";
+    header.style.gap = "10px";
+    header.style.cursor = "move";
+    header.style.userSelect = "none";
 
     const win = this.doc.defaultView;
     this.dialogDragCleanup = makeGraphWindowDraggable(this.doc, dialog, header);
@@ -726,6 +723,8 @@ export class CitationGraphDialog {
       "display:flex;flex-direction:column;flex:1;min-height:0";
     citationContent.append(header, body);
     this.switchGraphMode = (academic) => {
+      this.closeToolbarMenu();
+      this.academicTreeView?.closeMenus();
       if (academic && !this.academicTreeView) {
         this.academicTreeView = new AcademicTreeView(
           this.doc,
@@ -795,6 +794,7 @@ export class CitationGraphDialog {
 
       // Re-apply inline styles that depend on the dark/light palette.
       this.updateHeader(this.graphResult);
+      this.academicTreeView?.refreshAppearance();
       if (this.graphResult) {
         this.renderGraph(this.graphResult);
       }
@@ -1188,6 +1188,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       this.connectionsAbort = undefined;
       this.connectionsLoading = false;
       this.updateHeader(this.graphResult);
+      this.academicTreeView?.refreshAppearance();
       this.renderGraph(this.graphResult);
       return;
     }
@@ -1198,6 +1199,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       this.allConnectionEdges.length
     ) {
       this.updateHeader(this.graphResult);
+      this.academicTreeView?.refreshAppearance();
       this.renderGraph(this.graphResult);
       return;
     }
@@ -1719,6 +1721,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       this.applyLocalItemId(recid, existing.id);
       if (this.graphResult) {
         this.updateHeader(this.graphResult);
+        this.academicTreeView?.refreshAppearance();
         this.renderGraph(this.graphResult);
       }
       return;
@@ -1777,6 +1780,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     );
     if (this.graphResult) {
       this.updateHeader(this.graphResult);
+      this.academicTreeView?.refreshAppearance();
       this.renderGraph(this.graphResult);
     }
   }
@@ -1988,111 +1992,12 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
   }
 
   private closeToolbarMenu(): void {
-    this.toolbarMenuCleanup?.();
-    this.toolbarMenuCleanup = undefined;
-    this.toolbarMenuEl?.remove();
-    this.toolbarMenuEl = undefined;
+    this.toolbarMenu?.close();
   }
 
-  private showToolbarMenu(
-    anchor: HTMLElement,
-    items: Array<{
-      label: string;
-      disabled?: boolean;
-      onClick: () => void | Promise<void>;
-    }>,
-  ): void {
-    this.closeToolbarMenu();
-
-    const menu = this.doc.createElement("div");
-    menu.style.cssText = `
-      position: fixed;
-      z-index: 2147483005;
-      background: var(--material-background, #ffffff);
-      border: 1px solid var(--fill-quinary, #d1d5db);
-      border-radius: 10px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
-      padding: 6px;
-      min-width: 220px;
-    `;
-
-    const rect = anchor.getBoundingClientRect();
-    const viewportWidth = this.doc.documentElement?.clientWidth || 800;
-    const viewportHeight = this.doc.documentElement?.clientHeight || 600;
-    const left = Math.min(Math.max(10, rect.left), viewportWidth - 240);
-    const top = Math.min(Math.max(10, rect.bottom + 6), viewportHeight - 260);
-    menu.style.left = `${left}px`;
-    menu.style.top = `${top}px`;
-
-    for (const item of items) {
-      const row = this.doc.createElement("div");
-      row.textContent = item.label;
-      row.style.cssText = `
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 6px 10px;
-        border-radius: 8px;
-        font-size: 12px;
-        color: var(--fill-primary, #1e293b);
-        cursor: ${item.disabled ? "default" : "pointer"};
-        opacity: ${item.disabled ? "0.55" : "1"};
-        user-select: none;
-      `;
-
-      if (!item.disabled) {
-        row.addEventListener("mouseenter", () => {
-          row.style.background = "var(--fill-quinary, #f1f5f9)";
-        });
-        row.addEventListener("mouseleave", () => {
-          row.style.background = "transparent";
-        });
-      }
-
-      row.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-
-      row.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (item.disabled) {
-          return;
-        }
-        this.closeToolbarMenu();
-        try {
-          void Promise.resolve(item.onClick());
-        } catch {
-          // Ignore menu action errors
-        }
-      });
-
-      menu.appendChild(row);
-    }
-
-    (this.doc.body || this.doc.documentElement).appendChild(menu);
-    this.toolbarMenuEl = menu;
-
-    const win = this.doc.defaultView;
-    const onGlobalMouseDown = (e: MouseEvent) => {
-      const target = e.target as Node | null;
-      if (target && menu.contains(target)) {
-        return;
-      }
-      this.closeToolbarMenu();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        this.closeToolbarMenu();
-      }
-    };
-    win?.addEventListener("mousedown", onGlobalMouseDown, true);
-    win?.addEventListener("keydown", onKeyDown, true);
-    this.toolbarMenuCleanup = () => {
-      win?.removeEventListener("mousedown", onGlobalMouseDown, true);
-      win?.removeEventListener("keydown", onKeyDown, true);
-    };
+  private showToolbarMenu(anchor: HTMLElement, items: GraphMenuItem[]): void {
+    this.toolbarMenu ??= new GraphMenu(this.doc);
+    this.toolbarMenu.show(anchor, items);
   }
 
   private showSaveMenu(anchor: HTMLElement): void {
@@ -2377,23 +2282,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     title: string,
     filters: Array<{ label: string; pattern: string }>,
   ): Promise<string | null> {
-    const win = Zotero.getMainWindow();
-    const FilePickerCtor = win && (win as any).FilePicker;
-    if (!win || !FilePickerCtor) {
-      return null;
-    }
-    const fp = new FilePickerCtor();
-    fp.init(win, title, fp.modeSave);
-    for (const f of filters) {
-      fp.appendFilter(f.label, f.pattern);
-    }
-    fp.appendFilters(fp.filterAll);
-    fp.defaultString = defaultFilename;
-    const result = await fp.show();
-    if (result === fp.returnOK || result === fp.returnReplace) {
-      return fp.file;
-    }
-    return null;
+    return promptGraphSaveFile(defaultFilename, title, filters);
   }
 
   private async promptOpenFile(
@@ -2605,44 +2494,18 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const w = Math.max(1, Math.round(rect?.width || 800));
     const h = Math.max(1, Math.round(rect?.height || 600));
 
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
     try {
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("Image load failed"));
-        img.src = url;
-      });
-
-      const scale = 2;
-      const canvas = this.doc.createElement("canvas");
-      canvas.width = w * scale;
-      canvas.height = h * scale;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Canvas is not available");
-      ctx.setTransform(scale, 0, 0, scale, 0, 0);
-      ctx.drawImage(img, 0, 0, w, h);
-
-      const pngBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error("PNG encode failed"))),
-          "image/png",
-        );
-      });
-      const bytes = new Uint8Array(await pngBlob.arrayBuffer());
-      await IOUtils.write(filePath, bytes);
+      await saveGraphPNG(this.doc, filePath, { svg, width: w, height: h });
       this.showToast(
         getString("references-panel-citation-graph-export-success") ||
           "Exported",
       );
-    } catch (e) {
+    } catch (error) {
+      Zotero.debug(error);
       this.showToast(
         getString("references-panel-citation-graph-export-failed") ||
-          `Export failed: ${e}`,
+          "Export failed",
       );
-    } finally {
-      URL.revokeObjectURL(url);
     }
   }
 

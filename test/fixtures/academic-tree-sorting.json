@@ -1,0 +1,736 @@
+{
+  "fetchedAt": "2026-09-12T13:33:01.540Z",
+  "graph": {
+    "rootId": "997887",
+    "nodes": [
+      {
+        "id": "997887",
+        "name": "Ulf-G. Meißner",
+        "recid": "997887",
+        "institution": "Bonn U. and Jülich, Forschungszentrum",
+        "level": 0,
+        "canonicalName": "Meissner, Ulf-G.",
+        "educationYears": {
+          "phd": 1984,
+          "bachelor": 1982
+        }
+      },
+      {
+        "id": "1015185",
+        "name": "Gerald Edward Brown",
+        "recid": "1015185",
+        "level": -1,
+        "canonicalName": "Brown, Gerald Edward",
+        "educationYears": {
+          "phd": 1950,
+          "bachelor": 1946
+        }
+      },
+      {
+        "id": "1015801",
+        "name": "Bugra Borasoy",
+        "recid": "1015801",
+        "institution": "Bonn U.",
+        "level": 1,
+        "canonicalName": "Borasoy, Bugra",
+        "educationYears": {
+          "phd": 1996
+        }
+      },
+      {
+        "id": "1027503",
+        "name": "Udit Raha",
+        "recid": "1027503",
+        "institution": "Indian Inst. Tech., Guwahati",
+        "level": 1,
+        "canonicalName": "Raha, Udit",
+        "educationYears": {
+          "phd": 2006
+        }
+      },
+      {
+        "id": "1069658",
+        "name": "De-Chuan Du",
+        "recid": "1069658",
+        "institution": "Julich, Forschungszentrum",
+        "level": 1,
+        "canonicalName": "Du, De-Chuan",
+        "educationYears": {
+          "master": 2013,
+          "bachelor": 2009
+        }
+      },
+      {
+        "id": "1492467",
+        "name": "Maral Salajegheh",
+        "recid": "1492467",
+        "institution": "Bonn U., HISKP",
+        "level": 1,
+        "canonicalName": "Salajegheh, Maral",
+        "educationYears": {
+          "phd": 2020
+        }
+      },
+      {
+        "id": "1061504",
+        "name": "Martin Hoferichter",
+        "recid": "1061504",
+        "institution": "Bern U.",
+        "level": 1,
+        "canonicalName": "Hoferichter, Martin",
+        "educationYears": {
+          "phd": 2012
+        }
+      },
+      {
+        "id": "1078081",
+        "name": "Maxim Mai",
+        "recid": "1078081",
+        "institution": "U. Giessen (main); George Washington U.",
+        "level": 1,
+        "canonicalName": "Mai, Maxim",
+        "educationYears": {
+          "phd": 2013
+        }
+      },
+      {
+        "id": "1019908",
+        "name": "Lucas Platter",
+        "recid": "1019908",
+        "institution": "Tennessee U.",
+        "level": 1,
+        "canonicalName": "Platter, Lucas",
+        "educationYears": {
+          "phd": 2005
+        }
+      },
+      {
+        "id": "1006846",
+        "name": "Hans-Werner Hammer",
+        "recid": "1006846",
+        "level": 0,
+        "canonicalName": "Hammer, Hans-Werner",
+        "educationYears": {}
+      },
+      {
+        "id": "1210930",
+        "name": "Meng-Lin Du",
+        "recid": "1210930",
+        "institution": "UESTC, Chengdu",
+        "level": 1,
+        "canonicalName": "Du, Menglin",
+        "educationYears": {
+          "phd": 2017,
+          "master": 2012
+        }
+      },
+      {
+        "id": "982063",
+        "name": "Shi-Lin Zhu",
+        "recid": "982063",
+        "level": 0,
+        "canonicalName": "Zhu, Shi-Lin",
+        "educationYears": {}
+      },
+      {
+        "id": "1778031",
+        "name": "Thomas Vonk",
+        "recid": "1778031",
+        "level": 1,
+        "canonicalName": "Vonk, Thomas",
+        "educationYears": {
+          "phd": 2022
+        }
+      },
+      {
+        "id": "1027513",
+        "name": "Feng-Kun Guo",
+        "recid": "1027513",
+        "institution": "Beijing, Inst. Theor. Phys.",
+        "level": 0,
+        "canonicalName": "Guo, Fengkun",
+        "educationYears": {
+          "phd": 2007,
+          "bachelor": 2002
+        }
+      },
+      {
+        "id": "1426378",
+        "name": "Gianluca Stellin",
+        "recid": "1426378",
+        "institution": "IJCLab, Orsay",
+        "level": 1,
+        "canonicalName": "Stellin, Gianluca",
+        "educationYears": {}
+      },
+      {
+        "id": "1020511",
+        "name": "Lorenzo Fortunato",
+        "recid": "1020511",
+        "level": 0,
+        "canonicalName": "Fortunato, Lorenzo",
+        "educationYears": {
+          "phd": 2003,
+          "bachelor": 2000
+        }
+      },
+      {
+        "id": "989070",
+        "name": "Peng Nian Shen",
+        "recid": "989070",
+        "level": 0,
+        "canonicalName": "Shen, PengNian",
+        "educationYears": {
+          "phd": 1985
+        }
+      },
+      {
+        "id": "1757356",
+        "name": "Jing Gao",
+        "recid": "1757356",
+        "institution": "Bonn U., HISKP",
+        "level": 1,
+        "canonicalName": "Gao, Jing",
+        "educationYears": {
+          "phd": 2021,
+          "bachelor": 2016
+        }
+      },
+      {
+        "id": "999703",
+        "name": "Cai-Dian Lv",
+        "recid": "999703",
+        "level": 0,
+        "canonicalName": "Lv, Cai-Dian",
+        "educationYears": {
+          "phd": 1994,
+          "bachelor": 1989
+        }
+      },
+      {
+        "id": "1050613",
+        "name": "Tobias Huber",
+        "recid": "1050613",
+        "level": 0,
+        "canonicalName": "Huber, Tobias",
+        "educationYears": {}
+      },
+      {
+        "id": "1020041",
+        "name": "Sir Rudolph Ernst Peierls",
+        "recid": "1020041",
+        "level": -2,
+        "canonicalName": "Peierls, Rudolph Ernst, Sir",
+        "educationYears": {
+          "phd": 1929
+        }
+      },
+      {
+        "id": "2901307",
+        "name": "Rakshanda Goswami",
+        "recid": "2901307",
+        "institution": "Indian Inst. Tech., Guwahati",
+        "level": 2,
+        "canonicalName": "Goswami, Rakshanda",
+        "educationYears": {}
+      },
+      {
+        "id": "2929731",
+        "name": "Bhoomika Das",
+        "recid": "2929731",
+        "institution": "Indian Inst. Tech., Guwahati",
+        "level": 2,
+        "canonicalName": "Das, Bhoomika",
+        "educationYears": {
+          "master": 2019,
+          "bachelor": 2017
+        }
+      },
+      {
+        "id": "1873041",
+        "name": "Frederic Noël",
+        "recid": "1873041",
+        "institution": "U. Bern, AEC",
+        "level": 2,
+        "canonicalName": "Noël, Frederic",
+        "educationYears": {
+          "phd": 2024,
+          "master": 2020
+        }
+      },
+      {
+        "id": "1032586",
+        "name": "Bastian Kubis",
+        "recid": "1032586",
+        "level": 1,
+        "canonicalName": "Kubis, Bastian",
+        "educationYears": {}
+      },
+      {
+        "id": "1006803",
+        "name": "Christoph Hanhart",
+        "recid": "1006803",
+        "level": 1,
+        "canonicalName": "Hanhart, Christoph",
+        "educationYears": {
+          "phd": 1997
+        }
+      },
+      {
+        "id": "1668904",
+        "name": "Daniel Sadasivan",
+        "recid": "1668904",
+        "institution": "Ave Maria U.",
+        "level": 2,
+        "canonicalName": "Sadasivan, Daniel",
+        "educationYears": {
+          "phd": 2020
+        }
+      },
+      {
+        "id": "1045165",
+        "name": "Michael Döring",
+        "recid": "1045165",
+        "level": 1,
+        "canonicalName": "Döring, Michael",
+        "educationYears": {}
+      },
+      {
+        "id": "2698729",
+        "name": "Wen-jia Wang",
+        "recid": "2698729",
+        "institution": "UESTC, Chengdu",
+        "level": 2,
+        "canonicalName": "Wang, Wen-jia",
+        "educationYears": {
+          "master": 2023
+        }
+      },
+      {
+        "id": "1274497",
+        "name": "Li-Ye Xiao",
+        "recid": "1274497",
+        "level": 1,
+        "canonicalName": "Xiao, Li-Ye",
+        "educationYears": {}
+      },
+      {
+        "id": "1810325",
+        "name": "Teng Ji",
+        "recid": "1810325",
+        "institution": "Bonn U., HISKP",
+        "level": 1,
+        "canonicalName": "Ji, Teng",
+        "educationYears": {
+          "phd": 2023,
+          "bachelor": 2018
+        }
+      },
+      {
+        "id": "1820554",
+        "name": "Hao-Jie Jing",
+        "recid": "1820554",
+        "institution": "Shanxi U.",
+        "level": 1,
+        "canonicalName": "Jing, Hao-Jie",
+        "educationYears": {
+          "phd": 2021,
+          "bachelor": 2016
+        }
+      },
+      {
+        "id": "1851032",
+        "name": "Pan-Pan Shi",
+        "recid": "1851032",
+        "institution": "Valencia U., IFIC",
+        "level": 1,
+        "canonicalName": "Shi, Pan Pan",
+        "educationYears": {
+          "phd": 2023,
+          "master": 2019
+        }
+      },
+      {
+        "id": "2614857",
+        "name": "Meng-Na Tang",
+        "recid": "2614857",
+        "institution": "Yuncheng U.",
+        "level": 1,
+        "canonicalName": "Tang, Meng-Na",
+        "educationYears": {
+          "phd": 2023,
+          "bachelor": 2017
+        }
+      },
+      {
+        "id": "2712950",
+        "name": "Hai-Long Fu",
+        "recid": "2712950",
+        "institution": "Bonn Uni, HIKSP & IAS, Jülich",
+        "level": 1,
+        "canonicalName": "Fu, Hai-Long",
+        "educationYears": {
+          "phd": 2025,
+          "bachelor": 2020
+        }
+      },
+      {
+        "id": "2858595",
+        "name": "Yi-Lin Song",
+        "recid": "2858595",
+        "institution": "Beijing, Inst. Theor. Phys.",
+        "level": 1,
+        "canonicalName": "Song, Yi-Lin",
+        "educationYears": {
+          "master": 2025,
+          "bachelor": 2023
+        }
+      },
+      {
+        "id": "unlinked:2858595:1",
+        "name": "Guo, Fengkun",
+        "level": 0
+      },
+      {
+        "id": "2735621",
+        "name": "Zhao-Sai Jia",
+        "recid": "2735621",
+        "institution": "Qufu Normal U.",
+        "level": 1,
+        "canonicalName": "Jia, Zhaosai",
+        "educationYears": {
+          "master": 2021,
+          "bachelor": 2018
+        }
+      },
+      {
+        "id": "1246204",
+        "name": "Gang Li",
+        "recid": "1246204",
+        "level": 0,
+        "canonicalName": "Li, Gang",
+        "educationYears": {
+          "phd": 2009,
+          "bachelor": 2004
+        }
+      },
+      {
+        "id": "2779951",
+        "name": "Bing Wu",
+        "recid": "2779951",
+        "institution": "UESTC, Chengdu",
+        "level": 1,
+        "canonicalName": "Wu, Bing",
+        "educationYears": {
+          "phd": 2024,
+          "bachelor": 2019
+        }
+      },
+      {
+        "id": "981943",
+        "name": "Bingsong Zou",
+        "recid": "981943",
+        "level": 0,
+        "canonicalName": "Zou, Bing Song",
+        "educationYears": {
+          "phd": 1990,
+          "master": 1987,
+          "bachelor": 1984
+        }
+      },
+      {
+        "id": "2730529",
+        "name": "Tao-Ran Hu",
+        "recid": "2730529",
+        "institution": "Michigan State U., East Lansing (main)",
+        "level": 1,
+        "canonicalName": "Hu, Tao-Ran",
+        "educationYears": {
+          "bachelor": 2025
+        }
+      },
+      {
+        "id": "1000805",
+        "name": "Dean Lee",
+        "recid": "1000805",
+        "level": 0,
+        "canonicalName": "Lee, Dean",
+        "educationYears": {
+          "bachelor": 1992
+        }
+      },
+      {
+        "id": "2964270",
+        "name": "Zheng-Li Luo",
+        "recid": "2964270",
+        "institution": "Peking U., Beijing",
+        "level": 1,
+        "canonicalName": "Luo, Zheng-Li",
+        "educationYears": {
+          "bachelor": 2024
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "1015185",
+        "target": "997887",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "997887",
+        "target": "1015801",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "997887",
+        "target": "1027503",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1069658",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1492467",
+        "degreeTypes": ["unknown"]
+      },
+      {
+        "source": "997887",
+        "target": "1061504",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1078081",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1019908",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1006846",
+        "target": "1019908",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1210930",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "982063",
+        "target": "1210930",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "997887",
+        "target": "1778031",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "1778031",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1426378",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1020511",
+        "target": "1426378",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "997887",
+        "target": "1027513",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "989070",
+        "target": "1027513",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1757356",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "999703",
+        "target": "1757356",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1050613",
+        "target": "1757356",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1020041",
+        "target": "1015185",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1027503",
+        "target": "2901307",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027503",
+        "target": "2929731",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1061504",
+        "target": "1873041",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1032586",
+        "target": "1873041",
+        "degreeTypes": ["bachelor"]
+      },
+      {
+        "source": "1006803",
+        "target": "1873041",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "1078081",
+        "target": "1668904",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1045165",
+        "target": "1668904",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1210930",
+        "target": "2698729",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1274497",
+        "target": "2698729",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "1027513",
+        "target": "1810325",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1027513",
+        "target": "1820554",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "1851032",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1027513",
+        "target": "2614857",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2712950",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2858595",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "unlinked:2858595:1",
+        "target": "2858595",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2735621",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1246204",
+        "target": "2735621",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2779951",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "981943",
+        "target": "2779951",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "1027513",
+        "target": "2730529",
+        "degreeTypes": ["bachelor"]
+      },
+      {
+        "source": "1000805",
+        "target": "2730529",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2964270",
+        "degreeTypes": ["bachelor"]
+      },
+      {
+        "source": "981943",
+        "target": "2964270",
+        "degreeTypes": ["bachelor", "phd"]
+      }
+    ],
+    "expanded": {
+      "up": ["997887", "1015185"],
+      "down": [
+        "997887",
+        "1015801",
+        "1027503",
+        "1069658",
+        "1061504",
+        "1492467",
+        "1019908",
+        "1078081",
+        "1210930",
+        "1426378",
+        "1778031",
+        "1027513",
+        "1757356"
+      ]
+    },
+    "empty": {
+      "up": [],
+      "down": [
+        "1015801",
+        "1069658",
+        "1492467",
+        "1019908",
+        "1426378",
+        "1778031",
+        "1757356"
+      ]
+    },
+    "failures": [],
+    "limited": false,
+    "profileFailures": []
+  },
+  "source": "INSPIRE public author records; fetched using inspireFetch. Graph topology from the Ulf-G. Meissner two-generation example."
+}

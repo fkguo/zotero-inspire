@@ -1,5 +1,6 @@
 import type { InspireAuthorProfile } from "./types";
 
+export type AcademicSortMode = "name" | "year";
 export type AcademicDirection = "up" | "down";
 export type AcademicDegreeFilter =
   | "all"
@@ -10,6 +11,8 @@ export type AcademicDegreeFilter =
 export interface AcademicTreeNode {
   id: string;
   name: string;
+  canonicalName?: string;
+  educationYears?: Record<string, number>;
   recid?: string;
   institution?: string;
   level: number;

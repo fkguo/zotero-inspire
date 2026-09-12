@@ -2,8 +2,7 @@ import { INSPIRE_API_BASE } from "./constants";
 import { inspireFetch } from "./rateLimiter";
 import { localCache } from "./localCache";
 import { LRUCache } from "./utils";
-import { parseAuthorProfile } from "./authorProfileService";
-import type { InspireAuthorMetadata } from "./apiTypes";
+import { fetchAuthorRecord, retainAuthorRecord } from "./authorProfileRecords";
 import type { InspireAuthorProfile } from "./types";
 import type {
   AcademicStudentsPage,
@@ -65,22 +64,14 @@ async function cached<T>(
 }
 
 function profileFromRecord(value: unknown): InspireAuthorProfile {
-  const row = value as {
-    id?: string | number;
-    metadata?: InspireAuthorMetadata;
-  } | null;
-  const recid = String(row?.id ?? row?.metadata?.control_number ?? "");
-  const metadata = row?.metadata;
-  if (!/^\d+$/.test(recid) || !metadata?.name)
-    throw new Error("Invalid author record");
-  // Deleted/merged authors require an explicit new identity selection.
-  if ((metadata as { deleted?: boolean }).deleted)
-    throw new Error("Author record deleted");
-  const profile = parseAuthorProfile(metadata, recid);
-  if (!profile?.name) throw new Error("Author name missing");
+  return treeProfile(retainAuthorRecord(value));
+}
+
+function treeProfile(shared: InspireAuthorProfile): InspireAuthorProfile {
+  const profile = { ...shared };
   // The shared profile parser falls back to a historical position. Tree subtitles
   // explicitly describe current affiliations, so require INSPIRE's current flag.
-  const current = metadata.positions?.filter(
+  const current = profile.positions?.filter(
     (position) => position.current && position.institution,
   );
   profile.currentPosition = current?.length
@@ -113,28 +104,13 @@ function makeSource(refresh = false): AcademicTreeSource {
   return {
     async profile(recid, signal) {
       if (!/^\d+$/.test(recid)) throw new Error("Invalid author ID");
-      return cached(
-        `v2-profile-${recid}`,
-        signal,
-        async () => {
-          const result = profileFromRecord(
-            await request(
-              `${INSPIRE_API_BASE}/authors/${recid}`,
-              signal,
-              refresh,
-            ),
-          );
-          if (result.recid !== recid) throw new Error("Author ID mismatch");
-          return result;
-        },
-        refresh,
-      );
+      return treeProfile(await fetchAuthorRecord(recid, signal, refresh));
     },
     async students(recid, page, signal): Promise<AcademicStudentsPage> {
       if (!/^\d+$/.test(recid) || !Number.isInteger(page) || page < 1)
         throw new Error("Invalid students query");
       return cached(
-        `v2-students-${recid}-${page}`,
+        `v3-students-${recid}-${page}`,
         signal,
         async () => {
           const query = encodeURIComponent(`advisors.record.$ref:${recid}`);

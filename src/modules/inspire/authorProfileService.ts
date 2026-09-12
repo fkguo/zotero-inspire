@@ -4,11 +4,16 @@ import { INSPIRE_API_BASE, AUTHOR_PROFILE_CACHE_TTL_MS } from "./constants";
 import { LRUCache } from "./utils";
 import { localCache } from "./localCache";
 import type { AuthorSearchInfo, InspireAuthorProfile } from "./types";
-import type {
-  InspireAuthorsSearchResponse,
-  InspireAuthorDirectResponse,
-  InspireAuthorMetadata,
-} from "./apiTypes";
+import {
+  parseAuthorProfile,
+  AUTHOR_PROFILE_VERSION,
+} from "./authorProfileParser";
+export { parseAuthorProfile } from "./authorProfileParser";
+import {
+  fetchAuthorRecord,
+  clearAuthorRecordCache,
+} from "./authorProfileRecords";
+import type { InspireAuthorsSearchResponse } from "./apiTypes";
 
 const authorProfileCache = new LRUCache<
   string,
@@ -48,7 +53,9 @@ function getCachedProfile(key: string): InspireAuthorProfile | null {
  * Get author profile from local persistent cache.
  * Used for offline fallback when network is unavailable.
  */
-async function getLocalCachedProfile(key: string): Promise<InspireAuthorProfile | null> {
+async function getLocalCachedProfile(
+  key: string,
+): Promise<InspireAuthorProfile | null> {
   try {
     const result = await localCache.get<InspireAuthorProfile>(
       "author_profile",
@@ -57,11 +64,15 @@ async function getLocalCachedProfile(key: string): Promise<InspireAuthorProfile 
       { ignoreTTL: true }, // Allow expired cache for offline use
     );
     if (result?.data) {
-      Zotero.debug(`[${config.addonName}] Author profile from local cache: ${key}`);
+      Zotero.debug(
+        `[${config.addonName}] Author profile from local cache: ${key}`,
+      );
       return result.data;
     }
   } catch (e) {
-    Zotero.debug(`[${config.addonName}] Failed to get author profile from local cache: ${e}`);
+    Zotero.debug(
+      `[${config.addonName}] Failed to get author profile from local cache: ${e}`,
+    );
   }
   return null;
 }
@@ -72,10 +83,7 @@ async function getLocalCachedProfile(key: string): Promise<InspireAuthorProfile 
  * so subsequent lookups via any identifier hit the cache.
  * Also saves to local persistent cache for offline support.
  */
-function cacheProfile(
-  primaryKey: string,
-  profile: InspireAuthorProfile,
-): void {
+function cacheProfile(primaryKey: string, profile: InspireAuthorProfile): void {
   const now = Date.now();
   const entry = { profile, fetchedAt: now };
 
@@ -113,7 +121,13 @@ function cacheProfile(
 
   for (const key of localCacheKeys) {
     localCache
-      .set<InspireAuthorProfile>("author_profile", key, profile, undefined, undefined)
+      .set<InspireAuthorProfile>(
+        "author_profile",
+        key,
+        profile,
+        undefined,
+        undefined,
+      )
       .catch((e) => {
         Zotero.debug(
           `[${config.addonName}] Failed to save author profile to local cache (${key}): ${e}`,
@@ -138,11 +152,13 @@ export async function fetchAuthorProfile(
   authorInfo: AuthorSearchInfo,
   signal?: AbortSignal,
 ): Promise<InspireAuthorProfile | null> {
+  if (authorInfo.recid) return fetchAuthorByRecid(authorInfo.recid, signal);
   const cacheKey = getAuthorCacheKey(authorInfo);
 
   // Priority 1: Check in-memory cache (fastest)
   const cached = getCachedProfile(cacheKey);
-  if (cached) {
+  if (cached?.profileVersion === AUTHOR_PROFILE_VERSION) {
+    if (cached.recid) return fetchAuthorByRecid(cached.recid, signal);
     return cached;
   }
 
@@ -155,10 +171,12 @@ export async function fetchAuthorProfile(
   // Use recid if available, as it's the primary key for local cache
   const localCacheKey = authorInfo.recid || cacheKey;
   const localCached = await getLocalCachedProfile(localCacheKey);
-  if (localCached) {
+  if (localCached?.profileVersion === AUTHOR_PROFILE_VERSION) {
     // Also populate memory cache for faster subsequent access
     cacheProfile(cacheKey, localCached);
-    return localCached;
+    return localCached.recid
+      ? fetchAuthorByRecid(localCached.recid, signal)
+      : localCached;
   }
 
   try {
@@ -186,28 +204,42 @@ export async function fetchAuthorProfile(
         signal ? { signal } : undefined,
       ).catch(() => null);
       if (!response || !response.ok) {
-        Zotero.debug(`[${config.addonName}] Author profile search failed: ${response?.status} for ${url}`);
+        Zotero.debug(
+          `[${config.addonName}] Author profile search failed: ${response?.status} for ${url}`,
+        );
         return null;
       }
-      const data = (await response.json()) as unknown as InspireAuthorsSearchResponse | null;
+      const data =
+        (await response.json()) as unknown as InspireAuthorsSearchResponse | null;
       const hit = data?.hits?.hits?.[0];
       if (!hit) {
-        Zotero.debug(`[${config.addonName}] Author profile search: no results for query "${query}"`);
+        Zotero.debug(
+          `[${config.addonName}] Author profile search: no results for query "${query}"`,
+        );
         return null;
       }
       // Extract recid from search result and do direct lookup for full data (including email)
       const foundRecid = hit?.id || hit?.metadata?.control_number;
-      Zotero.debug(`[${config.addonName}] Author profile search found recid: ${foundRecid}`);
+      Zotero.debug(
+        `[${config.addonName}] Author profile search found recid: ${foundRecid}`,
+      );
       if (foundRecid) {
         // Direct lookup returns full data including email_addresses
-        const fullProfile = await fetchAuthorByRecid(String(foundRecid), signal);
+        const fullProfile = await fetchAuthorByRecid(
+          String(foundRecid),
+          signal,
+        );
         if (fullProfile) {
-          Zotero.debug(`[${config.addonName}] Author profile via direct lookup, email: ${fullProfile.emails?.join(", ") || "none"}`);
+          Zotero.debug(
+            `[${config.addonName}] Author profile via direct lookup, email: ${fullProfile.emails?.join(", ") || "none"}`,
+          );
           return fullProfile;
         }
       }
       // Fallback: parse from search result (may lack some fields like email)
-      Zotero.debug(`[${config.addonName}] Author profile fallback to search result parsing`);
+      Zotero.debug(
+        `[${config.addonName}] Author profile fallback to search result parsing`,
+      );
       return parseAuthorProfile(hit?.metadata, hit?.id);
     };
 
@@ -251,7 +283,9 @@ export async function fetchAuthorProfile(
       // 1. Full name in "First Last" format (most specific)
       if (firstName && lastName) {
         // Check if firstName looks like initials (e.g., "S.L.", "F.-K.")
-        const isInitials = /^[A-Z]\.(?:\s*-?[A-Z]\.)*$/.test(firstName.replace(/\s+/g, ""));
+        const isInitials = /^[A-Z]\.(?:\s*-?[A-Z]\.)*$/.test(
+          firstName.replace(/\s+/g, ""),
+        );
         if (!isInitials) {
           // Full first name - use directly
           searchQueries.push(`${firstName} ${lastName}`);
@@ -267,7 +301,9 @@ export async function fetchAuthorProfile(
 
       // Try searches in order, stop when we find a result
       for (const query of searchQueries) {
-        Zotero.debug(`[${config.addonName}] Author profile search: trying query "${query}"`);
+        Zotero.debug(
+          `[${config.addonName}] Author profile search: trying query "${query}"`,
+        );
         profile = await trySearch(query);
         if (profile) {
           cacheProfile(cacheKey, profile);
@@ -283,7 +319,9 @@ export async function fetchAuthorProfile(
     if ((err as Error).name === "AbortError") {
       throw err;
     }
-    Zotero.debug(`[${config.addonName}] Failed to fetch author profile: ${err}`);
+    Zotero.debug(
+      `[${config.addonName}] Failed to fetch author profile: ${err}`,
+    );
     return null;
   }
 }
@@ -301,128 +339,17 @@ async function fetchAuthorByRecid(
   signal?: AbortSignal,
 ): Promise<InspireAuthorProfile | null> {
   try {
-    // Direct lookup: /api/authors/{recid}
-    // Note: Don't use fields parameter for Authors API - get full response
-    // Author profiles are small (~2KB) and we need all fields including email_addresses
-    const url = `${INSPIRE_API_BASE}/authors/${recid}`;
-    const response = await inspireFetch(
-      url,
-      signal ? { signal } : undefined,
-    ).catch(() => null);
-
-    if (!response || !response.ok) {
-      return null;
-    }
-
-    const data = (await response.json()) as unknown as InspireAuthorDirectResponse | null;
-    // Direct lookup response: { "id": "...", "metadata": { ... } }
-    const record = data?.metadata;
-    if (!record) {
-      return null;
-    }
-    const recordId = data?.id || record?.control_number;
-    return parseAuthorProfile(record, recordId);
+    return await fetchAuthorRecord(recid, signal);
   } catch (err) {
-    if ((err as Error).name === "AbortError") {
-      throw err;
-    }
+    if ((err as Error).name === "AbortError") throw err;
     Zotero.debug(
-      `[${config.addonName}] Failed to fetch author by recid ${recid}: ${err}`,
+      `[${config.addonName}] Failed to fetch author profile: ${err}`,
     );
-    return null;
+    return getLocalCachedProfile(recid);
   }
-}
-
-export function parseAuthorProfile(
-  metadata: InspireAuthorMetadata | undefined,
-  recid?: string | number,
-): InspireAuthorProfile | null {
-  if (!metadata?.name) {
-    return null;
-  }
-
-  const profile: InspireAuthorProfile = {
-    recid: recid ? String(recid) : String(metadata.control_number || ""),
-    name: metadata.name.preferred_name || metadata.name.value || "",
-  };
-
-  if (Array.isArray(metadata.positions) && metadata.positions.length) {
-    const current =
-      metadata.positions.find((p: any) => p.current) || metadata.positions[0];
-    if (current) {
-      profile.currentPosition = {
-        institution: current.institution || "",
-        rank: current.rank,
-      };
-    }
-  }
-
-  if (Array.isArray(metadata.ids)) {
-    for (const id of metadata.ids) {
-      if (id?.schema === "ORCID") {
-        profile.orcid = id.value;
-      } else if (id?.schema === "INSPIRE BAI") {
-        profile.bai = id.value;
-      } else if (id?.schema === "INSPIRE ID") {
-        profile.inspireId = id.value;
-      }
-    }
-  }
-
-  if (Array.isArray(metadata.arxiv_categories)) {
-    profile.arxivCategories = metadata.arxiv_categories;
-  }
-
-  if (Array.isArray(metadata.urls) && metadata.urls.length) {
-    const url = metadata.urls.find((u: any) => u?.value)?.value;
-    if (url) {
-      profile.homepageUrl = url;
-    }
-  }
-
-  if (Array.isArray(metadata.email_addresses)) {
-    const currentEmails = metadata.email_addresses
-      .filter((e: any) => e?.current)
-      .map((e: any) => e?.value)
-      .filter((e: any) => typeof e === "string" && e.trim());
-    const allEmails = metadata.email_addresses
-      .map((e: any) => e?.value)
-      .filter((e: any) => typeof e === "string" && e.trim());
-    const emails = currentEmails.length ? currentEmails : allEmails;
-    if (emails.length) {
-      profile.emails = emails;
-    }
-  }
-
-  if (Array.isArray(metadata.advisors)) {
-    profile.advisors = metadata.advisors
-      .filter((advisor) => !advisor.hidden)
-      .map((advisor) => {
-        // Extract recid from record.$ref (e.g., "https://inspirehep.net/api/authors/1011904")
-        let recid: string | undefined;
-        const ref = advisor?.record?.$ref;
-        if (typeof ref === "string") {
-          const match = ref.match(/\/authors\/(\d+)$/);
-          if (match) {
-            recid = match[1];
-          }
-        }
-        return {
-          name: advisor?.name || "",
-          degreeType: advisor?.degree_type,
-          recid,
-        };
-      })
-      .filter((advisor: any) => advisor.name);
-  }
-
-  if (metadata.status) {
-    profile.status = metadata.status;
-  }
-
-  return profile;
 }
 
 export function clearAuthorProfileCache() {
   authorProfileCache.clear();
+  clearAuthorRecordCache();
 }

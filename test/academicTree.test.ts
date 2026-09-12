@@ -457,7 +457,7 @@ describe("academic tree metadata and layout", () => {
     expect(node("a").y).toBeLessThan(node("b").y);
     expect(node("b").y).toBe(node("c").y);
     expect(Math.abs(node("b").x - node("c").x)).toBeGreaterThanOrEqual(
-      ACADEMIC_NODE_WIDTH,
+      node("b").width,
     );
     expect(node("d").y).toBeGreaterThan(node("c").y);
   });
@@ -536,8 +536,10 @@ describe("academic tree metadata and layout", () => {
     for (const [i, a] of layout.nodes.entries())
       for (const b of layout.nodes.slice(i + 1))
         expect(
-          Math.abs(a.x - b.x) >= ACADEMIC_NODE_WIDTH ||
-            Math.abs(a.y - b.y) >= ACADEMIC_NODE_HEIGHT,
+          a.x + a.width <= b.x ||
+            b.x + b.width <= a.x ||
+            a.y + a.height <= b.y ||
+            b.y + b.height <= a.y,
         ).toBe(true);
   });
   it("lays out all nodes without overlaps and respects ascending generations", async () => {
@@ -554,8 +556,10 @@ describe("academic tree metadata and layout", () => {
       expect(a.y).toBeGreaterThanOrEqual(0);
       for (const b of layout.nodes.slice(i + 1))
         expect(
-          Math.abs(a.x - b.x) >= ACADEMIC_NODE_WIDTH ||
-            Math.abs(a.y - b.y) >= ACADEMIC_NODE_HEIGHT,
+          a.x + a.width <= b.x ||
+            b.x + b.width <= a.x ||
+            a.y + a.height <= b.y ||
+            b.y + b.height <= a.y,
         ).toBe(true);
     }
     for (const edge of graph.edges) {

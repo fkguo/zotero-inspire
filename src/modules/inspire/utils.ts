@@ -1,5 +1,8 @@
 import { config } from "../../../package.json";
-import { SEARCH_HISTORY_PREF_KEY } from "./constants";
+import {
+  SEARCH_HISTORY_PREF_KEY,
+  ACADEMIC_SEARCH_HISTORY_PREF_KEY,
+} from "./constants";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LRUCache - Least Recently Used Cache with size limit
@@ -294,6 +297,11 @@ export function clearAllHistoryPrefs(): void {
       true,
     );
     Zotero.debug(`[${config.addonName}] Search history cleared`);
+    Zotero.Prefs.set(
+      `${config.addonRef}.${ACADEMIC_SEARCH_HISTORY_PREF_KEY}`,
+      "[]",
+      true,
+    );
   } catch (err) {
     Zotero.debug(`[${config.addonName}] Failed to clear history: ${err}`);
   }

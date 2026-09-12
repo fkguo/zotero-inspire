@@ -1,3 +1,6 @@
+import { GraphMenu, graphButton, styleGraphSelect } from "./graphControls";
+import { applyPillButtonStyle, applyPillButtonColors } from "../../pickerUI";
+import { isDarkMode } from "../styles";
 import { getString } from "../../../utils/locale";
 import type { FluentMessageId } from "../../../../typings/i10n";
 import type { AcademicTreeGraph } from "../academicTreeTypes";
@@ -26,7 +29,9 @@ export class AcademicTreeTools {
     collapsed: [],
     path: [],
   };
-  private coAdvisors: HTMLInputElement;
+  private menu: GraphMenu;
+  private sortSelect: HTMLSelectElement;
+  private coButton: HTMLButtonElement;
   private collapse: HTMLButtonElement;
   private expand: HTMLButtonElement;
   private results: HTMLDivElement;
@@ -41,60 +46,53 @@ export class AcademicTreeTools {
   private projectedSource?: AcademicTreeGraph;
   private timer?: ReturnType<typeof setTimeout>;
   private disposed = false;
+  private exportPending = false;
   constructor(
     private doc: Document,
     private callbacks: Callbacks,
   ) {
+    this.menu = new GraphMenu(doc);
     this.element = doc.createElement("div");
-    this.element.style.cssText = "padding:4px 12px;flex-shrink:0";
-    const bar = doc.createElement("div");
-    bar.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-    this.element.append(bar);
-    const panels: HTMLElement[] = [],
-      toggles: HTMLButtonElement[] = [];
+    this.element.style.cssText =
+      "display:flex;align-items:center;gap:6px;flex-wrap:wrap";
+    const bar = this.element;
     const menu = (key: FluentMessageId) => {
       const panel = doc.createElement("div");
       panel.hidden = true;
       panel.style.cssText =
-        "padding:8px 0;align-items:center;gap:8px;flex-wrap:wrap";
-      const toggle = this.button(key, () => {
-        const open = panel.hidden;
-        panels.forEach((p) => {
-          p.hidden = true;
-          p.style.display = "none";
-        });
-        toggles.forEach((b) => b.setAttribute("aria-expanded", "false"));
-        panel.hidden = !open;
-        panel.style.display = open ? "flex" : "none";
-        toggle.setAttribute("aria-expanded", String(open));
-      });
+        "display:none;align-items:center;gap:8px;flex-wrap:wrap;width:480px";
+      const toggle = this.button(key, () => this.menu.toggle(toggle, panel));
+      toggle.textContent += " ▾";
       toggle.setAttribute("aria-expanded", "false");
-      panels.push(panel);
-      toggles.push(toggle);
-      bar.append(toggle);
-      this.element.append(panel);
+      toggle.setAttribute("aria-haspopup", "dialog");
+      bar.append(toggle, panel);
       return panel;
     };
+    this.sortSelect = this.personSelect("academic-tree-sort");
+    for (const mode of ["name", "year"] as const) {
+      const option = doc.createElement("option");
+      option.value = mode;
+      option.textContent = getString(
+        mode === "name" ? "academic-tree-sort-name" : "academic-tree-sort-year",
+      );
+      this.sortSelect.append(option);
+    }
+    this.sortSelect.title = getString("academic-tree-sort-hint");
+    this.sortSelect.addEventListener("change", () => {
+      this.state.sort = this.sortSelect.value === "year" ? "year" : "name";
+      this.change();
+    });
+    bar.append(this.sortSelect);
     const view = menu("academic-tree-view-menu");
-    const label = doc.createElement("label");
-    this.coAdvisors = doc.createElement("input");
-    this.coAdvisors.type = "checkbox";
-    this.coAdvisors.checked = true;
-    this.coAdvisors.setAttribute(
-      "aria-label",
-      getString("academic-tree-co-advisors"),
-    );
-    label.append(
-      this.coAdvisors,
-      doc.createTextNode(getString("academic-tree-co-advisors")),
-    );
-    label.title = getString("academic-tree-co-advisors-hint");
-    this.coAdvisors.addEventListener("change", () => {
-      this.state.showCoAdvisors = this.coAdvisors.checked;
+    this.coButton = this.button("academic-tree-co-advisors", () => {
+      this.state.showCoAdvisors = !this.state.showCoAdvisors;
       this.state.path = [];
       this.pathResult.textContent = "";
       this.change();
     });
+    this.coButton.title = getString("academic-tree-co-advisors-hint");
+    bar.prepend(this.coButton);
+    this.updateCoButton();
     this.query = doc.createElement("input");
     this.query.type = "search";
     this.query.size = 38;
@@ -122,7 +120,7 @@ export class AcademicTreeTools {
     this.results = doc.createElement("div");
     this.results.style.cssText =
       "flex-basis:100%;max-height:130px;overflow:auto";
-    view.append(label, this.query, this.visibilityNotice, this.results);
+    view.append(this.query, this.visibilityNotice, this.results);
     this.from = this.personSelect("academic-tree-path-from");
     this.to = this.personSelect("academic-tree-path-to");
     this.pathResult = doc.createElement("div");
@@ -144,9 +142,10 @@ export class AcademicTreeTools {
     this.selectionLabel = doc.createElement("span");
     this.selectionLabel.style.color = "var(--fill-secondary,#64748b)";
     expansion.append(this.selectionLabel);
-    this.expand = this.button("academic-tree-expand-ancestors", () =>
-      callbacks.expandAncestors(),
-    );
+    this.expand = this.button("academic-tree-expand-ancestors", () => {
+      this.menu.close();
+      callbacks.expandAncestors();
+    });
     this.collapse = this.button("academic-tree-collapse", () => {
       const id = callbacks.selected();
       if (!id) return;
@@ -165,53 +164,49 @@ export class AcademicTreeTools {
         this.change();
       }),
     );
-    const exporting = menu("academic-tree-export");
-    const scope = doc.createElement("select");
-    scope.setAttribute("aria-label", getString("academic-tree-export-scope"));
-    this.styleSelect(scope);
-    for (const [value, key] of [
-      ["view", "academic-tree-export-view"],
-      ["full", "academic-tree-export-full"],
-    ] as const) {
-      const option = doc.createElement("option");
-      option.value = value;
-      option.textContent = getString(key);
-      scope.append(option);
-    }
-    exporting.append(scope);
-    for (const format of ["svg", "png", "json", "csv"] as const) {
-      const button = this.button("academic-tree-export", () => {
-        button.disabled = true;
-        void callbacks.export(format, scope.value === "full").finally(() => {
-          if (!this.disposed) button.disabled = false;
-        });
-      });
-      button.textContent = format.toUpperCase();
-      button.setAttribute(
-        "aria-label",
-        `${getString("academic-tree-export")} ${format.toUpperCase()}`,
+    const exporting = this.button("academic-tree-export", () => {
+      this.menu.show(
+        exporting,
+        ([false, true] as const).flatMap((full) =>
+          (["svg", "png", "json", "csv"] as const).map((format) => ({
+            label: `${format.toUpperCase()} — ${getString(full ? "academic-tree-export-full" : "academic-tree-export-view")}…`,
+            disabled: !callbacks.graph() || this.exportPending,
+            onClick: async () => {
+              if (this.exportPending || this.disposed) return;
+              this.exportPending = true;
+              exporting.disabled = true;
+              try {
+                await callbacks.export(format, full);
+              } finally {
+                this.exportPending = false;
+                if (!this.disposed) exporting.disabled = false;
+              }
+            },
+          })),
+        ),
       );
-      exporting.append(button);
-    }
-    const hint = doc.createElement("span");
-    hint.textContent = getString("academic-tree-export-hint");
-    hint.style.cssText =
-      "flex-basis:100%;color:var(--fill-secondary,#64748b);font-size:12px";
-    exporting.append(hint);
+    });
+    exporting.textContent = getString("references-panel-citation-graph-export");
+    exporting.title = getString("academic-tree-export-hint");
+    exporting.setAttribute("aria-haspopup", "menu");
+    bar.append(exporting);
+  }
+  private updateCoButton() {
+    applyPillButtonStyle(
+      this.coButton,
+      this.state.showCoAdvisors,
+      isDarkMode(),
+    );
+    this.coButton.setAttribute(
+      "aria-pressed",
+      String(this.state.showCoAdvisors),
+    );
   }
   private button(key: FluentMessageId, fn: () => void) {
-    const button = this.doc.createElement("button");
-    button.type = "button";
-    button.textContent = getString(key);
-    button.setAttribute("aria-label", button.textContent);
-    button.style.cssText =
-      "font:inherit;color:inherit;background:var(--material-background,#fff);border:1px solid var(--fill-quinary,#cbd5e1);border-radius:5px;padding:4px 9px;cursor:pointer";
-    button.addEventListener("click", fn);
-    return button;
+    return graphButton(this.doc, getString(key), fn);
   }
   private styleSelect(select: HTMLSelectElement) {
-    select.style.cssText =
-      "font:inherit;color:inherit;background:var(--material-background,#fff);border:1px solid var(--fill-quinary,#cbd5e1);border-radius:4px;padding:4px;max-width:220px";
+    styleGraphSelect(select);
   }
   private personSelect(key: FluentMessageId) {
     const select = this.doc.createElement("select");
@@ -223,7 +218,7 @@ export class AcademicTreeTools {
   private change() {
     this.projected = undefined;
     this.projectedSource = undefined;
-    this.coAdvisors.checked = this.state.showCoAdvisors;
+    this.updateCoButton();
     this.callbacks.changed();
   }
   project(graph: AcademicTreeGraph) {
@@ -238,11 +233,12 @@ export class AcademicTreeTools {
     this.state = state
       ? { ...state, collapsed: [...state.collapsed], path: [...state.path] }
       : { showCoAdvisors: true, collapsed: [], path: [] };
+    this.sortSelect.value = this.state.sort || "name";
     this.query.value = "";
     this.results.replaceChildren();
     this.pathResult.textContent = "";
     this.visibilityNotice.textContent = "";
-    this.coAdvisors.checked = this.state.showCoAdvisors;
+    this.updateCoButton();
     this.projected = undefined;
     this.projectedSource = undefined;
     this.graph = undefined;
@@ -428,8 +424,24 @@ export class AcademicTreeTools {
     this.change();
     if (visible && path.length) this.callbacks.fitPath(path);
   }
+  closeMenus() {
+    this.menu.close();
+  }
+  refreshAppearance() {
+    const root = this.element.closest(".zinspire-academic-tree");
+    const buttons = Array.from(
+      (root || this.element).querySelectorAll("button"),
+    ) as HTMLButtonElement[];
+    for (const button of buttons)
+      applyPillButtonColors(
+        button,
+        button.getAttribute("aria-pressed") === "true",
+        isDarkMode(),
+      );
+  }
   dispose() {
     this.disposed = true;
+    this.menu.close();
     clearTimeout(this.timer);
     this.element.remove();
   }

@@ -636,8 +636,8 @@ academic-tree-stopped = Loading stopped. The relationships already loaded remain
 academic-tree-canvas-help = Click a name to trace their academic tree and show their papers in the sidebar. Hover over a name for the author preview. Click a card for branch actions. Drag to pan, scroll to zoom; arrows, +/− and 0 also work.
 academic-tree-source-note = Source: public INSPIRE author records. Arrows run from advisor to student; dashed cards have no linked author ID. Missing records do not establish the absence of a relationship. Blue lines highlight the chosen relationship path, or the selected or hovered person’s relationships when no path is active.
 
-academic-tree-view-menu = View
-academic-tree-expand-menu = Expand
+academic-tree-view-menu = Find / path
+academic-tree-expand-menu = Branches
 academic-tree-co-advisors = Show co-advisors
 academic-tree-co-advisors-hint = Hide supplemental co-advisors outside the center’s lineage and expanded ancestor branches. The center’s own advisors remain visible.
 academic-tree-find-placeholder = Find in loaded tree: name, ID, affiliation
@@ -664,3 +664,11 @@ academic-tree-visible-count = { $count } visible
 academic-tree-selection = Selected: { $name }
 academic-tree-revealed = Related hidden branches were revealed.
 academic-tree-find-more = { $count } more matches. Refine your search.
+
+academic-tree-legend = INSPIRE · Advisor → student · Gray cards: supplemental co-advisors · Dashed: unlinked record · Center chain aligned; each advisor’s students ordered by surname or education year · Hover a line to trace it · Missing data may omit relationships.
+
+academic-tree-sort = Sort within families
+academic-tree-sort-name = Surname A–Z
+academic-tree-sort-year = Education year ↑
+academic-tree-sort-hint = Sort all students of each advisor on the same generation row, including those with co-advisors. Years match the degree on that advisor–student relationship. Unknown years come last; ties use surname. Conflicting family orders favor the advisor closest to the center.
+academic-tree-education-year = Education ended { $year } (INSPIRE)

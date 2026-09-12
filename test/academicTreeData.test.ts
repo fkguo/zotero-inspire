@@ -27,13 +27,125 @@ beforeEach(() => {
   mocks.set.mockResolvedValue(undefined);
 });
 describe("academic tree data source", () => {
+  it("shares one exact-author request between sidebar and tree and preserves shared profile data", async () => {
+    const { academicTreeSource } =
+      await import("../src/modules/inspire/academicTreeDataService");
+    const { fetchAuthorProfile } =
+      await import("../src/modules/inspire/authorProfileService");
+    let complete!: (value: unknown) => void;
+    mocks.fetch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const sidebar = fetchAuthorProfile({ recid: "20", fullName: "Display" });
+    const tree = academicTreeSource.profile("20", signal());
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1));
+    complete(
+      response({
+        id: "20",
+        metadata: {
+          name: { value: "Surname, Given", preferred_name: "Given Surname" },
+          positions: [{ institution: "Past", rank: "PHD", end_date: "2007" }],
+        },
+      }),
+    );
+    const [a, b] = await Promise.all([sidebar, tree]);
+    expect(a?.currentPosition?.institution).toBe("Past");
+    expect(b.currentPosition).toBeUndefined();
+    expect(b.canonicalName).toBe("Surname, Given");
+    expect(b.positions?.[0].endDate).toBe("2007");
+    expect(
+      (await fetchAuthorProfile({ recid: "20", fullName: "" }))?.currentPosition
+        ?.institution,
+    ).toBe("Past");
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+  it("a stopped tree does not cancel a simultaneous sidebar profile", async () => {
+    const { fetchAuthorRecord } =
+      await import("../src/modules/inspire/authorProfileRecords");
+    let complete!: (value: unknown) => void;
+    mocks.fetch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const stop = new AbortController();
+    const a = fetchAuthorRecord("21", stop.signal);
+    const b = fetchAuthorRecord("21", signal());
+    const stopped = expect(a).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1));
+    stop.abort();
+    await stopped;
+    expect(mocks.fetch.mock.calls[0][1].signal.aborted).toBe(false);
+    complete(response(row("21")));
+    expect((await b).recid).toBe("21");
+  });
+  it("upgrades old cached profiles once and serves subsequent sidebar and tree visits", async () => {
+    const { academicTreeSource } =
+      await import("../src/modules/inspire/academicTreeDataService");
+    const { fetchAuthorProfile } =
+      await import("../src/modules/inspire/authorProfileService");
+    mocks.get.mockResolvedValue({
+      data: { profile: { recid: "22", name: "Legacy" }, fetchedAt: Date.now() },
+    });
+    mocks.fetch.mockResolvedValue(response(row("22")));
+    expect(
+      (await fetchAuthorProfile({ recid: "22", fullName: "" }))?.profileVersion,
+    ).toBe(2);
+    await academicTreeSource.profile("22", signal());
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+  it("a slow old request cannot overwrite a forced refresh", async () => {
+    const { fetchAuthorRecord } =
+      await import("../src/modules/inspire/authorProfileRecords");
+    let oldComplete!: (value: unknown) => void;
+    mocks.fetch.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          oldComplete = resolve;
+        }),
+    );
+    const old = fetchAuthorRecord("23", signal());
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1));
+    mocks.fetch.mockResolvedValueOnce(
+      response({ id: "23", metadata: { name: { value: "Fresh" } } }),
+    );
+    expect((await fetchAuthorRecord("23", signal(), true)).name).toBe("Fresh");
+    oldComplete(response({ id: "23", metadata: { name: { value: "Old" } } }));
+    await old;
+    expect((await fetchAuthorRecord("23", signal())).name).toBe("Fresh");
+    expect(mocks.set).toHaveBeenCalledTimes(1);
+  });
+  it("full student search records seed the sidebar cache without another request", async () => {
+    const { academicTreeSource } =
+      await import("../src/modules/inspire/academicTreeDataService");
+    const { fetchAuthorProfile } =
+      await import("../src/modules/inspire/authorProfileService");
+    mocks.fetch.mockResolvedValue(
+      response({ hits: { hits: [row("24")], total: 1 } }),
+    );
+    await academicTreeSource.students("1", 1, signal());
+    expect(
+      (await fetchAuthorProfile({ recid: "24", fullName: "" }))?.name,
+    ).toBe("Author 24");
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
   it("uses the limited fetch wrapper, fresh disk cache and then memory cache", async () => {
     const { academicTreeSource } =
       await import("../src/modules/inspire/academicTreeDataService");
     mocks.get.mockResolvedValue({
       data: {
-        data: { recid: "1", name: "Cached", advisors: [] },
-        at: Date.now(),
+        profile: {
+          recid: "1",
+          name: "Cached",
+          advisors: [],
+          profileVersion: 2,
+          positions: [],
+        },
+        fetchedAt: Date.now(),
       },
     });
     expect((await academicTreeSource.profile("1", signal())).name).toBe(
@@ -47,7 +159,10 @@ describe("academic tree data source", () => {
     const { academicTreeSource } =
       await import("../src/modules/inspire/academicTreeDataService");
     mocks.get.mockResolvedValue({
-      data: { data: { recid: "2", name: "Old" }, at: Date.now() - 3 * 3600000 },
+      data: {
+        profile: { recid: "2", name: "Old", profileVersion: 2, positions: [] },
+        fetchedAt: Date.now() - 3 * 3600000,
+      },
     });
     mocks.fetch.mockResolvedValue(response(row("2")));
     expect((await academicTreeSource.profile("2", signal())).name).toBe(
@@ -58,11 +173,9 @@ describe("academic tree data source", () => {
       { signal: expect.anything() },
     );
     expect(mocks.set).toHaveBeenCalledWith(
-      "academic_tree",
-      "v2-profile-2",
+      "author_profile",
+      "v2:2",
       expect.anything(),
-      undefined,
-      1,
     );
   });
   it("keeps HTTP and malformed-record failures retryable", async () => {
@@ -137,7 +250,10 @@ describe("academic tree data source", () => {
     const { academicTreeSource, createAcademicTreeSession } =
       await import("../src/modules/inspire/academicTreeDataService");
     mocks.get.mockResolvedValue({
-      data: { data: { recid: "1", name: "Old" }, at: Date.now() },
+      data: {
+        profile: { recid: "1", name: "Old", profileVersion: 2, positions: [] },
+        fetchedAt: Date.now(),
+      },
     });
     expect((await academicTreeSource.profile("1", signal())).name).toBe("Old");
     mocks.get.mockClear();

@@ -1,0 +1,939 @@
+{
+  "fetchedAt": "2026-09-11T17:35:22.443Z",
+  "graph": {
+    "rootId": "997887",
+    "nodes": [
+      {
+        "id": "997887",
+        "name": "Ulf-G. Meißner",
+        "recid": "997887",
+        "institution": "Bonn U. and Jülich, Forschungszentrum",
+        "level": 0
+      },
+      {
+        "id": "1015185",
+        "name": "Gerald Edward Brown",
+        "recid": "1015185",
+        "level": -1
+      },
+      {
+        "id": "1015801",
+        "name": "Bugra Borasoy",
+        "recid": "1015801",
+        "institution": "Bonn U.",
+        "level": 1
+      },
+      {
+        "id": "1027503",
+        "name": "Udit Raha",
+        "recid": "1027503",
+        "institution": "Indian Inst. Tech., Guwahati",
+        "level": 1
+      },
+      {
+        "id": "1069658",
+        "name": "De-Chuan Du",
+        "recid": "1069658",
+        "institution": "Julich, Forschungszentrum",
+        "level": 1
+      },
+      {
+        "id": "1492467",
+        "name": "Maral Salajegheh",
+        "recid": "1492467",
+        "institution": "Bonn U., HISKP",
+        "level": 1
+      },
+      {
+        "id": "1061504",
+        "name": "Martin Hoferichter",
+        "recid": "1061504",
+        "institution": "Bern U.",
+        "level": 1
+      },
+      {
+        "id": "1078081",
+        "name": "Maxim Mai",
+        "recid": "1078081",
+        "institution": "U. Giessen (main); George Washington U.",
+        "level": 1
+      },
+      {
+        "id": "1019908",
+        "name": "Lucas Platter",
+        "recid": "1019908",
+        "institution": "Tennessee U.",
+        "level": 1
+      },
+      {
+        "id": "1006846",
+        "name": "Hammer, Hans-Werner",
+        "recid": "1006846",
+        "level": 0
+      },
+      {
+        "id": "1210930",
+        "name": "Meng-Lin Du",
+        "recid": "1210930",
+        "institution": "UESTC, Chengdu",
+        "level": 1
+      },
+      {
+        "id": "982063",
+        "name": "Zhu, Shi-Lin",
+        "recid": "982063",
+        "level": 0
+      },
+      {
+        "id": "1778031",
+        "name": "Thomas Vonk",
+        "recid": "1778031",
+        "level": 1
+      },
+      {
+        "id": "1027513",
+        "name": "Feng-Kun Guo",
+        "recid": "1027513",
+        "institution": "Beijing, Inst. Theor. Phys.",
+        "level": 0
+      },
+      {
+        "id": "1426378",
+        "name": "Gianluca Stellin",
+        "recid": "1426378",
+        "institution": "IJCLab, Orsay",
+        "level": 1
+      },
+      {
+        "id": "1020511",
+        "name": "Fortunato, Lorenzo",
+        "recid": "1020511",
+        "level": 0
+      },
+      {
+        "id": "989070",
+        "name": "Shen, Peng Nian",
+        "recid": "989070",
+        "level": 0
+      },
+      {
+        "id": "1757356",
+        "name": "Jing Gao",
+        "recid": "1757356",
+        "institution": "Bonn U., HISKP",
+        "level": 1
+      },
+      {
+        "id": "999703",
+        "name": "Lv, Cai-Dian",
+        "recid": "999703",
+        "level": 0
+      },
+      {
+        "id": "1050613",
+        "name": "Huber, Tobias",
+        "recid": "1050613",
+        "level": 0
+      },
+      {
+        "id": "1020041",
+        "name": "Peierls, Rudolph Ernst, Sir",
+        "recid": "1020041",
+        "level": -2
+      },
+      {
+        "id": "2901307",
+        "name": "Rakshanda Goswami",
+        "recid": "2901307",
+        "institution": "Indian Inst. Tech., Guwahati",
+        "level": 2
+      },
+      {
+        "id": "2929731",
+        "name": "Bhoomika Das",
+        "recid": "2929731",
+        "institution": "Indian Inst. Tech., Guwahati",
+        "level": 2
+      },
+      {
+        "id": "1873041",
+        "name": "Frederic Noël",
+        "recid": "1873041",
+        "institution": "U. Bern, AEC",
+        "level": 2
+      },
+      {
+        "id": "1032586",
+        "name": "Kubis, Bastian",
+        "recid": "1032586",
+        "level": 1
+      },
+      {
+        "id": "1006803",
+        "name": "Hanhart, Christoph",
+        "recid": "1006803",
+        "level": 1
+      },
+      {
+        "id": "1668904",
+        "name": "Daniel Sadasivan",
+        "recid": "1668904",
+        "institution": "Ave Maria U.",
+        "level": 2
+      },
+      {
+        "id": "1045165",
+        "name": "Döring, Michael",
+        "recid": "1045165",
+        "level": 1
+      },
+      {
+        "id": "2698729",
+        "name": "Wen-jia Wang",
+        "recid": "2698729",
+        "institution": "UESTC, Chengdu",
+        "level": 2
+      },
+      {
+        "id": "1274497",
+        "name": "Xiao, Li-Ye",
+        "recid": "1274497",
+        "level": 1
+      },
+      {
+        "id": "1810325",
+        "name": "Teng Ji",
+        "recid": "1810325",
+        "institution": "Bonn U., HISKP",
+        "level": 1
+      },
+      {
+        "id": "1820554",
+        "name": "Hao-Jie Jing",
+        "recid": "1820554",
+        "institution": "Shanxi U.",
+        "level": 1
+      },
+      {
+        "id": "1851032",
+        "name": "Pan-Pan Shi",
+        "recid": "1851032",
+        "institution": "Valencia U., IFIC",
+        "level": 1
+      },
+      {
+        "id": "2614857",
+        "name": "Meng-Na Tang",
+        "recid": "2614857",
+        "institution": "Yuncheng U.",
+        "level": 1
+      },
+      {
+        "id": "2712950",
+        "name": "Hai-Long Fu",
+        "recid": "2712950",
+        "institution": "Bonn Uni, HIKSP & IAS, Jülich",
+        "level": 1
+      },
+      {
+        "id": "2858595",
+        "name": "Yi-Lin Song",
+        "recid": "2858595",
+        "institution": "Beijing, Inst. Theor. Phys.",
+        "level": 1
+      },
+      {
+        "id": "unlinked:2858595:1",
+        "name": "Guo, Fengkun",
+        "level": 0
+      },
+      {
+        "id": "2735621",
+        "name": "Zhao-Sai Jia",
+        "recid": "2735621",
+        "institution": "Qufu Normal U.",
+        "level": 1
+      },
+      {
+        "id": "1246204",
+        "name": "Li, Gang",
+        "recid": "1246204",
+        "level": 0
+      },
+      {
+        "id": "2779951",
+        "name": "Bing Wu",
+        "recid": "2779951",
+        "institution": "UESTC, Chengdu",
+        "level": 1
+      },
+      {
+        "id": "981943",
+        "name": "Zou, Bing Song",
+        "recid": "981943",
+        "level": 0
+      },
+      {
+        "id": "2730529",
+        "name": "Tao-Ran Hu",
+        "recid": "2730529",
+        "institution": "Michigan State U., East Lansing (main)",
+        "level": 1
+      },
+      {
+        "id": "1000805",
+        "name": "Lee, Dean",
+        "recid": "1000805",
+        "level": 0
+      },
+      {
+        "id": "2964270",
+        "name": "Zheng-Li Luo",
+        "recid": "2964270",
+        "institution": "Peking U., Beijing",
+        "level": 1
+      },
+      {
+        "id": "1020033",
+        "name": "Edwin Ernest Salpeter",
+        "recid": "1020033",
+        "level": -1
+      },
+      {
+        "id": "1007660",
+        "name": "Anthony M. Green",
+        "recid": "1007660",
+        "institution": "Helsinki Inst. of Phys.",
+        "level": -1
+      },
+      {
+        "id": "1036952",
+        "name": "Alfonso Mondragon",
+        "recid": "1036952",
+        "institution": "UNAM, Mexico",
+        "level": -1
+      },
+      {
+        "id": "1060031",
+        "name": "Wladyslaw J.  Świa̧tecki",
+        "recid": "1060031",
+        "level": -1
+      },
+      {
+        "id": "1019567",
+        "name": "Gordon Feldman",
+        "recid": "1019567",
+        "level": -1
+      },
+      {
+        "id": "1048902",
+        "name": "Peierls, Rudolph Ernst, Sir",
+        "recid": "1048902",
+        "level": -2
+      },
+      {
+        "id": "1049657",
+        "name": "Donald W.L. Sprung",
+        "recid": "1049657",
+        "level": -1
+      },
+      {
+        "id": "1023420",
+        "name": "Achim Schwenk",
+        "recid": "1023420",
+        "institution": "Darmstadt, Tech. U.; Darmstadt, EMMI",
+        "level": 0
+      },
+      {
+        "id": "1000769",
+        "name": "Kang Seog Lee",
+        "recid": "1000769",
+        "level": 0
+      },
+      {
+        "id": "1002531",
+        "name": "Che-Ming Ko",
+        "recid": "1002531",
+        "institution": "Texas A-M",
+        "level": 0
+      },
+      {
+        "id": "1000018",
+        "name": "Keh-Fei Liu",
+        "recid": "1000018",
+        "institution": "Kentucky U.",
+        "level": 0
+      },
+      {
+        "id": "1005643",
+        "name": "Soon-Tae Hong",
+        "recid": "1005643",
+        "institution": "Ewha Women's U., Seoul",
+        "level": 0
+      },
+      {
+        "id": "1002709",
+        "name": "Dubravko Klabucar",
+        "recid": "1002709",
+        "institution": "Zagreb U.",
+        "level": 0
+      },
+      {
+        "id": "1009402",
+        "name": "Bengt L. Friman",
+        "recid": "1009402",
+        "institution": "Darmstadt, GSI",
+        "level": 0
+      },
+      {
+        "id": "1027878",
+        "name": "Edward Baron",
+        "recid": "1027878",
+        "institution": "Oklahoma U.",
+        "level": 0
+      },
+      {
+        "id": "1039449",
+        "name": "Jeremy W. Holt",
+        "recid": "1039449",
+        "institution": "Texas A&M U., College Station (main)",
+        "level": 0
+      },
+      {
+        "id": "1282189",
+        "name": "Enrique Moreno Méndez",
+        "recid": "1282189",
+        "institution": "UNAM, Mexico",
+        "level": 0
+      },
+      {
+        "id": "984824",
+        "name": "Vicente Vento",
+        "recid": "984824",
+        "institution": "Valencia U.; Valencia U., IFIC",
+        "level": 0
+      },
+      {
+        "id": "987325",
+        "name": "Daniel D. Strottman",
+        "recid": "987325",
+        "institution": "Los Alamos",
+        "level": 0
+      },
+      {
+        "id": "983242",
+        "name": "Chun Wa Wong",
+        "recid": "983242",
+        "institution": "UCLA",
+        "level": 0
+      },
+      {
+        "id": "982798",
+        "name": "Shin Nan Yang",
+        "recid": "982798",
+        "institution": "Taiwan, Natl. Taiwan U.",
+        "level": 0
+      },
+      {
+        "id": "983363",
+        "name": "Andreas Wirzba",
+        "recid": "983363",
+        "institution": "Julich, Forschungszentrum",
+        "level": 0
+      },
+      {
+        "id": "990167",
+        "name": "James Avery Sauls",
+        "recid": "990167",
+        "institution": "Louisiana State U.",
+        "level": 0
+      },
+      {
+        "id": "unlinked:990167:1",
+        "name": "Serene, J.W.",
+        "level": -1
+      },
+      {
+        "id": "991666",
+        "name": "Dan-Olof Riska",
+        "recid": "991666",
+        "institution": "Helsinki Inst. of Phys.",
+        "level": 0
+      },
+      {
+        "id": "994523",
+        "name": "Dany P. Page",
+        "recid": "994523",
+        "institution": "UNAM, Inst. Astron.",
+        "level": 0
+      },
+      {
+        "id": "1000270",
+        "name": "Elliott H. Lieb",
+        "recid": "1000270",
+        "institution": "Princeton U.",
+        "level": 0
+      },
+      {
+        "id": "1054168",
+        "name": "Brown, Gerald Edward",
+        "recid": "1054168",
+        "level": -1
+      },
+      {
+        "id": "1039957",
+        "name": "Jason D. Holt",
+        "recid": "1039957",
+        "institution": "TRIUMF; McGill U.",
+        "level": 0
+      },
+      {
+        "id": "1001523",
+        "name": "Kuo, Thomas T.S.",
+        "recid": "1001523",
+        "level": -1
+      },
+      {
+        "id": "984812",
+        "name": "Raju Venugopalan",
+        "recid": "984812",
+        "institution": "Brookhaven",
+        "level": 0
+      },
+      {
+        "id": "992832",
+        "name": "Brown, Gerald Edward",
+        "recid": "992832",
+        "level": -1
+      }
+    ],
+    "edges": [
+      {
+        "source": "1015185",
+        "target": "997887",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "997887",
+        "target": "1015801",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "997887",
+        "target": "1027503",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1069658",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1492467",
+        "degreeTypes": ["unknown"]
+      },
+      {
+        "source": "997887",
+        "target": "1061504",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1078081",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1019908",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1006846",
+        "target": "1019908",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1210930",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "982063",
+        "target": "1210930",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "997887",
+        "target": "1778031",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "1778031",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1426378",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1020511",
+        "target": "1426378",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "997887",
+        "target": "1027513",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "989070",
+        "target": "1027513",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "997887",
+        "target": "1757356",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "999703",
+        "target": "1757356",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1050613",
+        "target": "1757356",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1020041",
+        "target": "1015185",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1027503",
+        "target": "2901307",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027503",
+        "target": "2929731",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1061504",
+        "target": "1873041",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1032586",
+        "target": "1873041",
+        "degreeTypes": ["bachelor"]
+      },
+      {
+        "source": "1006803",
+        "target": "1873041",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "1078081",
+        "target": "1668904",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1045165",
+        "target": "1668904",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1210930",
+        "target": "2698729",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1274497",
+        "target": "2698729",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "1027513",
+        "target": "1810325",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1027513",
+        "target": "1820554",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "1851032",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1027513",
+        "target": "2614857",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2712950",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2858595",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "unlinked:2858595:1",
+        "target": "2858595",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2735621",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1246204",
+        "target": "2735621",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2779951",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "981943",
+        "target": "2779951",
+        "degreeTypes": ["master"]
+      },
+      {
+        "source": "1027513",
+        "target": "2730529",
+        "degreeTypes": ["bachelor"]
+      },
+      {
+        "source": "1000805",
+        "target": "2730529",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1027513",
+        "target": "2964270",
+        "degreeTypes": ["bachelor"]
+      },
+      {
+        "source": "981943",
+        "target": "2964270",
+        "degreeTypes": ["bachelor", "phd"]
+      },
+      {
+        "source": "1020041",
+        "target": "1020033",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1020041",
+        "target": "1007660",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1020041",
+        "target": "1036952",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1020041",
+        "target": "1060031",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1020041",
+        "target": "1019567",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1048902",
+        "target": "1019567",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1020041",
+        "target": "1049657",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1049657",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1023420",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1000769",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1002531",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1000018",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1005643",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1002709",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1009402",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1015185",
+        "target": "1027878",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1039449",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1015185",
+        "target": "1282189",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "984824",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1015185",
+        "target": "987325",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "983242",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "982798",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "983363",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1015185",
+        "target": "990167",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "unlinked:990167:1",
+        "target": "990167",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1015185",
+        "target": "991666",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "994523",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1000270",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1054168",
+        "target": "1000270",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "1015185",
+        "target": "1039957",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1001523",
+        "target": "1039957",
+        "degreeTypes": ["phd"]
+      },
+      {
+        "source": "1015185",
+        "target": "984812",
+        "degreeTypes": ["other"]
+      },
+      {
+        "source": "992832",
+        "target": "984812",
+        "degreeTypes": ["other"]
+      }
+    ],
+    "expanded": {
+      "up": ["997887", "1015185"],
+      "down": [
+        "997887",
+        "1015801",
+        "1027503",
+        "1069658",
+        "1061504",
+        "1492467",
+        "1019908",
+        "1078081",
+        "1210930",
+        "1426378",
+        "1778031",
+        "1027513",
+        "1757356",
+        "1020041",
+        "1015185"
+      ]
+    },
+    "empty": {
+      "up": [],
+      "down": [
+        "1015801",
+        "1069658",
+        "1492467",
+        "1019908",
+        "1426378",
+        "1778031",
+        "1757356"
+      ]
+    },
+    "failures": [],
+    "limited": false,
+    "profileFailures": []
+  },
+  "source": "https://inspirehep.net/api/authors/997887"
+}
