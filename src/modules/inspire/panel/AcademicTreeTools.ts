@@ -25,7 +25,7 @@ interface Callbacks {
 export class AcademicTreeTools {
   readonly element: HTMLDivElement;
   state: AcademicTreeViewState = {
-    showCoAdvisors: true,
+    showCoAdvisors: false,
     collapsed: [],
     path: [],
   };
@@ -144,8 +144,17 @@ export class AcademicTreeTools {
     expansion.append(this.selectionLabel);
     this.expand = this.button("academic-tree-expand-ancestors", () => {
       this.menu.close();
+      const batch = this.state.ancestorStudents;
+      if (batch) {
+        this.state.ancestorStudents = { ...batch, open: !batch.open };
+        this.state.path = [];
+        this.pathResult.textContent = "";
+        this.change();
+        if (batch.open) return;
+      }
       callbacks.expandAncestors();
     });
+    this.expand.title = getString("academic-tree-expand-ancestors-hint");
     this.collapse = this.button("academic-tree-collapse", () => {
       const id = callbacks.selected();
       if (!id) return;
@@ -161,6 +170,11 @@ export class AcademicTreeTools {
       this.collapse,
       this.button("academic-tree-restore-branches", () => {
         this.state.collapsed = [];
+        if (this.state.ancestorStudents)
+          this.state.ancestorStudents = {
+            ...this.state.ancestorStudents,
+            open: true,
+          };
         this.change();
       }),
     );
@@ -232,7 +246,7 @@ export class AcademicTreeTools {
     clearTimeout(this.timer);
     this.state = state
       ? { ...state, collapsed: [...state.collapsed], path: [...state.path] }
-      : { showCoAdvisors: true, collapsed: [], path: [] };
+      : { showCoAdvisors: false, collapsed: [], path: [] };
     this.sortSelect.value = this.state.sort || "name";
     this.query.value = "";
     this.results.replaceChildren();
@@ -244,6 +258,17 @@ export class AcademicTreeTools {
     this.graph = undefined;
   }
   sync(graph: AcademicTreeGraph | undefined, busy: boolean) {
+    const batchOpen = !!this.state.ancestorStudents?.open;
+    const batchKey = batchOpen
+      ? "academic-tree-collapse-ancestors"
+      : "academic-tree-expand-ancestors";
+    this.expand.textContent = getString(batchKey);
+    this.expand.setAttribute("aria-label", getString(batchKey));
+    this.expand.title = getString(
+      batchOpen
+        ? "academic-tree-collapse-ancestors-hint"
+        : "academic-tree-expand-ancestors-hint",
+    );
     this.expand.disabled =
       busy || !graph || academicReachable(graph, graph.rootId, "up").size < 2;
     const id = this.callbacks.selected();
@@ -343,6 +368,9 @@ export class AcademicTreeTools {
     this.state.collapsed = this.state.collapsed.filter(
       (id) => !ancestors.has(id),
     );
+    const batch = this.state.ancestorStudents;
+    if (batch && !batch.open && batch.anchors.some((id) => ancestors.has(id)))
+      this.state.ancestorStudents = { ...batch, open: true };
     if (missing(projectAcademicTree(graph, this.state)))
       this.state.showCoAdvisors = true;
     const visible = !missing(projectAcademicTree(graph, this.state));

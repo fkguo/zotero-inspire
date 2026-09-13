@@ -17,6 +17,13 @@ export interface AcademicTreeLayout {
   nodes: AcademicLayoutNode[];
   width: number;
   height: number;
+  rows?: Array<{
+    generation: number;
+    part: number;
+    parts: number;
+    y: number;
+    height: number;
+  }>;
 }
 export const ACADEMIC_NODE_WIDTH = 144;
 export const ACADEMIC_NODE_HEIGHT = 55;
@@ -429,6 +436,15 @@ export function layoutAcademicTree(
   return {
     width,
     height: Math.max(100, height - 6),
+    rows: levels.map((level) => ({
+      generation: level,
+      part: 1,
+      parts: 1,
+      y: rowY.get(level)!,
+      height: Math.max(
+        ...layers.get(level)!.map((node) => dimensions.get(node.id)!.height),
+      ),
+    })),
     nodes: levels.flatMap((level) =>
       layers.get(level)!.map((node) => ({
         ...node,

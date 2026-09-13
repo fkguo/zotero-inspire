@@ -215,6 +215,103 @@ describe("Academic Tree window interactions", () => {
     ).toBe("year");
     expect(x("4")).toBeLessThan(x("3"));
   });
+  it("reflows at readable scale without requests, preserves the mode in history, and restores the tree", async () => {
+    open();
+    await rootIs("1");
+    const svg = () =>
+      doc.querySelector<SVGSVGElement>("svg[data-root-author-id]")!;
+    const treeTransform = doc
+      .querySelector('[data-author-id="1"]')!
+      .getAttribute("transform");
+    const bandColors = () =>
+      [...svg().querySelectorAll("[data-generation-band]")].map((band) => [
+        band.getAttribute("data-generation-band"),
+        band.getAttribute("fill"),
+      ]);
+    const treeBands = bandColors();
+    expect(treeBands).toHaveLength(3);
+    fixture.profile.mockClear();
+    fixture.students.mockClear();
+    expect(button("academic-tree-fit-page").parentElement).toBe(
+      button("academic-tree-fit").parentElement,
+    );
+    expect(button("academic-tree-fit-page").parentElement).toBe(
+      button("academic-tree-center").parentElement,
+    );
+    click(button("academic-tree-fit-page"));
+    expect(button("academic-tree-fit-page").getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(svg().getAttribute("data-layout-mode")).toBe("page");
+    expect(bandColors()).toEqual(treeBands);
+    expect(svg().querySelector("g")!.getAttribute("transform")).toContain(
+      "scale(1)",
+    );
+    expect(svg().querySelector('[data-generation="0"]')).not.toBeNull();
+    const bands = [...svg().querySelectorAll("[data-generation-band]")];
+    expect(bands).toHaveLength(3);
+    expect(new Set(bands.map((band) => band.getAttribute("fill"))).size).toBe(
+      3,
+    );
+    expect(
+      bands.every((band) => Number(band.getAttribute("fill-opacity")) < 0.1),
+    ).toBe(true);
+    const before = svg().querySelector("g")!.getAttribute("transform");
+    svg().dispatchEvent(
+      new win.WheelEvent("wheel", { deltaY: 100, cancelable: true }),
+    );
+    expect(svg().querySelector("g")!.getAttribute("transform")).not.toBe(
+      before,
+    );
+    expect(svg().querySelector("g")!.getAttribute("transform")).toContain(
+      "scale(1)",
+    );
+    expect(fixture.profile).not.toHaveBeenCalled();
+    expect(fixture.students).not.toHaveBeenCalled();
+    click(nameElement("3"));
+    await rootIs("3");
+    click(button("academic-tree-back"));
+    await rootIs("1");
+    expect(svg().getAttribute("data-layout-mode")).toBe("page");
+    click(button("academic-tree-fit-page"));
+    expect(svg().getAttribute("data-layout-mode")).toBe("tree");
+    expect(bandColors()).toEqual(treeBands);
+    expect(
+      doc.querySelector('[data-author-id="1"]')!.getAttribute("transform"),
+    ).toBe(treeTransform);
+  });
+  it("hides supplemental co-advisors initially while preserving the root's mentor", async () => {
+    const student = {
+      ...fixture.profiles[2],
+      advisors: [
+        ...fixture.profiles[2].advisors,
+        { name: "Co Advisor", recid: "4", degreeType: "master" },
+      ],
+    };
+    const profiles = [
+      ...fixture.profiles.slice(0, 2),
+      student,
+      { recid: "4", name: "Co Advisor", advisors: [] },
+    ];
+    fixture.profile.mockImplementation(async (id: string) =>
+      profiles.find((p) => p.recid === id),
+    );
+    fixture.students.mockImplementation(async (id: string) => {
+      const found = profiles.filter((p) =>
+        p.advisors.some((a) => a.recid === id),
+      );
+      return { profiles: found, total: found.length, hasMore: false };
+    });
+    open();
+    await rootIs("1");
+    expect(
+      button("academic-tree-co-advisors").getAttribute("aria-pressed"),
+    ).toBe("false");
+    expect(doc.querySelector('[data-author-id="2"]')).not.toBeNull();
+    expect(doc.querySelector('[data-author-id="4"]')).toBeNull();
+    click(button("academic-tree-co-advisors"));
+    expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
+  });
   it("remembers author searches across reopening, completes them and clears history", async () => {
     const prefs = new Map<string, unknown>();
     vi.mocked(Zotero.Prefs.get).mockImplementation(((key: string) =>
@@ -290,7 +387,7 @@ describe("Academic Tree window interactions", () => {
     await rootIs("2");
     click(button("academic-tree-back"));
     await rootIs("1");
-    expect(co.getAttribute("aria-pressed")).toBe("false");
+    expect(co.getAttribute("aria-pressed")).toBe("true");
     expect(doc.querySelector('[data-author-id="3"]')).toBeNull();
     const requests =
       fixture.profile.mock.calls.length + fixture.students.mock.calls.length;
@@ -350,6 +447,78 @@ describe("Academic Tree window interactions", () => {
       "Student Author ← Root Author ← Mentor Author",
     );
   });
+  it("expands every displayed ancestral generation but only direct students, without retrying unrelated failures", async () => {
+    const person = (recid: string, advisor: string) => ({
+      recid,
+      name: `Author ${recid}`,
+      advisors: [
+        { recid: advisor, name: `Author ${advisor}`, degreeType: "phd" },
+      ],
+    });
+    const profiles = [
+      fixture.profiles[0],
+      fixture.profiles[2],
+      person("2", "6"),
+      person("6", "7"),
+      { recid: "7", name: "Author 7", advisors: [] },
+      person("4", "2"),
+      person("8", "6"),
+      person("9", "7"),
+      person("10", "4"),
+      person("11", "8"),
+      person("12", "9"),
+    ];
+    fixture.profile.mockImplementation(async (id) => {
+      const p = profiles.find((p) => p.recid === id);
+      if (!p) throw Error("404");
+      return p;
+    });
+    let failStudent = true;
+    fixture.students.mockImplementation(async (id) => {
+      if (id === "3" && failStudent)
+        throw Error("Unrelated descendant request failed");
+      const found = profiles.filter((p) =>
+        p.advisors.some((a) => a.recid === id),
+      );
+      return { profiles: found, total: found.length, hasMore: false };
+    });
+    open();
+    await rootIs("1");
+    setSelect("academic-tree-up", "3");
+    await waitLoaded();
+    for (const id of ["2", "6", "7"])
+      expect(doc.querySelector(`[data-author-id="${id}"]`)).not.toBeNull();
+    fixture.students.mockClear();
+    click(button("academic-tree-expand-ancestors"));
+    await waitLoaded();
+    expect(fixture.students.mock.calls.map(([id]) => id).sort()).toEqual([
+      "2",
+      "6",
+      "7",
+    ]);
+    for (const id of ["4", "8", "9"])
+      expect(doc.querySelector(`[data-author-id="${id}"]`)).not.toBeNull();
+    for (const id of ["10", "11", "12"])
+      expect(doc.querySelector(`[data-author-id="${id}"]`)).toBeNull();
+    const requests = fixture.students.mock.calls.length;
+    click(button("academic-tree-collapse-ancestors"));
+    for (const id of ["4", "8", "9"])
+      expect(doc.querySelector(`[data-author-id="${id}"]`)).toBeNull();
+    for (const id of ["1", "2", "3", "6", "7"])
+      expect(doc.querySelector(`[data-author-id="${id}"]`)).not.toBeNull();
+    click(button("academic-tree-expand-ancestors"));
+    for (const id of ["4", "8", "9"])
+      expect(doc.querySelector(`[data-author-id="${id}"]`)).not.toBeNull();
+    expect(fixture.students.mock.calls.length).toBe(requests);
+    // Existing failures remain recoverable, but only through an explicit Retry.
+    failStudent = false;
+    fixture.students.mockClear();
+    click(button("academic-tree-retry"));
+    await waitLoaded();
+    expect(fixture.students.mock.calls.map(([id]) => id)).toEqual(["3"]);
+    for (const id of ["10", "11", "12"])
+      expect(doc.querySelector(`[data-author-id="${id}"]`)).toBeNull();
+  });
   it("expands the visible ancestors' students by one generation and refreshes the added branches", async () => {
     const cousin = {
       recid: "4",
@@ -385,6 +554,23 @@ describe("Academic Tree window interactions", () => {
     await waitLoaded();
     expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
     expect(doc.querySelector('[data-author-id="5"]')).toBeNull();
+    fixture.profile.mockClear();
+    fixture.students.mockClear();
+    click(button("academic-tree-collapse-ancestors"));
+    expect(doc.querySelector('[data-author-id="4"]')).toBeNull();
+    click(nameElement("3"));
+    await rootIs("3");
+    click(button("academic-tree-back"));
+    await rootIs("1");
+    expect(doc.querySelector('[data-author-id="4"]')).toBeNull();
+    expect(button("academic-tree-expand-ancestors")).toBeDefined();
+    fixture.profile.mockClear();
+    fixture.students.mockClear();
+    click(button("academic-tree-expand-ancestors"));
+    expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
+    expect(button("academic-tree-collapse-ancestors")).toBeDefined();
+    expect(fixture.profile).not.toHaveBeenCalled();
+    expect(fixture.students).not.toHaveBeenCalled();
   });
   it("renders compact cards with centered single-line and two-line labels at the existing font size", async () => {
     vi.mocked(win.HTMLCanvasElement.prototype.getContext).mockReturnValue({
@@ -1057,6 +1243,7 @@ it("exports the requested format and scope using the menu and shared native save
   try {
     open();
     await rootIs("1");
+    click(button("academic-tree-fit-page"));
     click(button("academic-tree-collapse"));
     click(button("academic-tree-export"));
     const currentJSON = [...doc.querySelectorAll('[role="menuitem"]')].find(
@@ -1064,6 +1251,7 @@ it("exports the requested format and scope using the menu and shared native save
     )!;
     click(currentJSON);
     await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(writes.mock.calls[0][1]).view.fitPage).toBe(true);
     expect(
       JSON.parse(writes.mock.calls[0][1]).graph.nodes.map((n: any) => n.id),
     ).not.toContain("3");
@@ -1090,6 +1278,12 @@ it("exports the requested format and scope using the menu and shared native save
     );
     expect(exported.querySelector("parsererror")).toBeNull();
     expect(exported.querySelectorAll("[data-author-id]")).toHaveLength(3);
+    expect(exported.documentElement.getAttribute("data-layout-mode")).toBe(
+      "page",
+    );
+    expect(
+      exported.querySelectorAll("[data-generation]").length,
+    ).toBeGreaterThan(0);
     expect(writes.mock.calls[2][1]).not.toContain("var(");
   } finally {
     delete (win as any).FilePicker;

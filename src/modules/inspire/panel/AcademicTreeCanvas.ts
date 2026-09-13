@@ -3,6 +3,8 @@ import { academicPrimaryLineage } from "../academicTreeExploration";
 import { serializeAcademicSVG } from "../academicTreeSVG";
 import type { AcademicTreeGraph, AcademicTreeNode } from "../academicTreeTypes";
 import { layoutAcademicTree, wrapAcademicName } from "../academicTreeLayout";
+import { pageAcademicTree } from "../academicTreePageLayout";
+import { getString } from "../../../utils/locale";
 
 const NS = "http://www.w3.org/2000/svg";
 /** SVG canvas with mouse/keyboard pan and zoom. All labels are plain text. */
@@ -16,6 +18,11 @@ export class AcademicTreeCanvas {
   private moved = false;
   private layout?: ReturnType<typeof layoutAcademicTree>;
   private rootId = "";
+  private fitPage = false;
+  private pageWidth = 0;
+  get layoutPageWidth() {
+    return this.pageWidth;
+  }
   private renderedGraph?: AcademicTreeGraph;
   private selected?: string;
   private sort: import("../academicTreeTypes").AcademicSortMode = "name";
@@ -87,6 +94,12 @@ export class AcademicTreeCanvas {
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (this.fitPage && !e.ctrlKey && !e.metaKey) {
+        this.y -= e.deltaY;
+        this.x -= e.deltaX;
+        this.transform();
+        return;
+      }
       const rect = this.element.getBoundingClientRect();
       this.zoom(
         Math.exp(-e.deltaY * 0.002),
@@ -118,6 +131,32 @@ export class AcademicTreeCanvas {
       this.element.removeEventListener("wheel", wheel);
       this.element.removeEventListener("keydown", key);
     });
+    const Resize = doc.defaultView?.ResizeObserver;
+    if (Resize) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const observer = new Resize(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (
+            this.fitPage &&
+            this.renderedGraph &&
+            this.element.getBoundingClientRect().width > 0
+          )
+            this.render(
+              this.renderedGraph,
+              this.selected,
+              this.primaryLineage,
+              this.sort,
+              true,
+            );
+        }, 150);
+      });
+      observer.observe(this.element);
+      this.cleanup.push(() => {
+        observer.disconnect();
+        clearTimeout(timer);
+      });
+    }
   }
   private transform() {
     this.group.setAttribute(
@@ -274,16 +313,34 @@ export class AcademicTreeCanvas {
     selected?: string,
     primaryLineage?: Set<string>,
     sort: import("../academicTreeTypes").AcademicSortMode = "name",
+    fitPage = false,
+    pageWidth?: number,
   ) {
+    const width = fitPage
+      ? Math.max(
+          300,
+          Math.floor(
+            pageWidth ??
+              (this.element.getBoundingClientRect().width || 824) - 24,
+          ),
+        )
+      : 0;
+    const modeChanged = this.fitPage !== fitPage;
     this.selected = selected;
     if (primaryLineage || this.renderedGraph !== graph)
       this.primaryLineage = primaryLineage ?? academicPrimaryLineage(graph);
     // Selection changes should preserve the focused DOM node and its hover card.
-    if (this.renderedGraph === graph && this.sort === sort) {
+    if (
+      this.renderedGraph === graph &&
+      this.sort === sort &&
+      this.pageWidth === width
+    ) {
       this.emphasize();
       return;
     }
     this.sort = sort;
+    this.fitPage = fitPage;
+    this.pageWidth = width;
     this.renderedGraph = graph;
     this.cards.clear();
     this.links = [];
@@ -294,8 +351,44 @@ export class AcademicTreeCanvas {
     this.rootId = graph.rootId;
     this.element.setAttribute("data-root-author-id", graph.rootId);
     this.layout = layoutAcademicTree(graph, this.measureName, sort);
+    if (fitPage)
+      this.layout = pageAcademicTree(
+        this.layout,
+        graph.rootId,
+        graph.edges,
+        width,
+      );
+    this.element.setAttribute("data-layout-mode", fitPage ? "page" : "tree");
     const positions = new Map(this.layout.nodes.map((node) => [node.id, node]));
     const fragment = this.doc.createDocumentFragment();
+    const bands = new Map<number, NonNullable<typeof this.layout.rows>>();
+    for (const row of this.layout.rows || []) {
+      const band = bands.get(row.generation) || [];
+      band.push(row);
+      bands.set(row.generation, band);
+    }
+    const palette = ["#6386ad", "#5f947e", "#af9162"];
+    for (const [generation, rows] of bands) {
+      const band = this.doc.createElementNS(NS, "rect");
+      band.setAttribute("data-generation-band", String(generation));
+      band.setAttribute("x", "8");
+      band.setAttribute("width", String(this.layout.width - 16));
+      band.setAttribute("y", String(rows[0].y - 10));
+      band.setAttribute(
+        "height",
+        String(rows.at(-1)!.y + rows.at(-1)!.height - rows[0].y + 24),
+      );
+      band.setAttribute("rx", "8");
+      band.setAttribute(
+        "fill",
+        palette[
+          ((generation % palette.length) + palette.length) % palette.length
+        ],
+      );
+      band.setAttribute("fill-opacity", "0.08");
+      band.setAttribute("pointer-events", "none");
+      fragment.append(band);
+    }
     const defs = this.doc.createElementNS(NS, "defs");
     for (const active of [false, true]) {
       const marker = this.doc.createElementNS(NS, "marker");
@@ -383,6 +476,33 @@ export class AcademicTreeCanvas {
         path,
         overlay,
       });
+    }
+    for (const row of fitPage ? this.layout.rows || [] : []) {
+      const label = this.doc.createElementNS(NS, "text");
+      label.setAttribute("data-generation", String(row.generation));
+      label.setAttribute("data-generation-part", `${row.part}/${row.parts}`);
+      label.setAttribute("x", "16");
+      label.setAttribute("y", String(row.y + 13));
+      label.setAttribute("font-size", "11");
+      label.setAttribute("font-family", "system-ui,sans-serif");
+      label.setAttribute("fill", "var(--fill-secondary,#64748b)");
+      label.setAttribute("pointer-events", "none");
+      label.textContent = getString("academic-tree-generation", {
+        args: {
+          generation:
+            row.generation > 0 ? `+${row.generation}` : String(row.generation),
+        },
+      });
+      if (row.parts > 1) {
+        const part = this.doc.createElementNS(NS, "tspan");
+        part.setAttribute("x", "16");
+        part.setAttribute("dy", "15");
+        part.textContent = getString("academic-tree-generation-row", {
+          args: { row: row.part, rows: row.parts },
+        });
+        label.append(part);
+      }
+      fragment.append(label);
     }
     for (const node of this.layout.nodes) {
       const g = this.doc.createElementNS(NS, "g");
@@ -527,7 +647,13 @@ export class AcademicTreeCanvas {
     this.group.replaceChildren(fragment);
     this.emphasize();
     const root = positions.get(graph.rootId);
-    if (rootChanged || !oldRoot) {
+    if (fitPage) {
+      this.scale = 1;
+      this.x = 12;
+      if (rootChanged || !oldRoot || modeChanged) this.y = 12;
+      else if (root) this.y += oldRoot.y - root.y;
+      this.transform();
+    } else if (rootChanged || !oldRoot || modeChanged) {
       this.scale = 1;
       this.center();
     } else if (root) {

@@ -1,5 +1,6 @@
 import type { AcademicLayoutNode } from "./academicTreeLayout";
 import type { AcademicTreeEdge } from "./academicTreeTypes";
+import { academicCorridors } from "./academicTreeCorridors";
 
 type LaneY = (source: string, top: number) => number;
 
@@ -70,6 +71,7 @@ export function createAcademicRouter(
       nodes,
       laneY,
       targetPorts.get(to.id)?.get(from.id),
+      targetPorts.get(to.id)?.size === 1,
     );
 }
 
@@ -80,9 +82,10 @@ export function academicEdgePath(
   nodes: AcademicLayoutNode[],
   laneY?: LaneY,
   targetX?: number,
+  flexibleTarget = false,
 ): string {
-  const x1 = from.x + from.width / 2,
-    x2 = targetX ?? to.x + to.width / 2;
+  const x1 = from.x + from.width / 2;
+  let x2 = targetX ?? to.x + to.width / 2;
   const start = from.y + from.height,
     end = to.y;
   if (end <= from.y) {
@@ -104,29 +107,20 @@ export function academicEdgePath(
   let x = x1,
     y = start,
     path = `M${x},${y}`;
-  for (const [top, row] of [...rows].sort((a, b) => a[0] - b[0])) {
-    const blocks = [...row].sort((a, b) => a.x - b.x);
-    const candidates = [
-      x,
-      x2,
-      blocks[0].x - 10,
-      ...blocks.map((node) => node.x + node.width + 10),
-    ]
-      .filter((candidate) =>
-        blocks.every(
-          (node) =>
-            candidate <= node.x - 7 || candidate >= node.x + node.width + 7,
-        ),
-      )
-      .sort(
-        (a, b) =>
-          Math.abs(a - x) +
-            Math.abs(a - x2) -
-            (Math.abs(b - x) + Math.abs(b - x2)) ||
-          Math.abs(a - x2) - Math.abs(b - x2) ||
-          a - b,
-      );
-    const next = candidates[0];
+  const ordered = [...rows].sort((a, b) => a[0] - b[0]);
+  const shift = flexibleTarget ? Math.min(12, to.width / 2 - 10) : 0;
+  const corridor = academicCorridors(
+    ordered.map(([, row]) => row),
+    x1,
+    x2,
+    x2 - shift,
+    x2 + shift,
+  );
+  // Adjacent generations retain centered family branches; flexibility only
+  // removes a small final jog after passing intermediate rows.
+  if (ordered.length) x2 = corridor.end;
+  for (const [i, [top, blocks]] of ordered.entries()) {
+    const next = corridor.route[i];
     if (next !== x)
       path += ` V${laneY?.(from.id, top) ?? (y + top) / 2} H${next}`;
     y = Math.max(...blocks.map((node) => node.y + node.height));

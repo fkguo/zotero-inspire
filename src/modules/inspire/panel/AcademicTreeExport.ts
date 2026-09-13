@@ -46,7 +46,14 @@ export async function exportAcademicTree(
       () => {},
     );
     try {
-      temporary.render(graph, undefined, undefined, state.sort || "name");
+      temporary.render(
+        graph,
+        undefined,
+        undefined,
+        state.sort || "name",
+        !!state.fitPage,
+        canvas.layoutPageWidth || undefined,
+      );
       picture = temporary.exportSVG(true);
     } finally {
       temporary.dispose();

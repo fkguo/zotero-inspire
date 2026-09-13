@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { layoutAcademicTree } from "../src/modules/inspire/academicTreeLayout";
-import { academicEdgePath } from "../src/modules/inspire/academicTreeRouting";
+import {
+  academicEdgePath,
+  createAcademicRouter,
+} from "../src/modules/inspire/academicTreeRouting";
 import type { AcademicTreeGraph } from "../src/modules/inspire/academicTreeTypes";
+import fixture from "./fixtures/academic-tree-expanded.json";
 
 const graph = (
   names: string[],
@@ -17,6 +21,92 @@ const graph = (
   limited: false,
 });
 const center = (n: { x: number; width: number }) => n.x + n.width / 2;
+it("keeps every ordinary-layout connector outside non-endpoint cards in the expanded fixture", () => {
+  const layout = layoutAcademicTree(fixture.graph as AcademicTreeGraph);
+  const byId = new Map(layout.nodes.map((n) => [n.id, n]));
+  const route = createAcademicRouter(layout.nodes, fixture.graph.edges);
+  for (const edge of fixture.graph.edges) {
+    const path = route(byId.get(edge.source)!, byId.get(edge.target)!);
+    expect(path).not.toMatch(/NaN|Infinity/);
+    let x = 0,
+      y = 0;
+    for (const part of path.matchAll(/([MVH])(-?[\d.]+)(?:,(-?[\d.]+))?/g)) {
+      const nx = part[1] === "V" ? x : Number(part[2]);
+      const ny =
+        part[1] === "H" ? y : Number(part[1] === "M" ? part[3] : part[2]);
+      if (part[1] !== "M")
+        for (const n of layout.nodes) {
+          if (n.id === edge.source || n.id === edge.target) continue;
+          const intersects =
+            x === nx
+              ? x > n.x &&
+                x < n.x + n.width &&
+                Math.max(y, ny) > n.y &&
+                Math.min(y, ny) < n.y + n.height
+              : y > n.y &&
+                y < n.y + n.height &&
+                Math.max(x, nx) > n.x &&
+                Math.min(x, nx) < n.x + n.width;
+          expect(
+            intersects,
+            `${edge.source} → ${edge.target} crosses ${n.name}`,
+          ).toBe(false);
+        }
+      x = nx;
+      y = ny;
+    }
+  }
+});
+const card = (id: string, x: number, y: number, width: number) => ({
+  id,
+  name: id,
+  level: 0,
+  x,
+  y,
+  width,
+  height: 30,
+});
+const endX = (path: string) =>
+  [...path.matchAll(/(?:M|H)([-\d.]+)/g)].map((m) => Number(m[1])).at(-1)!;
+
+it("chooses one clear corridor across successive rows instead of a locally short zigzag", () => {
+  const nodes = [
+    card("source", 50, 0, 100),
+    card("upper", 80, 100, 40),
+    card("lower", 10, 200, 75),
+    card("target", 25, 300, 100),
+  ];
+  const path = academicEdgePath(nodes[0], nodes[3], nodes);
+  expect(path.match(/H/g)).toHaveLength(2);
+  // The single detour passes to the right of BOTH obstacles.
+  const turns = [...path.matchAll(/H([-\d.]+)/g)].map((m) => Number(m[1]));
+  expect(turns[0]).toBeGreaterThan(120);
+  expect(turns[1]).toBe(75);
+  expect(academicEdgePath(nodes[0], nodes[3], [...nodes].reverse())).toBe(path);
+});
+
+it("removes a tiny final jog with a bounded off-center port, retaining separate co-advisor arrows", () => {
+  const nodes = [
+    card("source", 50, 0, 100),
+    card("obstacle", 98, 100, 82),
+    card("target", 50, 200, 100),
+    card("other", -100, 0, 100),
+  ];
+  const edge = { source: "source", target: "target", degreeTypes: [] };
+  const path = createAcademicRouter(nodes, [edge])(nodes[0], nodes[2]);
+  expect(path.match(/H/g)).toHaveLength(1);
+  expect(Math.abs(endX(path) - center(nodes[2]))).toBeLessThanOrEqual(12);
+  expect(endX(path)).toBeLessThan(98);
+  const shared = createAcademicRouter(nodes, [
+    edge,
+    { ...edge, source: "other" },
+  ]);
+  expect(
+    Math.abs(
+      endX(shared(nodes[0], nodes[2])) - endX(shared(nodes[3], nodes[2])),
+    ),
+  ).toBe(10);
+});
 describe("compact academic layout and routing", () => {
   it("keeps the focus's single-supervisor chain vertical with many expanded siblings", () => {
     const siblings = Array.from({ length: 32 }, (_, i) => `sibling ${i}`);

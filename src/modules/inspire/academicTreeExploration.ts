@@ -1,6 +1,12 @@
 import type { AcademicTreeGraph } from "./academicTreeTypes";
 
 export interface AcademicTreeViewState {
+  ancestorStudents?: {
+    open: boolean;
+    anchors: string[];
+    originalNodes: string[];
+  };
+  fitPage?: boolean;
   sort?: import("./academicTreeTypes").AcademicSortMode;
   showCoAdvisors: boolean;
   collapsed: string[];
@@ -48,7 +54,11 @@ export function projectAcademicTree(
   graph: AcademicTreeGraph,
   state: AcademicTreeViewState,
 ): AcademicTreeGraph {
-  if (state.showCoAdvisors && !state.collapsed.length) return graph;
+  const batch = state.ancestorStudents;
+  const hiddenAnchors = new Set(batch && !batch.open ? batch.anchors : []);
+  const originalNodes = new Set(batch?.originalNodes);
+  if (state.showCoAdvisors && !state.collapsed.length && !hiddenAnchors.size)
+    return graph;
   const ancestors = academicReachable(graph, graph.rootId, "up");
   const allowed = state.showCoAdvisors
     ? new Set(graph.nodes.map((node) => node.id))
@@ -59,6 +69,9 @@ export function projectAcademicTree(
     (edge) =>
       allowed.has(edge.source) &&
       allowed.has(edge.target) &&
+      (!hiddenAnchors.has(edge.source) ||
+        originalNodes.has(edge.target) ||
+        ancestors.has(edge.target)) &&
       (!collapsed.has(edge.source) ||
         (ancestors.has(edge.source) && edge.source !== graph.rootId)),
   );

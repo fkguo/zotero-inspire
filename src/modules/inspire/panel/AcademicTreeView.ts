@@ -41,6 +41,8 @@ import {
   type AcademicTreeViewState,
 } from "../academicTreeExploration";
 import { NAVIGATION_STACK_LIMIT } from "../constants";
+import { applyPillButtonColors } from "../../pickerUI";
+import { isDarkMode } from "../styles";
 
 interface AcademicTreeLoad {
   source: AcademicTreeSource;
@@ -110,6 +112,7 @@ export class AcademicTreeView {
   private actionAbort?: AbortController;
   private disposed = false;
   private limit = ACADEMIC_TREE_INITIAL_LIMIT;
+  private pageButton: HTMLButtonElement;
   private busy = false;
   private lastExpansion?: { id: string; direction: AcademicDirection };
   private cleanup: Array<() => void> = [];
@@ -303,13 +306,27 @@ export class AcademicTreeView {
           "up",
         );
         ancestors.delete(this.graph.rootId);
+        const previous = this.tools.state.ancestorStudents;
         const tasks = [...ancestors]
+          .filter((id) => !previous?.anchors.includes(id))
           .filter((id) =>
             this.graph!.nodes.some((node) => node.id === id && node.recid),
           )
-          .map((id) => ({ id, direction: "down" as const }));
-        if (tasks.length)
+          // Snapshot all currently shown ancestors; never recurse into new peers.
+          .map((id) => ({ id, direction: "down" as const, remaining: 1 }));
+        if (tasks.length) {
+          this.tools.state.ancestorStudents = {
+            open: true,
+            anchors: [
+              ...(previous?.anchors || []),
+              ...tasks.map((task) => task.id),
+            ],
+            originalNodes:
+              previous?.originalNodes ||
+              this.graph.nodes.map((node) => node.id),
+          };
           void this.load("down", this.graph.rootId, "normal", tasks);
+        }
       },
       export: async (format, full) => {
         if (!this.graph) return;
@@ -350,8 +367,15 @@ export class AcademicTreeView {
     );
     zoomOut.textContent = "−";
     zoomIn.textContent = "+";
+    this.pageButton = this.button("academic-tree-fit-page", () => {
+      this.tools.state.fitPage = !this.tools.state.fitPage;
+      this.renderGraph();
+    });
+    this.pageButton.title = getString("academic-tree-fit-page-hint");
+    this.updatePageButton();
     navigation.append(
       this.button("academic-tree-fit", () => this.canvas.fit()),
+      this.pageButton,
       this.button("academic-tree-center", () => this.canvas.center()),
       zoomOut,
       zoomIn,
@@ -609,6 +633,7 @@ export class AcademicTreeView {
   }
   private updateLoadControls() {
     this.tools?.sync(this.graph, this.busy);
+    this.updatePageButton();
     this.refresh.disabled = this.busy || !this.initialAuthor?.recid;
     this.stop.hidden = !this.busy;
     this.stop.disabled = !this.busy;
@@ -653,9 +678,29 @@ export class AcademicTreeView {
           ),
         };
       }) ?? [];
+    // Explicit Retry may recover failures outside the last batch. Preserve each
+    // batch task's original depth so retrying an ancestor never opens grandchildren.
+    const retryOtherBranches =
+      mode === "resume" && this.recovery === "retry" && this.pending?.batch
+        ? failedBranches.filter(
+            (task) =>
+              !this.pending!.expansions?.some(
+                (prior) =>
+                  prior.id === task.id && prior.direction === task.direction,
+              ),
+          )
+        : [];
     const operation: AcademicTreeLoad =
       mode === "resume" && this.pending
-        ? this.pending
+        ? retryOtherBranches.length
+          ? {
+              ...this.pending,
+              expansions: [
+                ...(this.pending.expansions || []),
+                ...retryOtherBranches,
+              ],
+            }
+          : this.pending
         : {
             source: createAcademicTreeSession(mode === "refresh"),
             recid,
@@ -679,7 +724,7 @@ export class AcademicTreeView {
                     ...(priorExpansion ? [priorExpansion] : []),
                   ]
                 : expansion
-                  ? [...failedBranches, ...(batch || [])]
+                  ? (batch ?? failedBranches)
                   : undefined,
           };
     this.cancel(false);
@@ -791,6 +836,7 @@ export class AcademicTreeView {
     }
   }
   private renderGraph() {
+    this.updatePageButton();
     if (!this.graph) return;
     const visible = this.tools.project(this.graph);
     if (!visible.nodes.some((node) => node.id === this.selected)) {
@@ -807,8 +853,21 @@ export class AcademicTreeView {
       this.selected,
       academicPrimaryLineage(this.graph),
       this.tools.state.sort || "name",
+      !!this.tools.state.fitPage,
     );
     this.canvas.highlightPath(this.tools.state.path);
+  }
+  private updatePageButton() {
+    if (!this.pageButton) return;
+    this.pageButton.setAttribute(
+      "aria-pressed",
+      String(!!this.tools.state.fitPage),
+    );
+    applyPillButtonColors(
+      this.pageButton,
+      !!this.tools.state.fitPage,
+      isDarkMode(),
+    );
   }
   private updateStatus(loading: boolean) {
     if (!this.graph) return;
@@ -954,6 +1013,7 @@ export class AcademicTreeView {
   }
   refreshAppearance() {
     this.tools.refreshAppearance();
+    this.updatePageButton();
   }
   cancel(showStatus = true) {
     this.authorPreview?.hide();
