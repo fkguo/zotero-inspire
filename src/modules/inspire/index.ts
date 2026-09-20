@@ -502,6 +502,11 @@ export {
 } from "./academicTreeDataService";
 export { layoutAcademicTree } from "./academicTreeLayout";
 export { pageAcademicTree } from "./academicTreePageLayout";
+export {
+  ACADEMIC_QUALIFICATIONS,
+  academicDegreeLabel,
+  academicQualificationCards,
+} from "./academicTreeQualifications";
 
 export {
   academicReachable,

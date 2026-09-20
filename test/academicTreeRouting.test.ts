@@ -307,3 +307,27 @@ it("keeps different advisors' arrows separate at a shared student's card", async
     expect(x).toBeLessThan(student.x + student.width);
   }
 });
+
+it.each([-1, 1])(
+  "keeps the aligned advisor straight with another advisor on side %s",
+  (side) => {
+    const shen = card("shen", 90, 0, 120);
+    const guo = card("guo", 100, 100, 100);
+    const other = card("other", 100 + side * 240, 0, 100);
+    const nodes = [shen, guo, other];
+    const edges = [shen, other].map((n) => ({
+      source: n.id,
+      target: guo.id,
+      degreeTypes: ["phd"],
+    }));
+    const route = createAcademicRouter(nodes, edges);
+    expect(route(shen, guo)).toBe("M150,30 V100");
+    expect(endX(route(other, guo))).toBe(150 + side * 10);
+    expect(
+      createAcademicRouter([...nodes].reverse(), [...edges].reverse())(
+        shen,
+        guo,
+      ),
+    ).toBe(route(shen, guo));
+  },
+);

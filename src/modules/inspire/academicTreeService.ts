@@ -1,5 +1,9 @@
 import { academicEducationYears } from "./academicTreeSorting";
 import type { InspireAuthorProfile } from "./types";
+import {
+  ACADEMIC_QUALIFICATIONS,
+  normalizeAcademicDegree,
+} from "./academicTreeQualifications";
 import type {
   AcademicTreeGraph,
   AcademicTreeSource,
@@ -45,9 +49,14 @@ export function matchesAcademicDegree(
   filter: AcademicDegreeFilter,
 ): boolean {
   if (filter === "all") return true;
-  if (filter === "other")
-    return !["phd", "master", "bachelor"].includes(degree || "");
-  return degree === filter;
+  const type = normalizeAcademicDegree(degree);
+  if (filter === "specified")
+    return (
+      type !== "other" &&
+      type !== "unknown" &&
+      Object.hasOwn(ACADEMIC_QUALIFICATIONS, type)
+    );
+  return type === filter;
 }
 
 /** Bounded breadth-first traversal. Identity is exclusively the INSPIRE author ID. */

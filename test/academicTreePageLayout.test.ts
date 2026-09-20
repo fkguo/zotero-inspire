@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { layoutAcademicTree } from "../src/modules/inspire/academicTreeLayout";
 import { pageAcademicTree } from "../src/modules/inspire/academicTreePageLayout";
 import { createAcademicRouter } from "../src/modules/inspire/academicTreeRouting";
+import { academicQualificationCards } from "../src/modules/inspire/academicTreeQualifications";
 import type { AcademicTreeGraph } from "../src/modules/inspire/academicTreeTypes";
 import fixture from "./fixtures/academic-tree-sorting.json";
 import expanded from "./fixtures/academic-tree-expanded.json";
@@ -45,7 +46,12 @@ describe("academic page layout", () => {
   for (const graph of [fixture.graph, expanded.graph] as AcademicTreeGraph[])
     for (const sort of ["name", "year"] as const)
       it(`wraps ${graph.nodes.length} people sorted by ${sort} without shrinking, overlaps, or changed reading order`, () => {
-        const original = layoutAcademicTree(graph, undefined, sort);
+        const original = layoutAcademicTree(
+          graph,
+          undefined,
+          sort,
+          academicQualificationCards(graph, (degree) => degree),
+        );
         for (const width of [360, 640, 1024]) {
           const page = pageAcademicTree(
             original,

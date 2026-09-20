@@ -5,9 +5,14 @@ import {
   packPinnedAcademicRow as packPinnedRow,
 } from "./academicTreePacking";
 import { academicNodeOrder } from "./academicTreeSorting";
+import {
+  wrapAcademicQualifications,
+  type AcademicQualificationCard,
+} from "./academicTreeQualifications";
 import type { AcademicTreeGraph, AcademicTreeNode } from "./academicTreeTypes";
 
 export interface AcademicLayoutNode extends AcademicTreeNode {
+  qualificationLines?: string[];
   x: number;
   y: number;
   width: number;
@@ -170,6 +175,7 @@ export function layoutAcademicTree(
   graph: AcademicTreeGraph,
   measure: (text: string) => number = (text) => Array.from(text).length * 7,
   sort: import("./academicTreeTypes").AcademicSortMode = "name",
+  qualifications?: Map<string, AcademicQualificationCard>,
 ): AcademicTreeLayout {
   const layers = new Map<number, AcademicTreeNode[]>();
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -182,9 +188,22 @@ export function layoutAcademicTree(
       );
       const lines =
         wrapAcademicName(node.name, measure, width - 20).length || 1;
+      const qualificationLines = wrapAcademicQualifications(
+        qualifications?.get(node.id)?.labels || [],
+        (text) => (measure(text) * 10) / 13,
+        width - 20,
+      );
       return [
         node.id,
-        { width, height: lines * 16 + (node.institution ? 11 : 0) + 12 },
+        {
+          width,
+          height:
+            lines * 16 +
+            (node.institution ? 11 : 0) +
+            qualificationLines.length * 12 +
+            12,
+          ...(qualificationLines.length ? { qualificationLines } : {}),
+        },
       ];
     }),
   );

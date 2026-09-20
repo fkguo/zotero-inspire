@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   buildAcademicTree,
   clampAcademicDepth,
+  matchesAcademicDegree,
 } from "../src/modules/inspire/academicTreeService";
 import { ACADEMIC_TREE_DEFAULT_DEPTH } from "../src/modules/inspire/academicTreeTypes";
 import type {
@@ -272,6 +273,48 @@ describe("academic tree traversal", () => {
       degreeFilter: "phd",
     });
     expect(graph.nodes.map((n) => n.id).sort()).toEqual(["1", "3"]);
+  });
+  it("separates all six qualifications, Other and missing types during traversal", async () => {
+    const types = [
+      "phd",
+      "diploma",
+      "bachelor",
+      "master",
+      "habilitation",
+      "laurea",
+      "other",
+      undefined,
+    ] as const;
+    const profiles = [
+      person(1),
+      ...types.map((degreeType, i) =>
+        person(i + 2, [{ recid: "1", name: "Author 1", degreeType }]),
+      ),
+    ];
+    for (const [i, type] of types.entries()) {
+      const filter = type || "unknown";
+      const graph = await buildAcademicTree(profiles[0], {
+        ...opts(sourceFor(profiles)),
+        degreeFilter: filter,
+      });
+      expect(graph.nodes.map((n) => n.id).sort()).toEqual(
+        ["1", String(i + 2)].sort(),
+      );
+      expect(matchesAcademicDegree(type, "specified")).toBe(i < 6);
+    }
+    const specified = await buildAcademicTree(profiles[0], {
+      ...opts(sourceFor(profiles)),
+      degreeFilter: "specified",
+    });
+    expect(specified.nodes.map((n) => n.id).sort()).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+    ]);
   });
   it("deduplicates cyclic records and terminates eight-generation traversal", async () => {
     const profiles = [person(1, [advisor(2)]), person(2, [advisor(1)])];

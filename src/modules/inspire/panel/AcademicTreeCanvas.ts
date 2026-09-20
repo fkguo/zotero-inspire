@@ -5,6 +5,10 @@ import type { AcademicTreeGraph, AcademicTreeNode } from "../academicTreeTypes";
 import { layoutAcademicTree, wrapAcademicName } from "../academicTreeLayout";
 import { pageAcademicTree } from "../academicTreePageLayout";
 import { getString } from "../../../utils/locale";
+import {
+  academicDegreeLabel,
+  academicQualificationCards,
+} from "../academicTreeQualifications";
 
 const NS = "http://www.w3.org/2000/svg";
 /** SVG canvas with mouse/keyboard pan and zoom. All labels are plain text. */
@@ -350,7 +354,15 @@ export class AcademicTreeCanvas {
     const rootChanged = this.rootId !== graph.rootId;
     this.rootId = graph.rootId;
     this.element.setAttribute("data-root-author-id", graph.rootId);
-    this.layout = layoutAcademicTree(graph, this.measureName, sort);
+    const qualifications = academicQualificationCards(graph, (degree) =>
+      academicDegreeLabel(degree, getString),
+    );
+    this.layout = layoutAcademicTree(
+      graph,
+      this.measureName,
+      sort,
+      qualifications,
+    );
     if (fitPage)
       this.layout = pageAcademicTree(
         this.layout,
@@ -454,7 +466,7 @@ export class AcademicTreeCanvas {
         this.emphasize();
       });
       const title = this.doc.createElementNS(NS, "title");
-      title.textContent = `${from.name} → ${to.name}: ${edge.degreeTypes.join(", ")}`;
+      title.textContent = `${from.name} → ${to.name}: ${(edge.degreeTypes.length ? edge.degreeTypes : ["unknown"]).map((degree) => academicDegreeLabel(degree, getString)).join(", ")}`;
       hit.appendChild(title);
       edgeLayer.append(halo, path, hit);
       const overlay = this.doc.createElementNS(NS, "g");
@@ -505,6 +517,8 @@ export class AcademicTreeCanvas {
       fragment.append(label);
     }
     for (const node of this.layout.nodes) {
+      const qualificationLines = node.qualificationLines || [];
+      const qualificationHeight = qualificationLines.length * 12;
       const g = this.doc.createElementNS(NS, "g");
       g.setAttribute("transform", `translate(${node.x},${node.y})`);
       g.setAttribute("data-author-id", node.id);
@@ -554,7 +568,10 @@ export class AcademicTreeCanvas {
         String(
           node.height / 2 +
             4 -
-            ((lines.length - 1) * 16 + (node.institution ? 11 : 0)) / 2,
+            ((lines.length - 1) * 16 +
+              (node.institution ? 11 : 0) +
+              qualificationHeight) /
+              2,
         ),
       );
       lines.forEach((line, index) => {
@@ -610,7 +627,10 @@ export class AcademicTreeCanvas {
         const affiliation = this.doc.createElementNS(NS, "text");
         affiliation.setAttribute("data-affiliation", node.institution);
         affiliation.setAttribute("x", String(node.width / 2));
-        affiliation.setAttribute("y", String(node.height - 7));
+        affiliation.setAttribute(
+          "y",
+          String(node.height - 7 - qualificationHeight),
+        );
         affiliation.setAttribute("text-anchor", "middle");
         affiliation.setAttribute("font-size", "10");
         affiliation.setAttribute("font-family", "system-ui,sans-serif");
@@ -628,6 +648,37 @@ export class AcademicTreeCanvas {
         full.textContent = node.institution;
         affiliation.appendChild(full);
         g.appendChild(affiliation);
+      }
+      if (qualificationLines.length) {
+        const qualification = this.doc.createElementNS(NS, "text");
+        qualification.setAttribute(
+          "data-qualifications",
+          qualifications.get(node.id)!.labels.join(" / "),
+        );
+        qualification.setAttribute(
+          "aria-label",
+          qualifications.get(node.id)!.description,
+        );
+        qualification.setAttribute("x", String(node.width / 2));
+        qualification.setAttribute(
+          "y",
+          String(node.height - 7 - (qualificationLines.length - 1) * 12),
+        );
+        qualification.setAttribute("text-anchor", "middle");
+        qualification.setAttribute("font-size", "10");
+        qualification.setAttribute("font-family", "system-ui,sans-serif");
+        qualification.setAttribute("fill", "var(--fill-secondary,#64748b)");
+        for (const [i, line] of qualificationLines.entries()) {
+          const span = this.doc.createElementNS(NS, "tspan");
+          span.setAttribute("x", String(node.width / 2));
+          span.setAttribute("dy", i ? "12" : "0");
+          span.textContent = line;
+          qualification.append(span);
+        }
+        const title = this.doc.createElementNS(NS, "title");
+        title.textContent = qualifications.get(node.id)!.description;
+        qualification.append(title);
+        g.append(qualification);
       }
       const activate = () => {
         if (!this.moved) this.select(node);
@@ -651,14 +702,18 @@ export class AcademicTreeCanvas {
       this.scale = 1;
       this.x = 12;
       if (rootChanged || !oldRoot || modeChanged) this.y = 12;
-      else if (root) this.y += oldRoot.y - root.y;
+      else if (root)
+        this.y += oldRoot.y + oldRoot.height / 2 - root.y - root.height / 2;
       this.transform();
     } else if (rootChanged || !oldRoot || modeChanged) {
       this.scale = 1;
       this.center();
     } else if (root) {
-      this.x += (oldRoot.x - root.x) * this.scale;
-      this.y += (oldRoot.y - root.y) * this.scale;
+      this.x +=
+        (oldRoot.x + oldRoot.width / 2 - root.x - root.width / 2) * this.scale;
+      this.y +=
+        (oldRoot.y + oldRoot.height / 2 - root.y - root.height / 2) *
+        this.scale;
       this.transform();
     }
   }

@@ -35,7 +35,9 @@ export async function exportAcademicTree(
       2,
     );
   else if (format === "csv") contents = academicTreeCSV(graph);
-  else if (full) {
+  else {
+    // The on-screen canvas is only a viewport. Render the selected graph in an
+    // off-screen canvas so Current view also includes shown people beyond it.
     const temporary = new AcademicTreeCanvas(
       doc,
       "",
@@ -58,7 +60,7 @@ export async function exportAcademicTree(
     } finally {
       temporary.dispose();
     }
-  } else picture = canvas.exportSVG(false);
+  }
   const filePath = await promptGraphSaveFile(
     `academic-tree-${graph.rootId}.${format}`,
     getString("academic-tree-export"),

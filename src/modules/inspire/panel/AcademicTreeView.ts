@@ -13,6 +13,10 @@ import {
 import { getString } from "../../../utils/locale";
 import type { FluentMessageId } from "../../../../typings/i10n";
 import type { AuthorSearchInfo, InspireAuthorProfile } from "../types";
+import {
+  ACADEMIC_QUALIFICATIONS,
+  academicDegreeLabel,
+} from "../academicTreeQualifications";
 import type {
   AcademicTreeGraph,
   AcademicTreeNode,
@@ -214,10 +218,8 @@ export class AcademicTreeView {
     this.degree.setAttribute("aria-label", getString("academic-tree-degree"));
     for (const [value, key] of Object.entries({
       all: "academic-tree-all",
-      phd: "academic-tree-phd",
-      master: "academic-tree-master",
-      bachelor: "academic-tree-bachelor",
-      other: "academic-tree-other",
+      specified: "academic-tree-specified",
+      ...ACADEMIC_QUALIFICATIONS,
     })) {
       const option = doc.createElement("option");
       option.value = value;
@@ -919,14 +921,7 @@ export class AcademicTreeView {
           (person) => person.id === edge.source,
         );
         const degrees = edge.degreeTypes.map((degree) => {
-          const key = {
-            phd: "academic-tree-phd",
-            master: "academic-tree-master",
-            bachelor: "academic-tree-bachelor",
-            other: "academic-tree-other",
-            unknown: "academic-tree-unknown",
-          }[degree];
-          const label = key ? getString(key as FluentMessageId) : degree;
+          const label = academicDegreeLabel(degree, getString);
           const year = node.educationYears?.[degree];
           return year === undefined
             ? label

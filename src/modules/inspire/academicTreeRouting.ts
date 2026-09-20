@@ -19,19 +19,40 @@ export function createAcademicRouter(
   }
   for (const [target, ports] of targetPorts) {
     const node = byId.get(target)!;
-    const sources = [...ports.keys()].sort(
-      (a, b) => byId.get(a)!.x - byId.get(b)!.x || a.localeCompare(b, "en"),
-    );
+    const center = node.x + node.width / 2;
+    const sources = [...ports.keys()].sort((a, b) => {
+      const from = byId.get(a)!,
+        other = byId.get(b)!;
+      return (
+        from.x + from.width / 2 - other.x - other.width / 2 ||
+        other.y - from.y ||
+        a.localeCompare(b, "en")
+      );
+    });
+    // Reserve the center for a clear vertical connection. Splitting all ports
+    // symmetrically would force this aligned advisor into a needless dogleg.
+    const aligned = sources.findIndex((id) => {
+      const from = byId.get(id)!;
+      return (
+        from.y + from.height < node.y &&
+        Math.abs(from.x + from.width / 2 - center) < 0.001 &&
+        !nodes.some(
+          (obstacle) =>
+            obstacle.id !== id &&
+            obstacle.id !== target &&
+            obstacle.y < node.y &&
+            obstacle.y + obstacle.height > from.y + from.height &&
+            center > obstacle.x - 7 &&
+            center < obstacle.x + obstacle.width + 7,
+        )
+      );
+    });
+    const origin = aligned >= 0 ? aligned : (sources.length - 1) / 2;
     const step = Math.min(
       10,
-      (node.width - 20) / Math.max(1, sources.length - 1),
+      (node.width / 2 - 10) / Math.max(1, origin, sources.length - 1 - origin),
     );
-    sources.forEach((id, i) =>
-      ports.set(
-        id,
-        node.x + node.width / 2 + (i - (sources.length - 1) / 2) * step,
-      ),
-    );
+    sources.forEach((id, i) => ports.set(id, center + (i - origin) * step));
   }
   const lanes = new Map<number, Map<string, number>>();
   const laneY: LaneY = (source, top) => {

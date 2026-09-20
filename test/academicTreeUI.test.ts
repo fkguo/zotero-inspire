@@ -285,7 +285,7 @@ describe("Academic Tree window interactions", () => {
       ...fixture.profiles[2],
       advisors: [
         ...fixture.profiles[2].advisors,
-        { name: "Co Advisor", recid: "4", degreeType: "master" },
+        { name: "Co Advisor", recid: "4", degreeType: "other" },
       ],
     };
     const profiles = [
@@ -309,8 +309,26 @@ describe("Academic Tree window interactions", () => {
     ).toBe("false");
     expect(doc.querySelector('[data-author-id="2"]')).not.toBeNull();
     expect(doc.querySelector('[data-author-id="4"]')).toBeNull();
+    const qualification = () =>
+      doc.querySelector('[data-author-id="3"] [data-qualifications]')!;
+    expect(qualification().getAttribute("data-qualifications")).toBe(
+      "academic-tree-master",
+    );
+    expect(qualification().querySelector("title")!.textContent).not.toContain(
+      "Co Advisor",
+    );
     click(button("academic-tree-co-advisors"));
     expect(doc.querySelector('[data-author-id="4"]')).not.toBeNull();
+    expect(qualification().getAttribute("data-qualifications")).toBe(
+      "academic-tree-master / academic-tree-other",
+    );
+    expect(qualification().querySelector("title")!.textContent).toContain(
+      "Co Advisor → Student Author: academic-tree-other",
+    );
+    click(button("academic-tree-co-advisors"));
+    expect(qualification().getAttribute("data-qualifications")).toBe(
+      "academic-tree-master",
+    );
   });
   it("remembers author searches across reopening, completes them and clears history", async () => {
     const prefs = new Map<string, unknown>();
@@ -1281,6 +1299,7 @@ it("exports the requested format and scope using the menu and shared native save
     expect(exported.documentElement.getAttribute("data-layout-mode")).toBe(
       "page",
     );
+    expect(exported.querySelector("[data-qualifications]")).not.toBeNull();
     expect(
       exported.querySelectorAll("[data-generation]").length,
     ).toBeGreaterThan(0);

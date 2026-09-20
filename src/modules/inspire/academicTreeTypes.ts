@@ -4,10 +4,15 @@ export type AcademicSortMode = "name" | "year";
 export type AcademicDirection = "up" | "down";
 export type AcademicDegreeFilter =
   | "all"
+  | "specified"
   | "phd"
+  | "diploma"
+  | "habilitation"
+  | "laurea"
   | "master"
   | "bachelor"
-  | "other";
+  | "other"
+  | "unknown";
 export interface AcademicTreeNode {
   id: string;
   name: string;

@@ -288,7 +288,7 @@ describe("academic tree exports", () => {
         ?.getAttribute("stroke"),
     ).toBe("#0060df");
   });
-  it("exports JSON with graph identity and settings, CSV relations and full SVG despite a filtered canvas", async () => {
+  it("exports JSON with graph identity and settings, CSV relations, and complete image bounds for each scope", async () => {
     const original = graph();
     const hidden = { ...state(), showCoAdvisors: false };
     const projected = projectAcademicTree(original, hidden);
@@ -311,6 +311,23 @@ describe("academic tree exports", () => {
     expect(json.view.showCoAdvisors).toBe(false);
     await exportAcademicTree(
       document,
+      projected,
+      canvas,
+      hidden,
+      {},
+      "svg",
+      false,
+    );
+    const visibleSVG = new DOMParser().parseFromString(
+      saved.mock.calls[1][1],
+      "image/svg+xml",
+    );
+    expect(visibleSVG.querySelector('[data-author-id="c"]')).toBeNull();
+    expect(visibleSVG.querySelector("svg > g")?.hasAttribute("transform")).toBe(
+      false,
+    );
+    await exportAcademicTree(
+      document,
       original,
       canvas,
       hidden,
@@ -318,7 +335,7 @@ describe("academic tree exports", () => {
       "svg",
       true,
     );
-    expect(saved.mock.calls[1][1]).toContain('data-author-id="c"');
+    expect(saved.mock.calls[2][1]).toContain('data-author-id="c"');
     expect(canvas.element.querySelector('[data-author-id="c"]')).toBeNull();
     await exportAcademicTree(
       document,
@@ -329,7 +346,7 @@ describe("academic tree exports", () => {
       "csv",
       true,
     );
-    expect(saved.mock.calls[2][1]).toContain('"relationship"');
+    expect(saved.mock.calls[3][1]).toContain('"relationship"');
   });
   it("does not write on native picker cancellation and propagates write failures", async () => {
     result = 1;
@@ -375,6 +392,7 @@ describe("academic tree exports", () => {
     }) as typeof document.createElementNS);
     vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue({
       drawImage: vi.fn(),
+      measureText: (text: string) => ({ width: text.length * 13 }),
     } as unknown as CanvasRenderingContext2D);
     vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(
       function (callback) {
@@ -386,7 +404,7 @@ describe("academic tree exports", () => {
         } as Blob);
       },
     );
-    vi.spyOn(canvas, "exportSVG").mockReturnValue({
+    vi.spyOn(AcademicTreeCanvas.prototype, "exportSVG").mockReturnValue({
       width: 100_000,
       height: 100_000,
       svg: '<svg xmlns="http://www.w3.org/2000/svg" width="100000" height="100000" viewBox="0 0 100000 100000"/>',
