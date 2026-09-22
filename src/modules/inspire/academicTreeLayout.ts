@@ -9,9 +9,11 @@ import {
   wrapAcademicQualifications,
   type AcademicQualificationCard,
 } from "./academicTreeQualifications";
+import { buildInitials, formatAuthorName } from "./formatters";
 import type { AcademicTreeGraph, AcademicTreeNode } from "./academicTreeTypes";
 
 export interface AcademicLayoutNode extends AcademicTreeNode {
+  displayName?: string;
   qualificationLines?: string[];
   x: number;
   y: number;
@@ -31,6 +33,7 @@ export interface AcademicTreeLayout {
   }>;
 }
 export const ACADEMIC_NODE_WIDTH = 144;
+const ACADEMIC_COMPACT_NODE_WIDTH = 168;
 export const ACADEMIC_NODE_HEIGHT = 55;
 const COLUMN_STEP = ACADEMIC_NODE_WIDTH + 18;
 
@@ -71,6 +74,46 @@ export function wrapAcademicName(
     while (rest[0] === " ") rest.shift();
   }
   return lines;
+}
+
+/** Prefer a readable compact name over hiding the end of a long surname. */
+function fitAcademicName(
+  node: AcademicTreeNode,
+  measure: (text: string) => number,
+): { displayName?: string; width: number; lines: string[] } {
+  const fullName = node.name.trim().replace(/\s+/g, " ");
+  const baseWidth = Math.max(
+    100,
+    Math.min(ACADEMIC_NODE_WIDTH, measure(fullName) + 20),
+  );
+  const fullLines = wrapAcademicName(fullName, measure, baseWidth - 20);
+  if (!fullLines.at(-1)?.endsWith("…"))
+    return { width: baseWidth, lines: fullLines };
+
+  const compactName = formatAuthorName(node.canonicalName || fullName, false);
+  if (!compactName || compactName === fullName)
+    return { width: baseWidth, lines: fullLines };
+  const firstName = fullName.split(" ")[0] || "";
+  const firstInitials = buildInitials(firstName);
+  // The first given name helps recognition most. Keep it when the resulting
+  // label still fits; only later given names need to become initials.
+  const candidates = [
+    firstInitials && compactName.startsWith(firstInitials)
+      ? `${firstName}${compactName.slice(firstInitials.length)}`.trim()
+      : "",
+    compactName,
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const width = Math.max(
+      baseWidth,
+      Math.min(ACADEMIC_COMPACT_NODE_WIDTH, measure(candidate) + 20),
+    );
+    const lines = wrapAcademicName(candidate, measure, width - 20);
+    if (!lines.at(-1)?.endsWith("…"))
+      return { displayName: candidate, width, lines };
+  }
+  return { width: baseWidth, lines: fullLines };
 }
 
 /** Count edge crossings in O(E log E), excluding shared endpoints. */
@@ -182,12 +225,9 @@ export function layoutAcademicTree(
   const ranks = displayRanks(graph);
   const dimensions = new Map(
     graph.nodes.map((node) => {
-      const width = Math.max(
-        100,
-        Math.min(ACADEMIC_NODE_WIDTH, measure(node.name) + 20),
-      );
-      const lines =
-        wrapAcademicName(node.name, measure, width - 20).length || 1;
+      const name = fitAcademicName(node, measure);
+      const width = name.width;
+      const lines = name.lines.length || 1;
       const qualificationLines = wrapAcademicQualifications(
         qualifications?.get(node.id)?.labels || [],
         (text) => (measure(text) * 10) / 13,
@@ -202,6 +242,7 @@ export function layoutAcademicTree(
             (node.institution ? 11 : 0) +
             qualificationLines.length * 12 +
             12,
+          ...(name.displayName ? { displayName: name.displayName } : {}),
           ...(qualificationLines.length ? { qualificationLines } : {}),
         },
       ];

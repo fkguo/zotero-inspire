@@ -26,7 +26,8 @@ import type {
 } from "../academicTreeTypes";
 import {
   ACADEMIC_TREE_DEFAULT_DEPTH,
-  ACADEMIC_TREE_MAX_DEPTH,
+  ACADEMIC_TREE_MAX_ANCESTOR_DEPTH,
+  ACADEMIC_TREE_MAX_DESCENDANT_DEPTH,
   ACADEMIC_TREE_INITIAL_LIMIT,
   ACADEMIC_TREE_MAX_NODES,
 } from "../academicTreeTypes";
@@ -212,8 +213,16 @@ export class AcademicTreeView {
       (query) => void this.search(query),
     );
     toolbar.append(searchWrapper, historyButton, search);
-    this.up = this.depth(toolbar, "academic-tree-up");
-    this.down = this.depth(toolbar, "academic-tree-down");
+    this.up = this.depth(
+      toolbar,
+      "academic-tree-up",
+      ACADEMIC_TREE_MAX_ANCESTOR_DEPTH,
+    );
+    this.down = this.depth(
+      toolbar,
+      "academic-tree-down",
+      ACADEMIC_TREE_MAX_DESCENDANT_DEPTH,
+    );
     this.degree = doc.createElement("select");
     this.degree.setAttribute("aria-label", getString("academic-tree-degree"));
     for (const [value, key] of Object.entries({
@@ -434,14 +443,14 @@ export class AcademicTreeView {
   private styleSelect(select: HTMLSelectElement) {
     styleGraphSelect(select);
   }
-  private depth(toolbar: HTMLElement, key: FluentMessageId) {
+  private depth(toolbar: HTMLElement, key: FluentMessageId, maximum: number) {
     const label = this.doc.createElement("label");
     label.textContent = `${getString(key)} `;
     label.style.cssText =
       "display:flex;align-items:center;gap:4px;font-size:12px;color:var(--fill-secondary,#64748b)";
     const select = this.doc.createElement("select");
     select.setAttribute("aria-label", getString(key));
-    for (let depth = 0; depth <= ACADEMIC_TREE_MAX_DEPTH; depth++) {
+    for (let depth = 0; depth <= maximum; depth++) {
       const option = this.doc.createElement("option");
       option.value = String(depth);
       option.textContent = String(depth);
@@ -952,12 +961,15 @@ export class AcademicTreeView {
       "academic-tree-expand-down",
       () => void this.load("down"),
     );
-    expandUp.disabled = node.level <= -ACADEMIC_TREE_MAX_DEPTH;
-    expandDown.disabled = node.level >= ACADEMIC_TREE_MAX_DEPTH;
-    for (const button of [expandUp, expandDown]) {
+    expandUp.disabled = node.level <= -ACADEMIC_TREE_MAX_ANCESTOR_DEPTH;
+    expandDown.disabled = node.level >= ACADEMIC_TREE_MAX_DESCENDANT_DEPTH;
+    for (const [button, maximum] of [
+      [expandUp, ACADEMIC_TREE_MAX_ANCESTOR_DEPTH],
+      [expandDown, ACADEMIC_TREE_MAX_DESCENDANT_DEPTH],
+    ] as const) {
       if (button.disabled)
         button.title = getString("academic-tree-depth-limit", {
-          args: { count: ACADEMIC_TREE_MAX_DEPTH },
+          args: { count: maximum },
         });
     }
     this.actions.append(

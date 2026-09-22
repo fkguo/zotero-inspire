@@ -157,11 +157,14 @@ describe("academic tree traversal", () => {
       "Institute",
     );
   });
-  it("defaults to two generations and allows only 0–8", () => {
+  it("defaults to two generations and allows 0–10 ancestors and 0–8 descendants", () => {
     expect(ACADEMIC_TREE_DEFAULT_DEPTH).toBe(2);
-    expect([-3, 0, 2, 6, 8, 20, NaN].map(clampAcademicDepth)).toEqual([
-      0, 0, 2, 6, 8, 8, 2,
-    ]);
+    expect(
+      [-3, 0, 2, 6, 8, 10, 20, NaN].map((depth) =>
+        clampAcademicDepth(depth),
+      ),
+    ).toEqual([0, 0, 2, 6, 8, 10, 10, 2]);
+    expect([-3, 0, 2, 6, 8, 10, 20, NaN].map((depth) => clampAcademicDepth(depth, "down"))).toEqual([0, 0, 2, 6, 8, 8, 8, 2]);
   });
   it("honors independent zero, two and eight generation bounds", async () => {
     const profiles = Array.from({ length: 25 }, (_, i) =>
@@ -186,7 +189,7 @@ describe("academic tree traversal", () => {
       expect(graph.nodes.find((n) => n.id === "13")?.level).toBe(0);
     }
   });
-  it("prevents local expansion past eight generations, but allows tracing from a new root", async () => {
+  it("prevents local expansion past direction-specific limits, but allows tracing from a new root", async () => {
     const profiles = Array.from({ length: 25 }, (_, i) =>
       person(i + 1, i ? [advisor(i)] : []),
     );
@@ -198,9 +201,9 @@ describe("academic tree traversal", () => {
     });
     expect(
       initial.nodes.map((node) => Number(node.id)).sort((a, b) => a - b),
-    ).toEqual(Array.from({ length: 17 }, (_, i) => i + 5));
+    ).toEqual(Array.from({ length: 19 }, (_, i) => i + 3));
     for (const [id, direction] of [
-      [5, "up"],
+      [3, "up"],
       [21, "down"],
     ] as const) {
       vi.mocked(source.profile).mockClear();
@@ -224,9 +227,7 @@ describe("academic tree traversal", () => {
           (node) => node.id === String(id + (direction === "up" ? -1 : 1)),
         ),
       ).toBe(true);
-      expect(recentered.nodes.every((node) => Math.abs(node.level) <= 8)).toBe(
-        true,
-      );
+      expect(recentered.nodes.every((node) => node.level >= -10 && node.level <= 8)).toBe(true);
     }
   });
   it("preserves co-advisors and multiple degrees with one node per author", async () => {
@@ -643,5 +644,37 @@ describe("academic name labels", () => {
       "Alexandria",
       "Montgomery",
     ]);
+  });
+  it("keeps the first given name, initials later ones, and retains a long surname", () => {
+    const graph: AcademicTreeGraph = {
+      rootId: "sommerfeld",
+      nodes: [
+        {
+          id: "sommerfeld",
+          name: "Arnold Johannes Wilhelm Sommerfeld",
+          canonicalName: "Sommerfeld, Arnold Johannes Wilhelm",
+          level: 0,
+        },
+        {
+          id: "lindemann",
+          name: "Carl Louis Ferdinand von Lindemann",
+          canonicalName: "von Lindemann, Carl Louis Ferdinand",
+          level: -1,
+        },
+      ],
+      edges: [{ source: "lindemann", target: "sommerfeld", degreeTypes: [] }],
+      expanded: { up: [], down: [] },
+      empty: { up: [], down: [] },
+      failures: [],
+      limited: false,
+    };
+    const layout = layoutAcademicTree(graph, width);
+    expect(layout.nodes.find((node) => node.id === "sommerfeld")).toMatchObject({
+      displayName: "Arnold J. W. Sommerfeld",
+    });
+    expect(layout.nodes.find((node) => node.id === "lindemann")).toMatchObject({
+      displayName: "Carl L. F. von Lindemann",
+    });
+    expect(layout.nodes.every((node) => node.width <= 168)).toBe(true);
   });
 });

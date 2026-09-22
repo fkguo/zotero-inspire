@@ -53,6 +53,7 @@ export interface AcademicTreeSource {
   ): Promise<AcademicStudentsPage>;
 }
 export const ACADEMIC_TREE_DEFAULT_DEPTH = 2;
-export const ACADEMIC_TREE_MAX_DEPTH = 8;
+export const ACADEMIC_TREE_MAX_ANCESTOR_DEPTH = 10;
+export const ACADEMIC_TREE_MAX_DESCENDANT_DEPTH = 8;
 export const ACADEMIC_TREE_INITIAL_LIMIT = 200;
 export const ACADEMIC_TREE_MAX_NODES = 1000;

@@ -559,7 +559,7 @@ export class AcademicTreeCanvas {
       text.setAttribute("font-size", "13");
       text.setAttribute("font-family", "system-ui,sans-serif");
       const lines = wrapAcademicName(
-        node.name,
+        node.displayName || node.name,
         this.measureName,
         node.width - 20,
       );

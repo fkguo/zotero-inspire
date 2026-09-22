@@ -12,7 +12,8 @@ import type {
   AcademicTreeNode,
 } from "./academicTreeTypes";
 import {
-  ACADEMIC_TREE_MAX_DEPTH,
+  ACADEMIC_TREE_MAX_ANCESTOR_DEPTH,
+  ACADEMIC_TREE_MAX_DESCENDANT_DEPTH,
   ACADEMIC_TREE_MAX_NODES,
 } from "./academicTreeTypes";
 import {
@@ -38,9 +39,16 @@ export interface AcademicTreeOptions {
   onProgress?: (graph: AcademicTreeGraph) => void;
 }
 
-export function clampAcademicDepth(value: number): number {
+export function clampAcademicDepth(
+  value: number,
+  direction: AcademicDirection = "up",
+): number {
+  const maximum =
+    direction === "up"
+      ? ACADEMIC_TREE_MAX_ANCESTOR_DEPTH
+      : ACADEMIC_TREE_MAX_DESCENDANT_DEPTH;
   return Number.isFinite(value)
-    ? Math.max(0, Math.min(ACADEMIC_TREE_MAX_DEPTH, Math.floor(value)))
+    ? Math.max(0, Math.min(maximum, Math.floor(value)))
     : 2;
 }
 
@@ -117,7 +125,11 @@ export async function buildAcademicTree(
       }
       return existing;
     }
-    if (Math.abs(level) > ACADEMIC_TREE_MAX_DEPTH) return;
+    if (
+      level < -ACADEMIC_TREE_MAX_ANCESTOR_DEPTH ||
+      level > ACADEMIC_TREE_MAX_DESCENDANT_DEPTH
+    )
+      return;
     if (nodes.size >= maxNodes) {
       graph.limited = true;
       return;
@@ -162,8 +174,8 @@ export async function buildAcademicTree(
     const level = nodes.get(id)?.level;
     if (
       level === undefined ||
-      (direction === "up" && level <= -ACADEMIC_TREE_MAX_DEPTH) ||
-      (direction === "down" && level >= ACADEMIC_TREE_MAX_DEPTH)
+      (direction === "up" && level <= -ACADEMIC_TREE_MAX_ANCESTOR_DEPTH) ||
+      (direction === "down" && level >= ACADEMIC_TREE_MAX_DESCENDANT_DEPTH)
     )
       return;
     const key = `${direction}:${id}`;
@@ -177,8 +189,8 @@ export async function buildAcademicTree(
       queue.push(task);
     }
   };
-  enqueue(root.recid, "up", clampAcademicDepth(options.upDepth));
-  enqueue(root.recid, "down", clampAcademicDepth(options.downDepth));
+  enqueue(root.recid, "up", clampAcademicDepth(options.upDepth, "up"));
+  enqueue(root.recid, "down", clampAcademicDepth(options.downDepth, "down"));
   const enqueueExpansions = () => {
     for (const task of options.expansions ?? [])
       if (nodes.has(task.id))
