@@ -109,6 +109,7 @@ describe("academic genealogy sorting", () => {
         "Udit Raha",
         "Maral Salajegheh",
         "Gianluca Stellin",
+        "Thomas Vonk",
       ],
       year: [
         "Lucas Platter",
@@ -116,6 +117,7 @@ describe("academic genealogy sorting", () => {
         "Martin Hoferichter",
         "Maxim Mai",
         "Meng-Lin Du",
+        "Thomas Vonk",
         "Bugra Borasoy",
         "De-Chuan Du",
         "Jing Gao",

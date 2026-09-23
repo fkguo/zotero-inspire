@@ -442,7 +442,7 @@ describe("academic tree metadata and layout", () => {
       { name: "Public", recid: "4", degreeType: "master" },
     ]);
   });
-  it("places a co-advisor below their own mentors and keeps the other mentor close to the shared student", async () => {
+  it("keeps direct students in the first generation and retains their co-advisor links", async () => {
     const profiles = [
       { ...person(1), name: "Ulf-G. Meissner" },
       { ...person(2, [advisor(1), advisor(3)]), name: "Shared Student" },
@@ -466,8 +466,13 @@ describe("academic tree metadata and layout", () => {
     expect(Math.abs(node("3").x - node("4").x)).toBeLessThan(
       ACADEMIC_NODE_WIDTH + 24,
     );
-    for (const edge of graph.edges)
-      expect(node(edge.source).y).toBeLessThan(node(edge.target).y);
+    for (const edge of graph.edges) {
+      const sameGeneration = node(edge.source).y === node(edge.target).y;
+      expect(
+        node(edge.source).y < node(edge.target).y ||
+          (sameGeneration && edge.target === "2"),
+      ).toBe(true);
+    }
     expect(JSON.stringify(graph)).toBe(original);
     expect(layout.nodes.map((n) => [n.id, n.level]).sort()).toEqual(
       graph.nodes.map((n) => [n.id, n.level]).sort(),

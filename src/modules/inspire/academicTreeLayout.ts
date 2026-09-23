@@ -205,10 +205,29 @@ function displayRanks(graph: AcademicTreeGraph): Map<string, number> {
   }
   const root = componentOf.get(graph.rootId);
   const offset = root === undefined ? 0 : rank[root];
+  // A direct student of the focal author belongs to generation +1 even when a
+  // second advisor is another visible student. Longest-path ranking would put
+  // that student below the second advisor instead. Use the shortest directed
+  // path from the focal component for descendants; retain the established
+  // global ranks for ancestors and lateral branches of their advisors.
+  const descendantDistance = new Map<number, number>();
+  if (root !== undefined) {
+    descendantDistance.set(root, 0);
+    const descendants = [root];
+    for (let cursor = 0; cursor < descendants.length; cursor++) {
+      const from = descendants[cursor];
+      for (const to of next[from])
+        if (!descendantDistance.has(to)) {
+          descendantDistance.set(to, descendantDistance.get(from)! + 1);
+          descendants.push(to);
+        }
+    }
+  }
   return new Map(
     graph.nodes.map((node) => [
       node.id,
-      rank[componentOf.get(node.id)!] - offset,
+      descendantDistance.get(componentOf.get(node.id)!) ??
+        rank[componentOf.get(node.id)!] - offset,
     ]),
   );
 }
