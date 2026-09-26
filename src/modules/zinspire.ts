@@ -8746,7 +8746,9 @@ export class InspireReferencePanelController {
     this.cancelExport(); // Cancel any previous export
     // FTR-ABORT-CONTROLLER-FIX: Use utility function to safely create AbortController
     // Don't create mock signal - only pass real signal to fetch()
-    this.exportAbort = createAbortController();
+    // Keep this export's own controller: a newer export replaces this.exportAbort.
+    const exportAbort = createAbortController();
+    this.exportAbort = exportAbort;
 
     const BATCH_SIZE = METADATA_BATCH_SIZE; // Same as existing code for metadata batch fetch
     const allBibTeX: string[] = [];
@@ -8765,7 +8767,7 @@ export class InspireReferencePanelController {
     try {
       for (let i = 0; i < entriesWithRecid.length; i += BATCH_SIZE) {
         // PERF-FIX-2: Check abort before each batch (use optional chaining)
-        if (this.exportAbort?.signal?.aborted) {
+        if (exportAbort?.signal?.aborted) {
           Zotero.debug(`[${config.addonName}] BibTeX export aborted`);
           progressWin.changeLine({
             icon: icon,
@@ -8782,8 +8784,8 @@ export class InspireReferencePanelController {
 
         try {
           // PERF-FIX-2: Only pass signal to fetch if it's a real AbortSignal
-          const fetchOptions = this.exportAbort?.signal
-            ? { signal: this.exportAbort.signal }
+          const fetchOptions = exportAbort?.signal
+            ? { signal: exportAbort.signal }
             : {};
           const response = await inspireFetch(url, fetchOptions);
           if (response.ok) {
@@ -8806,7 +8808,7 @@ export class InspireReferencePanelController {
       }
 
       // PERF-FIX-2: Only show success if not aborted (use optional chaining)
-      if (!this.exportAbort?.signal?.aborted && allBibTeX.length) {
+      if (!exportAbort?.signal?.aborted && allBibTeX.length) {
         const success = await copyToClipboard(allBibTeX.join("\n\n"));
         if (success) {
           progressWin.changeLine({
@@ -8817,7 +8819,7 @@ export class InspireReferencePanelController {
             type: "success",
           });
         }
-      } else if (!this.exportAbort?.signal?.aborted) {
+      } else if (!exportAbort?.signal?.aborted) {
         progressWin.changeLine({
           icon: icon,
           text: strings.bibtexAllFailed,
@@ -8834,8 +8836,11 @@ export class InspireReferencePanelController {
         });
       }
     } finally {
-      // PERF-FIX-2: Clear abort controller after export completes
-      this.exportAbort = undefined;
+      // PERF-FIX-2: Clear abort controller after export completes,
+      // unless a newer export has already replaced it
+      if (this.exportAbort === exportAbort) {
+        this.exportAbort = undefined;
+      }
     }
 
     setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
@@ -9071,7 +9076,9 @@ export class InspireReferencePanelController {
     this.cancelExport(); // Cancel any previous export
     // FTR-ABORT-CONTROLLER-FIX: Use utility function to safely create AbortController
     // Don't create mock signal - only pass real signal to fetch()
-    this.exportAbort = createAbortController();
+    // Keep this export's own controller: a newer export replaces this.exportAbort.
+    const exportAbort = createAbortController();
+    this.exportAbort = exportAbort;
 
     const BATCH_SIZE = METADATA_BATCH_SIZE;
     const allContent: string[] = [];
@@ -9091,7 +9098,7 @@ export class InspireReferencePanelController {
     try {
       for (let i = 0; i < entriesWithRecid.length; i += BATCH_SIZE) {
         // PERF-FIX-2: Check abort before each batch (use optional chaining)
-        if (this.exportAbort?.signal?.aborted) {
+        if (exportAbort?.signal?.aborted) {
           Zotero.debug(`[${config.addonName}] ${format} export aborted`);
           progressWin.changeLine({
             icon: icon,
@@ -9109,8 +9116,8 @@ export class InspireReferencePanelController {
 
         try {
           // PERF-FIX-2: Only pass signal to fetch if it's a real AbortSignal
-          const fetchOptions = this.exportAbort?.signal
-            ? { signal: this.exportAbort.signal }
+          const fetchOptions = exportAbort?.signal
+            ? { signal: exportAbort.signal }
             : {};
           const response = await inspireFetch(url, fetchOptions);
           if (response.ok) {
@@ -9234,8 +9241,11 @@ export class InspireReferencePanelController {
       Zotero.debug(`[${config.addonName}] Export error: ${e}`);
       progressWin.changeLine({ text: strings.bibtexAllFailed, type: "fail" });
     } finally {
-      // PERF-FIX-2: Clear abort controller after export completes
-      this.exportAbort = undefined;
+      // PERF-FIX-2: Clear abort controller after export completes,
+      // unless a newer export has already replaced it
+      if (this.exportAbort === exportAbort) {
+        this.exportAbort = undefined;
+      }
     }
 
     setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
@@ -9265,7 +9275,9 @@ export class InspireReferencePanelController {
 
     this.cancelExport();
     // FTR-ABORT-CONTROLLER-FIX: Use utility function to safely create AbortController
-    this.exportAbort = createAbortController();
+    // Keep this export's own controller: a newer export replaces this.exportAbort.
+    const exportAbort = createAbortController();
+    this.exportAbort = exportAbort;
 
     const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
     const progressWin = new ztoolkit.ProgressWindow(config.addonName);
@@ -9310,7 +9322,7 @@ export class InspireReferencePanelController {
       const fieldsParam = buildFieldsParam("control_number,texkeys");
 
       for (let i = 0; i < missingRecids.length; i += METADATA_BATCH_SIZE) {
-        if (this.exportAbort?.signal?.aborted) {
+        if (exportAbort?.signal?.aborted) {
           progressWin.changeLine({
             icon: icon,
             text: getString("references-panel-export-cancelled"),
@@ -9324,8 +9336,8 @@ export class InspireReferencePanelController {
         const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batch.length}${fieldsParam}`;
 
         try {
-          const fetchOptions = this.exportAbort?.signal
-            ? { signal: this.exportAbort.signal }
+          const fetchOptions = exportAbort?.signal
+            ? { signal: exportAbort.signal }
             : {};
           const response = await inspireFetch(url, fetchOptions);
           if (!response.ok) continue;
@@ -9390,7 +9402,10 @@ export class InspireReferencePanelController {
         });
       }
     } finally {
-      this.exportAbort = undefined;
+      // Clear the controller unless a newer export has already replaced it
+      if (this.exportAbort === exportAbort) {
+        this.exportAbort = undefined;
+      }
       setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
     }
   }
