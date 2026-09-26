@@ -1463,6 +1463,9 @@ export class InspireReferencePanelController {
   private static navigationStack: NavigationSnapshot[] = [];
   private static forwardStack: NavigationSnapshot[] = [];
   private static isNavigatingHistory = false;
+  // The history jump in progress: the tab it started in, and the snapshot
+  // of the item it is waiting for.
+  private static historyJump?: { tabID?: string; target: NavigationSnapshot };
   // Shared citation listener (singleton on readerIntegration)
   private static citationListenerRegistered = false;
   private static sharedCitationHandler?: (event: CitationLookupEvent) => void;
@@ -8396,6 +8399,7 @@ export class InspireReferencePanelController {
       InspireReferencePanelController.forwardStack = [];
       InspireReferencePanelController.sharedPendingScrollRestore = undefined;
       InspireReferencePanelController.isNavigatingHistory = false;
+      InspireReferencePanelController.historyJump = undefined;
     }
     InspireReferencePanelController.syncBackButtonStates();
     this.entryCitedSource = undefined;
@@ -9765,6 +9769,7 @@ export class InspireReferencePanelController {
     options: { loadData?: boolean } = {},
   ) {
     const loadData = options.loadData !== false;
+    let itemChanged = false;
     try {
       if (args.tabType !== "library" && args.tabType !== "reader") {
         // Don't override search mode display
@@ -9826,7 +9831,7 @@ export class InspireReferencePanelController {
       }
 
       const previousItemID = this.currentItemID;
-      const itemChanged = previousItemID !== item.id;
+      itemChanged = previousItemID !== item.id;
       this.currentItemID = item.id;
       if (itemChanged) {
         this.assignCurrentRecid(undefined, true);
@@ -10020,7 +10025,19 @@ export class InspireReferencePanelController {
     } finally {
       if (InspireReferencePanelController.isNavigatingHistory) {
         const currentID = args.item?.id;
-        if (!args.item || currentID === this.currentItemID) {
+        const jump = InspireReferencePanelController.historyJump;
+        // The jump ends when its target reaches a panel, when a panel moves
+        // on to another item, or once another tab is shown. While its tab
+        // stays selected, a panel showing its item again (Zotero re-rendering
+        // it, or a load begun before the jump) must not end it: the target
+        // may still be on its way.
+        if (
+          !args.item ||
+          (currentID === this.currentItemID &&
+            (itemChanged ||
+              currentID === jump?.target.itemID ||
+              ReaderTabHelper.getSelectedTabID() !== jump?.tabID))
+        ) {
           InspireReferencePanelController.isNavigatingHistory = false;
         }
       }
@@ -10171,6 +10188,7 @@ export class InspireReferencePanelController {
     ) {
       return;
     }
+    let reopened = false;
     try {
       // Zotero.Reader.open expects an attachment ID, not the parent item ID
       // Find the best attachment for this parent item
@@ -10201,6 +10219,7 @@ export class InspireReferencePanelController {
         (await Zotero.Reader.open(attachmentID, undefined, {
           allowDuplicate: false,
         })) || null;
+      reopened = true;
       if (reader) {
         ReaderTabHelper.focusReader(reader as _ZoteroTypes.ReaderInstance);
       }
@@ -10208,6 +10227,24 @@ export class InspireReferencePanelController {
       Zotero.debug(
         `[${config.addonName}] Failed to reopen reader for item ${snapshot.itemID}: ${err}`,
       );
+    } finally {
+      // Without a Reader tab no item would reach the panel and end the
+      // history jump: show the item in the library instead, as when
+      // reopening Reader tabs is turned off. If the user has left the tab
+      // the jump started in, leave them there and end the jump.
+      const jump = InspireReferencePanelController.historyJump;
+      if (
+        !reopened &&
+        InspireReferencePanelController.isNavigatingHistory &&
+        jump?.target === snapshot
+      ) {
+        if (ReaderTabHelper.getSelectedTabID() === jump.tabID) {
+          Zotero.getActiveZoteroPane()?.selectItems([snapshot.itemID]);
+        } else {
+          InspireReferencePanelController.isNavigatingHistory = false;
+          InspireReferencePanelController.syncBackButtonStates();
+        }
+      }
     }
   }
 
@@ -10287,16 +10324,6 @@ export class InspireReferencePanelController {
     if (!pane) {
       return;
     }
-    const currentSnapshot = this.captureNavigationSnapshot();
-    if (currentSnapshot) {
-      InspireReferencePanelController.forwardStack.push(currentSnapshot);
-      if (
-        InspireReferencePanelController.forwardStack.length >
-        NAVIGATION_STACK_LIMIT
-      ) {
-        InspireReferencePanelController.forwardStack.shift();
-      }
-    }
     InspireReferencePanelController.sharedPendingScrollRestore = undefined;
     while (stack.length) {
       const snapshot = stack.pop();
@@ -10307,7 +10334,22 @@ export class InspireReferencePanelController {
       if (!targetItem) {
         continue;
       }
+      // Store the current item only once there is an item to go back to.
+      const currentSnapshot = this.captureNavigationSnapshot();
+      if (currentSnapshot) {
+        InspireReferencePanelController.forwardStack.push(currentSnapshot);
+        if (
+          InspireReferencePanelController.forwardStack.length >
+          NAVIGATION_STACK_LIMIT
+        ) {
+          InspireReferencePanelController.forwardStack.shift();
+        }
+      }
       InspireReferencePanelController.isNavigatingHistory = true;
+      InspireReferencePanelController.historyJump = {
+        tabID: ReaderTabHelper.getSelectedTabID(),
+        target: snapshot,
+      };
       InspireReferencePanelController.sharedPendingScrollRestore = {
         itemID: snapshot.itemID,
         scrollTop: snapshot.scrollState.scrollTop,
@@ -10350,14 +10392,6 @@ export class InspireReferencePanelController {
     if (!pane) {
       return;
     }
-    const currentSnapshot = this.captureNavigationSnapshot();
-    if (currentSnapshot) {
-      const backStack = InspireReferencePanelController.navigationStack;
-      backStack.push(currentSnapshot);
-      if (backStack.length > NAVIGATION_STACK_LIMIT) {
-        backStack.shift();
-      }
-    }
     InspireReferencePanelController.sharedPendingScrollRestore = undefined;
     while (stack.length) {
       const snapshot = stack.pop();
@@ -10368,7 +10402,20 @@ export class InspireReferencePanelController {
       if (!targetItem) {
         continue;
       }
+      // Store the current item only once there is an item to go forward to.
+      const currentSnapshot = this.captureNavigationSnapshot();
+      if (currentSnapshot) {
+        const backStack = InspireReferencePanelController.navigationStack;
+        backStack.push(currentSnapshot);
+        if (backStack.length > NAVIGATION_STACK_LIMIT) {
+          backStack.shift();
+        }
+      }
       InspireReferencePanelController.isNavigatingHistory = true;
+      InspireReferencePanelController.historyJump = {
+        tabID: ReaderTabHelper.getSelectedTabID(),
+        target: snapshot,
+      };
       InspireReferencePanelController.sharedPendingScrollRestore = {
         itemID: snapshot.itemID,
         scrollTop: snapshot.scrollState.scrollTop,

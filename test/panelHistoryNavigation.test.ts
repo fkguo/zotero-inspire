@@ -3,14 +3,16 @@ import { InspireReferencePanelController } from "../src/modules/zinspire";
 import type { NavigationSnapshot } from "../src/modules/inspire/types";
 
 // Back/forward history of the References panel. A history jump asks Zotero to
-// show another item and sets isNavigatingHistory; the ← / → buttons are
-// disabled while it is set. These tests press the arrow keys again while it
-// is set and check the history once Zotero has shown the requested items.
+// show another item and sets isNavigatingHistory until that item reaches a
+// panel; the ← / → buttons are disabled while it is set. These tests press the
+// arrow keys, replay the item changes Zotero reports meanwhile, and check the
+// history once Zotero has shown the requested items.
 
 const Panel = InspireReferencePanelController as any;
 const A = 1;
 const B = 2;
 const C = 3;
+const D = 4;
 
 function snapshot(itemID: number, readerTabID?: string): NavigationSnapshot {
   return {
@@ -34,13 +36,14 @@ function resetHistory() {
   Panel.navigationStack = [];
   Panel.forwardStack = [];
   Panel.isNavigatingHistory = false;
+  Panel.historyJump = undefined;
   Panel.sharedPendingScrollRestore = undefined;
 }
 
 describe("References panel back/forward history", () => {
-  // Regular items A, B, C, each with one PDF attachment (item ID + 10).
+  // Regular items A, B, C, D, each with one PDF attachment (item ID + 10).
   const items = new Map<number, any>();
-  for (const id of [A, B, C]) {
+  for (const id of [A, B, C, D]) {
     items.set(id, {
       id,
       isRegularItem: () => true,
@@ -219,5 +222,245 @@ describe("References panel back/forward history", () => {
     });
     expect(selectItems).not.toHaveBeenCalled();
     expect(openReader).toHaveBeenCalledTimes(1);
+  });
+
+  // Zotero also calls onItemChange for the item a panel already shows, for
+  // example when it renders the item pane again after a "refresh"
+  // notification.
+  it.each([
+    // Visited A, then B, then C; the panel shows C.
+    {
+      direction: "Back",
+      key: "ArrowLeft",
+      back: [A, B],
+      shown: C,
+      forward: [],
+    },
+    // Visited A, then B, then C, and went back to A; the panel shows A.
+    {
+      direction: "Forward",
+      key: "ArrowRight",
+      back: [],
+      shown: A,
+      forward: [C, B],
+    },
+  ] as const)(
+    "keeps a $direction jump pending while Zotero shows the item it leaves again",
+    async ({ key, back, shown, forward }) => {
+      Panel.navigationStack = back.map((id) => snapshot(id));
+      Panel.forwardStack = forward.map((id) => snapshot(id));
+      const panel = openPanel(shown);
+
+      panel.press(key);
+      await panel.arrive(shown); // Zotero renders it again before B arrives
+      expect(panel.controller.backButton.disabled).toBe(true);
+      panel.press(key);
+      await panel.showSelected();
+
+      expect(panel.history()).toEqual({ back: [A], current: B, forward: [C] });
+      expect(selectItems.mock.calls).toEqual([[[B]]]);
+    },
+  );
+
+  it("keeps a jump pending while the references of the item it leaves load", async () => {
+    // Visited A, then B, then C; Zotero shows C and has the open section
+    // load C's references (onAsyncRender).
+    Panel.navigationStack = [snapshot(A), snapshot(B)];
+    const panel = openPanel();
+    await panel.arrive(C);
+    let finishLoading: () => void = () => undefined;
+    const loadEntries = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishLoading = resolve;
+        }),
+    );
+    Object.assign(panel.controller, {
+      renderChartLoading: vi.fn(),
+      renderMessage: vi.fn(),
+      getLoadingMessageForMode: () => "",
+      performAutoCheck: vi.fn(async () => undefined),
+      updateSortSelector: vi.fn(),
+      loadEntries,
+    });
+    const loading = panel.controller.handleVisibleItemChange({
+      tabType: "library",
+      item: items.get(C),
+    });
+    expect(loadEntries).toHaveBeenCalledTimes(1);
+
+    panel.press("ArrowLeft");
+    finishLoading(); // C's references arrive before B does
+    await loading;
+    expect(panel.controller.backButton.disabled).toBe(true);
+    await panel.showSelected();
+
+    expect(panel.history()).toEqual({ back: [A], current: B, forward: [C] });
+  });
+
+  it("ends a jump to an open Reader tab when that tab shows its item", async () => {
+    // Visited A in the library, then C in a Reader tab that is still open,
+    // and went back to A; the library panel shows A.
+    Panel.forwardStack = [snapshot(C, "reader-C")];
+    const readerC = { tabID: "reader-C", focus: vi.fn() };
+    (globalThis as any).Zotero.Reader.getByTabID = (tabID: string) =>
+      tabID === "reader-C" ? readerC : undefined;
+    const panel = openPanel(A);
+    const readerPanel = openPanel(C); // the item pane of C's Reader tab
+
+    panel.press("ArrowRight");
+    expect((globalThis as any).Zotero_Tabs.select).toHaveBeenCalledWith(
+      "reader-C",
+    );
+    // Zotero selects the tab and renders its item pane, which shows C again.
+    Object.assign((globalThis as any).Zotero_Tabs, {
+      selectedType: "reader",
+      selectedID: "reader-C",
+    });
+    await readerPanel.arrive(C, "reader");
+
+    expect(readerPanel.history()).toEqual({
+      back: [A],
+      current: C,
+      forward: [],
+    });
+    expect(readerPanel.controller.backButton.disabled).toBe(false);
+  });
+
+  it("ends a jump once Zotero shows its target, even the item already shown", async () => {
+    // Went from C to D through the panel, then selected C again in the
+    // library, so the item behind C is C itself; the panel shows C.
+    Panel.navigationStack = [snapshot(C)];
+    const panel = openPanel(C);
+
+    panel.press("ArrowLeft");
+    expect(selectItems).toHaveBeenCalledWith([C]);
+    // Zotero reports nothing for an item that is already selected, but
+    // reports it again whenever it renders the item pane again.
+    await panel.arrive(C);
+
+    expect(Panel.isNavigatingHistory).toBe(false);
+  });
+
+  it.each([
+    [
+      "its PDF has been deleted since",
+      () => {
+        const itemB = { ...items.get(B), getAttachments: () => [] };
+        (globalThis as any).Zotero.Items.get = (id: number) =>
+          id === B ? itemB : (items.get(id) ?? null);
+      },
+    ],
+    [
+      "Zotero fails to open it",
+      () => openReader.mockRejectedValue(new Error("cannot open")),
+    ],
+  ])(
+    "shows the item in the library when its Reader tab cannot be reopened: %s",
+    async (_cause, preventReopening) => {
+      // Visited A in the library, B in a Reader tab closed since, then C.
+      Panel.navigationStack = [snapshot(A), snapshot(B, "reader-B")];
+      preventReopening();
+      const panel = openPanel(C);
+
+      panel.press("ArrowLeft");
+      await new Promise((resolve) => setTimeout(resolve, 0)); // reopening fails
+      expect(selectItems).toHaveBeenCalledWith([B]);
+      await panel.showSelected();
+
+      expect(panel.history()).toEqual({ back: [A], current: B, forward: [C] });
+      expect(panel.controller.backButton.disabled).toBe(false);
+      expect(panel.controller.forwardButton.disabled).toBe(false);
+    },
+  );
+
+  it("ends a jump once the user shows another tab", async () => {
+    // Visited A in the library, B in a Reader tab closed since, then C.
+    Panel.navigationStack = [snapshot(A), snapshot(B, "reader-B")];
+    openReader.mockReturnValue(new Promise(() => undefined)); // still opening
+    const panel = openPanel(C);
+    const readerPanel = openPanel(D); // the item pane of D's Reader tab
+
+    panel.press("ArrowLeft");
+    // While B's Reader tab opens, the user selects D's Reader tab, whose
+    // item pane Zotero renders again.
+    Object.assign((globalThis as any).Zotero_Tabs, {
+      selectedType: "reader",
+      selectedID: "reader-D",
+    });
+    await readerPanel.arrive(D, "reader");
+
+    expect(Panel.isNavigatingHistory).toBe(false);
+    expect(readerPanel.controller.backButton.disabled).toBe(false);
+  });
+
+  it.each([
+    ["selects another item", (panel: any) => panel.arrive(D)],
+    [
+      "switches to a Reader tab that also shows C",
+      () => {
+        const readerPanel = openPanel(C); // the item pane of C's Reader tab
+        Object.assign((globalThis as any).Zotero_Tabs, {
+          selectedType: "reader",
+          selectedID: "reader-C",
+        });
+        return readerPanel.arrive(C, "reader");
+      },
+    ],
+    [
+      "switches to a note tab",
+      () => {
+        Object.assign((globalThis as any).Zotero_Tabs, {
+          selectedType: "note",
+          selectedID: "note-1",
+        });
+      },
+    ],
+  ])(
+    "leaves the user's choice alone if the user %s before reopening fails",
+    async (_choice, goElsewhere) => {
+      // Visited A in the library, B in a Reader tab closed since, then C.
+      Panel.navigationStack = [snapshot(A), snapshot(B, "reader-B")];
+      let failOpening: (error: Error) => void = () => undefined;
+      openReader.mockReturnValue(
+        new Promise((_resolve, reject) => {
+          failOpening = reject;
+        }),
+      );
+      const panel = openPanel(C);
+
+      panel.press("ArrowLeft");
+      await goElsewhere(panel); // while B's Reader tab is opening
+      failOpening(new Error("cannot open"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(selectItems).not.toHaveBeenCalled();
+      expect(Panel.isNavigatingHistory).toBe(false);
+      expect(panel.controller.backButton.disabled).toBe(false);
+    },
+  );
+
+  it("stores nothing when every earlier item has been deleted", () => {
+    const X = 9; // deleted since it was visited
+    Panel.navigationStack = [snapshot(X)];
+    const panel = openPanel(C);
+
+    panel.press("ArrowLeft");
+
+    expect(panel.history()).toEqual({ back: [], current: C, forward: [] });
+    expect(selectItems).not.toHaveBeenCalled();
+    expect(panel.controller.forwardButton.disabled).toBe(true);
+  });
+
+  it("stores nothing when every later item has been deleted", () => {
+    const X = 9; // deleted since it was visited
+    Panel.forwardStack = [snapshot(X)];
+    const panel = openPanel(A);
+
+    panel.press("ArrowRight");
+
+    expect(panel.history()).toEqual({ back: [], current: A, forward: [] });
+    expect(selectItems).not.toHaveBeenCalled();
+    expect(panel.controller.backButton.disabled).toBe(true);
   });
 });
