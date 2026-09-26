@@ -10614,7 +10614,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.renderChart(); // Use deferred render (same as original implementation)
         this.renderReferenceList({ preserveScroll: !shouldReset });
         if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
-          this.updateAuthorStats(entriesForDisplay);
+          this.updateAuthorStats(this.getEntriesForAuthorStats());
           this.updateAuthorProfileCard();
         }
         if (shouldReset) {
@@ -10721,7 +10721,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
               mode === "entryCited" &&
               this.entryCitedSource?.authorSearchInfo
             ) {
-              this.updateAuthorStats(entriesForDisplay);
+              this.updateAuthorStats(this.getEntriesForAuthorStats());
               this.updateAuthorProfileCard();
             }
             if (shouldReset) {
@@ -10824,8 +10824,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           this.totalApiCount = total;
         }
 
+        const filtering = this.hasActiveListFilters();
+
         // Update status with loading progress (only when not filtering)
-        if (!this.filterText) {
+        if (!filtering) {
           const loadedCount = currentEntries.length;
           const totalStr = total !== null ? ` of ${total}` : "";
           this.setStatus(`Loading... ${loadedCount}${totalStr} records`);
@@ -10839,7 +10841,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             this.resetListScroll();
           }
           hasRenderedFirstPage = true;
-        } else if (this.filterText || this.chartSelectedBins.size > 0) {
+        } else if (filtering) {
           // If filtering is active, need full re-render to apply filter
           this.renderReferenceList({ preserveScroll: true });
         } else {
@@ -11005,7 +11007,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.renderChart(); // Use deferred render (same as original implementation)
         this.renderReferenceList();
         if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
-          this.updateAuthorStats(entriesForDisplay);
+          this.updateAuthorStats(this.getEntriesForAuthorStats());
           this.updateAuthorProfileCard();
         }
         if (options.resetScroll && !hasRenderedFirstPage) {
@@ -11093,11 +11095,16 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             this.labelMatcherCache.clear();
           }
 
+          // Recount only while the panel shows this load's list (the card is
+          // computed from allEntries), also after leaving the tab and
+          // returning to it from the memory cache.
           if (
             enrichMode === "entryCited" &&
-            this.entryCitedSource?.authorSearchInfo
+            this.entryCitedSource?.authorSearchInfo &&
+            this.allEntries === entries &&
+            isStillCurrent()
           ) {
-            this.updateAuthorStats(entries);
+            this.updateAuthorStats(this.getEntriesForAuthorStats());
             this.updateAuthorProfileCard();
           }
 
@@ -11204,7 +11211,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
                 mode === "entryCited" &&
                 this.entryCitedSource?.authorSearchInfo
               ) {
-                this.updateAuthorStats(entriesForDisplay);
+                this.updateAuthorStats(this.getEntriesForAuthorStats());
                 this.updateAuthorProfileCard();
               }
               if (options.resetScroll) {
@@ -12163,9 +12170,22 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   /**
+   * Search variants of the filter text, one group per token; tokens without
+   * any variant are dropped.
+   */
+  private getFilterTextGroups(): string[][] {
+    return parseFilterTokens(this.filterText)
+      .map(({ text, quoted }) =>
+        buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }),
+      )
+      .filter((variants) => variants.length);
+  }
+
+  /**
    * Apply all active filters to entries (text filter, chart filter, author filter).
    * This is used by both renderReferenceList and doRenderChart for consistency.
    * Ensures chart stats always match the filtered list view.
+   * hasActiveListFilters() must report every filter applied here.
    */
   private getFilteredEntries(
     entries: InspireReferenceEntry[],
@@ -12174,11 +12194,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     const { skipChartFilter = false } = options;
 
     // Parse and apply text filter
-    const filterGroups = parseFilterTokens(this.filterText)
-      .map(({ text, quoted }) =>
-        buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }),
-      )
-      .filter((variants) => variants.length);
+    const filterGroups = this.getFilterTextGroups();
 
     const textFiltered = filterGroups.length
       ? entries.filter((entry) =>
@@ -12207,6 +12223,23 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
     // Apply quick filters (high citations, recency, etc.)
     return this.applyQuickFilters(publishedFiltered);
+  }
+
+  /**
+   * Whether any list filter (text, chart selection, author count, published
+   * only or a quick filter) is active, i.e. whether getFilteredEntries() can
+   * drop entries. A list that is still loading must then be re-rendered
+   * through the filters instead of having new entries appended. Unlike
+   * hasActiveFilters(), filter text without any search token does not count.
+   */
+  private hasActiveListFilters(): boolean {
+    return (
+      this.getFilterTextGroups().length > 0 ||
+      this.chartSelectedBins.size > 0 ||
+      this.authorFilterEnabled ||
+      this.publishedOnlyFilterEnabled ||
+      this.quickFilters.size > 0
+    );
   }
 
   private renderReferenceList(
@@ -12300,6 +12333,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     // Phase 0.1 Refactor: Also clear EntryListRenderer's cache
     this.entryRenderer?.clearCache();
     this.loadMoreButton = undefined;
+    // "Load more" state belongs to the list being replaced
+    this.currentFilteredEntries = undefined;
 
     if (!this.allEntries.length) {
       this.renderMessage(this.getEmptyMessageForMode(this.viewMode));
@@ -12309,13 +12344,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
     // Apply all active filters using shared filtering logic
     const filtered = this.getFilteredEntries(this.allEntries);
-
-    // Parse filter tokens for UI feedback (to show filter count message)
-    const filterGroups = parseFilterTokens(this.filterText)
-      .map(({ text, quoted }) =>
-        buildFilterTokenVariants(text, { ignoreSpaceDot: quoted }),
-      )
-      .filter((variants) => variants.length);
+    // With any filter active: larger pages and a match count in the status
+    const anyFilterActive = this.hasActiveListFilters();
 
     if (!filtered.length) {
       this.renderMessage(getString("references-panel-no-match"));
@@ -12325,13 +12355,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       // PERF FIX: Always use pagination when there are many entries, even with filters
       // Without this, DOM operations (clearing 10000+ elements) can take seconds
       // Use higher threshold when filtering for better UX with smaller result sets
-      const hasFilter =
-        filterGroups.length > 0 ||
-        this.chartSelectedBins.size > 0 ||
-        this.authorFilterEnabled ||
-        this.publishedOnlyFilterEnabled ||
-        this.quickFilters.size > 0;
-      const paginationThreshold = hasFilter
+      const paginationThreshold = anyFilterActive
         ? RENDER_PAGE_SIZE_FILTERED
         : RENDER_PAGE_SIZE;
       const usePagination = filtered.length > paginationThreshold;
@@ -12352,8 +12376,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.currentFilteredEntries = filtered;
         this.currentPaginationBatchSize = paginationThreshold;
         this.renderLoadMoreButton(filtered, paginationThreshold);
-      } else {
-        this.currentFilteredEntries = undefined;
       }
     }
     this.lastRenderedEntries = filtered;
@@ -12365,14 +12387,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         ? this.totalApiCount
         : this.allEntries.length;
     const fetchedCount = this.allEntries.length;
-
-    // Check if any filter is active (text, chart, author, or published only)
-    const anyFilterActive =
-      filterGroups.length > 0 ||
-      this.chartSelectedBins.size > 0 ||
-      this.authorFilterEnabled ||
-      this.publishedOnlyFilterEnabled ||
-      this.quickFilters.size > 0;
 
     if (anyFilterActive) {
       // For filter mode, show matches and indicate if searching in partial data
@@ -12740,7 +12754,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    */
   private appendNewEntries(previousCount: number): number {
     // Skip if filtering is active (need full re-render to apply filter)
-    if (this.filterText || this.chartSelectedBins.size > 0) {
+    if (this.hasActiveListFilters()) {
       return 0;
     }
 
@@ -13216,7 +13230,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             : cached;
       this.allEntries = entriesForDisplay;
       if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
-        this.updateAuthorStats(entriesForDisplay);
+        this.updateAuthorStats(this.getEntriesForAuthorStats());
         this.updateAuthorProfileCard();
       }
       // Reset totalApiCount for cached data (allEntries.length is accurate)
@@ -14113,7 +14127,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           this.totalApiCount = total;
         }
 
-        if (!this.filterText) {
+        const filtering = this.hasActiveListFilters();
+
+        if (!filtering) {
           const loadedCount = currentEntries.length;
           const totalStr = total !== null ? ` of ${total}` : "";
           this.setStatus(`Searching... ${loadedCount}${totalStr} results`);
@@ -14124,7 +14140,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           this.renderReferenceList({ preserveScroll: false });
           this.resetListScroll();
           hasRenderedFirstPage = true;
-        } else if (this.filterText || this.chartSelectedBins.size > 0) {
+        } else if (filtering) {
           this.renderReferenceList({ preserveScroll: true });
         } else {
           this.appendNewEntries(prevCount);
