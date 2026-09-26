@@ -3,17 +3,6 @@
 // Refactored components extracted from InspireReferencePanelController
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Re-export ExportManager
-export {
-  ExportManager,
-  type ExportFormat,
-  type ExportTarget,
-  type ExportFormatConfig,
-  type ExportManagerOptions,
-  type ExportResult,
-  EXPORT_FORMATS,
-} from "./ExportManager";
-
 // Re-export BatchImportManager
 export {
   BatchImportManager,

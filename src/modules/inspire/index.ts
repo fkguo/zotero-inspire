@@ -410,13 +410,6 @@ export {
 
 // Re-export panel components (refactored from controller)
 export {
-  ExportManager,
-  type ExportFormat,
-  type ExportTarget,
-  type ExportFormatConfig,
-  type ExportManagerOptions,
-  type ExportResult,
-  EXPORT_FORMATS,
   BatchImportManager,
   type DuplicateInfo,
   type BatchImportResult,
