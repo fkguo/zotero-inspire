@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InspireReferencePanelController } from "../src/modules/zinspire";
 import { METADATA_BATCH_SIZE } from "../src/modules/inspire/constants";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
+import { getString } from "../src/utils/locale";
 
 // Exports from the References panel share one cancel handle: starting an
 // export cancels the one still running, and closing the panel (destroy())
@@ -56,12 +57,23 @@ function createController(entryCount: number) {
   return controller;
 }
 
+// Progress windows opened by the exports, in order.
+let progressWindows: ProgressWindowStub[] = [];
+
 class ProgressWindowStub {
   win = { changeHeadline: vi.fn() };
   createLine = vi.fn();
   changeLine = vi.fn();
   show = vi.fn();
   close = vi.fn();
+  constructor() {
+    progressWindows.push(this);
+  }
+}
+
+// The last message a progress window showed.
+function lastMessage(progressWindow: ProgressWindowStub) {
+  return progressWindow.changeLine.mock.lastCall?.[0]?.text;
 }
 
 // A request that stays open until its signal is aborted, then fails the way
@@ -84,6 +96,7 @@ describe("References panel export cancellation", () => {
     // Progress windows close themselves after a delay; keep those timers
     // from outliving the test.
     vi.useFakeTimers();
+    progressWindows = [];
     fetchMock = vi.fn(pendingUntilAborted);
     copyText = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -118,6 +131,9 @@ describe("References panel export cancellation", () => {
 
       // The replaced export ends only now, while the newer one is running.
       await older;
+      expect(lastMessage(progressWindows[0])).toBe(
+        getString("references-panel-export-cancelled"),
+      );
 
       controller.cancelExport();
       expect(newerSignal.aborted).toBe(true);
@@ -150,6 +166,9 @@ describe("References panel export cancellation", () => {
       // its first and left the clipboard alone.
       expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(copyText).toHaveBeenCalledOnce();
+      expect(lastMessage(progressWindows[0])).toBe(
+        getString("references-panel-export-cancelled"),
+      );
     },
   );
 });

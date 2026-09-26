@@ -8976,7 +8976,7 @@ export class InspireReferencePanelController {
           Zotero.debug(`[${config.addonName}] ${format} export aborted`);
           progressWin.changeLine({
             icon: icon,
-            text: "Export cancelled",
+            text: getString("references-panel-export-cancelled"),
             type: "default",
           });
           setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
@@ -9016,7 +9016,7 @@ export class InspireReferencePanelController {
             Zotero.debug(`[${config.addonName}] ${format} batch aborted`);
             progressWin.changeLine({
               icon: icon,
-              text: "Export cancelled",
+              text: getString("references-panel-export-cancelled"),
               type: "default",
             });
             setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
@@ -9106,7 +9106,7 @@ export class InspireReferencePanelController {
       if ((e as Error).name === "AbortError") {
         progressWin.changeLine({
           icon: icon,
-          text: "Export cancelled",
+          text: getString("references-panel-export-cancelled"),
           type: "default",
         });
         setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
@@ -9231,7 +9231,14 @@ export class InspireReferencePanelController {
             }
           }
         } catch (e) {
-          if ((e as Error).name === "AbortError") return;
+          if ((e as Error).name === "AbortError") {
+            progressWin.changeLine({
+              icon: icon,
+              text: getString("references-panel-export-cancelled"),
+              type: "default",
+            });
+            return;
+          }
           Zotero.debug(`[${config.addonName}] Failed to fetch texkeys: ${e}`);
         }
       }
