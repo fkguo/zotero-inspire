@@ -3,14 +3,6 @@
 // Refactored components extracted from InspireReferencePanelController
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Re-export NavigationManager
-export {
-  NavigationManager,
-  type NavigationState,
-  type NavigationContext,
-  type NavigationManagerOptions,
-} from "./NavigationManager";
-
 // Re-export ExportManager
 export {
   ExportManager,

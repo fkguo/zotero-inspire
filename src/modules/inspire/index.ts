@@ -410,10 +410,6 @@ export {
 
 // Re-export panel components (refactored from controller)
 export {
-  NavigationManager,
-  type NavigationState,
-  type NavigationContext,
-  type NavigationManagerOptions,
   ExportManager,
   type ExportFormat,
   type ExportTarget,
