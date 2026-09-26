@@ -18336,6 +18336,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       showToast: (message) => this.showToast(message),
       updateRowStatus: (entry) => this.updateRowStatus(entry),
       onSelectionChange: (count) => this.updateBatchToolbarVisibility(count),
+      // One batch import at a time, across panels: Import waits for it
+      onImportStateChange: (inProgress) => {
+        if (this.batchImportButton) {
+          this.batchImportButton.disabled = inProgress;
+        }
+      },
     };
   }
 
@@ -18381,6 +18387,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.batchImportButton.textContent = getString(
       "references-panel-batch-import",
     );
+    // A batch import may already be running in another panel
+    this.batchImportButton.disabled = this.batchImport.isImportInProgress();
     this.batchImportButton.addEventListener("click", () => {
       Zotero.debug(`[${config.addonName}] Import button clicked`);
       const anchor = this.batchImportButton || this.body;
@@ -18415,9 +18423,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           "references-panel-batch-selected",
           { args: { count } },
         );
-      }
-      if (this.batchImportButton) {
-        this.batchImportButton.disabled = false;
       }
     } else {
       this.batchToolbar.style.display = "none";

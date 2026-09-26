@@ -73,6 +73,11 @@ export interface BatchImportManagerOptions {
   updateRowStatus: (entry: InspireReferenceEntry) => void;
   /** Callback when batch toolbar visibility should be updated */
   onSelectionChange?: (count: number) => void;
+  /**
+   * Callback when a batch import in any panel starts (true) and when it is
+   * over (false), its duplicate dialog and save-target prompt included
+   */
+  onImportStateChange?: (inProgress: boolean) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,6 +89,11 @@ export interface BatchImportManagerOptions {
  * Handles selection, duplicate detection, and batch import with progress.
  */
 export class BatchImportManager {
+  // One batch import at a time across all references panels: set from the
+  // Import click until that import is over, and announced to every open panel
+  private static importInProgress = false;
+  private static openManagers = new Set<BatchImportManager>();
+
   private options: BatchImportManagerOptions;
 
   // Selection state
@@ -104,6 +114,7 @@ export class BatchImportManager {
 
   constructor(options: BatchImportManagerOptions) {
     this.options = options;
+    BatchImportManager.openManagers.add(this);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -202,17 +213,32 @@ export class BatchImportManager {
    */
   dispose(): void {
     this.disposed = true;
+    BatchImportManager.openManagers.delete(this);
     this.cancelDuplicateSearch?.();
     this.closeDuplicateDialog?.(null);
   }
 
   /**
+   * Whether a batch import is under way, in this panel or another.
+   */
+  isImportInProgress(): boolean {
+    return BatchImportManager.importInProgress;
+  }
+
+  /**
    * Handle batch import button click.
-   * Returns the import result or null if cancelled.
+   * Returns the import result, or null if cancelled or if a batch import is
+   * already under way (in any panel).
    */
   async handleBatchImport(
     anchor: HTMLElement,
   ): Promise<BatchImportResult | null> {
+    if (BatchImportManager.importInProgress) {
+      Zotero.debug(
+        `[${config.addonName}] handleBatchImport: an import is already in progress`,
+      );
+      return null;
+    }
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: started, selectedEntryIDs.size=${this.selectedEntryIDs.size}`,
     );
@@ -234,6 +260,26 @@ export class BatchImportManager {
       return null;
     }
 
+    try {
+      BatchImportManager.setImportInProgress(true);
+      return await this.importSelectedEntries(selectedEntries, anchor);
+    } finally {
+      BatchImportManager.setImportInProgress(false);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Private: Import Flow
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Check the selected entries for duplicates, ask for the save target, and
+   * import. Returns the import result or null if cancelled.
+   */
+  private async importSelectedEntries(
+    selectedEntries: InspireReferenceEntry[],
+    anchor: HTMLElement,
+  ): Promise<BatchImportResult | null> {
     // Detect duplicates
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: detecting duplicates...`,
@@ -786,5 +832,23 @@ export class BatchImportManager {
    */
   private notifySelectionChange(): void {
     this.options.onSelectionChange?.(this.selectedEntryIDs.size);
+  }
+
+  /**
+   * Record whether a batch import is under way and tell every open panel. A
+   * panel that fails to update (its window may be gone) does not stop the
+   * others.
+   */
+  private static setImportInProgress(inProgress: boolean): void {
+    BatchImportManager.importInProgress = inProgress;
+    for (const manager of BatchImportManager.openManagers) {
+      try {
+        manager.options.onImportStateChange?.(inProgress);
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] onImportStateChange failed: ${err}`,
+        );
+      }
+    }
   }
 }
