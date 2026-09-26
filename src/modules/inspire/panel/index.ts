@@ -8,9 +8,7 @@ export {
   BatchImportManager,
   type DuplicateInfo,
   type BatchImportResult,
-  type BatchSaveTarget,
   type BatchImportManagerOptions,
-  type BatchImportState,
 } from "./BatchImportManager";
 
 // Re-export PerformanceMonitor
