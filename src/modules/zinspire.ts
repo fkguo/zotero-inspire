@@ -5852,6 +5852,14 @@ export class InspireReferencePanelController {
     this.updateChartClearButton();
     this.renderChart();
     this.renderReferenceList();
+    // FTR-AUTHOR-CARD-FILTERS: Update author stats when filters are cleared
+    if (
+      this.viewMode === "entryCited" &&
+      this.entryCitedSource?.authorSearchInfo
+    ) {
+      this.updateAuthorStats(this.getEntriesForAuthorStats());
+      this.updateAuthorProfileCard();
+    }
   }
 
   private handleFilterInputChange(rawValue: string): void {
@@ -5866,6 +5874,14 @@ export class InspireReferencePanelController {
       } else {
         this.renderChart();
         this.renderReferenceList();
+        // FTR-AUTHOR-CARD-FILTERS: Update author stats when filter text changes
+        if (
+          this.viewMode === "entryCited" &&
+          this.entryCitedSource?.authorSearchInfo
+        ) {
+          this.updateAuthorStats(this.getEntriesForAuthorStats());
+          this.updateAuthorProfileCard();
+        }
       }
     }, this.filterDebounceDelay);
   }
