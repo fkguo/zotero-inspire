@@ -35,11 +35,13 @@ export function deriveRecidFromItem(item: Zotero.Item): string | null {
 }
 
 export function extractRecidFromRecordRef(ref?: string): string | null {
-  if (!ref) {
+  if (typeof ref !== "string") {
     return null;
   }
-  const match = ref.match(/\/(\d+)(?:\?.*)?$/);
-  return match ? match[1] : null;
+  // A $ref is INSPIRE's own link to the cited record, so a relative one is
+  // resolved against INSPIRE. It can point to another collection (e.g. data),
+  // whose numbers are not literature recids.
+  return recidFromInspireLiteratureLink(ref.trim(), "https://inspirehep.net/");
 }
 
 export function extractRecidFromUrls(
@@ -70,13 +72,16 @@ const INSPIRE_LITERATURE_PATH_REGEX =
  * records. A link with whitespace or a backslash is rejected: the URL parser
  * would drop or rewrite those characters, changing where the digits end.
  */
-function recidFromInspireLiteratureLink(link: string): string | null {
+function recidFromInspireLiteratureLink(
+  link: string,
+  base?: string,
+): string | null {
   if (!link || /[\s\\]/.test(link)) {
     return null;
   }
   let parsed: URL;
   try {
-    parsed = new URL(link);
+    parsed = new URL(link, base);
   } catch {
     return null;
   }

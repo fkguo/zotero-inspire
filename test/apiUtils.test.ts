@@ -4,12 +4,15 @@
 // Regression cases:
 //   - repository record URLs (CDS, DESY pubdb, RERO, NII) were read as INSPIRE
 //     recids, so the panel showed another paper's references and citations
-//     (URLs below are taken from real library items).
+//     (URLs below are taken from real library items);
+//   - a reference linked to an INSPIRE data record got that record's number
+//     as a literature recid.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from "vitest";
 import {
   deriveRecidFromItem,
+  extractRecidFromRecordRef,
   extractRecidFromUrl,
   extractRecidFromUrls,
 } from "../src/modules/inspire/apiUtils";
@@ -92,6 +95,33 @@ describe("extractRecidFromUrl", () => {
     expect(extractRecidFromUrl(null)).toBeNull();
     expect(extractRecidFromUrl(undefined)).toBeNull();
     expect(extractRecidFromUrl(123 as any)).toBeNull();
+  });
+});
+
+describe("extractRecidFromRecordRef", () => {
+  it.each([
+    ["https://inspirehep.net/api/literature/230779", "230779"],
+    ["https://inspirehep.net/api/literature/230779?format=json", "230779"],
+    // a relative $ref is resolved against INSPIRE, which issued it
+    ["/api/literature/230779", "230779"],
+  ])("reads the recid from %s", (ref, recid) => {
+    expect(extractRecidFromRecordRef(ref)).toBe(recid);
+  });
+
+  it.each([
+    // a reference linked to an INSPIRE data record, as returned by the API
+    "https://inspirehep.net/api/data/2875713",
+    "https://inspirehep.net/api/authors/1012345",
+    "https://cds.cern.ch/record/1986460",
+    "//cds.cern.ch/record/1986460",
+  ])("gives no recid for %s", (ref) => {
+    expect(extractRecidFromRecordRef(ref)).toBeNull();
+  });
+
+  it("handles empty and non-text input", () => {
+    expect(extractRecidFromRecordRef("")).toBeNull();
+    expect(extractRecidFromRecordRef(undefined)).toBeNull();
+    expect(extractRecidFromRecordRef(123 as any)).toBeNull();
   });
 });
 
