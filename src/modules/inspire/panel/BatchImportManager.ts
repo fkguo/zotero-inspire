@@ -122,8 +122,9 @@ export class BatchImportManager {
       `[${config.addonName}] handleCheckboxClick: isChecked=${isChecked}`,
     );
 
+    // Shift+Click: the rows in view from the last clicked row to this one
+    let range: InspireReferenceEntry[] | undefined;
     if (event.shiftKey && this.lastSelectedEntryID) {
-      // Shift+Click: select range
       const filteredEntries = this.options.getFilteredEntries();
       const lastIndex = filteredEntries.findIndex(
         (e) => e.id === this.lastSelectedEntryID,
@@ -131,22 +132,26 @@ export class BatchImportManager {
       const currentIndex = filteredEntries.findIndex((e) => e.id === entry.id);
 
       if (lastIndex >= 0 && currentIndex >= 0) {
-        const start = Math.min(lastIndex, currentIndex);
-        const end = Math.max(lastIndex, currentIndex);
-
-        for (let i = start; i <= end; i++) {
-          const e = filteredEntries[i];
-          if (isChecked) {
-            this.selectedEntryIDs.add(e.id);
-          } else {
-            this.selectedEntryIDs.delete(e.id);
-          }
-        }
-
-        this.updateAllCheckboxes();
+        range = filteredEntries.slice(
+          Math.min(lastIndex, currentIndex),
+          Math.max(lastIndex, currentIndex) + 1,
+        );
       }
+    }
+
+    if (range) {
+      for (const e of range) {
+        if (isChecked) {
+          this.selectedEntryIDs.add(e.id);
+        } else {
+          this.selectedEntryIDs.delete(e.id);
+        }
+      }
+
+      this.updateAllCheckboxes();
     } else {
-      // Regular click: toggle single item
+      // Regular click, or Shift+Click when the last clicked row is no longer
+      // in view (e.g. filtered out): toggle this row alone
       if (isChecked) {
         this.selectedEntryIDs.add(entry.id);
       } else {

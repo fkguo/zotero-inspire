@@ -194,7 +194,8 @@ function buttonIn(root: ParentNode, key: string) {
 /**
  * A BatchImportManager on a jsdom panel whose list shows `visible` (the
  * filtered view) out of `entries`; checkbox clicks reach the manager the way
- * the panel's list click handler passes them on.
+ * the panel's list click handler passes them on. `rerender(view)` redraws the
+ * list, optionally for a new filtered view.
  */
 function setUpManager(
   entries: InspireReferenceEntry[],
@@ -209,12 +210,13 @@ function setUpManager(
   (globalThis as any).Zotero.getMainWindow = () => dom.window;
 
   let listEl = doc.createElement("div");
+  let view = visible;
   const options = {
     getDocument: () => doc as Document,
     getBody: () => body,
     getListElement: () => listEl,
     getAllEntries: () => entries,
-    getFilteredEntries: () => visible,
+    getFilteredEntries: () => view,
     importReference: vi.fn<BatchImportManagerOptions["importReference"]>(),
     promptForSaveTarget: vi
       .fn<BatchImportManagerOptions["promptForSaveTarget"]>()
@@ -226,7 +228,8 @@ function setUpManager(
   const manager = new BatchImportManager(options);
 
   /** Replace the list element, as the panel does when it re-renders. */
-  const rerender = () => {
+  const rerender = (nextView = view) => {
+    view = nextView;
     const next = doc.createElement("div");
     next.addEventListener("click", (event) => {
       const row = (event.target as HTMLElement).closest(
@@ -235,7 +238,7 @@ function setUpManager(
       const clicked = entries.find((e) => e.id === row.dataset.entryId)!;
       manager.handleCheckboxClick(clicked, event as MouseEvent);
     });
-    renderRows(next, visible, manager.getSelectedEntryIDs());
+    renderRows(next, view, manager.getSelectedEntryIDs());
     listEl.remove();
     body.appendChild(next);
     listEl = next;
@@ -341,6 +344,30 @@ describe("batch selection", () => {
 
     panel.click("e4", { shiftKey: true });
     expect(panel.selected()).toEqual(["e4"]);
+  });
+
+  it("toggles just the clicked row on Shift+Click when the last clicked row is out of view", () => {
+    const panel = setUpManager(entries, visible);
+    // Tick and untick e2: nothing selected, e2 clicked last
+    panel.click("e2");
+    panel.click("e2");
+    // A filter now also hides e2
+    panel.rerender(visible.filter((e) => e.id !== "e2"));
+
+    panel.click("e5", { shiftKey: true });
+    expect(panel.selected()).toEqual(["e5"]);
+    expect(panel.ticked()).toEqual(["e5"]);
+    expect(panel.options.onSelectionChange).toHaveBeenLastCalledWith(1);
+
+    // e5 is in view, so the next Shift+Click selects a range from it
+    panel.click("e1", { shiftKey: true });
+    expect(panel.selected()).toEqual(["e1", "e4", "e5"]);
+
+    // Unticking works the same way once the last clicked row is hidden
+    panel.rerender(visible.filter((e) => e.id !== "e1"));
+    panel.click("e4", { shiftKey: true });
+    expect(panel.selected()).toEqual(["e1", "e5"]);
+    expect(panel.ticked()).toEqual(["e5"]);
   });
 
   it("hands out the live selection and ticks the list shown at the time", () => {
