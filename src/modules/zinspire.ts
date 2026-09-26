@@ -10312,7 +10312,9 @@ export class InspireReferencePanelController {
 
   private handleBackNavigation() {
     const stack = InspireReferencePanelController.navigationStack;
-    if (!stack.length) {
+    // Do nothing while a history jump is in progress: the Back button is
+    // disabled meanwhile, but the ← key still calls this.
+    if (!stack.length || InspireReferencePanelController.isNavigatingHistory) {
       return;
     }
     const pane = Zotero.getActiveZoteroPane();
@@ -10373,7 +10375,9 @@ export class InspireReferencePanelController {
 
   private handleForwardNavigation() {
     const stack = InspireReferencePanelController.forwardStack;
-    if (!stack.length) {
+    // Do nothing while a history jump is in progress: the Forward button is
+    // disabled meanwhile, but the → key still calls this.
+    if (!stack.length || InspireReferencePanelController.isNavigatingHistory) {
       return;
     }
     const pane = Zotero.getActiveZoteroPane();
