@@ -237,7 +237,6 @@ import {
   type ParsedCitation,
   type MatchResult,
   // Style utilities
-  CHART_STYLES,
   toStyleString,
   isDarkMode,
   getChartNoDataStyle,

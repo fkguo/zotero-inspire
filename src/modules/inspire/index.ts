@@ -335,7 +335,6 @@ export {
   BUTTON_STYLES,
   TEXT_STYLES,
   CONTAINER_STYLES,
-  CHART_STYLES,
   STATUS_COLORS,
   TAB_COLORS,
   applyStyle,
@@ -411,10 +410,6 @@ export {
 
 // Re-export panel components (refactored from controller)
 export {
-  ChartManager,
-  type ChartViewMode,
-  type ChartState,
-  type ChartManagerOptions,
   NavigationManager,
   type NavigationState,
   type NavigationContext,

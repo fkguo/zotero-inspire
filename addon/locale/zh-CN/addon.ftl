@@ -349,8 +349,6 @@ references-panel-chart-selfcite-filter = 排除自引
 references-panel-chart-selfcite-filter-tooltip = 在「按引用」模式下使用不含自引的引用次数。
 references-panel-chart-published-only = 已发表
 references-panel-chart-published-only-tooltip = 筛选：仅显示有期刊信息的论文（排除仅有 arXiv 的论文）
-references-panel-chart-total = 总计
-references-panel-chart-filtered = 已筛选
 
 # 速率限制本地化字符串
 references-panel-rate-limit-tooltip = INSPIRE API 速率限制状态

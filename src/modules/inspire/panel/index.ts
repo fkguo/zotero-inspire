@@ -3,14 +3,6 @@
 // Refactored components extracted from InspireReferencePanelController
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Re-export ChartManager
-export {
-  ChartManager,
-  type ChartViewMode,
-  type ChartState,
-  type ChartManagerOptions,
-} from "./ChartManager";
-
 // Re-export NavigationManager
 export {
   NavigationManager,
