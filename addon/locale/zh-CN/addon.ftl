@@ -282,6 +282,10 @@ references-panel-bibtex-copied = BibTeX 已复制到剪贴板
 references-panel-bibtex-failed = 获取 BibTeX 失败
 references-panel-texkey-copied = TeX Key 已复制到剪贴板
 references-panel-texkey-failed = 获取 TeX Key 失败
+references-panel-copy-link = 复制链接
+references-panel-open-link = 在浏览器中打开
+references-panel-link-copied = 链接已复制到剪贴板
+references-panel-copy-failed = 复制到剪贴板失败
 
 # 摘要复制右键菜单
 references-panel-abstract-copy = 复制
@@ -382,6 +386,7 @@ menuitem-copy-bibtex = 复制 BibTeX
 menuitem-copy-citation-key = 复制引用键
 menuitem-copy-inspire-recid = 复制 INSPIRE recid
 menuitem-copy-inspire-link = 复制 INSPIRE 链接
+menuitem-copy-inspire-link-md = 复制 INSPIRE 链接（Markdown）
 menuitem-copy-zotero-link = 复制 Zotero 链接
 copy-success-bibtex =
   { $count ->
@@ -389,6 +394,7 @@ copy-success-bibtex =
    *[other] 已复制 { $count } 条 BibTeX
   }
 copy-success-inspire-link = INSPIRE 链接已复制到剪贴板
+copy-success-inspire-link-md = Markdown 链接已复制到剪贴板
 copy-success-citation-key =
   { $count ->
     [one] 已复制 1 个引用键
