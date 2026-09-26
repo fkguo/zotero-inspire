@@ -1733,6 +1733,9 @@ export class InspireReferencePanelController {
   private chartCollapsed: boolean; // Initialized from preferences in constructor
   private chartViewMode: "year" | "citation" = "year";
   private chartSelectedBins: Set<string> = new Set();
+  // Kind of bins the selected keys came from; the year chart falls back to
+  // citation bins when no entry has a usable year
+  private chartSelectionMode: "year" | "citation" = "year";
   private lastChartClickedKey?: string;
   private cachedChartStats?: { mode: string; stats: ChartBin[] };
   // ResizeObserver for dynamic chart re-rendering on width change
@@ -7797,17 +7800,19 @@ export class InspireReferencePanelController {
     ); // Cap at 20
 
     // Compute stats based on current view mode
+    let binMode = this.chartViewMode;
     let stats =
-      this.chartViewMode === "year"
+      binMode === "year"
         ? this.computeYearStats(entries, dynamicMaxBars)
         : this.computeCitationStats(entries);
 
     // Fallback: If year mode returns no stats but we have entries, try citation mode
     // This handles cases where references lack year information
-    if (!stats.length && this.chartViewMode === "year" && entries.length > 0) {
+    if (!stats.length && binMode === "year" && entries.length > 0) {
       Zotero.debug(
         `[${config.addonName}] Chart: No year data for ${entries.length} entries, falling back to citation view`,
       );
+      binMode = "citation";
       stats = this.computeCitationStats(entries);
       // Note: Don't change chartViewMode - this is just a display fallback
       // User can still switch views, and next render will try year mode first
@@ -7823,7 +7828,7 @@ export class InspireReferencePanelController {
     }
 
     // Cache stats
-    this.cachedChartStats = { mode: this.chartViewMode, stats };
+    this.cachedChartStats = { mode: binMode, stats };
 
     // Update stats display in header
     this.updateChartStatsDisplay(entries);
@@ -7969,7 +7974,7 @@ export class InspireReferencePanelController {
       if (group) {
         const key = (group as HTMLElement).dataset.key;
         if (key) {
-          this.handleChartBarClick(key, event);
+          this.handleChartBarClick(key, event, binMode);
         }
       }
     });
@@ -7980,7 +7985,18 @@ export class InspireReferencePanelController {
     this.updateChartClearButton();
   }
 
-  private handleChartBarClick(key: string, event: MouseEvent) {
+  private handleChartBarClick(
+    key: string,
+    event: MouseEvent,
+    binMode: "year" | "citation",
+  ) {
+    // Keys from the other kind of bins mean nothing here: start a new selection
+    if (binMode !== this.chartSelectionMode) {
+      this.chartSelectedBins.clear();
+      this.lastChartClickedKey = undefined;
+      this.chartSelectionMode = binMode;
+    }
+
     const isRangeSelect = event.shiftKey;
     const isMultiSelect = event.ctrlKey || event.metaKey;
     const handledRange =
@@ -8148,7 +8164,7 @@ export class InspireReferencePanelController {
   private matchesChartFilter(entry: InspireReferenceEntry): boolean {
     if (!this.chartSelectedBins.size) return true;
 
-    if (this.chartViewMode === "year") {
+    if (this.chartSelectionMode === "year") {
       const entryYear = parseInt(entry.year || "0", 10);
       if (entryYear <= 0) return false;
 
