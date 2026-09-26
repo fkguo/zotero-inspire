@@ -8721,18 +8721,43 @@ export class InspireReferencePanelController {
   }
 
   /**
+   * Entries the export menu works on: the checked entries if there are any,
+   * otherwise every entry that passes the current filters (text, chart
+   * selection, author count, published only, quick filters), including those
+   * not rendered yet. These are the entries "Select all" would check.
+   */
+  private getExportEntries(): {
+    entries: InspireReferenceEntry[];
+    hasSelection: boolean;
+  } {
+    const selectedIDs = this.batchImport.getSelectedEntryIDs();
+    if (selectedIDs.size > 0) {
+      return {
+        entries: this.allEntries.filter((e) => selectedIDs.has(e.id)),
+        hasSelection: true,
+      };
+    }
+    return {
+      // A copy: a list that is still loading grows in place, and with no
+      // filter active getFilteredEntries() returns that same array
+      entries: [...this.getFilteredEntries(this.allEntries)],
+      hasSelection: false,
+    };
+  }
+
+  /**
    * Show export menu with format options (BibTeX, LaTeX US, LaTeX EU).
    * User can choose to copy to clipboard or export to file.
    * Uses HTML dropdown positioned relative to the panel container.
    */
   showExportMenu(event: Event) {
-    // Determine which entries to export
-    const selectedIDs = this.batchImport.getSelectedEntryIDs();
-    const hasSelection = selectedIDs.size > 0;
-    const targetEntries = hasSelection
-      ? this.allEntries.filter((e) => selectedIDs.has(e.id))
-      : this.allEntries;
+    // Determine which entries to export. Every action below works on this
+    // set, so the count shown is what gets exported even if more entries
+    // arrive while the menu is open.
+    const { entries: targetEntries, hasSelection } = this.getExportEntries();
     const selectedEntries = hasSelection ? targetEntries : [];
+    // Show the number of entries when they are checked or filtered
+    const showCount = hasSelection || this.hasActiveListFilters();
 
     const entriesWithRecid = targetEntries.filter((e) => e.recid);
 
@@ -8852,7 +8877,7 @@ export class InspireReferencePanelController {
     const copyLabel = getString("references-panel-export-copy-header");
     popup.appendChild(
       createMenuItem(
-        hasSelection ? `${copyLabel} (${entriesWithRecid.length})` : copyLabel,
+        showCount ? `${copyLabel} (${entriesWithRecid.length})` : copyLabel,
         true,
       ),
     );
@@ -8860,7 +8885,7 @@ export class InspireReferencePanelController {
     for (const format of formats) {
       popup.appendChild(
         createMenuItem(`  ${format.label}`, false, () => {
-          this.exportEntries(format.id, "clipboard", format.ext);
+          this.exportEntries(format.id, "clipboard", format.ext, targetEntries);
         }),
       );
     }
@@ -8880,9 +8905,7 @@ export class InspireReferencePanelController {
     const exportLabel = getString("references-panel-export-file-header");
     popup.appendChild(
       createMenuItem(
-        hasSelection
-          ? `${exportLabel} (${entriesWithRecid.length})`
-          : exportLabel,
+        showCount ? `${exportLabel} (${entriesWithRecid.length})` : exportLabel,
         true,
       ),
     );
@@ -8890,7 +8913,7 @@ export class InspireReferencePanelController {
     for (const format of formats) {
       popup.appendChild(
         createMenuItem(`  ${format.label}`, false, () => {
-          this.exportEntries(format.id, "file", format.ext);
+          this.exportEntries(format.id, "file", format.ext, targetEntries);
         }),
       );
     }
@@ -8904,7 +8927,7 @@ export class InspireReferencePanelController {
       );
       popup.appendChild(
         createMenuItem(
-          hasSelection
+          showCount
             ? `${citationLabel} (${entriesWithRecid.length})`
             : citationLabel,
           true,
@@ -8935,15 +8958,10 @@ export class InspireReferencePanelController {
     format: string,
     target: "clipboard" | "file",
     fileExt: string = ".bib",
+    // The export menu passes the entries it counted when it opened
+    entries: InspireReferenceEntry[] = this.getExportEntries().entries,
   ) {
-    // Determine which entries to export
-    const selectedIDs = this.batchImport.getSelectedEntryIDs();
-    const hasSelection = selectedIDs.size > 0;
-    const targetEntries = hasSelection
-      ? this.allEntries.filter((e) => selectedIDs.has(e.id))
-      : this.allEntries;
-
-    const entriesWithRecid = targetEntries.filter((e) => e.recid);
+    const entriesWithRecid = entries.filter((e) => e.recid);
     const strings = getCachedStrings();
 
     // PERF-FIX-2: Create AbortController for this export operation

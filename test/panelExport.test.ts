@@ -49,10 +49,17 @@ function createController(entryCount: number) {
     allEntries: Array.from({ length: entryCount }, (_, i) =>
       entry(String(i + 1)),
     ),
-    // Nothing is selected, so every entry is exported. Once the selection is
-    // kept by BatchImportManager, exportEntries() asks it instead.
-    selectedEntryIDs: new Set<string>(),
+    // Nothing is checked and no list filter is on, so every entry is
+    // exported.
     batchImport: { getSelectedEntryIDs: () => new Set<string>() },
+    filterText: "",
+    chartViewMode: "year",
+    chartSelectionMode: "year",
+    chartSelectedBins: new Set<string>(),
+    authorFilterEnabled: false,
+    publishedOnlyFilterEnabled: false,
+    quickFilters: new Set(),
+    excludeSelfCitations: false,
   });
   return controller;
 }
