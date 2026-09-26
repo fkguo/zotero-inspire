@@ -234,7 +234,44 @@ export function extractArxivFromMetadata(
 }
 
 /**
- * Extract arXiv ID from item (Extra field, URL, or Archive Location)
+ * Groups: 1 the ID; 2-4 new style YY, MM, sequence number; 5-7 old style YY,
+ * MM, sequence number
+ */
+const ARXIV_ID_REGEX =
+  /^((\d\d)(\d\d)\.(\d{4,5})|(?:[a-z]+(?:-[a-z]+)*|(?:math|cs|nlin|q-bio)\.[a-z]{2})\/(\d\d)(\d\d)(\d{3}))(?:v[1-9]\d*)?$/i;
+
+/**
+ * The arXiv ID in `value` without its version, if `value` has the form of an
+ * arXiv identifier: new style YYMM.NNNN (0704 to 1412) or YYMM.NNNNN (from
+ * 1501); old style archive/YYMMNNN (9107 to 0703), where math, cs, nlin and
+ * q-bio may add a two-letter subject class (math.GT/0309136). The sequence
+ * number starts at 1.
+ */
+function arxivIdWithoutVersion(value: string): string | undefined {
+  const match = value.match(ARXIV_ID_REGEX);
+  if (!match) {
+    return undefined;
+  }
+  const newStyle = match[2] !== undefined;
+  const [yy, mm, seq] = newStyle ? match.slice(2, 5) : match.slice(5, 8);
+  const month = Number(mm);
+  // Old-style years 91-99 are 1991-1999, all other years 20YY
+  const century = !newStyle && Number(yy) >= 91 ? 1900 : 2000;
+  const yymm = (century + Number(yy)) * 100 + month;
+  const valid =
+    month >= 1 &&
+    month <= 12 &&
+    Number(seq) > 0 &&
+    (newStyle
+      ? yymm >= 200704 && seq.length === (yymm >= 201501 ? 5 : 4)
+      : yymm >= 199107 && yymm <= 200703);
+  return valid ? match[1] : undefined;
+}
+
+/**
+ * Extract arXiv ID from item (Extra field, URL, or Archive Location).
+ * Archive Location counts only when marked as arXiv ("arXiv:" prefix or
+ * Archive "arXiv"): this plugin stores the INSPIRE recid there.
  */
 export function extractArxivIdFromItem(item: Zotero.Item): string | undefined {
   // Try Extra field
@@ -252,9 +289,16 @@ export function extractArxivIdFromItem(item: Zotero.Item): string | undefined {
   }
 
   // Try Archive Location (sometimes used for arXiv ID)
-  const archiveLoc = item.getField("archiveLocation") as string;
-  if (archiveLoc && /^[0-9.]+|[a-z-]+\/[0-9]+$/.test(archiveLoc)) {
-    return archiveLoc;
+  const archiveLoc = (
+    (item.getField("archiveLocation") as string) || ""
+  ).trim();
+  if (archiveLoc) {
+    const candidate = archiveLoc.replace(/^arXiv:\s*/i, "");
+    const archive = ((item.getField("archive") as string) || "").trim();
+    if (candidate !== archiveLoc || /^arXiv$/i.test(archive)) {
+      const id = arxivIdWithoutVersion(candidate);
+      if (id) return id;
+    }
   }
 
   return undefined;
