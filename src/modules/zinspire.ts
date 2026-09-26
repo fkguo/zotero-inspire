@@ -9029,6 +9029,18 @@ export class InspireReferencePanelController {
         }
       }
 
+      // The last batch may have arrived after this export was cancelled
+      if (exportAbort?.signal?.aborted) {
+        Zotero.debug(`[${config.addonName}] ${format} export aborted`);
+        progressWin.changeLine({
+          icon: icon,
+          text: getString("references-panel-export-cancelled"),
+          type: "default",
+        });
+        setTimeout(() => progressWin.close(), PROGRESS_CLOSE_DELAY_MS);
+        return;
+      }
+
       if (!allContent.length) {
         progressWin.changeLine({
           icon: icon,
@@ -9084,7 +9096,8 @@ export class InspireReferencePanelController {
         // Export to file
         const filename = `references_${this.currentRecid || "export"}${fileExt}`;
         const filePath = await this.promptSaveFile(filename, fileExt);
-        if (filePath) {
+        // The export may have been cancelled while the save dialog was open
+        if (filePath && !exportAbort?.signal?.aborted) {
           await Zotero.File.putContentsAsync(filePath, fullContent);
           progressWin.changeLine({
             icon: icon,
@@ -9241,6 +9254,16 @@ export class InspireReferencePanelController {
           }
           Zotero.debug(`[${config.addonName}] Failed to fetch texkeys: ${e}`);
         }
+      }
+
+      // The last batch may have arrived after this export was cancelled
+      if (exportAbort?.signal?.aborted) {
+        progressWin.changeLine({
+          icon: icon,
+          text: getString("references-panel-export-cancelled"),
+          type: "default",
+        });
+        return;
       }
 
       // Collect all texkeys

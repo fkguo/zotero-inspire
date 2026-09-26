@@ -91,6 +91,7 @@ function pendingUntilAborted(_url: string, init?: RequestInit) {
 describe("References panel export cancellation", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let copyText: ReturnType<typeof vi.fn>;
+  let saveFile: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     // Progress windows close themselves after a delay; keep those timers
@@ -99,11 +100,13 @@ describe("References panel export cancellation", () => {
     progressWindows = [];
     fetchMock = vi.fn(pendingUntilAborted);
     copyText = vi.fn();
+    saveFile = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("addon", { data: {} });
     vi.stubGlobal("ztoolkit", { ProgressWindow: ProgressWindowStub });
     vi.stubGlobal("Zotero", {
       debug: vi.fn(),
+      File: { putContentsAsync: saveFile },
       Utilities: { Internal: { copyTextToClipboard: copyText } },
     });
   });
@@ -142,11 +145,18 @@ describe("References panel export cancellation", () => {
     },
   );
 
-  it.each(["exportEntries", "copyCitationKeys"] as const)(
-    "stops a replaced %s before its next batch",
-    async (kind) => {
-      // Two batches: METADATA_BATCH_SIZE entries, then one more.
-      const controller = createController(METADATA_BATCH_SIZE + 1);
+  it.each([
+    ["exportEntries", 1],
+    ["exportEntries", 2],
+    ["copyCitationKeys", 1],
+    ["copyCitationKeys", 2],
+  ] as const)(
+    "stops a replaced %s before it fetches more or copies (batches: %i)",
+    async (kind, batches) => {
+      // One batch, or two: METADATA_BATCH_SIZE entries, then one more.
+      const controller = createController(
+        batches === 1 ? 1 : METADATA_BATCH_SIZE + 1,
+      );
       // Every request is answered at once, except the older export's first
       // one: its answer arrives after the newer export has started, as if it
       // was already on its way when the older export was cancelled.
@@ -162,13 +172,39 @@ describe("References panel export cancellation", () => {
       answerFirstRequest(new Response(ANSWER[kind]));
       await Promise.all([older, newer]);
 
-      // The newer export fetched both batches; the older one stopped after
-      // its first and left the clipboard alone.
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      // The newer export fetched all its batches and copied its result; the
+      // older one stopped after its first batch and left the clipboard alone.
+      expect(fetchMock).toHaveBeenCalledTimes(1 + batches);
       expect(copyText).toHaveBeenCalledOnce();
       expect(lastMessage(progressWindows[0])).toBe(
         getString("references-panel-export-cancelled"),
       );
     },
   );
+
+  it("does not save the file of an export cancelled while its save dialog is open", async () => {
+    const controller = createController(1);
+    fetchMock.mockImplementation(
+      async () => new Response(ANSWER.exportEntries),
+    );
+    let dialogOpened!: () => void;
+    const opened = new Promise<void>((resolve) => (dialogOpened = resolve));
+    let chooseFile!: (path: string) => void;
+    controller.promptSaveFile = vi.fn(() => {
+      dialogOpened();
+      return new Promise<string>((resolve) => (chooseFile = resolve));
+    });
+
+    const saving = controller.exportEntries("bibtex", "file", ".bib");
+    await opened;
+    // For example, the panel is closed while the dialog is open.
+    controller.cancelExport();
+    chooseFile("references.bib");
+    await saving;
+
+    expect(saveFile).not.toHaveBeenCalled();
+    expect(lastMessage(progressWindows[0])).toBe(
+      getString("references-panel-export-cancelled"),
+    );
+  });
 });
