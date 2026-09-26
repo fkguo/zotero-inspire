@@ -355,7 +355,6 @@ export type FluentMessageId =
   | 'references-panel-batch-no-selection'
   | 'references-panel-batch-select-all'
   | 'references-panel-batch-selected'
-  | 'references-panel-bibtex-all-copied'
   | 'references-panel-bibtex-all-failed'
   | 'references-panel-bibtex-copied'
   | 'references-panel-bibtex-failed'

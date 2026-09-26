@@ -307,7 +307,6 @@ zoteroinspire-refresh-button =
 zoteroinspire-copy-all-button =
     .tooltiptext = 导出引用（BibTeX/LaTeX）
 references-panel-bibtex-fetching = 正在获取条目...
-references-panel-bibtex-all-copied = { $count } 条 BibTeX 已复制到剪贴板
 references-panel-bibtex-all-failed = 获取条目失败
 references-panel-no-recid-entries = 无 INSPIRE 记录可导出
 
