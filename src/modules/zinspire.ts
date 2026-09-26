@@ -152,7 +152,6 @@ import {
   clearAllHistoryPrefs,
   // AbortController utilities (FTR-ABORT-CONTROLLER-FIX)
   createAbortController,
-  createMockSignal,
   // Rate limiter
   inspireFetch,
   getRateLimiterStatus,
@@ -187,10 +186,6 @@ import {
   extractArxivFromMetadata,
   findItemByRecid,
   copyToClipboard,
-  // Batch query functions (FTR-BATCH-IMPORT)
-  findItemsByRecids,
-  findItemsByArxivs,
-  findItemsByDOIs,
   // Author utilities
   extractAuthorNamesFromReference,
   extractAuthorNamesLimited,
@@ -268,6 +263,9 @@ import {
   type AuthorPreviewCallbacks,
   // Citation graph dialog (FTR-CITATION-GRAPH)
   CitationGraphDialog,
+  // Batch selection and import (FTR-BATCH-IMPORT)
+  BatchImportManager,
+  type BatchImportManagerOptions,
 } from "./inspire";
 
 // Re-export for external use
@@ -1824,12 +1822,11 @@ export class InspireReferencePanelController {
   private readonly mouseMoveThrottleMs = 16; // ~60fps
 
   // Batch import state (FTR-BATCH-IMPORT)
-  private selectedEntryIDs = new Set<string>();
-  private lastSelectedEntryID?: string; // For Shift+Click range selection
+  // Selection, duplicate detection and the import itself live in batchImport.
+  private batchImport: BatchImportManager;
   private batchToolbar?: HTMLDivElement;
   private batchSelectedBadge?: HTMLSpanElement;
   private batchImportButton?: HTMLButtonElement;
-  private batchImportAbort?: AbortController;
 
   // PDF Annotate (FTR-PDF-ANNOTATE)
   // FTR-MULTI-PDF-FIX-V3: LRU cache for labelMatchers, keyed by attachmentItemID
@@ -2471,6 +2468,9 @@ export class InspireReferencePanelController {
       container: previewContainer as HTMLElement,
       callbacks: this.getAuthorPreviewCallbacks(),
     });
+
+    // FTR-BATCH-IMPORT: Selection, duplicate detection and batch import
+    this.batchImport = new BatchImportManager(this.getBatchImportOptions());
 
     // FTR-BATCH-IMPORT: Create batch toolbar (hidden by default, shown when items selected)
     // Must be created AFTER listEl exists, so insertBefore(toolbar, listEl) works correctly
@@ -6275,7 +6275,7 @@ export class InspireReferencePanelController {
           `[${config.addonName}] Event delegation: checkbox click detected`,
         );
         // Don't prevent default - let checkbox toggle naturally
-        this.handleCheckboxClick(entry, event);
+        this.batchImport.handleCheckboxClick(entry, event);
         return;
       }
 
@@ -8818,9 +8818,10 @@ export class InspireReferencePanelController {
    */
   showExportMenu(event: Event) {
     // Determine which entries to export
-    const hasSelection = this.selectedEntryIDs.size > 0;
+    const selectedIDs = this.batchImport.getSelectedEntryIDs();
+    const hasSelection = selectedIDs.size > 0;
     const targetEntries = hasSelection
-      ? this.allEntries.filter((e) => this.selectedEntryIDs.has(e.id))
+      ? this.allEntries.filter((e) => selectedIDs.has(e.id))
       : this.allEntries;
     const selectedEntries = hasSelection ? targetEntries : [];
 
@@ -9027,9 +9028,10 @@ export class InspireReferencePanelController {
     fileExt: string = ".bib",
   ) {
     // Determine which entries to export
-    const hasSelection = this.selectedEntryIDs.size > 0;
+    const selectedIDs = this.batchImport.getSelectedEntryIDs();
+    const hasSelection = selectedIDs.size > 0;
     const targetEntries = hasSelection
-      ? this.allEntries.filter((e) => this.selectedEntryIDs.has(e.id))
+      ? this.allEntries.filter((e) => selectedIDs.has(e.id))
       : this.allEntries;
 
     const entriesWithRecid = targetEntries.filter((e) => e.recid);
@@ -9879,9 +9881,7 @@ export class InspireReferencePanelController {
 
       if (itemChanged) {
         // FTR-BATCH-IMPORT: Clear selection when item changes
-        this.selectedEntryIDs.clear();
-        this.lastSelectedEntryID = undefined;
-        this.updateBatchToolbarVisibility();
+        this.batchImport.clearSelection();
 
         // FTR-SMART-UPDATE-AUTO-CHECK: Clear notification and pending diff
         this.clearAutoCheckNotification();
@@ -14433,7 +14433,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    */
   private getRenderContext(): EntryRenderContext {
     return {
-      selectedEntryIDs: this.selectedEntryIDs,
+      selectedEntryIDs: this.batchImport.getSelectedEntryIDs(),
       focusedEntryID: this.focusedEntryID,
       viewMode: this.viewMode,
       maxAuthors: (getPref("max_authors") as number) || 3,
@@ -18319,6 +18319,25 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
+   * Panel state and actions used by BatchImportManager. Each is read when
+   * called, since the panel replaces listEl and allEntries as it re-renders.
+   */
+  private getBatchImportOptions(): BatchImportManagerOptions {
+    return {
+      getDocument: () => this.body.ownerDocument,
+      getBody: () => this.body,
+      getListElement: () => this.listEl,
+      getAllEntries: () => this.allEntries,
+      getFilteredEntries: () => this.getFilteredEntries(this.allEntries),
+      importReference: (recid, target) => this.importReference(recid, target),
+      promptForSaveTarget: (anchor) => this.promptForSaveTarget(anchor),
+      showToast: (message) => this.showToast(message),
+      updateRowStatus: (entry) => this.updateRowStatus(entry),
+      onSelectionChange: (count) => this.updateBatchToolbarVisibility(count),
+    };
+  }
+
+  /**
    * Create the batch toolbar UI (hidden by default).
    */
   private createBatchToolbar() {
@@ -18343,14 +18362,14 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     const selectAllBtn = doc.createElement("button");
     selectAllBtn.className = "zinspire-batch-toolbar__btn";
     selectAllBtn.textContent = getString("references-panel-batch-select-all");
-    selectAllBtn.addEventListener("click", () => this.selectAllEntries());
+    selectAllBtn.addEventListener("click", () => this.batchImport.selectAll());
     this.batchToolbar.appendChild(selectAllBtn);
 
     // Clear button
     const clearBtn = doc.createElement("button");
     clearBtn.className = "zinspire-batch-toolbar__btn";
     clearBtn.textContent = getString("references-panel-batch-clear");
-    clearBtn.addEventListener("click", () => this.clearSelection());
+    clearBtn.addEventListener("click", () => this.batchImport.clearSelection());
     this.batchToolbar.appendChild(clearBtn);
 
     // Import button
@@ -18362,7 +18381,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     );
     this.batchImportButton.addEventListener("click", () => {
       Zotero.debug(`[${config.addonName}] Import button clicked`);
-      this.handleBatchImport().catch((err) => {
+      const anchor = this.batchImportButton || this.body;
+      this.batchImport.handleBatchImport(anchor).catch((err) => {
         Zotero.debug(`[${config.addonName}] handleBatchImport error: ${err}`);
       });
     });
@@ -18373,9 +18393,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   /**
-   * Update batch toolbar visibility and badge.
+   * Update batch toolbar visibility and badge for `count` selected entries.
    */
-  private updateBatchToolbarVisibility() {
+  private updateBatchToolbarVisibility(count: number) {
     if (!this.batchToolbar) {
       Zotero.debug(
         `[${config.addonName}] updateBatchToolbarVisibility: batchToolbar is null`,
@@ -18383,7 +18403,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       return;
     }
 
-    const count = this.selectedEntryIDs.size;
     Zotero.debug(
       `[${config.addonName}] updateBatchToolbarVisibility: count=${count}`,
     );
@@ -18400,616 +18419,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       }
     } else {
       this.batchToolbar.style.display = "none";
-    }
-  }
-
-  /**
-   * Handle checkbox click with Shift+Click range selection support.
-   */
-  private handleCheckboxClick(entry: InspireReferenceEntry, event: MouseEvent) {
-    Zotero.debug(
-      `[${config.addonName}] handleCheckboxClick: entry.id=${entry.id}`,
-    );
-    const checkbox = event.target as HTMLInputElement;
-    const isChecked = checkbox.checked;
-    Zotero.debug(
-      `[${config.addonName}] handleCheckboxClick: isChecked=${isChecked}`,
-    );
-
-    if (event.shiftKey && this.lastSelectedEntryID) {
-      // Shift+Click: select range
-      const filteredEntries = this.getFilteredEntries(this.allEntries);
-      const lastIndex = filteredEntries.findIndex(
-        (e) => e.id === this.lastSelectedEntryID,
-      );
-      const currentIndex = filteredEntries.findIndex((e) => e.id === entry.id);
-
-      if (lastIndex >= 0 && currentIndex >= 0) {
-        const start = Math.min(lastIndex, currentIndex);
-        const end = Math.max(lastIndex, currentIndex);
-
-        for (let i = start; i <= end; i++) {
-          const e = filteredEntries[i];
-          if (isChecked) {
-            this.selectedEntryIDs.add(e.id);
-          } else {
-            this.selectedEntryIDs.delete(e.id);
-          }
-        }
-
-        // Update all checkboxes in the range
-        this.updateAllCheckboxes();
-      }
-    } else {
-      // Regular click: toggle single item
-      if (isChecked) {
-        this.selectedEntryIDs.add(entry.id);
-      } else {
-        this.selectedEntryIDs.delete(entry.id);
-      }
-    }
-
-    // Update last selected for Shift+Click
-    this.lastSelectedEntryID = entry.id;
-    this.updateBatchToolbarVisibility();
-  }
-
-  /**
-   * Update all visible checkboxes to match selection state.
-   */
-  private updateAllCheckboxes() {
-    const checkboxes = this.listEl.querySelectorAll(
-      ".zinspire-ref-entry__checkbox",
-    );
-    for (let i = 0; i < checkboxes.length; i++) {
-      const checkbox = checkboxes[i] as HTMLInputElement;
-      const entryId = checkbox.dataset?.entryId;
-      if (entryId) {
-        checkbox.checked = this.selectedEntryIDs.has(entryId);
-      }
-    }
-  }
-
-  /**
-   * Select all entries in the current filtered view.
-   */
-  private selectAllEntries() {
-    const filteredEntries = this.getFilteredEntries(this.allEntries);
-    for (const entry of filteredEntries) {
-      this.selectedEntryIDs.add(entry.id);
-    }
-    this.updateAllCheckboxes();
-    this.updateBatchToolbarVisibility();
-  }
-
-  /**
-   * Clear all selections.
-   */
-  private clearSelection() {
-    this.selectedEntryIDs.clear();
-    this.lastSelectedEntryID = undefined;
-    this.updateAllCheckboxes();
-    this.updateBatchToolbarVisibility();
-  }
-
-  /**
-   * Handle batch import button click.
-   */
-  private async handleBatchImport() {
-    Zotero.debug(
-      `[${config.addonName}] handleBatchImport: started, selectedEntryIDs.size=${this.selectedEntryIDs.size}`,
-    );
-    if (this.selectedEntryIDs.size === 0) {
-      this.showToast(getString("references-panel-batch-no-selection"));
-      return;
-    }
-
-    // Get selected entries
-    const selectedEntries = this.allEntries.filter(
-      (e) => this.selectedEntryIDs.has(e.id) && e.recid,
-    );
-    Zotero.debug(
-      `[${config.addonName}] handleBatchImport: selectedEntries.length=${selectedEntries.length}`,
-    );
-    if (selectedEntries.length === 0) {
-      this.showToast(getString("references-panel-batch-no-selection"));
-      return;
-    }
-
-    // Detect duplicates
-    Zotero.debug(
-      `[${config.addonName}] handleBatchImport: detecting duplicates...`,
-    );
-    const duplicates = await this.detectDuplicates(selectedEntries);
-    Zotero.debug(
-      `[${config.addonName}] handleBatchImport: duplicates.size=${duplicates.size}`,
-    );
-
-    // If there are duplicates, show dialog
-    let entriesToImport = selectedEntries;
-    if (duplicates.size > 0) {
-      const result = await this.showDuplicateDialog(
-        selectedEntries,
-        duplicates,
-      );
-      if (!result) {
-        // User cancelled
-        return;
-      }
-      entriesToImport = result;
-    }
-
-    if (entriesToImport.length === 0) {
-      this.showToast(getString("references-panel-batch-no-selection"));
-      return;
-    }
-
-    // Prompt for save target once
-    Zotero.debug(
-      `[${config.addonName}] handleBatchImport: prompting for save target...`,
-    );
-    const anchor = this.batchImportButton || this.body;
-    const target = await this.promptForSaveTarget(anchor);
-    Zotero.debug(
-      `[${config.addonName}] handleBatchImport: target=${target ? "selected" : "cancelled"}`,
-    );
-    if (!target) {
-      return;
-    }
-
-    // Run batch import
-    Zotero.debug(
-      `[${config.addonName}] handleBatchImport: starting batch import for ${entriesToImport.length} entries`,
-    );
-    await this.runBatchImportWithProgress(entriesToImport, target);
-  }
-
-  /**
-   * Detect duplicates for selected entries.
-   * Returns a map of entry.id -> { localItemID, matchType }
-   */
-  private async detectDuplicates(
-    entries: InspireReferenceEntry[],
-  ): Promise<
-    Map<string, { localItemID: number; matchType: "recid" | "arxiv" | "doi" }>
-  > {
-    const duplicates = new Map<
-      string,
-      { localItemID: number; matchType: "recid" | "arxiv" | "doi" }
-    >();
-
-    // Skip entries that already have localItemID (already detected as local)
-    const entriesToCheck = entries.filter((e) => !e.localItemID);
-    if (entriesToCheck.length === 0) {
-      // All entries already have localItemID, mark them as duplicates
-      for (const entry of entries) {
-        if (entry.localItemID) {
-          duplicates.set(entry.id, {
-            localItemID: entry.localItemID,
-            matchType: "recid",
-          });
-        }
-      }
-      return duplicates;
-    }
-
-    // Collect identifiers for batch queries
-    const recids: string[] = [];
-    const arxivIds: string[] = [];
-    const dois: string[] = [];
-    const entryByRecid = new Map<string, InspireReferenceEntry>();
-    const entryByArxiv = new Map<string, InspireReferenceEntry>();
-    const entryByDOI = new Map<string, InspireReferenceEntry>();
-
-    for (const entry of entriesToCheck) {
-      if (entry.recid) {
-        recids.push(entry.recid);
-        entryByRecid.set(entry.recid, entry);
-      }
-      const arxivId =
-        typeof entry.arxivDetails === "object"
-          ? entry.arxivDetails?.id
-          : undefined;
-      if (arxivId) {
-        arxivIds.push(arxivId);
-        entryByArxiv.set(arxivId, entry);
-      }
-      if (entry.doi) {
-        dois.push(entry.doi);
-        entryByDOI.set(entry.doi, entry);
-      }
-    }
-
-    // Batch query for each identifier type (priority: recid > arXiv > DOI)
-    const [recidMatches, arxivMatches, doiMatches] = await Promise.all([
-      recids.length > 0
-        ? findItemsByRecids(recids)
-        : Promise.resolve(new Map<string, number>()),
-      arxivIds.length > 0
-        ? findItemsByArxivs(arxivIds)
-        : Promise.resolve(new Map<string, number>()),
-      dois.length > 0
-        ? findItemsByDOIs(dois)
-        : Promise.resolve(new Map<string, number>()),
-    ]);
-
-    // Add already-local entries to duplicates
-    for (const entry of entries) {
-      if (entry.localItemID) {
-        duplicates.set(entry.id, {
-          localItemID: entry.localItemID,
-          matchType: "recid",
-        });
-      }
-    }
-
-    // Process matches in priority order
-    for (const [recid, localItemID] of recidMatches) {
-      const entry = entryByRecid.get(recid);
-      if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "recid" });
-      }
-    }
-
-    for (const [arxivId, localItemID] of arxivMatches) {
-      const entry = entryByArxiv.get(arxivId);
-      if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "arxiv" });
-      }
-    }
-
-    for (const [doi, localItemID] of doiMatches) {
-      const entry = entryByDOI.get(doi);
-      if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "doi" });
-      }
-    }
-
-    return duplicates;
-  }
-
-  /**
-   * Show duplicate detection dialog.
-   * Returns the entries to import (user-selected), or null if cancelled.
-   */
-  private async showDuplicateDialog(
-    entries: InspireReferenceEntry[],
-    duplicates: Map<
-      string,
-      { localItemID: number; matchType: "recid" | "arxiv" | "doi" }
-    >,
-  ): Promise<InspireReferenceEntry[] | null> {
-    return new Promise((resolve) => {
-      // Use the panel's own document for creating elements
-      const doc = this.body.ownerDocument;
-      Zotero.debug(
-        `[${config.addonName}] showDuplicateDialog: duplicates.size=${duplicates.size}`,
-      );
-
-      // Create overlay - append to panel body instead of document.body
-      const overlay = doc.createElement("div");
-      overlay.className = "zinspire-duplicate-dialog";
-      // Make overlay cover the panel area
-      overlay.style.position = "fixed";
-      overlay.style.top = "0";
-      overlay.style.left = "0";
-      overlay.style.right = "0";
-      overlay.style.bottom = "0";
-      overlay.style.background = "rgba(0, 0, 0, 0.5)";
-      overlay.style.display = "flex";
-      overlay.style.alignItems = "center";
-      overlay.style.justifyContent = "center";
-      overlay.style.zIndex = "10000";
-
-      // Create content
-      const content = doc.createElement("div");
-      content.className = "zinspire-duplicate-dialog__content";
-      content.style.background = "var(--material-background, #ffffff)";
-      content.style.borderRadius = "8px";
-      content.style.padding = "16px";
-      content.style.maxWidth = "90%";
-      content.style.maxHeight = "70%";
-      content.style.overflowY = "auto";
-      content.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.3)";
-
-      // Title
-      const title = doc.createElement("div");
-      title.className = "zinspire-duplicate-dialog__title";
-      title.style.fontSize = "14px";
-      title.style.fontWeight = "600";
-      title.style.marginBottom = "8px";
-      title.textContent = getString("references-panel-batch-duplicate-title");
-      content.appendChild(title);
-
-      // Message
-      const message = doc.createElement("div");
-      message.className = "zinspire-duplicate-dialog__message";
-      message.style.fontSize = "12px";
-      message.style.marginBottom = "12px";
-      message.textContent = getString(
-        "references-panel-batch-duplicate-message",
-        { args: { count: duplicates.size } },
-      );
-      content.appendChild(message);
-
-      // List of duplicates
-      const list = doc.createElement("div");
-      list.className = "zinspire-duplicate-dialog__list";
-      list.style.maxHeight = "150px";
-      list.style.overflowY = "auto";
-      list.style.border = "1px solid var(--fill-quinary, #e0e0e0)";
-      list.style.borderRadius = "4px";
-      list.style.marginBottom = "12px";
-
-      const duplicateEntries = entries.filter((e) => duplicates.has(e.id));
-      const checkboxMap = new Map<string, HTMLInputElement>();
-
-      for (const entry of duplicateEntries) {
-        const match = duplicates.get(entry.id)!;
-        const item = doc.createElement("div");
-        item.className = "zinspire-duplicate-dialog__item";
-        item.style.display = "flex";
-        item.style.alignItems = "flex-start";
-        item.style.gap = "8px";
-        item.style.padding = "8px";
-        item.style.borderBottom = "1px solid var(--fill-quinary, #e0e0e0)";
-        item.style.fontSize = "12px";
-
-        const checkbox = doc.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.style.marginTop = "2px";
-        checkbox.style.flexShrink = "0";
-        checkbox.checked = false; // Default: skip duplicates
-        checkboxMap.set(entry.id, checkbox);
-        item.appendChild(checkbox);
-
-        const info = doc.createElement("div");
-        info.style.flex = "1";
-        info.style.minWidth = "0";
-
-        const titleEl = doc.createElement("div");
-        titleEl.style.fontWeight = "500";
-        titleEl.style.whiteSpace = "nowrap";
-        titleEl.style.overflow = "hidden";
-        titleEl.style.textOverflow = "ellipsis";
-        titleEl.textContent = entry.title;
-        titleEl.title = entry.title;
-        info.appendChild(titleEl);
-
-        const matchEl = doc.createElement("div");
-        matchEl.style.fontSize = "10px";
-        matchEl.style.color = "var(--zotero-blue-6, #2554c7)";
-        matchEl.style.marginTop = "2px";
-        const matchKey =
-          `references-panel-batch-duplicate-match-${match.matchType}` as FluentMessageId;
-        matchEl.textContent = getString(matchKey);
-        info.appendChild(matchEl);
-
-        item.appendChild(info);
-        list.appendChild(item);
-      }
-      content.appendChild(list);
-
-      // Actions
-      const actions = doc.createElement("div");
-      actions.style.display = "flex";
-      actions.style.gap = "8px";
-      actions.style.flexWrap = "wrap";
-      actions.style.justifyContent = "flex-end";
-
-      const createBtn = (text: string, primary = false) => {
-        const btn = doc.createElement("button");
-        btn.style.border = "1px solid var(--zotero-gray-4, #d1d1d5)";
-        btn.style.borderRadius = "4px";
-        btn.style.padding = "6px 12px";
-        btn.style.fontSize = "12px";
-        btn.style.cursor = "pointer";
-        if (primary) {
-          btn.style.background = "var(--zotero-blue-5, #0060df)";
-          btn.style.color = "#ffffff";
-          btn.style.borderColor = "var(--zotero-blue-5, #0060df)";
-        } else {
-          btn.style.background = "var(--zotero-gray-1, #ffffff)";
-          btn.style.color = "var(--zotero-gray-7, #2b2b30)";
-        }
-        btn.textContent = text;
-        return btn;
-      };
-
-      // Skip All button
-      const skipAllBtn = createBtn(
-        getString("references-panel-batch-duplicate-skip-all"),
-      );
-      skipAllBtn.addEventListener("click", () => {
-        for (const cb of checkboxMap.values()) {
-          cb.checked = false;
-        }
-      });
-      actions.appendChild(skipAllBtn);
-
-      // Import All button
-      const importAllBtn = createBtn(
-        getString("references-panel-batch-duplicate-import-all"),
-      );
-      importAllBtn.addEventListener("click", () => {
-        for (const cb of checkboxMap.values()) {
-          cb.checked = true;
-        }
-      });
-      actions.appendChild(importAllBtn);
-
-      // Cancel button
-      const cancelBtn = createBtn(
-        getString("references-panel-batch-duplicate-cancel"),
-      );
-      cancelBtn.addEventListener("click", () => {
-        overlay.remove();
-        resolve(null);
-      });
-      actions.appendChild(cancelBtn);
-
-      // Confirm button
-      const confirmBtn = createBtn(
-        getString("references-panel-batch-duplicate-confirm"),
-        true,
-      );
-      confirmBtn.addEventListener("click", () => {
-        // Get entries to import (non-duplicates + selected duplicates)
-        const result: InspireReferenceEntry[] = [];
-        for (const entry of entries) {
-          if (!duplicates.has(entry.id)) {
-            result.push(entry);
-          } else if (checkboxMap.get(entry.id)?.checked) {
-            result.push(entry);
-          }
-        }
-        overlay.remove();
-        resolve(result);
-      });
-      actions.appendChild(confirmBtn);
-
-      content.appendChild(actions);
-      overlay.appendChild(content);
-
-      // Add to panel body (not document.body)
-      // Make panel body position relative for overlay positioning
-      this.body.appendChild(overlay);
-
-      // Close on overlay click
-      overlay.addEventListener("click", (e) => {
-        if (e.target === overlay) {
-          overlay.remove();
-          resolve(null);
-        }
-      });
-
-      // Close on Escape
-      const escapeHandler = (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-          overlay.remove();
-          resolve(null);
-          doc.removeEventListener("keydown", escapeHandler);
-        }
-      };
-      doc.addEventListener("keydown", escapeHandler);
-    });
-  }
-
-  /**
-   * Run batch import with progress display.
-   */
-  private async runBatchImportWithProgress(
-    entries: InspireReferenceEntry[],
-    target: SaveTargetSelection,
-  ) {
-    const total = entries.length;
-    let done = 0;
-    let success = 0;
-    let failed = 0;
-
-    // Setup cancellation
-    this.batchImportAbort = createAbortController();
-    const signal = this.batchImportAbort?.signal || createMockSignal();
-
-    // Escape key listener for cancellation
-    const escapeHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        this.batchImportAbort?.abort();
-      }
-    };
-    const mainWindow = Zotero.getMainWindow();
-    mainWindow?.addEventListener("keydown", escapeHandler, true);
-
-    // Progress window
-    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
-    const progressWindow = new ProgressWindowHelper(config.addonName);
-    progressWindow.win.changeHeadline(config.addonName, icon);
-    progressWindow.createLine({
-      text: getString("references-panel-batch-importing", {
-        args: { done: 0, total },
-      }),
-      progress: 0,
-    });
-    progressWindow.show(-1); // Keep open
-
-    // Concurrency limiter
-    const CONCURRENCY = 3;
-    let index = 0;
-
-    const worker = async () => {
-      while (index < entries.length && !signal.aborted) {
-        const currentIndex = index++;
-        const entry = entries[currentIndex];
-
-        try {
-          const newItem = await this.importReference(entry.recid!, target);
-          if (newItem) {
-            entry.localItemID = newItem.id;
-            entry.displayText = buildDisplayText(entry);
-            entry.searchText = "";
-            this.selectedEntryIDs.delete(entry.id);
-            this.updateRowStatus(entry);
-            success++;
-          } else {
-            failed++;
-          }
-        } catch (err) {
-          Zotero.debug(`[${config.addonName}] Batch import error: ${err}`);
-          failed++;
-        }
-
-        done++;
-        const percent = Math.round((done / total) * 100);
-        progressWindow.changeLine({
-          text: getString("references-panel-batch-importing", {
-            args: { done, total },
-          }),
-          progress: percent,
-        });
-      }
-    };
-
-    try {
-      // Start workers
-      const workers: Promise<void>[] = [];
-      for (let i = 0; i < Math.min(CONCURRENCY, entries.length); i++) {
-        workers.push(worker());
-      }
-      await Promise.all(workers);
-    } finally {
-      // Clean up
-      mainWindow?.removeEventListener("keydown", escapeHandler, true);
-      this.batchImportAbort = undefined;
-
-      // Close progress and show result
-      progressWindow.close();
-
-      // Show result toast
-      if (signal.aborted) {
-        this.showToast(
-          getString("references-panel-batch-import-cancelled", {
-            args: { done, total },
-          }),
-        );
-      } else if (failed > 0) {
-        this.showToast(
-          getString("references-panel-batch-import-partial", {
-            args: { success, total, failed },
-          }),
-        );
-      } else {
-        this.showToast(
-          getString("references-panel-batch-import-success", {
-            args: { count: success },
-          }),
-        );
-      }
-
-      // Update UI
-      this.updateAllCheckboxes();
-      this.updateBatchToolbarVisibility();
     }
   }
 

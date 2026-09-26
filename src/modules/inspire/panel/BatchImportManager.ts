@@ -14,6 +14,7 @@ import {
   createAbortController,
   createMockSignal,
 } from "../index";
+import type { SaveTargetSelection } from "../../pickerUI";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 
 // XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
@@ -41,17 +42,6 @@ export interface BatchImportResult {
 }
 
 /**
- * Save target for batch import (passed from picker).
- */
-export interface BatchSaveTarget {
-  libraryID?: number;
-  collectionIDs: (number | undefined)[];
-  tags?: string[];
-  note?: string;
-  primaryRowID: string;
-}
-
-/**
  * Options for BatchImportManager initialization.
  */
 export interface BatchImportManagerOptions {
@@ -59,7 +49,10 @@ export interface BatchImportManagerOptions {
   getDocument: () => Document;
   /** Callback to get the body element for attaching dialogs */
   getBody: () => HTMLElement;
-  /** Callback to get the list element for checkbox updates */
+  /**
+   * Callback to get the list element for checkbox updates. Called on every
+   * update, since the panel replaces the list element when it re-renders.
+   */
   getListElement: () => HTMLElement;
   /** Callback to get all entries */
   getAllEntries: () => InspireReferenceEntry[];
@@ -68,24 +61,18 @@ export interface BatchImportManagerOptions {
   /** Callback to import a single reference by recid */
   importReference: (
     recid: string,
-    target: BatchSaveTarget,
+    target: SaveTargetSelection,
   ) => Promise<Zotero.Item | null>;
   /** Callback to prompt for save target (shows picker UI) */
-  promptForSaveTarget: (anchor: HTMLElement) => Promise<BatchSaveTarget | null>;
+  promptForSaveTarget: (
+    anchor: HTMLElement,
+  ) => Promise<SaveTargetSelection | null>;
   /** Callback to show a toast notification */
   showToast: (message: string) => void;
   /** Callback to update a single row's status in the list */
   updateRowStatus: (entry: InspireReferenceEntry) => void;
   /** Callback when batch toolbar visibility should be updated */
   onSelectionChange?: (count: number) => void;
-}
-
-/**
- * Batch import state.
- */
-export interface BatchImportState {
-  selectedCount: number;
-  isImporting: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,11 +88,10 @@ export class BatchImportManager {
 
   // Selection state
   private selectedEntryIDs = new Set<string>();
-  private lastSelectedEntryID?: string;
+  private lastSelectedEntryID?: string; // For Shift+Click range selection
 
   // Import state
   private importAbort?: AbortController;
-  private isImporting = false;
 
   constructor(options: BatchImportManagerOptions) {
     this.options = options;
@@ -116,35 +102,25 @@ export class BatchImportManager {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Get the current batch import state.
+   * Get the selected entry IDs. This is the live set, not a copy: it
+   * reflects later selection changes.
    */
-  getState(): BatchImportState {
-    return {
-      selectedCount: this.selectedEntryIDs.size,
-      isImporting: this.isImporting,
-    };
-  }
-
-  /**
-   * Get the set of selected entry IDs.
-   */
-  getSelectedEntryIDs(): Set<string> {
-    return new Set(this.selectedEntryIDs);
-  }
-
-  /**
-   * Check if an entry is selected.
-   */
-  isSelected(entryId: string): boolean {
-    return this.selectedEntryIDs.has(entryId);
+  getSelectedEntryIDs(): ReadonlySet<string> {
+    return this.selectedEntryIDs;
   }
 
   /**
    * Handle checkbox click with Shift+Click range selection support.
    */
   handleCheckboxClick(entry: InspireReferenceEntry, event: MouseEvent): void {
+    Zotero.debug(
+      `[${config.addonName}] handleCheckboxClick: entry.id=${entry.id}`,
+    );
     const checkbox = event.target as HTMLInputElement;
     const isChecked = checkbox.checked;
+    Zotero.debug(
+      `[${config.addonName}] handleCheckboxClick: isChecked=${isChecked}`,
+    );
 
     if (event.shiftKey && this.lastSelectedEntryID) {
       // Shift+Click: select range
@@ -211,6 +187,9 @@ export class BatchImportManager {
   async handleBatchImport(
     anchor: HTMLElement,
   ): Promise<BatchImportResult | null> {
+    Zotero.debug(
+      `[${config.addonName}] handleBatchImport: started, selectedEntryIDs.size=${this.selectedEntryIDs.size}`,
+    );
     if (this.selectedEntryIDs.size === 0) {
       this.options.showToast(getString("references-panel-batch-no-selection"));
       return null;
@@ -220,6 +199,9 @@ export class BatchImportManager {
     const selectedEntries = allEntries.filter(
       (e) => this.selectedEntryIDs.has(e.id) && e.recid,
     );
+    Zotero.debug(
+      `[${config.addonName}] handleBatchImport: selectedEntries.length=${selectedEntries.length}`,
+    );
 
     if (selectedEntries.length === 0) {
       this.options.showToast(getString("references-panel-batch-no-selection"));
@@ -227,7 +209,13 @@ export class BatchImportManager {
     }
 
     // Detect duplicates
+    Zotero.debug(
+      `[${config.addonName}] handleBatchImport: detecting duplicates...`,
+    );
     const duplicates = await this.detectDuplicates(selectedEntries);
+    Zotero.debug(
+      `[${config.addonName}] handleBatchImport: duplicates.size=${duplicates.size}`,
+    );
 
     // If there are duplicates, show dialog
     let entriesToImport = selectedEntries;
@@ -248,28 +236,22 @@ export class BatchImportManager {
     }
 
     // Prompt for save target
+    Zotero.debug(
+      `[${config.addonName}] handleBatchImport: prompting for save target...`,
+    );
     const target = await this.options.promptForSaveTarget(anchor);
+    Zotero.debug(
+      `[${config.addonName}] handleBatchImport: target=${target ? "selected" : "cancelled"}`,
+    );
     if (!target) {
       return null;
     }
 
     // Run batch import
+    Zotero.debug(
+      `[${config.addonName}] handleBatchImport: starting batch import for ${entriesToImport.length} entries`,
+    );
     return this.runBatchImport(entriesToImport, target);
-  }
-
-  /**
-   * Cancel the current batch import operation.
-   */
-  cancelImport(): void {
-    this.importAbort?.abort();
-  }
-
-  /**
-   * Cleanup manager resources.
-   */
-  destroy(): void {
-    this.cancelImport();
-    this.selectedEntryIDs.clear();
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -388,6 +370,9 @@ export class BatchImportManager {
     return new Promise((resolve) => {
       const doc = this.options.getDocument();
       const body = this.options.getBody();
+      Zotero.debug(
+        `[${config.addonName}] showDuplicateDialog: duplicates.size=${duplicates.size}`,
+      );
 
       // Create overlay
       const overlay = doc.createElement("div");
@@ -420,6 +405,7 @@ export class BatchImportManager {
 
       // Title
       const title = doc.createElement("div");
+      title.className = "zinspire-duplicate-dialog__title";
       Object.assign(title.style, {
         fontSize: "14px",
         fontWeight: "600",
@@ -430,6 +416,7 @@ export class BatchImportManager {
 
       // Message
       const message = doc.createElement("div");
+      message.className = "zinspire-duplicate-dialog__message";
       Object.assign(message.style, {
         fontSize: "12px",
         marginBottom: "12px",
@@ -444,6 +431,7 @@ export class BatchImportManager {
 
       // List of duplicates
       const list = doc.createElement("div");
+      list.className = "zinspire-duplicate-dialog__list";
       Object.assign(list.style, {
         maxHeight: "150px",
         overflowY: "auto",
@@ -458,6 +446,7 @@ export class BatchImportManager {
       for (const entry of duplicateEntries) {
         const match = duplicates.get(entry.id)!;
         const item = doc.createElement("div");
+        item.className = "zinspire-duplicate-dialog__item";
         Object.assign(item.style, {
           display: "flex",
           alignItems: "flex-start",
@@ -613,14 +602,12 @@ export class BatchImportManager {
    */
   private async runBatchImport(
     entries: InspireReferenceEntry[],
-    target: BatchSaveTarget,
+    target: SaveTargetSelection,
   ): Promise<BatchImportResult> {
     const total = entries.length;
     let done = 0;
     let success = 0;
     let failed = 0;
-
-    this.isImporting = true;
 
     // Setup cancellation
     this.importAbort = createAbortController();
@@ -698,7 +685,6 @@ export class BatchImportManager {
     } finally {
       mainWindow?.removeEventListener("keydown", escapeHandler, true);
       this.importAbort = undefined;
-      this.isImporting = false;
 
       progressWindow.close();
 
