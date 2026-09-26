@@ -11,13 +11,6 @@ export {
   type ChartManagerOptions,
 } from "./ChartManager";
 
-// Re-export FilterManager
-export {
-  FilterManager,
-  type FilterState,
-  type FilterManagerOptions,
-} from "./FilterManager";
-
 // Re-export NavigationManager
 export {
   NavigationManager,
