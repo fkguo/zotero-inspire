@@ -55,14 +55,22 @@ describe("References panel back/forward history", () => {
   }
   let selectItems: ReturnType<typeof vi.fn>;
   let openReader: ReturnType<typeof vi.fn>;
+  let selectedInLibrary: number[];
 
   beforeEach(() => {
-    selectItems = vi.fn();
+    selectedInLibrary = [];
+    selectItems = vi.fn(async (ids: number[]) => {
+      selectedInLibrary = ids;
+      return true;
+    });
     openReader = vi.fn();
     (globalThis as any).Zotero = {
       debug: vi.fn(),
       Items: { get: (id: number) => items.get(id) ?? null },
-      getActiveZoteroPane: () => ({ selectItems }),
+      getActiveZoteroPane: () => ({
+        selectItems,
+        getSelectedItems: () => selectedInLibrary,
+      }),
       Prefs: { get: (key: string) => key.endsWith(".reader_auto_reopen") },
       Reader: { open: openReader, getByTabID: () => undefined },
     };
@@ -74,7 +82,10 @@ describe("References panel back/forward history", () => {
     resetHistory();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Let the timers a test started fire now: a panel restoring its scroll
+    // position later would take the next test's pending restore.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     resetHistory();
     delete (globalThis as any).Zotero;
     delete (globalThis as any).Zotero_Tabs;
@@ -340,6 +351,182 @@ describe("References panel back/forward history", () => {
     await panel.arrive(C);
 
     expect(Panel.isNavigatingHistory).toBe(false);
+  });
+
+  // Zotero reports no item when asked to show the item the library already
+  // shows: selecting its selected item again renders nothing, and going back
+  // to the library tab only performs a render put off while it was hidden.
+  it.each([
+    // Went from A to B in the library, then opened C's PDF from B's panel.
+    {
+      direction: "Back",
+      key: "ArrowLeft",
+      back: [A, B],
+      forward: [],
+      after: { back: [A], current: B, forward: [C] },
+    },
+    // In C's Reader tab, selected B in the library from C's panel, then went
+    // back to C.
+    {
+      direction: "Forward",
+      key: "ArrowRight",
+      back: [],
+      forward: [B],
+      after: { back: [C], current: B, forward: [] },
+    },
+  ] as const)(
+    "ends a $direction jump from a Reader tab to the item the library shows",
+    async ({ key, back, forward, after }) => {
+      selectedInLibrary = [B];
+      const panel = openPanel(B); // the library selects and shows B
+      Object.assign((globalThis as any).Zotero_Tabs, {
+        selectedType: "reader",
+        selectedID: "reader-C",
+      });
+      const readerPanel = openPanel(); // the item pane of C's Reader tab
+      await readerPanel.arrive(C, "reader");
+      Panel.navigationStack = back.map((id) => snapshot(id));
+      Panel.forwardStack = forward.map((id) => snapshot(id));
+      // B's list was scrolled down when the user left it.
+      const target = [...Panel.navigationStack, ...Panel.forwardStack].find(
+        (s: NavigationSnapshot) => s.itemID === B,
+      );
+      target.scrollState.scrollTop = 120;
+      let finishSelecting: (found: boolean) => void = () => undefined;
+      selectItems.mockReturnValue(
+        new Promise((resolve) => {
+          finishSelecting = resolve;
+        }),
+      );
+
+      readerPanel.press(key);
+      expect(selectItems.mock.calls).toEqual([[[B]]]);
+      expect(panel.controller.backButton.disabled).toBe(true);
+      // Zotero shows the library tab, where B is already selected, and
+      // renders nothing.
+      Object.assign((globalThis as any).Zotero_Tabs, {
+        selectedType: "library",
+        selectedID: "zotero-pane",
+      });
+      finishSelecting(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(panel.history()).toEqual(after);
+      expect(panel.controller.backButton.disabled).toBe(false);
+      expect(panel.controller.forwardButton.disabled).toBe(
+        after.forward.length === 0,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(panel.controller.listEl.scrollTop).toBe(120);
+    },
+  );
+
+  it.each([
+    [
+      "reopening Reader tabs is turned off",
+      () => {
+        (globalThis as any).Zotero.Prefs.get = () => false;
+      },
+    ],
+    [
+      "Zotero fails to reopen it",
+      () => openReader.mockRejectedValue(new Error("cannot open")),
+    ],
+  ])(
+    "ends a jump to the item the library shows when its Reader tab is closed and %s",
+    async (_cause, preventReopening) => {
+      // Visited A in the library, B in a Reader tab closed since, then C;
+      // the library still selects and shows B.
+      selectedInLibrary = [B];
+      const panel = openPanel(B);
+      Object.assign((globalThis as any).Zotero_Tabs, {
+        selectedType: "reader",
+        selectedID: "reader-C",
+      });
+      const readerPanel = openPanel(); // the item pane of C's Reader tab
+      await readerPanel.arrive(C, "reader");
+      Panel.navigationStack = [snapshot(A), snapshot(B, "reader-B")];
+      preventReopening();
+      // Zotero shows the library tab, where B is already selected, and
+      // renders nothing.
+      selectItems.mockImplementation(async () => {
+        Object.assign((globalThis as any).Zotero_Tabs, {
+          selectedType: "library",
+          selectedID: "zotero-pane",
+        });
+        return true;
+      });
+
+      readerPanel.press("ArrowLeft");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(selectItems.mock.calls).toEqual([[[B]]]);
+      expect(panel.history()).toEqual({ back: [A], current: B, forward: [C] });
+      expect(panel.controller.backButton.disabled).toBe(false);
+      expect(panel.controller.forwardButton.disabled).toBe(false);
+    },
+  );
+
+  it.each([
+    ["returns without showing the library", async () => false],
+    [
+      "shows the library without selecting B",
+      async () => {
+        Object.assign((globalThis as any).Zotero_Tabs, {
+          selectedType: "library",
+          selectedID: "zotero-pane",
+        });
+        return true;
+      },
+    ],
+  ])("keeps a jump pending if Zotero %s", async (_outcome, selectNothing) => {
+    // Visited A, then B, then C in a Reader tab. The library selects
+    // nothing now, which Zotero shows without rendering the item pane, so
+    // the library panel still shows B.
+    const panel = openPanel(B);
+    Object.assign((globalThis as any).Zotero_Tabs, {
+      selectedType: "reader",
+      selectedID: "reader-C",
+    });
+    const readerPanel = openPanel(); // the item pane of C's Reader tab
+    await readerPanel.arrive(C, "reader");
+    Panel.navigationStack = [snapshot(A), snapshot(B)];
+    selectItems.mockImplementation(selectNothing);
+
+    readerPanel.press("ArrowLeft");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(selectItems.mock.calls).toEqual([[[B]]]);
+    expect(panel.controller.backButton.disabled).toBe(true);
+    expect(panel.controller.forwardButton.disabled).toBe(true);
+  });
+
+  it("ends a jump to the item of the Reader tab already selected", async () => {
+    // In C's Reader tab, opened D's PDF from C's panel, then selected C's
+    // Reader tab again, so the item behind C is C itself.
+    const readerC = { tabID: "reader-C", focus: vi.fn() };
+    (globalThis as any).Zotero.Reader.getByTabID = (tabID: string) =>
+      tabID === "reader-C" ? readerC : undefined;
+    Object.assign((globalThis as any).Zotero_Tabs, {
+      selectedType: "reader",
+      selectedID: "reader-C",
+    });
+    const readerPanel = openPanel(); // the item pane of C's Reader tab
+    await readerPanel.arrive(C, "reader");
+    Panel.navigationStack = [snapshot(C, "reader-C")];
+
+    readerPanel.press("ArrowLeft");
+    // Zotero does nothing when asked to select the tab already selected.
+    expect((globalThis as any).Zotero_Tabs.select).toHaveBeenCalledWith(
+      "reader-C",
+    );
+
+    expect(readerPanel.history()).toEqual({
+      back: [],
+      current: C,
+      forward: [C],
+    });
+    expect(readerPanel.controller.forwardButton.disabled).toBe(false);
   });
 
   it.each([

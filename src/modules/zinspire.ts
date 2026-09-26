@@ -10239,11 +10239,72 @@ export class InspireReferencePanelController {
         jump?.target === snapshot
       ) {
         if (ReaderTabHelper.getSelectedTabID() === jump.tabID) {
-          Zotero.getActiveZoteroPane()?.selectItems([snapshot.itemID]);
+          const pane = Zotero.getActiveZoteroPane();
+          if (pane) {
+            InspireReferencePanelController.selectInLibrary(pane, snapshot);
+          }
         } else {
           InspireReferencePanelController.isNavigatingHistory = false;
           InspireReferencePanelController.syncBackButtonStates();
         }
+      }
+    }
+  }
+
+  // Select the target of a history jump in the library. If the library
+  // already selected and showed it, Zotero reports no item that would end
+  // the jump, so end it once Zotero shows the library with only the target
+  // selected.
+  private static selectInLibrary(
+    pane: _ZoteroTypes.ZoteroPane,
+    target: NavigationSnapshot,
+  ) {
+    void pane.selectItems([target.itemID]).then(
+      () => {
+        const selected = pane.getSelectedItems(true);
+        if (
+          ReaderTabHelper.getSelectedTabType() === "library" &&
+          selected.length === 1 &&
+          selected[0] === target.itemID
+        ) {
+          InspireReferencePanelController.endJumpIfShown(target);
+        }
+      },
+      (err) => {
+        Zotero.debug(
+          `[${config.addonName}] Failed to select item ${target.itemID}: ${err}`,
+        );
+      },
+    );
+  }
+
+  // Zotero reports no item when asked to show what it already shows: the
+  // item selected in the library (selecting it again renders nothing, and
+  // going back to the library tab only performs a render put off while the
+  // tab was hidden), or the item of the selected tab (selecting that tab
+  // again does nothing). End the jump to `target` if the panel of the
+  // library, or of the Reader tab `readerTabID`, already shows its item.
+  private static endJumpIfShown(
+    target: NavigationSnapshot,
+    readerTabID?: string,
+  ) {
+    if (
+      !InspireReferencePanelController.isNavigatingHistory ||
+      InspireReferencePanelController.historyJump?.target !== target
+    ) {
+      return;
+    }
+    for (const panel of InspireReferencePanelController.instances) {
+      const inTab = readerTabID
+        ? panel.currentTabType === "reader" &&
+          panel.currentReaderTabID === readerTabID
+        : panel.currentTabType === "library";
+      if (inTab && panel.currentItemID === target.itemID) {
+        InspireReferencePanelController.isNavigatingHistory = false;
+        InspireReferencePanelController.syncBackButtonStates();
+        // As after a render, restore the list once the tab is shown.
+        setTimeout(() => panel.restoreScrollPositionIfNeeded(), 0);
+        return;
       }
     }
   }
@@ -10364,8 +10425,16 @@ export class InspireReferencePanelController {
           snapshot.readerTabID,
         );
         if (readerTabExists) {
+          const alreadySelected =
+            ReaderTabHelper.getSelectedTabID() === snapshot.readerTabID;
           ReaderTabHelper.selectTab(snapshot.readerTabID);
           ReaderTabHelper.focusReader(readerTabExists);
+          if (alreadySelected) {
+            InspireReferencePanelController.endJumpIfShown(
+              snapshot,
+              snapshot.readerTabID,
+            );
+          }
           break;
         }
         // Reader tab was closed - try to reopen if setting is enabled
@@ -10375,7 +10444,7 @@ export class InspireReferencePanelController {
         }
       }
       // Fallback: select item in library (for library snapshots or closed reader tabs)
-      pane.selectItems([snapshot.itemID]);
+      InspireReferencePanelController.selectInLibrary(pane, snapshot);
       break;
     }
     InspireReferencePanelController.syncBackButtonStates();
@@ -10429,8 +10498,16 @@ export class InspireReferencePanelController {
           snapshot.readerTabID,
         );
         if (readerTabExists) {
+          const alreadySelected =
+            ReaderTabHelper.getSelectedTabID() === snapshot.readerTabID;
           ReaderTabHelper.selectTab(snapshot.readerTabID);
           ReaderTabHelper.focusReader(readerTabExists);
+          if (alreadySelected) {
+            InspireReferencePanelController.endJumpIfShown(
+              snapshot,
+              snapshot.readerTabID,
+            );
+          }
           break;
         }
         // Reader tab was closed - try to reopen if setting is enabled
@@ -10440,7 +10517,7 @@ export class InspireReferencePanelController {
         }
       }
       // Fallback: select item in library
-      pane.selectItems([snapshot.itemID]);
+      InspireReferencePanelController.selectInLibrary(pane, snapshot);
       break;
     }
     InspireReferencePanelController.syncBackButtonStates();
