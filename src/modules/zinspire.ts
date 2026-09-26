@@ -78,7 +78,6 @@ import {
   isReferenceSortOption,
   isInspireSortOption,
   isRelatedSortOption,
-  SEARCH_HISTORY_PREF_KEY,
   FILTER_HISTORY_PREF_KEY,
   FILTER_HISTORY_MAX_ENTRIES,
   AUTHOR_IDS_EXTRACT_LIMIT,
@@ -1005,19 +1004,9 @@ export class ZInspireReferencePane {
         return;
       }
 
-      // Get search history from preferences
-      const historyJson = Zotero.Prefs.get(
-        `${config.prefsPrefix}.${SEARCH_HISTORY_PREF_KEY}`,
-        true,
-      ) as string | undefined;
-      let history: string[] = [];
-      try {
-        if (historyJson) {
-          history = JSON.parse(historyJson);
-        }
-      } catch {
-        history = [];
-      }
+      // Search history, most recent first (the same store the panel's
+      // INSPIRE search writes to)
+      const history = literatureSearchHistory.read().map((item) => item.query);
 
       if (history.length === 0) {
         hintOverlay.style.display = "none";
@@ -1025,8 +1014,9 @@ export class ZInspireReferencePane {
         return;
       }
 
-      // Get the query part after "inspire:"
-      const queryPart = userInput.slice(8); // After "inspire:"
+      // Get the query part after "inspire:", ignoring leading spaces: saved
+      // queries are trimmed, and so is the query that Enter searches for
+      const queryPart = userInput.slice(8).trimStart();
 
       // Find a matching history item that starts with user's query
       let matchingHint = "";

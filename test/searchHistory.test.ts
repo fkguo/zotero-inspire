@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
+import { JSDOM } from "jsdom";
 import { config } from "../package.json";
 import {
   SearchHistoryStore,
@@ -6,6 +7,7 @@ import {
   literatureSearchHistory,
 } from "../src/modules/inspire/searchHistory";
 import { clearAllHistoryPrefs } from "../src/modules/inspire/utils";
+import { ZInspireReferencePane } from "../src/modules/zinspire";
 
 const prefs = new Map<string, unknown>();
 beforeEach(() => {
@@ -76,5 +78,68 @@ describe("shared persistent search history", () => {
         .slice(0, 2)
         .map((x) => x.query),
     ).toEqual(["latest", "another window"]);
+  });
+});
+
+describe("inspire: search bar hint", () => {
+  afterEach(() => ZInspireReferencePane.unregisterSearchBarListener());
+
+  function setUpSearchBar() {
+    const dom = new JSDOM('<div><input id="zotero-tb-search-textbox"></div>');
+    (globalThis as any).Zotero.getMainWindow = () => dom.window;
+    ZInspireReferencePane.registerSearchBarListener();
+    const doc = dom.window.document;
+    const input = doc.getElementById(
+      "zotero-tb-search-textbox",
+    ) as HTMLInputElement;
+    const type = (value: string) => {
+      input.value = value;
+      input.setSelectionRange(value.length, value.length);
+      input.dispatchEvent(new dom.window.Event("input"));
+    };
+    const hint = () => {
+      const overlay = doc.querySelector<HTMLElement>(".zinspire-search-hint");
+      return overlay && overlay.style.display !== "none"
+        ? (overlay.textContent ?? "").replace(/\u00A0/g, " ")
+        : "";
+    };
+    const pressTab = () =>
+      input.dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { key: "Tab" }),
+      );
+    return { input, type, hint, pressTab };
+  }
+
+  it("completes from the queries saved by the literature search history", () => {
+    literatureSearchHistory.add("find a guo");
+    literatureSearchHistory.add("t pentaquark");
+    const { input, type, hint, pressTab } = setUpSearchBar();
+
+    type("inspire:");
+    expect(hint()).toBe("t pentaquark");
+    type("inspire:fi");
+    expect(hint()).toBe("nd a guo");
+    pressTab();
+    expect(input.value).toBe("inspire:find a guo");
+  });
+
+  it("ignores spaces typed after the prefix", () => {
+    literatureSearchHistory.add("find a guo");
+    literatureSearchHistory.add("a");
+    const { input, type, hint, pressTab } = setUpSearchBar();
+
+    // More spaces than the saved query "a" has characters
+    type("inspire:  ");
+    expect(hint()).toBe("a");
+    type("inspire: fi");
+    expect(hint()).toBe("nd a guo");
+    pressTab();
+    expect(input.value).toBe("inspire:find a guo");
+  });
+
+  it("shows no hint before anything has been searched", () => {
+    const { type, hint } = setUpSearchBar();
+    type("inspire:");
+    expect(hint()).toBe("");
   });
 });
