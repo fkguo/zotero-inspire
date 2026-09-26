@@ -21,7 +21,10 @@ vi.mock("../src/utils/locale", () => ({
 
 import { getPref } from "../src/utils/prefs";
 import { inspireFetch } from "../src/modules/inspire/rateLimiter";
-import { enrichReferencesEntries } from "../src/modules/inspire/referencesService";
+import {
+  buildReferenceEntry,
+  enrichReferencesEntries,
+} from "../src/modules/inspire/referencesService";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 
 const inspireFetchMock = vi.mocked(inspireFetch);
@@ -163,4 +166,45 @@ describe("reference metadata enrichment batching", () => {
     expect(result.complete).toBe(true);
     expect(result.processedRecids).toHaveLength(10);
   });
+});
+
+// A reference without a linked INSPIRE record falls back to its URLs; record
+// URLs of other repositories (e.g. CDS) must not be read as INSPIRE recids.
+describe("reference recid", () => {
+  it("takes the recid from the linked INSPIRE record", () => {
+    const entry = buildReferenceEntry(
+      {
+        record: { $ref: "https://inspirehep.net/api/literature/230779" },
+        reference: { urls: [{ value: "https://cds.cern.ch/record/1986460" }] },
+      },
+      0,
+    );
+    expect(entry.recid).toBe("230779");
+  });
+
+  it("reads an INSPIRE link among the URLs of an unlinked reference", () => {
+    const entry = buildReferenceEntry(
+      {
+        reference: {
+          urls: [
+            { value: "http://cdsweb.cern.ch/record/1234567" },
+            { value: "http://inspirehep.net/record/230779/" },
+          ],
+        },
+      },
+      0,
+    );
+    expect(entry.recid).toBe("230779");
+  });
+
+  it.each(["https://cds.cern.ch/record/1986460", "/literature/230779"])(
+    "gives no recid for an unlinked reference whose only URL is %s",
+    (value) => {
+      const entry = buildReferenceEntry(
+        { reference: { urls: [{ value }] } },
+        0,
+      );
+      expect(entry.recid).toBeUndefined();
+    },
+  );
 });

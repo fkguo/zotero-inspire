@@ -57,12 +57,50 @@ export function extractRecidFromUrls(
   return null;
 }
 
-export function extractRecidFromUrl(url?: string | null): string | null {
-  if (!url) {
+const INSPIRE_HOSTS = new Set(["inspirehep.net", "www.inspirehep.net"]);
+
+/** /literature/<recid>, /api/literature/<recid> or legacy /record/<recid> */
+const INSPIRE_LITERATURE_PATH_REGEX =
+  /^\/(?:(?:api\/)?literature|record)\/(\d+)(?:\/|$)/;
+
+/**
+ * Recid from a link to an INSPIRE literature record; the host must be
+ * inspirehep.net (optionally www.). Record URLs of other repositories
+ * (cds.cern.ch/record/<n>, ...) and other INSPIRE collections number their own
+ * records. A link with whitespace or a backslash is rejected: the URL parser
+ * would drop or rewrite those characters, changing where the digits end.
+ */
+function recidFromInspireLiteratureLink(link: string): string | null {
+  if (!link || /[\s\\]/.test(link)) {
     return null;
   }
-  const match = url.match(/(?:literature|record)\/(\d+)/);
+  let parsed: URL;
+  try {
+    parsed = new URL(link);
+  } catch {
+    return null;
+  }
+  if (!INSPIRE_HOSTS.has(parsed.hostname)) {
+    return null;
+  }
+  const match = parsed.pathname.match(INSPIRE_LITERATURE_PATH_REGEX);
   return match ? match[1] : null;
+}
+
+/**
+ * Recid from a single INSPIRE literature link. A link without a host (a
+ * relative path, or a host name without a scheme) cannot be attributed to
+ * INSPIRE and gives none.
+ */
+export function extractRecidFromUrl(url?: string | null): string | null {
+  if (typeof url !== "string") {
+    return null;
+  }
+  const link = url.trim();
+  // A scheme-relative link ("//host/path") still names its host
+  return recidFromInspireLiteratureLink(
+    link.startsWith("//") ? `https:${link}` : link,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
