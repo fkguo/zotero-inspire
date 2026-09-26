@@ -472,6 +472,27 @@ describe("duplicate detection", () => {
 });
 
 describe("duplicate dialog", () => {
+  /** Close the dialog in one of the ways a user can. */
+  function closeDialog(
+    panel: ReturnType<typeof setUpManager>,
+    dialog: HTMLElement,
+    how: string,
+  ) {
+    if (how === "cancel") {
+      buttonIn(dialog, "references-panel-batch-duplicate-cancel").click();
+    } else if (how === "confirm") {
+      buttonIn(dialog, "references-panel-batch-duplicate-confirm").click();
+    } else if (how === "escape") {
+      panel.doc.dispatchEvent(
+        new panel.dom.window.KeyboardEvent("keydown", { key: "Escape" }),
+      );
+    } else if (how === "dispose") {
+      panel.manager.dispose();
+    } else {
+      dialog.dispatchEvent(new panel.dom.window.MouseEvent("click"));
+    }
+  }
+
   it("lists the duplicates unticked in the panel's dialog style and imports the ticked ones with the rest", async () => {
     const entries = [
       entry("a"),
@@ -554,6 +575,7 @@ describe("duplicate dialog", () => {
     ["the Cancel button", "cancel"],
     ["Escape", "escape"],
     ["a click beside the dialog", "backdrop"],
+    ["its panel going away", "dispose"],
   ])("closes without importing on %s", async (_label, how) => {
     const entries = [entry("a", { localItemID: 1 }), entry("b")];
     const panel = setUpManager(entries);
@@ -561,13 +583,7 @@ describe("duplicate dialog", () => {
 
     const run = panel.manager.handleBatchImport(panel.anchor);
     const dialog = await panel.dialog();
-    if (how === "cancel") {
-      buttonIn(dialog, "references-panel-batch-duplicate-cancel").click();
-    } else if (how === "escape") {
-      panel.doc.dispatchEvent(
-        new panel.dom.window.KeyboardEvent("keydown", { key: "Escape" }),
-      );
-    } else {
+    if (how === "backdrop") {
       // A click inside the dialog keeps it open
       dialog
         .querySelector(".zinspire-duplicate-dialog__content")!
@@ -575,14 +591,96 @@ describe("duplicate dialog", () => {
           new panel.dom.window.MouseEvent("click", { bubbles: true }),
         );
       expect(dialog.isConnected).toBe(true);
-      dialog.dispatchEvent(new panel.dom.window.MouseEvent("click"));
     }
+    closeDialog(panel, dialog, how);
 
     expect(await run).toBeNull();
     expect(dialog.isConnected).toBe(false);
     expect(panel.options.promptForSaveTarget).not.toHaveBeenCalled();
     expect(panel.options.importReference).not.toHaveBeenCalled();
     expect(panel.selected()).toEqual(["a", "b"]);
+  });
+
+  it.each([
+    ["the Cancel button", "cancel"],
+    ["the Confirm button", "confirm"],
+    ["Escape", "escape"],
+    ["a click beside the dialog", "backdrop"],
+    ["its panel going away", "dispose"],
+  ])("stops listening for Escape once closed with %s", async (_label, how) => {
+    const panel = setUpManager([entry("a", { localItemID: 1 }), entry("b")]);
+    panel.options.promptForSaveTarget.mockResolvedValue(null);
+    panel.manager.selectAll();
+    const added = vi.spyOn(panel.doc, "addEventListener");
+    const removed = vi.spyOn(panel.doc, "removeEventListener");
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    const dialog = await panel.dialog();
+    const listeners = added.mock.calls
+      .filter(([type]) => type === "keydown")
+      .map(([, listener]) => listener);
+    expect(listeners).toHaveLength(1);
+    expect(removed).not.toHaveBeenCalled();
+    closeDialog(panel, dialog, how);
+    await run;
+
+    expect(dialog.isConnected).toBe(false);
+    expect(removed).toHaveBeenCalledWith("keydown", listeners[0]);
+  });
+
+  it.each([
+    ["with duplicates", true],
+    ["without duplicates", false],
+  ])(
+    "asks nothing when the panel goes away during the duplicate search, %s",
+    async (_label, found) => {
+      const panel = setUpManager([entry("a")]);
+      let finishSearch = () => {};
+      library.findItemsByRecids.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishSearch = () => resolve(new Map(found ? [["rec-a", 1]] : []));
+          }),
+      );
+      const added = vi.spyOn(panel.doc, "addEventListener");
+      panel.manager.selectAll();
+
+      const run = panel.manager.handleBatchImport(panel.anchor);
+      await vi.waitFor(() =>
+        expect(library.findItemsByRecids).toHaveBeenCalled(),
+      );
+      panel.manager.dispose();
+      // The import ends without waiting for the search, whose late result
+      // then changes nothing
+      expect(await run).toBeNull();
+      finishSearch();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(panel.body.querySelector(".zinspire-duplicate-dialog")).toBeNull();
+      expect(added).not.toHaveBeenCalled();
+      expect(panel.options.promptForSaveTarget).not.toHaveBeenCalled();
+      expect(panel.options.importReference).not.toHaveBeenCalled();
+    },
+  );
+
+  it("leaves an open save-target prompt to the user when the panel goes away", async () => {
+    const panel = setUpManager([entry("a")]);
+    let answer: (target: SaveTargetSelection | null) => void = () => {};
+    panel.options.promptForSaveTarget.mockImplementation(
+      () => new Promise((resolve) => (answer = resolve)),
+    );
+    panel.options.importReference.mockResolvedValue({ id: 100 } as any);
+    panel.manager.selectAll();
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    await vi.waitFor(() =>
+      expect(panel.options.promptForSaveTarget).toHaveBeenCalledOnce(),
+    );
+    panel.manager.dispose();
+    answer(TARGET);
+
+    expect(await run).toEqual({ success: 1, failed: 0, cancelled: false });
+    expect(panel.options.importReference).toHaveBeenCalledWith("rec-a", TARGET);
   });
 
   it("has nothing to import when every duplicate is skipped", async () => {
@@ -827,6 +925,20 @@ describe("References panel batch toolbar and selection", () => {
     };
   }
 
+  /** Add the state destroy() clears, which setUpPanel does not create. */
+  function allowDestroy(controller: any) {
+    Object.assign(controller, {
+      referencesCache: new Map(),
+      citedByCache: new Map(),
+      relatedCache: new Map(),
+      entryCitedCache: new Map(),
+      metadataCache: new Map(),
+      labelMatcherCache: new Map(),
+      pdfParseAttemptedMap: new Map(),
+      pdfParseFallbackWarningShown: new Set(),
+    });
+  }
+
   it("shows the toolbar with the count while rows are ticked", () => {
     const panel = setUpPanel([entry("a"), entry("b"), entry("c")]);
     expect(panel.toolbar.style.display).toBe("none");
@@ -903,17 +1015,7 @@ describe("References panel batch toolbar and selection", () => {
     const ids = ["a", "b", "c", "d", "e"];
     const panel = setUpPanel(ids.map((id) => entry(id)));
     const { controller } = panel;
-    // State that destroy() clears
-    Object.assign(controller, {
-      referencesCache: new Map(),
-      citedByCache: new Map(),
-      relatedCache: new Map(),
-      entryCitedCache: new Map(),
-      metadataCache: new Map(),
-      labelMatcherCache: new Map(),
-      pdfParseAttemptedMap: new Map(),
-      pdfParseFallbackWarningShown: new Set(),
-    });
+    allowDestroy(controller);
     controller.promptForSaveTarget = vi.fn().mockResolvedValue(TARGET);
     controller.showToast = vi.fn();
     const pending: Array<() => void> = [];
@@ -936,6 +1038,33 @@ describe("References panel batch toolbar and selection", () => {
       ),
     );
     expect(controller.importReference).toHaveBeenCalledTimes(5);
+  });
+
+  it("cancels the import when the panel is closed with the duplicate dialog open", async () => {
+    const panel = setUpPanel([entry("a", { localItemID: 1 }), entry("b")]);
+    const { controller } = panel;
+    allowDestroy(controller);
+    controller.promptForSaveTarget = vi.fn();
+    controller.importReference = vi.fn();
+    const doc = controller.body.ownerDocument as Document;
+    const added = vi.spyOn(doc, "addEventListener");
+    const removed = vi.spyOn(doc, "removeEventListener");
+    buttonIn(panel.toolbar, "references-panel-batch-select-all").click();
+
+    const run = controller.batchImport.handleBatchImport(controller.body);
+    await vi.waitFor(() =>
+      expect(doc.querySelector(".zinspire-duplicate-dialog")).not.toBeNull(),
+    );
+    const [dialogListener] = added.mock.calls
+      .filter(([type]) => type === "keydown")
+      .map(([, listener]) => listener);
+    controller.destroy();
+
+    expect(await run).toBeNull();
+    expect(doc.querySelector(".zinspire-duplicate-dialog")).toBeNull();
+    expect(removed).toHaveBeenCalledWith("keydown", dialogListener);
+    expect(controller.promptForSaveTarget).not.toHaveBeenCalled();
+    expect(controller.importReference).not.toHaveBeenCalled();
   });
 
   it("exports the ticked rows, or every row when none is ticked", async () => {

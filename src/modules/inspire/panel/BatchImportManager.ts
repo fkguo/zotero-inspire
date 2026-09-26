@@ -90,6 +90,15 @@ export class BatchImportManager {
   private selectedEntryIDs = new Set<string>();
   private lastSelectedEntryID?: string; // For Shift+Click range selection
 
+  // Closes the duplicate dialog while it is open
+  private closeDuplicateDialog?: (
+    result: InspireReferenceEntry[] | null,
+  ) => void;
+  // Stops waiting for the duplicate search while it runs
+  private cancelDuplicateSearch?: () => void;
+  // Set once the panel has gone away
+  private disposed = false;
+
   // Import state
   private importAbort?: AbortController;
 
@@ -186,6 +195,18 @@ export class BatchImportManager {
   }
 
   /**
+   * Call when the panel goes away. An import that has not asked anything yet
+   * is cancelled, as is one whose duplicate dialog (part of the panel) is
+   * open; a save-target prompt already open is left to the user, and an
+   * import already running is left to finish.
+   */
+  dispose(): void {
+    this.disposed = true;
+    this.cancelDuplicateSearch?.();
+    this.closeDuplicateDialog?.(null);
+  }
+
+  /**
    * Handle batch import button click.
    * Returns the import result or null if cancelled.
    */
@@ -217,7 +238,25 @@ export class BatchImportManager {
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: detecting duplicates...`,
     );
-    const duplicates = await this.detectDuplicates(selectedEntries);
+    // If the panel goes away meanwhile, stop waiting for the search
+    let duplicates: Map<string, DuplicateInfo> | null;
+    try {
+      duplicates = await new Promise<Map<string, DuplicateInfo> | null>(
+        (resolve, reject) => {
+          this.cancelDuplicateSearch = () => resolve(null);
+          this.detectDuplicates(selectedEntries).then(resolve, reject);
+        },
+      );
+    } finally {
+      this.cancelDuplicateSearch = undefined;
+    }
+    // The panel went away during the search: ask nothing, import nothing
+    if (!duplicates || this.disposed) {
+      Zotero.debug(
+        `[${config.addonName}] handleBatchImport: the panel was closed during the duplicate search`,
+      );
+      return null;
+    }
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: duplicates.size=${duplicates.size}`,
     );
@@ -395,6 +434,19 @@ export class BatchImportManager {
         zIndex: "10000",
       });
 
+      // However the dialog closes, it also stops listening for Escape
+      const close = (result: InspireReferenceEntry[] | null) => {
+        this.closeDuplicateDialog = undefined;
+        overlay.remove();
+        doc.removeEventListener("keydown", escapeHandler);
+        resolve(result);
+      };
+      const escapeHandler = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          close(null);
+        }
+      };
+
       // Create content container
       const content = doc.createElement("div");
       content.className = "zinspire-duplicate-dialog__content";
@@ -549,10 +601,7 @@ export class BatchImportManager {
       const cancelBtn = createBtn(
         getString("references-panel-batch-duplicate-cancel"),
       );
-      cancelBtn.addEventListener("click", () => {
-        overlay.remove();
-        resolve(null);
-      });
+      cancelBtn.addEventListener("click", () => close(null));
       actions.appendChild(cancelBtn);
 
       // Confirm
@@ -569,8 +618,7 @@ export class BatchImportManager {
             result.push(entry);
           }
         }
-        overlay.remove();
-        resolve(result);
+        close(result);
       });
       actions.appendChild(confirmBtn);
 
@@ -581,20 +629,13 @@ export class BatchImportManager {
       // Close on overlay click
       overlay.addEventListener("click", (e) => {
         if (e.target === overlay) {
-          overlay.remove();
-          resolve(null);
+          close(null);
         }
       });
 
       // Close on Escape
-      const escapeHandler = (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-          overlay.remove();
-          resolve(null);
-          doc.removeEventListener("keydown", escapeHandler);
-        }
-      };
       doc.addEventListener("keydown", escapeHandler);
+      this.closeDuplicateDialog = close;
     });
   }
 

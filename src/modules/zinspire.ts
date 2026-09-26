@@ -8236,6 +8236,8 @@ export class InspireReferencePanelController {
     // FTR-CITATION-GRAPH: Cleanup citation graph dialog
     this.citationGraphDialog?.dispose();
     this.citationGraphDialog = undefined;
+    // FTR-BATCH-IMPORT: Close the duplicate dialog; a running import finishes
+    this.batchImport.dispose();
     this.allEntries = [];
     this.referencesCache.clear();
     this.citedByCache.clear();
