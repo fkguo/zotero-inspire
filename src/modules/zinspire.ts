@@ -102,7 +102,6 @@ import {
   RENDER_PAGE_SIZE_FILTERED,
   METADATA_BATCH_SIZE,
   LOCAL_STATUS_BATCH_SIZE,
-  HIGH_CITATIONS_THRESHOLD,
   SMALL_AUTHOR_GROUP_THRESHOLD,
   AUTHOR_NAME_MAX_LENGTH,
   CLIPBOARD_WARN_SIZE_BYTES,
@@ -113,6 +112,9 @@ import {
   QUICK_FILTER_CONFIGS,
   isQuickFilterType,
   type QuickFilterType,
+  // Quick Filter predicates
+  applyQuickFilters as entryPassesQuickFilters,
+  createDefaultFilterContext,
   // API Field Selection (FTR-API-FIELD-OPTIMIZATION)
   API_FIELDS_LIST_DISPLAY,
   buildFieldsParam,
@@ -6165,46 +6167,15 @@ export class InspireReferencePanelController {
     if (!this.quickFilters.size) {
       return entries;
     }
-    return entries.filter((entry) => this.matchesQuickFilters(entry));
-  }
-
-  private matchesQuickFilters(entry: InspireReferenceEntry): boolean {
-    if (!this.quickFilters.size) {
-      return true;
-    }
-
-    for (const filter of this.quickFilters) {
-      switch (filter) {
-        case "highCitations":
-          if (!this.matchesHighCitationsFilter(entry)) return false;
-          break;
-        case "recent5Years":
-          if (!this.matchesRecentYearsFilter(entry, 5)) return false;
-          break;
-        case "recent1Year":
-          if (!this.matchesRecentYearsFilter(entry, 1)) return false;
-          break;
-        case "publishedOnly":
-          if (!this.matchesPublishedOnlyFilter(entry)) return false;
-          break;
-        case "preprintOnly":
-          if (!this.matchesPreprintOnlyFilter(entry)) return false;
-          break;
-        case "relatedOnly":
-          if (!this.matchesRelatedOnlyFilter(entry)) return false;
-          break;
-        case "localItems":
-          if (!this.matchesLocalItemsFilter(entry)) return false;
-          break;
-        case "onlineItems":
-          if (!this.matchesOnlineItemsFilter(entry)) return false;
-          break;
-        default:
-          break;
-      }
-    }
-
-    return true;
+    // Use the shared predicates from inspire/filters.ts so every filter type
+    // behaves the same here as there; the panel supplies its own citation
+    // value (self-citation toggle).
+    const context = createDefaultFilterContext((entry) =>
+      this.getCitationValue(entry),
+    );
+    return entries.filter((entry) =>
+      entryPassesQuickFilters(entry, this.quickFilters, context),
+    );
   }
 
   private enableTextSelection() {
@@ -8255,43 +8226,6 @@ export class InspireReferencePanelController {
     return authorCount > 0 && authorCount <= SMALL_AUTHOR_GROUP_THRESHOLD;
   }
 
-  private matchesHighCitationsFilter(entry: InspireReferenceEntry): boolean {
-    const citationCount = this.getCitationValue(entry);
-    return citationCount > HIGH_CITATIONS_THRESHOLD;
-  }
-
-  private matchesRecentYearsFilter(
-    entry: InspireReferenceEntry,
-    years: number,
-  ): boolean {
-    const normalizedYears = Math.max(1, years);
-    const currentYear = new Date().getFullYear();
-    const thresholdYear = currentYear - (normalizedYears - 1);
-    const entryYear = Number.parseInt(entry.year ?? "", 10);
-    if (Number.isNaN(entryYear)) {
-      return false;
-    }
-    return entryYear >= thresholdYear;
-  }
-
-  private matchesPreprintOnlyFilter(entry: InspireReferenceEntry): boolean {
-    return (
-      this.hasArxivIdentifier(entry) && !this.matchesPublishedOnlyFilter(entry)
-    );
-  }
-
-  private matchesRelatedOnlyFilter(entry: InspireReferenceEntry): boolean {
-    return entry.isRelated === true;
-  }
-
-  private matchesLocalItemsFilter(entry: InspireReferenceEntry): boolean {
-    return typeof entry.localItemID === "number" && entry.localItemID > 0;
-  }
-
-  private matchesOnlineItemsFilter(entry: InspireReferenceEntry): boolean {
-    return typeof entry.localItemID !== "number" || entry.localItemID <= 0;
-  }
-
   /**
    * Check if entry has journal information (formally published).
    * Returns true if the paper has journal_title or journal_title_abbrev.
@@ -8300,30 +8234,6 @@ export class InspireReferencePanelController {
   private matchesPublishedOnlyFilter(entry: InspireReferenceEntry): boolean {
     const info = entry.publicationInfo;
     return !!(info?.journal_title || info?.journal_title_abbrev);
-  }
-
-  private hasArxivIdentifier(entry: InspireReferenceEntry): boolean {
-    if (!entry.arxivDetails) {
-      return false;
-    }
-    if (typeof entry.arxivDetails === "string") {
-      return entry.arxivDetails.trim().length > 0;
-    }
-    if (typeof entry.arxivDetails === "object") {
-      if (
-        typeof entry.arxivDetails.id === "string" &&
-        entry.arxivDetails.id.trim()
-      ) {
-        return true;
-      }
-      if (
-        Array.isArray(entry.arxivDetails.categories) &&
-        entry.arxivDetails.categories.length
-      ) {
-        return true;
-      }
-    }
-    return false;
   }
 
   destroy() {
