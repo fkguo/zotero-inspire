@@ -45,6 +45,8 @@ function createController(entries: InspireReferenceEntry[]) {
   Object.assign(controller, {
     body: doc.createElement("div"),
     chartSvgWrapper: doc.createElement("div"),
+    chartStatsTopLine: doc.createElement("div"),
+    chartStatsBottomLine: doc.createElement("div"),
     chartCollapsed: false,
     chartViewMode: "year",
     chartSelectionMode: "year",
@@ -71,7 +73,8 @@ function drawnKeys(controller: any): string[] {
   );
 }
 
-function clickBar(controller: any, key: string, init: MouseEventInit = {}) {
+// Click a bar on screen without running the chart redraw that follows.
+function pressBar(controller: any, key: string, init: MouseEventInit = {}) {
   const bar = controller.chartSvgWrapper.querySelector(
     `.zinspire-chart-bar-group[data-key="${key}"] rect`,
   ) as Element | null;
@@ -81,6 +84,10 @@ function clickBar(controller: any, key: string, init: MouseEventInit = {}) {
   expect(controller.renderReferenceList).toHaveBeenCalledTimes(
     listRefreshes + 1,
   );
+}
+
+function clickBar(controller: any, key: string, init: MouseEventInit = {}) {
+  pressBar(controller, key, init);
   // Run the deferred chart redraw that follows the list refresh.
   vi.runAllTimers();
 }
@@ -91,14 +98,26 @@ function listedIDs(controller: any): string[] {
     .map((e: InspireReferenceEntry) => e.id);
 }
 
+function headerSummary(controller: any): string[] {
+  return [
+    controller.chartStatsTopLine.textContent,
+    controller.chartStatsBottomLine.textContent,
+  ];
+}
+
 describe("References panel chart filter", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    (globalThis as any).Zotero = { debug: vi.fn() };
+    (globalThis as any).addon = { data: {} };
+    (globalThis as any).Zotero = {
+      debug: vi.fn(),
+      Prefs: { get: vi.fn(), set: vi.fn() },
+    };
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    delete (globalThis as any).addon;
     delete (globalThis as any).Zotero;
   });
 
@@ -138,21 +157,112 @@ describe("References panel chart filter", () => {
     expect(listedIDs(controller)).toEqual(["uncited", "few", "some"]);
   });
 
-  it("keeps filtering by the citation bar after a quick filter clears the cached bins", () => {
+  it("keeps the citation bar and shift-click ranges working right after a quick filter change", () => {
     const controller = createController([
       entry("uncited"),
       entry("uncitedLocal", { localItemID: 7 }),
       entry("few", { citationCount: 3 }),
+      entry("some", { citationCount: 30 }),
     ]);
     controller.renderChartImmediate();
     clickBar(controller, "0");
     expect(listedIDs(controller)).toEqual(["uncited", "uncitedLocal"]);
 
-    // The list refreshes before the deferred chart redraw caches the bins again.
+    // The list refreshes at once; the chart is redrawn only afterwards.
     controller.setQuickFilterState("onlineItems", true, { skipPersist: true });
-
-    expect(controller.cachedChartStats).toBeUndefined();
     expect(listedIDs(controller)).toEqual(["uncited"]);
+
+    // Shift-click a bar still on screen, before that redraw.
+    clickBar(controller, "10-49", { shiftKey: true });
+
+    expect(Array.from(controller.chartSelectedBins)).toEqual([
+      "0",
+      "1-9",
+      "10-49",
+    ]);
+    expect(listedIDs(controller)).toEqual(["uncited", "few", "some"]);
+  });
+
+  it("shift-click ranges follow the bars still on screen after all filters are cleared", () => {
+    const controller = createController([
+      entry("uncited"),
+      entry("few", { citationCount: 3 }),
+      entry("some", { citationCount: 30 }),
+    ]);
+    controller.renderChartImmediate();
+    controller.setQuickFilterState("onlineItems", true, { skipPersist: true });
+    vi.runAllTimers();
+
+    controller.clearAllFilters();
+    // Both clicks land before the deferred chart redraw.
+    pressBar(controller, "0", { shiftKey: true });
+    pressBar(controller, "10-49", { shiftKey: true });
+
+    expect(Array.from(controller.chartSelectedBins)).toEqual([
+      "0",
+      "1-9",
+      "10-49",
+    ]);
+    expect(listedIDs(controller)).toEqual(["uncited", "few", "some"]);
+  });
+
+  it("starts a new shift-click range after the view is switched", () => {
+    const controller = createController([
+      entry("uncited"),
+      entry("few", { citationCount: 3 }),
+      entry("some", { citationCount: 30 }),
+    ]);
+    controller.renderChartImmediate();
+    clickBar(controller, "0");
+
+    controller.toggleChartView("citation");
+    vi.runAllTimers();
+    expect(drawnKeys(controller)).toEqual(CITATION_KEYS);
+    clickBar(controller, "10-49", { shiftKey: true });
+
+    expect(Array.from(controller.chartSelectedBins)).toEqual(["10-49"]);
+    expect(listedIDs(controller)).toEqual(["some"]);
+  });
+
+  it("summarises the bins that were drawn in the chart header", () => {
+    const controller = createController([
+      entry("uncited", { searchText: "undated" }),
+      entry("few", { citationCount: 3, searchText: "undated" }),
+      entry("cited2020", {
+        year: "2020",
+        citationCount: 7,
+        searchText: "published",
+      }),
+    ]);
+    controller.filterText = "undated";
+    controller.renderChartImmediate();
+    expect(drawnKeys(controller)).toEqual(CITATION_KEYS);
+    expect(headerSummary(controller)).toEqual(["3 citations", "h=1 · avg 1.5"]);
+
+    controller.filterText = "";
+    controller.renderChartImmediate();
+    expect(drawnKeys(controller)).toEqual(["2020"]);
+    expect(headerSummary(controller)).toEqual(["3 papers", ""]);
+  });
+
+  it("clears the chart header summary while no bars are drawn", () => {
+    const controller = createController([
+      entry("uncited"),
+      entry("few", { citationCount: 3 }),
+    ]);
+    controller.renderChartImmediate();
+    expect(headerSummary(controller)).toEqual(["3 citations", "h=1 · avg 1.5"]);
+
+    controller.renderChartLoading();
+    expect(headerSummary(controller)).toEqual(["", ""]);
+
+    controller.renderChartImmediate();
+    expect(headerSummary(controller)).toEqual(["3 citations", "h=1 · avg 1.5"]);
+    // No entry is in the local library, so this quick filter leaves none.
+    controller.setQuickFilterState("localItems", true, { skipPersist: true });
+    vi.runAllTimers();
+    expect(drawnKeys(controller)).toEqual([]);
+    expect(headerSummary(controller)).toEqual(["", ""]);
   });
 
   it("keeps a citation selection when year bins are drawn again, until a year bar is clicked", () => {

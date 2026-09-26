@@ -1739,7 +1739,6 @@ export class InspireReferencePanelController {
   // citation bins when no entry has a usable year
   private chartSelectionMode: "year" | "citation" = "year";
   private lastChartClickedKey?: string;
-  private cachedChartStats?: { mode: string; stats: ChartBin[] };
   // ResizeObserver for dynamic chart re-rendering on width change
   private chartResizeObserver?: ResizeObserver;
   private chartResizeFrame?: { cancel: (id: number) => void; id: number };
@@ -5734,7 +5733,6 @@ export class InspireReferencePanelController {
     this.updateQuickFiltersButtonState();
     this.updatePublishedOnlyButtonStyle();
     this.updateQuickFilterCheckboxStates();
-    this.cachedChartStats = undefined;
     this.updateChartClearButton();
 
     if (!options?.suppressRender) {
@@ -5827,7 +5825,6 @@ export class InspireReferencePanelController {
     if (this.chartSelectedBins.size > 0) {
       this.chartSelectedBins.clear();
       this.lastChartClickedKey = undefined;
-      this.cachedChartStats = undefined;
       didChange = true;
     }
 
@@ -5844,7 +5841,6 @@ export class InspireReferencePanelController {
       this.updateQuickFiltersButtonState();
       this.updateQuickFilterCheckboxStates();
       this.updatePublishedOnlyButtonStyle();
-      this.cachedChartStats = undefined;
       didChange = true;
     }
 
@@ -7369,7 +7365,6 @@ export class InspireReferencePanelController {
     if (this.chartViewMode === mode) return;
     this.chartViewMode = mode;
     this.chartSelectedBins.clear(); // Clear selection when switching views
-    this.cachedChartStats = undefined; // Invalidate cache
 
     // Update button states with inline styles (dark mode aware)
     if (this.chartContainer) {
@@ -7446,7 +7441,6 @@ export class InspireReferencePanelController {
         // Clear chart data to avoid hidden filters affecting list rendering
         this.chartSvgWrapper.textContent = "";
         this.chartSelectedBins.clear();
-        this.cachedChartStats = undefined;
         this.lastChartClickedKey = undefined;
         this.chartNeedsRefresh = true;
         this.clearChartStatsDisplay();
@@ -7681,6 +7675,7 @@ export class InspireReferencePanelController {
       this.chartRenderTimer = undefined;
     }
     this.chartSvgWrapper.textContent = "";
+    this.clearChartStatsDisplay();
     const loadingMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
     loadingMsg.className = "zinspire-chart-no-data";
     loadingMsg.style.cssText = toStyleString(getChartNoDataItalicStyle());
@@ -7766,6 +7761,7 @@ export class InspireReferencePanelController {
       skipChartFilter: true,
     });
     if (!entries.length) {
+      this.clearChartStatsDisplay();
       const noDataMsg = this.chartSvgWrapper.ownerDocument.createElement("div");
       noDataMsg.className = "zinspire-chart-no-data";
       noDataMsg.style.cssText = toStyleString(getChartNoDataStyle());
@@ -7827,11 +7823,8 @@ export class InspireReferencePanelController {
       return;
     }
 
-    // Cache stats
-    this.cachedChartStats = { mode: binMode, stats };
-
     // Update stats display in header
-    this.updateChartStatsDisplay(entries);
+    this.updateChartStatsDisplay(entries, binMode);
 
     // Create SVG - use actual pixel dimensions, no viewBox scaling
     const SVG_NS = "http://www.w3.org/2000/svg";
@@ -7974,7 +7967,7 @@ export class InspireReferencePanelController {
       if (group) {
         const key = (group as HTMLElement).dataset.key;
         if (key) {
-          this.handleChartBarClick(key, event, binMode);
+          this.handleChartBarClick(key, event, binMode, stats);
         }
       }
     });
@@ -7989,6 +7982,7 @@ export class InspireReferencePanelController {
     key: string,
     event: MouseEvent,
     binMode: "year" | "citation",
+    stats: ChartBin[],
   ) {
     // Keys from the other kind of bins mean nothing here: start a new selection
     if (binMode !== this.chartSelectionMode) {
@@ -8000,7 +7994,7 @@ export class InspireReferencePanelController {
     const isRangeSelect = event.shiftKey;
     const isMultiSelect = event.ctrlKey || event.metaKey;
     const handledRange =
-      isRangeSelect && this.applyShiftChartSelection(key, isMultiSelect);
+      isRangeSelect && this.applyShiftChartSelection(key, isMultiSelect, stats);
 
     if (!handledRange) {
       if (isMultiSelect) {
@@ -8029,14 +8023,17 @@ export class InspireReferencePanelController {
     this.renderReferenceList();
   }
 
-  private applyShiftChartSelection(key: string, additive: boolean): boolean {
-    const stats = this.cachedChartStats?.stats;
-    if (!stats?.length) {
-      return false;
-    }
-
+  // `stats` are the bins of the chart that was clicked, so a range always
+  // matches the bars on screen, even before a pending redraw.
+  private applyShiftChartSelection(
+    key: string,
+    additive: boolean,
+    stats: ChartBin[],
+  ): boolean {
+    // Extend from the last clicked bar only while some bar is still selected:
+    // view switches and new data clear the selection but not that bar
     const rangeKeys = this.getChartRangeKeys(
-      this.lastChartClickedKey,
+      this.chartSelectedBins.size ? this.lastChartClickedKey : undefined,
       key,
       stats,
     );
@@ -8091,11 +8088,14 @@ export class InspireReferencePanelController {
   }
 
   /**
-   * Update the stats display in chart header.
-   * - By Year mode: shows total paper count (single line)
-   * - By Citations mode: shows total citations on line 1, h-index and avg on line 2
+   * Update the stats display in chart header, following the bins drawn.
+   * - Year bins: shows total paper count (single line)
+   * - Citation bins: shows total citations on line 1, h-index and avg on line 2
    */
-  private updateChartStatsDisplay(entries: InspireReferenceEntry[]) {
+  private updateChartStatsDisplay(
+    entries: InspireReferenceEntry[],
+    binMode: "year" | "citation",
+  ) {
     const topLine = this.chartStatsTopLine;
     const bottomLine = this.chartStatsBottomLine;
     if (!topLine) return;
@@ -8105,7 +8105,7 @@ export class InspireReferencePanelController {
       bottomLine.textContent = "";
     }
 
-    if (this.chartViewMode === "year") {
+    if (binMode === "year") {
       // Show total paper count (single line)
       const totalPapers = entries.length;
       topLine.textContent = `${totalPapers.toLocaleString()} ${totalPapers === 1 ? "paper" : "papers"}`;
@@ -8304,7 +8304,6 @@ export class InspireReferencePanelController {
     this.removeThemeChangeListener();
     // Clear chart state
     this.chartSelectedBins.clear();
-    this.cachedChartStats = undefined;
     this.chartContainer = undefined;
     this.chartSvgWrapper = undefined;
     // Clear rate limiter subscription
@@ -8658,7 +8657,6 @@ export class InspireReferencePanelController {
     this.entryRenderer?.clearCache();
     this.totalApiCount = null;
     this.chartSelectedBins.clear(); // Clear chart selection on refresh
-    this.cachedChartStats = undefined; // Invalidate chart cache
     this.renderChartLoading(); // Show loading state in chart
     this.renderMessage(this.getLoadingMessageForMode(this.viewMode));
 
@@ -9915,7 +9913,6 @@ export class InspireReferencePanelController {
           this.allEntries = [];
           this.totalApiCount = null; // Reset API count for new item
           this.chartSelectedBins.clear(); // Clear chart selection
-          this.cachedChartStats = undefined; // Invalidate chart cache
           // Clear filter state for new item to avoid incorrect filtering
           this.filterText = "";
           if (this.filterInput) {
@@ -13159,7 +13156,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         // Clear chart and show prompt message
         this.allEntries = [];
         this.chartSelectedBins.clear();
-        this.cachedChartStats = undefined;
         this.chartNeedsRefresh = true;
         this.chartNeedsRefresh = true;
         this.lastRenderedEntries = [];
@@ -13179,7 +13175,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.allEntries = cached;
         this.totalApiCount = null;
         this.chartSelectedBins.clear();
-        this.cachedChartStats = undefined;
         this.renderChartImmediate(); // Use immediate render for cache hit
         this.renderReferenceList({ preserveScroll: false });
         return;
@@ -13238,7 +13233,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       this.totalApiCount = null;
       // Clear chart selection and render chart for new data
       this.chartSelectedBins.clear();
-      this.cachedChartStats = undefined;
       this.lastRenderedEntries = [];
       this.chartNeedsRefresh = true;
       this.lastRenderedEntries = [];
