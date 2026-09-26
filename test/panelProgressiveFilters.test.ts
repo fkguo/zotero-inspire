@@ -115,6 +115,7 @@ function createController(): any {
     // List filters, all off
     filterText: "",
     chartViewMode: "year",
+    chartSelectionMode: "year",
     chartSelectedBins: new Set<string>(),
     authorFilterEnabled: false,
     publishedOnlyFilterEnabled: false,
