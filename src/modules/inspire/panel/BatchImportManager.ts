@@ -73,6 +73,11 @@ export interface BatchImportManagerOptions {
   updateRowStatus: (entry: InspireReferenceEntry) => void;
   /** Callback when batch toolbar visibility should be updated */
   onSelectionChange?: (count: number) => void;
+  /**
+   * Callback when a batch import in any panel starts (true) and when it is
+   * over (false), its duplicate dialog and save-target prompt included
+   */
+  onImportStateChange?: (inProgress: boolean) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,17 +89,32 @@ export interface BatchImportManagerOptions {
  * Handles selection, duplicate detection, and batch import with progress.
  */
 export class BatchImportManager {
+  // One batch import at a time across all references panels: set from the
+  // Import click until that import is over, and announced to every open panel
+  private static importInProgress = false;
+  private static openManagers = new Set<BatchImportManager>();
+
   private options: BatchImportManagerOptions;
 
   // Selection state
   private selectedEntryIDs = new Set<string>();
   private lastSelectedEntryID?: string; // For Shift+Click range selection
 
+  // Closes the duplicate dialog while it is open
+  private closeDuplicateDialog?: (
+    result: InspireReferenceEntry[] | null,
+  ) => void;
+  // Stops waiting for the duplicate search while it runs
+  private cancelDuplicateSearch?: () => void;
+  // Set once the panel has gone away
+  private disposed = false;
+
   // Import state
   private importAbort?: AbortController;
 
   constructor(options: BatchImportManagerOptions) {
     this.options = options;
+    BatchImportManager.openManagers.add(this);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -122,8 +142,9 @@ export class BatchImportManager {
       `[${config.addonName}] handleCheckboxClick: isChecked=${isChecked}`,
     );
 
+    // Shift+Click: the rows in view from the last clicked row to this one
+    let range: InspireReferenceEntry[] | undefined;
     if (event.shiftKey && this.lastSelectedEntryID) {
-      // Shift+Click: select range
       const filteredEntries = this.options.getFilteredEntries();
       const lastIndex = filteredEntries.findIndex(
         (e) => e.id === this.lastSelectedEntryID,
@@ -131,22 +152,26 @@ export class BatchImportManager {
       const currentIndex = filteredEntries.findIndex((e) => e.id === entry.id);
 
       if (lastIndex >= 0 && currentIndex >= 0) {
-        const start = Math.min(lastIndex, currentIndex);
-        const end = Math.max(lastIndex, currentIndex);
-
-        for (let i = start; i <= end; i++) {
-          const e = filteredEntries[i];
-          if (isChecked) {
-            this.selectedEntryIDs.add(e.id);
-          } else {
-            this.selectedEntryIDs.delete(e.id);
-          }
-        }
-
-        this.updateAllCheckboxes();
+        range = filteredEntries.slice(
+          Math.min(lastIndex, currentIndex),
+          Math.max(lastIndex, currentIndex) + 1,
+        );
       }
+    }
+
+    if (range) {
+      for (const e of range) {
+        if (isChecked) {
+          this.selectedEntryIDs.add(e.id);
+        } else {
+          this.selectedEntryIDs.delete(e.id);
+        }
+      }
+
+      this.updateAllCheckboxes();
     } else {
-      // Regular click: toggle single item
+      // Regular click, or Shift+Click when the last clicked row is no longer
+      // in view (e.g. filtered out): toggle this row alone
       if (isChecked) {
         this.selectedEntryIDs.add(entry.id);
       } else {
@@ -181,12 +206,39 @@ export class BatchImportManager {
   }
 
   /**
+   * Call when the panel goes away. An import that has not asked anything yet
+   * is cancelled, as is one whose duplicate dialog (part of the panel) is
+   * open; a save-target prompt already open is left to the user, and an
+   * import already running is left to finish.
+   */
+  dispose(): void {
+    this.disposed = true;
+    BatchImportManager.openManagers.delete(this);
+    this.cancelDuplicateSearch?.();
+    this.closeDuplicateDialog?.(null);
+  }
+
+  /**
+   * Whether a batch import is under way, in this panel or another.
+   */
+  isImportInProgress(): boolean {
+    return BatchImportManager.importInProgress;
+  }
+
+  /**
    * Handle batch import button click.
-   * Returns the import result or null if cancelled.
+   * Returns the import result, or null if cancelled or if a batch import is
+   * already under way (in any panel).
    */
   async handleBatchImport(
     anchor: HTMLElement,
   ): Promise<BatchImportResult | null> {
+    if (BatchImportManager.importInProgress) {
+      Zotero.debug(
+        `[${config.addonName}] handleBatchImport: an import is already in progress`,
+      );
+      return null;
+    }
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: started, selectedEntryIDs.size=${this.selectedEntryIDs.size}`,
     );
@@ -208,11 +260,49 @@ export class BatchImportManager {
       return null;
     }
 
+    try {
+      BatchImportManager.setImportInProgress(true);
+      return await this.importSelectedEntries(selectedEntries, anchor);
+    } finally {
+      BatchImportManager.setImportInProgress(false);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Private: Import Flow
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Check the selected entries for duplicates, ask for the save target, and
+   * import. Returns the import result or null if cancelled.
+   */
+  private async importSelectedEntries(
+    selectedEntries: InspireReferenceEntry[],
+    anchor: HTMLElement,
+  ): Promise<BatchImportResult | null> {
     // Detect duplicates
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: detecting duplicates...`,
     );
-    const duplicates = await this.detectDuplicates(selectedEntries);
+    // If the panel goes away meanwhile, stop waiting for the search
+    let duplicates: Map<string, DuplicateInfo> | null;
+    try {
+      duplicates = await new Promise<Map<string, DuplicateInfo> | null>(
+        (resolve, reject) => {
+          this.cancelDuplicateSearch = () => resolve(null);
+          this.detectDuplicates(selectedEntries).then(resolve, reject);
+        },
+      );
+    } finally {
+      this.cancelDuplicateSearch = undefined;
+    }
+    // The panel went away during the search: ask nothing, import nothing
+    if (!duplicates || this.disposed) {
+      Zotero.debug(
+        `[${config.addonName}] handleBatchImport: the panel was closed during the duplicate search`,
+      );
+      return null;
+    }
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: duplicates.size=${duplicates.size}`,
     );
@@ -390,6 +480,19 @@ export class BatchImportManager {
         zIndex: "10000",
       });
 
+      // However the dialog closes, it also stops listening for Escape
+      const close = (result: InspireReferenceEntry[] | null) => {
+        this.closeDuplicateDialog = undefined;
+        overlay.remove();
+        doc.removeEventListener("keydown", escapeHandler);
+        resolve(result);
+      };
+      const escapeHandler = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          close(null);
+        }
+      };
+
       // Create content container
       const content = doc.createElement("div");
       content.className = "zinspire-duplicate-dialog__content";
@@ -544,10 +647,7 @@ export class BatchImportManager {
       const cancelBtn = createBtn(
         getString("references-panel-batch-duplicate-cancel"),
       );
-      cancelBtn.addEventListener("click", () => {
-        overlay.remove();
-        resolve(null);
-      });
+      cancelBtn.addEventListener("click", () => close(null));
       actions.appendChild(cancelBtn);
 
       // Confirm
@@ -564,8 +664,7 @@ export class BatchImportManager {
             result.push(entry);
           }
         }
-        overlay.remove();
-        resolve(result);
+        close(result);
       });
       actions.appendChild(confirmBtn);
 
@@ -576,20 +675,13 @@ export class BatchImportManager {
       // Close on overlay click
       overlay.addEventListener("click", (e) => {
         if (e.target === overlay) {
-          overlay.remove();
-          resolve(null);
+          close(null);
         }
       });
 
       // Close on Escape
-      const escapeHandler = (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-          overlay.remove();
-          resolve(null);
-          doc.removeEventListener("keydown", escapeHandler);
-        }
-      };
       doc.addEventListener("keydown", escapeHandler);
+      this.closeDuplicateDialog = close;
     });
   }
 
@@ -740,5 +832,23 @@ export class BatchImportManager {
    */
   private notifySelectionChange(): void {
     this.options.onSelectionChange?.(this.selectedEntryIDs.size);
+  }
+
+  /**
+   * Record whether a batch import is under way and tell every open panel. A
+   * panel that fails to update (its window may be gone) does not stop the
+   * others.
+   */
+  private static setImportInProgress(inProgress: boolean): void {
+    BatchImportManager.importInProgress = inProgress;
+    for (const manager of BatchImportManager.openManagers) {
+      try {
+        manager.options.onImportStateChange?.(inProgress);
+      } catch (err) {
+        Zotero.debug(
+          `[${config.addonName}] onImportStateChange failed: ${err}`,
+        );
+      }
+    }
   }
 }

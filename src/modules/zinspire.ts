@@ -8271,6 +8271,8 @@ export class InspireReferencePanelController {
     // FTR-CITATION-GRAPH: Cleanup citation graph dialog
     this.citationGraphDialog?.dispose();
     this.citationGraphDialog = undefined;
+    // FTR-BATCH-IMPORT: Close the duplicate dialog; a running import finishes
+    this.batchImport.dispose();
     this.allEntries = [];
     this.referencesCache.clear();
     this.citedByCache.clear();
@@ -12389,6 +12391,17 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.cleanupEventDelegation();
     const doc = this.listEl.ownerDocument;
     const oldListEl = this.listEl;
+    // FTR-KEYBOARD-NAV-FULL: Replacing the list drops its DOM focus. If the
+    // list itself had the focus, give it to the new list once it is drawn;
+    // leave the focus alone otherwise, so that a redraw while the user types
+    // in the filter box (or any other field) does not take it away, and the
+    // list does not take it from a checkbox or button in a row.
+    const listHadFocus = doc.activeElement === oldListEl;
+    const restoreFocus = () => {
+      if (listHadFocus) {
+        this.listEl.focus({ preventScroll: true });
+      }
+    };
     const newListEl = doc.createElement("div");
     newListEl.className = oldListEl.className;
     if (oldListEl.id) newListEl.id = oldListEl.id;
@@ -12432,6 +12445,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (!this.allEntries.length) {
       this.renderMessage(this.getEmptyMessageForMode(this.viewMode));
       restoreScroll();
+      restoreFocus();
       return;
     }
 
@@ -12528,11 +12542,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     restoreScroll();
 
-    // FTR-KEYBOARD-NAV-FULL: Restore DOM focus to listEl if there's a focused entry
-    // This is needed because rendering replaces listEl, losing the DOM focus
-    if (this.focusedEntryID) {
-      this.listEl.focus({ preventScroll: true });
-    }
+    // FTR-KEYBOARD-NAV-FULL: Give the redrawn list the focus it had (see above)
+    restoreFocus();
 
     if (
       InspireReferencePanelController.PANEL_LAYOUT_DEBUG &&
@@ -18441,6 +18452,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       showToast: (message) => this.showToast(message),
       updateRowStatus: (entry) => this.updateRowStatus(entry),
       onSelectionChange: (count) => this.updateBatchToolbarVisibility(count),
+      // One batch import at a time, across panels: Import waits for it
+      onImportStateChange: (inProgress) => {
+        if (this.batchImportButton) {
+          this.batchImportButton.disabled = inProgress;
+        }
+      },
     };
   }
 
@@ -18486,6 +18503,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.batchImportButton.textContent = getString(
       "references-panel-batch-import",
     );
+    // A batch import may already be running in another panel
+    this.batchImportButton.disabled = this.batchImport.isImportInProgress();
     this.batchImportButton.addEventListener("click", () => {
       Zotero.debug(`[${config.addonName}] Import button clicked`);
       const anchor = this.batchImportButton || this.body;
@@ -18520,9 +18539,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           "references-panel-batch-selected",
           { args: { count } },
         );
-      }
-      if (this.batchImportButton) {
-        this.batchImportButton.disabled = false;
       }
     } else {
       this.batchToolbar.style.display = "none";
