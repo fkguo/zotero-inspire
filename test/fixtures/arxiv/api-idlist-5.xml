@@ -1,0 +1,150 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/HsyPbE6U+MdX0S7ih+vqlYIW590</id>
+  <title>arXiv Query: search_query=&amp;id_list=1706.03762,1801.00862,2103.00001,2609.28534,2502.20357&amp;start=0&amp;max_results=10</title>
+  <updated>2026-09-26T04:32:09Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=&amp;start=0&amp;max_results=10&amp;id_list=1706.03762,1801.00862,2103.00001,2609.28534,2502.20357" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>10</opensearch:itemsPerPage>
+  <opensearch:totalResults>5</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/1706.03762v7</id>
+    <title>Attention Is All You Need</title>
+    <updated>2023-08-02T00:41:18Z</updated>
+    <link href="https://arxiv.org/abs/1706.03762v7" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/1706.03762v7" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English-to-German translation task, improving over the existing best results, including ensembles by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2017-06-12T17:57:34Z</published>
+    <arxiv:comment>15 pages, 5 figures</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Ashish Vaswani</name>
+    </author>
+    <author>
+      <name>Noam Shazeer</name>
+    </author>
+    <author>
+      <name>Niki Parmar</name>
+    </author>
+    <author>
+      <name>Jakob Uszkoreit</name>
+    </author>
+    <author>
+      <name>Llion Jones</name>
+    </author>
+    <author>
+      <name>Aidan N. Gomez</name>
+    </author>
+    <author>
+      <name>Lukasz Kaiser</name>
+    </author>
+    <author>
+      <name>Illia Polosukhin</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2103.00001v3</id>
+    <title>Three-dimensional Coherent X-ray Diffraction Imaging via Deep Convolutional Neural Networks</title>
+    <updated>2021-10-19T18:50:02Z</updated>
+    <link href="https://arxiv.org/abs/2103.00001v3" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2103.00001v3" rel="related" type="application/pdf" title="pdf"/>
+    <summary>As a critical component of coherent X-ray diffraction imaging (CDI), phase retrieval has been extensively applied in X-ray structural science to recover the 3D morphological information inside measured particles. Despite meeting all the oversampling requirements of Sayre and Shannon, current phase retrieval approaches still have trouble achieving a unique inversion of experimental data in the presence of noise. Here, we propose to overcome this limitation by incorporating a 3D Machine Learning (ML) model combining (optional) supervised learning with transfer learning. The trained ML model can rapidly provide an immediate result with high accuracy which could benefit real-time experiments, and the predicted result can be further refined with transfer learning. More significantly, the proposed ML model can be used without any prior training to learn the missing phases of an image based on minimization of an appropriate 'loss function' alone. We demonstrate significantly improved performance with experimental Bragg CDI data over traditional iterative phase retrieval algorithms.</summary>
+    <category term="eess.IV" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cond-mat.dis-nn" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cond-mat.mtrl-sci" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="physics.app-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2021-02-26T21:47:14Z</published>
+    <arxiv:primary_category term="eess.IV"/>
+    <arxiv:journal_ref>npj Comput Mater 7, 175 (2021)</arxiv:journal_ref>
+    <author>
+      <name>Longlong Wu</name>
+    </author>
+    <author>
+      <name>Shinjae Yoo</name>
+    </author>
+    <author>
+      <name>Ana F. Suzana</name>
+    </author>
+    <author>
+      <name>Tadesse A. Assefa</name>
+    </author>
+    <author>
+      <name>Jiecheng Diao</name>
+    </author>
+    <author>
+      <name>Ross J. Harder</name>
+    </author>
+    <author>
+      <name>Wonsuk Cha</name>
+    </author>
+    <author>
+      <name>Ian K. Robinson</name>
+    </author>
+    <arxiv:doi>10.1038/s41524-021-00644-z</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1038/s41524-021-00644-z" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2502.20357v2</id>
+    <title>Phenomenology of the Higgs sector from Reduction of Couplings in the Type-II 2HDM</title>
+    <updated>2026-09-24T07:35:02Z</updated>
+    <link href="https://arxiv.org/abs/2502.20357v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2502.20357v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The idea of reduction of couplings provides a systematic procedure to search for relations among seemingly unrelated parameters of a renormalizable theory. As a consequence, such reduced theories exhibit more constrained parameter spaces. Motivated by this, in this work we perform a precise phenomenological analysis of the Higgs sector of a version of the Type-II 2HDM on which the idea of reduction of couplings has been applied. We compute Higgs boson masses and decay widths and confront them with current experimental measurements. Compared to the previous study, apart from the inclusion of actual experimental constraints on production and decay rates of Higgs bosons, we also include all model parameters in the RGE running as well as one- and two-loop threshold corrections and two-loop RGE running from the high scale. Furthermore, Higgs boson masses are now computed at the one-loop level. Top quark mass, which is an important prediction of the reduction framework, is now evaluated including previously missing sub-leading one-loop contributions, with an addition of up to four-loop pure-QCD corrections.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-02-27T18:30:25Z</published>
+    <arxiv:comment>10 pages, 2 figures</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <arxiv:journal_ref>Eur. Phys. J. C 86, 986 (2026)</arxiv:journal_ref>
+    <author>
+      <name>Wojciech Kotlarski</name>
+    </author>
+    <author>
+      <name>Gregory Patellis</name>
+    </author>
+    <arxiv:doi>10.1140/epjc/s10052-026-15993-6</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1140/epjc/s10052-026-15993-6" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/1801.00862v3</id>
+    <title>Quantum Computing in the NISQ era and beyond</title>
+    <updated>2018-07-31T21:46:33Z</updated>
+    <link href="https://arxiv.org/abs/1801.00862v3" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/1801.00862v3" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Noisy Intermediate-Scale Quantum (NISQ) technology will be available in the near future. Quantum computers with 50-100 qubits may be able to perform tasks which surpass the capabilities of today's classical digital computers, but noise in quantum gates will limit the size of quantum circuits that can be executed reliably. NISQ devices will be useful tools for exploring many-body quantum physics, and may have other useful applications, but the 100-qubit quantum computer will not change the world right away --- we should regard it as a significant step toward the more powerful quantum technologies of the future. Quantum technologists should continue to strive for more accurate quantum gates and, eventually, fully fault-tolerant quantum computing.</summary>
+    <category term="quant-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cond-mat.str-el" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2018-01-02T23:43:08Z</published>
+    <arxiv:comment>20 pages. Based on a Keynote Address at Quantum Computing for Business, 5 December 2017. (v3) Formatted for publication in Quantum, minor revisions</arxiv:comment>
+    <arxiv:primary_category term="quant-ph"/>
+    <arxiv:journal_ref>Quantum 2, 79 (2018)</arxiv:journal_ref>
+    <author>
+      <name>John Preskill</name>
+    </author>
+    <arxiv:doi>10.22331/q-2018-08-06-79</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.22331/q-2018-08-06-79" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28534v1</id>
+    <title>A weak Hellinger inequality for noisy Boolean channels</title>
+    <updated>2026-09-22T19:50:58Z</updated>
+    <link href="https://arxiv.org/abs/2609.28534v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28534v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>A weak form of the Hellinger conjecture of Anantharam, Bogdanov, Chakrabarti, Jayram, and Nair for the binary symmetric channel is proved: dictator functions maximize Hellinger $Φ$-entropy among all Boolean functions of the input and all one-bit statistics of the output of a noisy channel. The technical heart of the matter is an explicit inequality in three real parameters, which is proved using explicit polynomial approximations and computer-assisted positivity checks. The results are also formally verified in Lean 4.</summary>
+    <category term="cs.IT" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="math.CO" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-22T19:50:58Z</published>
+    <arxiv:comment>19 pages; associated formalization available at https://github.com/roos-j/lean-weakhellinger</arxiv:comment>
+    <arxiv:primary_category term="cs.IT"/>
+    <author>
+      <name>Polona Durcik</name>
+    </author>
+    <author>
+      <name>Marco Fraccaroli</name>
+    </author>
+    <author>
+      <name>Joris Roos</name>
+    </author>
+  </entry>
+</feed>

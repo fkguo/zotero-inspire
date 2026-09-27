@@ -1,0 +1,232 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/u1iwQepC/LE4/unl9gkJDCrfxv8</id>
+  <title>arXiv Query: search_query=&amp;id_list=2609.28538,2609.28544,2609.28555,2609.28616,2609.28619,2609.28686,2609.28700,2609.28704,2609.28740,2609.28752,2609.28819,2609.28840,2609.29025,2609.29135&amp;start=0&amp;max_results=10</title>
+  <updated>2026-09-26T04:46:49Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=&amp;start=0&amp;max_results=10&amp;id_list=2609.28538,2609.28544,2609.28555,2609.28616,2609.28619,2609.28686,2609.28700,2609.28704,2609.28740,2609.28752,2609.28819,2609.28840,2609.29025,2609.29135" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>10</opensearch:itemsPerPage>
+  <opensearch:totalResults>14</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28700v1</id>
+    <title>Measuring Dual-Superconductor Length Scales in the QCD Vacuum at HERA</title>
+    <updated>2026-09-23T18:38:16Z</updated>
+    <link href="https://arxiv.org/abs/2609.28700v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28700v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>In the dual superconductor picture, the QCD vacuum is a condensate of chromomagnetic monopoles characterised by two lengths: the penetration depth $λ$ of the chromoelectric field and the coherence length $ξ$ of the condensate. These have previously been accessible only through lattice calculations of static flux tubes. We show that they can instead be measured in exclusive diffraction, where the transverse profile of a gluonic hotspot is the vacuum's response to a localised color source. We therefore use the Clem vortex profile to describe the hotspot geometry. Fitting Clem's vortex profile to all 104 available H1 and ZEUS exclusive $J/ψ$ photoproduction points, spanning $|t|&lt;30~{\rm GeV}^2$ and $40\leq W\leq 251~{\rm GeV}$, we obtain $χ^2/{\rm ndf}=0.72$ and extract $λ=0.19(2)~{\rm fm}$, $ξ_v=0.087(13)~{\rm fm}$, and a Ginzburg--Landau parameter $κ=2.7(7)$, corresponding to the type-II regime. The corresponding vector mass $1/λ=1.03(11)~{\rm GeV}$ agrees with lattice determinations of the lightest gluelump. The resulting Ginzburg--Landau string tension implied by $λ$ and $κ$ reproduces the QCD string tension well; the matching requires $α_S=0.37(9)$ compared with $α_S(1/λ^2)=0.36(2)$ in the same LO scheme used for the dipole amplitude calculation.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-23T18:38:16Z</published>
+    <arxiv:comment>4 pages, 2 figures</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Tobias Toll</name>
+    </author>
+    <author>
+      <name>Nahid Vasim</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28619v1</id>
+    <title>UFO Sightings with Matchete: Connecting BSM Lagrangians with Event Generators</title>
+    <updated>2026-09-23T18:00:00Z</updated>
+    <link href="https://arxiv.org/abs/2609.28619v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28619v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We present a tool for the automated generation of Universal Feynman Output (UFO) files, used as input by many event generators, for generic Beyond the Standard Model (BSM) theories and their low-energy Effective Field Theory (EFT) descriptions. Building on the Matchete package, which provides a convenient interface for defining BSM models and deriving their EFTs via matching, our extension obtains the Lagrangian in the broken phase of the electroweak symmetry, performs automatic gauge fixing, computes all Feynman rules, imposes flavor symmetries, and exports the model in the UFO format. This significantly streamlines BSM and EFT analyses, as we illustrate with an EFT validity study for a multi-channel leptoquark search. As an application, we provide a complete UFO implementation of the Standard Model EFT up to dimension eight using the $M_W$ electroweak input scheme.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-23T18:00:00Z</published>
+    <arxiv:comment>61 pages, 14 figures, UFO files available at https://gitlab.com/matchete/model-database/-/tree/master/UFO-models, code available at https://matchete.gitlab.io</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Luis Hourtz</name>
+    </author>
+    <author>
+      <name>Tamilarasan Ketheeswaran</name>
+    </author>
+    <author>
+      <name>Michael Krämer</name>
+    </author>
+    <author>
+      <name>Anders Eller Thomsen</name>
+    </author>
+    <author>
+      <name>Philip Weber</name>
+    </author>
+    <author>
+      <name>Felix Wilsch</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28819v1</id>
+    <title>Heavy Inert Doublet Reconciles LZ and IceCube</title>
+    <updated>2026-09-23T21:53:54Z</updated>
+    <link href="https://arxiv.org/abs/2609.28819v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28819v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We show that the inert doublet dark matter can reconcile the purported LZ direct detection signal and IceCube constraints. The preferred dark matter mass is 11.3--20.3~TeV, an order of magnitude heavier than the standard higgsino target. The smaller number density at a high mass can reproduce the LZ event given the exponential sensitivity to the velocity, while suppressing the capture rate in the Sun because of the higher infall velocity. On the other hand, the high mass requires a large coupling between the inert doublet and Higgs boson to have the correct annihilation cross section for the freeze-out. There is about an order of magnitude of validity range below the Landau pole, beyond which a UV completion is needed. Electroweak precision observables are below the experimental limits despite the large coupling.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-23T21:53:54Z</published>
+    <arxiv:comment>16 pages, 6 figures</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Hitoshi Murayama</name>
+    </author>
+    <author>
+      <name>Bea Noether</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.29135v1</id>
+    <title>Anomaly in baryon number</title>
+    <updated>2026-09-24T07:13:00Z</updated>
+    <link href="https://arxiv.org/abs/2609.29135v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.29135v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Chiral anomalies in baryon and lepton number currents in the GUT-inspired $SO(5) \times U(1) \times SU(3)$ gauge-Higgs unification model in the Randall-Sundrum (RS) warped space are examined. Total anomalies including contributions of all Kaluza-Klein (KK) excited modes of fermions running along internal triangular loops are expressed in terms of the values of wave functions of gauge-boson KK towers at the ultraviolet (UV) and infrared (IR) branes in the RS space. The covariant divergence of 5D baryon number current picks up an anomaly term proportional to ${\rm Tr} \,F_{μν} \tilde F^{μν} |_{SU(2)_L} - {\rm Tr} \, F_{μν} \tilde F^{μν} |_{SU(2)_R}$ at the UV and IR branes where $SU(2)_L \times SU(2)_R$ is a subgroup of $SO(5)$.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="hep-th" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-24T07:13:00Z</published>
+    <arxiv:comment>31 pages, 1 figure</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Yutaka Hosotani</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28538v1</id>
+    <title>Spectral shaping of Gaussian white noise for synthetic axion signal generation in microwave cavity haloscopes</title>
+    <updated>2026-09-22T21:05:11Z</updated>
+    <link href="https://arxiv.org/abs/2609.28538v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28538v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Microwave cavity haloscopes search for dark-matter axions through the weak electromagnetic field generated by axion-photon conversion in a static magnetic field. Realistic synthetic signals are essential for end-to-end calibration of the receiver, validation of the analysis pipeline, measurement of signal recovery efficiency, and blind-injection studies. Here, we present a general method for producing stochastic synthetic axion waveforms by shaping Gaussian white noise in the frequency domain. The target axion power spectral density is imposed directly on the Fourier coefficients, and arbitrarily long continuous time streams are generated efficiently using an overlap-save implementation. The method reproduces both the ensemble-averaged spectral line shape and the time-domain fluctuations expected for a classical axion field, while providing direct control of the total injected power. Because the spectral model enters only through a replaceable transfer function, the routine can accommodate the Standard Halo Model as well as nonstandard velocity distributions and narrow substructure.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="physics.ins-det" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-22T21:05:11Z</published>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>D. Vattolo</name>
+    </author>
+    <author>
+      <name>D. Ahn</name>
+    </author>
+    <author>
+      <name>G. Carugno</name>
+    </author>
+    <author>
+      <name>R. Di Vora</name>
+    </author>
+    <author>
+      <name>D. Maiello</name>
+    </author>
+    <author>
+      <name>A. Ortolan</name>
+    </author>
+    <author>
+      <name>G. Ruoso</name>
+    </author>
+    <author>
+      <name>G. Sardo Infirri</name>
+    </author>
+    <author>
+      <name>C. Braggio</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28704v1</id>
+    <title>Plasma instability splits axion-photon conversion lines</title>
+    <updated>2026-09-23T18:39:41Z</updated>
+    <link href="https://arxiv.org/abs/2609.28704v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28704v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The axion coupling to electromagnetism may leave signatures of uncertain nature in astrophysical spectra; one is thought to be a single line centered at the axion frequency $ω= \sqrt{\left(m_a c^2/\hbar\right)^2 + c^2 k_a^2}$, with $m_a c^2/\hbar$ the axion Compton frequency and $\hbar k_a$ its momentum. If a parametric plasma instability is excited, this signature is transformed into a set of lines, which may be proportionally spaced and linearly polarized. A Crab pulsar signal at a frequency near recent cosmological predictions for the axion Compton frequency has some qualitative similarity to this signature, though this similarity is not evidence that the signal is caused by axions.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.HE" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="physics.plasm-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-23T18:39:41Z</published>
+    <arxiv:comment>Accepted for publication in Physical Review D; 12 pages, 4 figures</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Elizabeth A. Tolman</name>
+    </author>
+    <arxiv:doi>10.1103/pjhp-hdxd</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1103/pjhp-hdxd" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28840v1</id>
+    <title>A Stepping Stone Solution to the QCD Axion Isocurvature Problem</title>
+    <updated>2026-09-23T23:10:10Z</updated>
+    <link href="https://arxiv.org/abs/2609.28840v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28840v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We propose a ''stepping stone'' realization of the varying Peccei Quinn (PQ) scale solution to the QCD axion isocurvature problem. In conventional implementations, suppressing isocurvature during high scale inflation requires a large inflationary PQ scale, while the subsequent evolution toward the much smaller late time vacuum can induce parametric resonance and nonthermal restoration of the PQ symmetry. We ameliorate this tension by introducing an intermediate PQ-breaking vacuum that is reached before the end of inflation, so that the later evolution to the present day PQ scale spans only a moderate hierarchy. The vacuum structure arises radiatively: a Yukawa coupling between the PQ scalar and PQ-charged fermions drives the quartic coupling negative at high scales while keeping it positive at lower scales. A positive dimension six operator then stabilizes a large field minimum, while the positive low energy quartic together with the quadratic terms generates the intermediate vacuum. We study two mechanisms in which the rolling inflaton removes the large field minimum, either by scanning a hidden non-Abelian gauge coupling or by directly scanning the Yukawa coupling. In both cases the PQ field is released toward the intermediate vacuum during inflation, after CMB modes have exited the horizon. We exhibit benchmark regions with subdominant backreaction on the inflationary sector and suppressed vacuum tunneling, and show that the construction permits substantially less hierarchical quartic and higher-dimensional couplings than conventional realizations that depend on a varying PQ scale. The underlying logic may have analogues for extra-dimensional or string axions, where the effective axion decay constant is controlled by geometric moduli, although realizing the required intermediate vacuum in a controlled modulus potential is nontrivial.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.CO" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-23T23:10:10Z</published>
+    <arxiv:comment>38 pages, 7 figures</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Kun-Feng Lyu</name>
+    </author>
+    <author>
+      <name>Kuver Sinha</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28686v1</id>
+    <title>Quantum field-theoretical description of solar neutrino oscillations</title>
+    <updated>2026-09-23T18:26:47Z</updated>
+    <link href="https://arxiv.org/abs/2609.28686v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28686v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>A quantum field-theoretical description of neutrino oscillations in matter in adiabatic approximation is developed. Estimates of the oscillation coherence lengths have been made for several solar neutrino production and detection processes. It has been shown that, within the framework of the developed approach, the results of solar neutrino detection experiments can be correctly described in terms of neutrino mass eigenstates without taking oscillations into account.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="hep-th" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-23T18:26:47Z</published>
+    <arxiv:comment>21 pages</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Vadim Egorov</name>
+    </author>
+    <author>
+      <name>Igor Volobuev</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28752v1</id>
+    <title>Inclusive $B$ decays, lifetimes, and $|V_{cb}|$: a unified heavy-quark expansion analysis</title>
+    <updated>2026-09-23T19:51:47Z</updated>
+    <link href="https://arxiv.org/abs/2609.28752v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28752v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We present a global HQE analysis of inclusive semileptonic $\bar{B} \to X_c l \bar ν_\ell$ moments, partial branching fractions, and $B^+$, $B^0$ lifetime observables. Our fit setup follows a new approach where perturbative scales are treated as correlated nuisance parameters, while missing higher-order power corrections are assessed through order-by-order fits up to $O(1/m_b^5)$. In the default scenario, we find $|V_{cb}| = (42.32 \pm 0.28|_{\rm fit} \pm 0.10|_{\rm h.o.})\times 10^{-3} = (42.32 \pm 0.30) \times 10^{-3}$ and $\mathcal{B}(\bar B \to X_c \ell \bar ν_\ell) = (10.91 \pm 0.11|_{\rm fit} \pm 0.21|_{\rm h.o.})\%$. For the lifetimes we obtain $τ_{B^+} = 1.89^{+0.04}_{-0.22}$ ps and $τ_{B^0} = 1.74^{+0.03}_{-0.23}$ ps, where the strongly asymmetric uncertainty is dominated by the perturbative scale variation of the non-leptonic width. Our predictions are in agreement with previous predictions and the corresponding widths lie $1.1$-$1.2,σ$ below the measurements. For the lifetime ratio, we find $τ_{B^+}/τ_{B^0} = 1.082^{+0.031}_{-0.013}$ which agrees with experiment. For the full dataset of $q^2, E_\ell$ and $M_X$ moments, we obtain a poor fit quality, which we investigate using a leave-one-out study. In light of the persisting $|V_{cb}|$ puzzle, new correlated moment measurements as well as updated branching ratio measurements are highly encouraged.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="hep-ex" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-23T19:51:47Z</published>
+    <arxiv:comment>41 pages, 10 figures</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Matteo Fael</name>
+    </author>
+    <author>
+      <name>Ilija S. Milutin</name>
+    </author>
+    <author>
+      <name>Markus Prim</name>
+    </author>
+    <author>
+      <name>K. Keri Vos</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.28544v1</id>
+    <title>Hyperfine Structure of $B$ and $D$ Mesons in a QCD-Inspired Potential Model</title>
+    <updated>2026-09-23T02:42:05Z</updated>
+    <link href="https://arxiv.org/abs/2609.28544v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.28544v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We investigate the hyperfine structure of $B$ and $D$ mesons within a QCD-inspired potential model based on the Cornell ansatz. The conventional contact spin--spin term is regularized with a Gaussian smearing to remove the short-distance singularity, and analytic wavefunctions are obtained using the Dalgarno--Lewis perturbative method with the Coulomb part as parent.
+  The numerical study has been extended to include explicit 2S hyperfine predictions and results for the $B_c$ system; these additions probe the stability of the potential parameter space (effective $α_s$, confinement strength and smearing width) for unequal-mass systems and radial excitations. We also present a short sensitivity study of the fixed effective coupling $α_s$ and discuss the physical interpretation of the smearing parameter $σ$. The combined analytic and phenomenological framework provides compact, testable benchmarks for upcoming spectroscopy measurements.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-23T02:42:05Z</published>
+    <arxiv:comment>8 pages, 2 Tables, 2 figures</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <arxiv:journal_ref>published in Eur. Phys. J. Plus (2025) 140:1069</arxiv:journal_ref>
+    <author>
+      <name>Krishna Kingkar Pathak</name>
+    </author>
+    <arxiv:doi>10.1140/epjp/s13360-025-07031-3</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1140/epjp/s13360-025-07031-3" title="doi"/>
+  </entry>
+</feed>
