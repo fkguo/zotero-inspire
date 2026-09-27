@@ -12264,6 +12264,17 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.cleanupEventDelegation();
     const doc = this.listEl.ownerDocument;
     const oldListEl = this.listEl;
+    // FTR-KEYBOARD-NAV-FULL: Replacing the list drops its DOM focus. If the
+    // list itself had the focus, give it to the new list once it is drawn;
+    // leave the focus alone otherwise, so that a redraw while the user types
+    // in the filter box (or any other field) does not take it away, and the
+    // list does not take it from a checkbox or button in a row.
+    const listHadFocus = doc.activeElement === oldListEl;
+    const restoreFocus = () => {
+      if (listHadFocus) {
+        this.listEl.focus({ preventScroll: true });
+      }
+    };
     const newListEl = doc.createElement("div");
     newListEl.className = oldListEl.className;
     if (oldListEl.id) newListEl.id = oldListEl.id;
@@ -12305,6 +12316,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     if (!this.allEntries.length) {
       this.renderMessage(this.getEmptyMessageForMode(this.viewMode));
       restoreScroll();
+      restoreFocus();
       return;
     }
 
@@ -12422,11 +12434,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     restoreScroll();
 
-    // FTR-KEYBOARD-NAV-FULL: Restore DOM focus to listEl if there's a focused entry
-    // This is needed because rendering replaces listEl, losing the DOM focus
-    if (this.focusedEntryID) {
-      this.listEl.focus({ preventScroll: true });
-    }
+    // FTR-KEYBOARD-NAV-FULL: Give the redrawn list the focus it had (see above)
+    restoreFocus();
 
     if (
       InspireReferencePanelController.PANEL_LAYOUT_DEBUG &&
