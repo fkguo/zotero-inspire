@@ -22,6 +22,7 @@ import {
   filterFunding,
 } from "../src/modules/inspire/funding/fundingFilter";
 import { FundingInfo } from "../src/modules/inspire/funding/types";
+import { getFundingForItem } from "../src/modules/inspire/funding/fundingService";
 
 /** Collect extracted grant numbers grouped by funder id. */
 function grantsByFunder(text: string): Record<string, Set<string>> {
@@ -167,6 +168,30 @@ describe("filterFunding - modes", () => {
   });
 });
 
+// This plugin stores the INSPIRE recid in Archive Location (Archive "INSPIRE");
+// it was once reported as the paper's arXiv ID.
+describe("getFundingForItem - arXiv ID of the item", () => {
+  beforeEach(() => mockMode("all"));
+
+  it("does not report an INSPIRE recid in Archive Location as the arXiv ID", async () => {
+    const result = await getFundingForItem(
+      regularItemWithoutPdf(90001, {
+        archive: "INSPIRE",
+        archiveLocation: "1234567",
+      }),
+    );
+    expect(result.source).toBe("none");
+    expect(result.arxivId).toBeUndefined();
+  });
+
+  it("reports an arXiv ID marked in Archive Location", async () => {
+    const result = await getFundingForItem(
+      regularItemWithoutPdf(90002, { archiveLocation: "arXiv:2101.01234" }),
+    );
+    expect(result.arxivId).toBe("2101.01234");
+  });
+});
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function mk(funderId: string, grantNumber: string, category: string): FundingInfo {
@@ -191,4 +216,19 @@ function mockMode(mode: string, custom = "") {
     if (key === "funding_filter_custom") return custom;
     return undefined;
   });
+}
+
+/** Regular item with no attachment; absent fields read back as "". */
+function regularItemWithoutPdf(
+  id: number,
+  fields: Record<string, string>,
+): any {
+  return {
+    id,
+    isPDFAttachment: () => false,
+    isRegularItem: () => true,
+    getBestAttachment: async () => null,
+    getAttachments: () => [],
+    getField: (field: string) => fields[field] ?? "",
+  };
 }

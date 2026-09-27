@@ -35,11 +35,13 @@ export function deriveRecidFromItem(item: Zotero.Item): string | null {
 }
 
 export function extractRecidFromRecordRef(ref?: string): string | null {
-  if (!ref) {
+  if (typeof ref !== "string") {
     return null;
   }
-  const match = ref.match(/\/(\d+)(?:\?.*)?$/);
-  return match ? match[1] : null;
+  // A $ref is INSPIRE's own link to the cited record, so a relative one is
+  // resolved against INSPIRE. It can point to another collection (e.g. data),
+  // whose numbers are not literature recids.
+  return recidFromInspireLiteratureLink(ref.trim(), "https://inspirehep.net/");
 }
 
 export function extractRecidFromUrls(
@@ -57,12 +59,53 @@ export function extractRecidFromUrls(
   return null;
 }
 
-export function extractRecidFromUrl(url?: string | null): string | null {
-  if (!url) {
+const INSPIRE_HOSTS = new Set(["inspirehep.net", "www.inspirehep.net"]);
+
+/** /literature/<recid>, /api/literature/<recid> or legacy /record/<recid> */
+const INSPIRE_LITERATURE_PATH_REGEX =
+  /^\/(?:(?:api\/)?literature|record)\/(\d+)(?:\/|$)/;
+
+/**
+ * Recid from a link to an INSPIRE literature record; the host must be
+ * inspirehep.net (optionally www.). Record URLs of other repositories
+ * (cds.cern.ch/record/<n>, ...) and other INSPIRE collections number their own
+ * records. A link with whitespace or a backslash is rejected: the URL parser
+ * would drop or rewrite those characters, changing where the digits end.
+ */
+function recidFromInspireLiteratureLink(
+  link: string,
+  base?: string,
+): string | null {
+  if (!link || /[\s\\]/.test(link)) {
     return null;
   }
-  const match = url.match(/(?:literature|record)\/(\d+)/);
+  let parsed: URL;
+  try {
+    parsed = new URL(link, base);
+  } catch {
+    return null;
+  }
+  if (!INSPIRE_HOSTS.has(parsed.hostname)) {
+    return null;
+  }
+  const match = parsed.pathname.match(INSPIRE_LITERATURE_PATH_REGEX);
   return match ? match[1] : null;
+}
+
+/**
+ * Recid from a single INSPIRE literature link. A link without a host (a
+ * relative path, or a host name without a scheme) cannot be attributed to
+ * INSPIRE and gives none.
+ */
+export function extractRecidFromUrl(url?: string | null): string | null {
+  if (typeof url !== "string") {
+    return null;
+  }
+  const link = url.trim();
+  // A scheme-relative link ("//host/path") still names its host
+  return recidFromInspireLiteratureLink(
+    link.startsWith("//") ? `https:${link}` : link,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,7 +234,44 @@ export function extractArxivFromMetadata(
 }
 
 /**
- * Extract arXiv ID from item (Extra field, URL, or Archive Location)
+ * Groups: 1 the ID; 2-4 new style YY, MM, sequence number; 5-7 old style YY,
+ * MM, sequence number
+ */
+const ARXIV_ID_REGEX =
+  /^((\d\d)(\d\d)\.(\d{4,5})|(?:[a-z]+(?:-[a-z]+)*|(?:math|cs|nlin|q-bio)\.[a-z]{2})\/(\d\d)(\d\d)(\d{3}))(?:v[1-9]\d*)?$/i;
+
+/**
+ * The arXiv ID in `value` without its version, if `value` has the form of an
+ * arXiv identifier: new style YYMM.NNNN (0704 to 1412) or YYMM.NNNNN (from
+ * 1501); old style archive/YYMMNNN (9107 to 0703), where math, cs, nlin and
+ * q-bio may add a two-letter subject class (math.GT/0309136). The sequence
+ * number starts at 1.
+ */
+function arxivIdWithoutVersion(value: string): string | undefined {
+  const match = value.match(ARXIV_ID_REGEX);
+  if (!match) {
+    return undefined;
+  }
+  const newStyle = match[2] !== undefined;
+  const [yy, mm, seq] = newStyle ? match.slice(2, 5) : match.slice(5, 8);
+  const month = Number(mm);
+  // Old-style years 91-99 are 1991-1999, all other years 20YY
+  const century = !newStyle && Number(yy) >= 91 ? 1900 : 2000;
+  const yymm = (century + Number(yy)) * 100 + month;
+  const valid =
+    month >= 1 &&
+    month <= 12 &&
+    Number(seq) > 0 &&
+    (newStyle
+      ? yymm >= 200704 && seq.length === (yymm >= 201501 ? 5 : 4)
+      : yymm >= 199107 && yymm <= 200703);
+  return valid ? match[1] : undefined;
+}
+
+/**
+ * Extract arXiv ID from item (Extra field, URL, or Archive Location).
+ * Archive Location counts only when marked as arXiv ("arXiv:" prefix or
+ * Archive "arXiv"): this plugin stores the INSPIRE recid there.
  */
 export function extractArxivIdFromItem(item: Zotero.Item): string | undefined {
   // Try Extra field
@@ -209,9 +289,16 @@ export function extractArxivIdFromItem(item: Zotero.Item): string | undefined {
   }
 
   // Try Archive Location (sometimes used for arXiv ID)
-  const archiveLoc = item.getField("archiveLocation") as string;
-  if (archiveLoc && /^[0-9.]+|[a-z-]+\/[0-9]+$/.test(archiveLoc)) {
-    return archiveLoc;
+  const archiveLoc = (
+    (item.getField("archiveLocation") as string) || ""
+  ).trim();
+  if (archiveLoc) {
+    const candidate = archiveLoc.replace(/^arXiv:\s*/i, "");
+    const archive = ((item.getField("archive") as string) || "").trim();
+    if (candidate !== archiveLoc || /^arXiv$/i.test(archive)) {
+      const id = arxivIdWithoutVersion(candidate);
+      if (id) return id;
+    }
   }
 
   return undefined;
