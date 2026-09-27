@@ -17,11 +17,9 @@ import { ROW_POOL_MAX_SIZE, type InspireReferenceEntry } from "../index";
 export type StyleApplicator = (element: HTMLElement) => void;
 
 /**
- * Options for RowPoolManager initialization.
+ * Style applicators of the row template.
  */
-export interface RowPoolManagerOptions {
-  /** Maximum size of the row pool */
-  maxPoolSize?: number;
+export interface EntryRowStyles {
   /** Callback to apply row styles (FIX-PANEL-WIDTH-OVERFLOW) */
   applyRowStyle?: StyleApplicator;
   /** Callback to apply text container styles */
@@ -36,6 +34,14 @@ export interface RowPoolManagerOptions {
   applyBibTeXButtonStyle?: StyleApplicator;
   /** Callback to apply PDF button styles */
   applyPdfButtonStyle?: StyleApplicator;
+}
+
+/**
+ * Options for RowPoolManager initialization.
+ */
+export interface RowPoolManagerOptions extends EntryRowStyles {
+  /** Maximum size of the row pool */
+  maxPoolSize?: number;
 }
 
 /**
@@ -198,17 +204,32 @@ export class RowPoolManager {
    */
   private createRowTemplate(doc: Document): HTMLDivElement {
     this.stats.createdCount++;
+    return createEntryRowTemplate(doc, this.options);
+  }
+}
 
-    const row = doc.createElement("div");
-    row.classList.add("zinspire-ref-entry");
+// ─────────────────────────────────────────────────────────────────────────────
+// Row template
+// ─────────────────────────────────────────────────────────────────────────────
 
-    // FIX-PANEL-WIDTH-OVERFLOW: Apply row styles to constrain width
-    if (this.options.applyRowStyle) {
-      this.options.applyRowStyle(row);
-    }
+/**
+ * Create a row of the entry list with all sub-elements pre-created (PERF-13);
+ * the row renderer fills in the content.
+ */
+export function createEntryRowTemplate(
+  doc: Document,
+  styles: EntryRowStyles,
+): HTMLDivElement {
+  const row = doc.createElement("div");
+  row.classList.add("zinspire-ref-entry");
 
-    // Use innerHTML for static elements (Zotero XHTML removes input/button via innerHTML)
-    row.innerHTML = `
+  // FIX-PANEL-WIDTH-OVERFLOW: Apply row styles to constrain width
+  if (styles.applyRowStyle) {
+    styles.applyRowStyle(row);
+  }
+
+  // Use innerHTML for static elements (Zotero XHTML removes input/button via innerHTML)
+  row.innerHTML = `
       <div class="zinspire-ref-entry__text">
         <div class="zinspire-ref-entry__controls">
           <span class="zinspire-ref-entry__dot is-clickable"></span>
@@ -225,96 +246,95 @@ export class RowPoolManager {
       </div>
     `;
 
-    const textContainer = row.querySelector(
-      ".zinspire-ref-entry__text",
-    ) as HTMLElement;
-    const controls = row.querySelector(
-      ".zinspire-ref-entry__controls",
-    ) as HTMLElement;
-    const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
-    const content = row.querySelector(
-      ".zinspire-ref-entry__content",
-    ) as HTMLElement;
+  const textContainer = row.querySelector(
+    ".zinspire-ref-entry__text",
+  ) as HTMLElement;
+  const controls = row.querySelector(
+    ".zinspire-ref-entry__controls",
+  ) as HTMLElement;
+  const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
+  const content = row.querySelector(
+    ".zinspire-ref-entry__content",
+  ) as HTMLElement;
 
-    // Apply styles via callbacks if provided
-    if (textContainer && this.options.applyTextContainerStyle) {
-      this.options.applyTextContainerStyle(textContainer);
-    }
-    if (marker) {
-      if (this.options.applyMarkerStyle) {
-        this.options.applyMarkerStyle(marker);
-      }
-      marker.style.cursor = "pointer";
-    }
-    if (content && this.options.applyContentStyle) {
-      this.options.applyContentStyle(content);
-    }
-
-    // XHTML namespace for proper element creation in Zotero
-    const XHTML_NS = "http://www.w3.org/1999/xhtml";
-
-    // Create checkbox via createElementNS (required for Zotero XHTML)
-    const checkbox = doc.createElementNS(XHTML_NS, "input") as HTMLInputElement;
-    checkbox.type = "checkbox";
-    checkbox.classList.add("zinspire-ref-entry__checkbox");
-    checkbox.style.width = "14px";
-    checkbox.style.height = "14px";
-    checkbox.style.margin = "0";
-    checkbox.style.cursor = "pointer";
-    checkbox.style.flexShrink = "0";
-
-    // Create buttons via createElementNS (required for Zotero XHTML)
-    const linkButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
-    linkButton.type = "button";
-    linkButton.classList.add("zinspire-ref-entry__link");
-    if (this.options.applyLinkButtonStyle) {
-      this.options.applyLinkButtonStyle(linkButton);
-    }
-
-    const bibtexButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
-    bibtexButton.type = "button";
-    bibtexButton.classList.add("zinspire-ref-entry__bibtex");
-    if (this.options.applyBibTeXButtonStyle) {
-      this.options.applyBibTeXButtonStyle(bibtexButton);
-    }
-
-    const texkeyButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
-    texkeyButton.type = "button";
-    texkeyButton.classList.add("zinspire-ref-entry__texkey");
-    if (this.options.applyBibTeXButtonStyle) {
-      this.options.applyBibTeXButtonStyle(texkeyButton);
-    }
-
-    // PDF button - shows PDF status and allows opening/finding PDF
-    const pdfButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
-    pdfButton.type = "button";
-    pdfButton.classList.add("zinspire-ref-entry__pdf");
-    if (this.options.applyPdfButtonStyle) {
-      this.options.applyPdfButtonStyle(pdfButton);
-    }
-
-    const statsButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
-    statsButton.type = "button";
-    statsButton.classList.add(
-      "zinspire-ref-entry__stats",
-      "zinspire-ref-entry__stats-button",
-    );
-
-    // Insert elements at correct positions
-    if (controls && marker && content) {
-      // Insert checkbox before marker (leftmost position)
-      controls.insertBefore(checkbox, marker);
-      // Row 1: checkbox, marker (dot), link
-      // Row 2: texkey, bibtex, pdf
-      controls.appendChild(linkButton);
-      controls.appendChild(texkeyButton);
-      controls.appendChild(bibtexButton);
-      controls.appendChild(pdfButton);
-      content.appendChild(statsButton);
-    }
-
-    return row;
+  // Apply styles via callbacks if provided
+  if (textContainer && styles.applyTextContainerStyle) {
+    styles.applyTextContainerStyle(textContainer);
   }
+  if (marker) {
+    if (styles.applyMarkerStyle) {
+      styles.applyMarkerStyle(marker);
+    }
+    marker.style.cursor = "pointer";
+  }
+  if (content && styles.applyContentStyle) {
+    styles.applyContentStyle(content);
+  }
+
+  // XHTML namespace for proper element creation in Zotero
+  const XHTML_NS = "http://www.w3.org/1999/xhtml";
+
+  // Create checkbox via createElementNS (required for Zotero XHTML)
+  const checkbox = doc.createElementNS(XHTML_NS, "input") as HTMLInputElement;
+  checkbox.type = "checkbox";
+  checkbox.classList.add("zinspire-ref-entry__checkbox");
+  checkbox.style.width = "14px";
+  checkbox.style.height = "14px";
+  checkbox.style.margin = "0";
+  checkbox.style.cursor = "pointer";
+  checkbox.style.flexShrink = "0";
+
+  // Create buttons via createElementNS (required for Zotero XHTML)
+  const linkButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  linkButton.type = "button";
+  linkButton.classList.add("zinspire-ref-entry__link");
+  if (styles.applyLinkButtonStyle) {
+    styles.applyLinkButtonStyle(linkButton);
+  }
+
+  const bibtexButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  bibtexButton.type = "button";
+  bibtexButton.classList.add("zinspire-ref-entry__bibtex");
+  if (styles.applyBibTeXButtonStyle) {
+    styles.applyBibTeXButtonStyle(bibtexButton);
+  }
+
+  const texkeyButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  texkeyButton.type = "button";
+  texkeyButton.classList.add("zinspire-ref-entry__texkey");
+  if (styles.applyBibTeXButtonStyle) {
+    styles.applyBibTeXButtonStyle(texkeyButton);
+  }
+
+  // PDF button - shows PDF status and allows opening/finding PDF
+  const pdfButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  pdfButton.type = "button";
+  pdfButton.classList.add("zinspire-ref-entry__pdf");
+  if (styles.applyPdfButtonStyle) {
+    styles.applyPdfButtonStyle(pdfButton);
+  }
+
+  const statsButton = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  statsButton.type = "button";
+  statsButton.classList.add(
+    "zinspire-ref-entry__stats",
+    "zinspire-ref-entry__stats-button",
+  );
+
+  // Insert elements at correct positions
+  if (controls && marker && content) {
+    // Insert checkbox before marker (leftmost position)
+    controls.insertBefore(checkbox, marker);
+    // Row 1: checkbox, marker (dot), link
+    // Row 2: texkey, bibtex, pdf
+    controls.appendChild(linkButton);
+    controls.appendChild(texkeyButton);
+    controls.appendChild(bibtexButton);
+    controls.appendChild(pdfButton);
+    content.appendChild(statsButton);
+  }
+
+  return row;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

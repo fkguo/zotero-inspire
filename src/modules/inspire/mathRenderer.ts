@@ -127,12 +127,12 @@ export function getRenderMode(): RenderMode {
   return mode === "katex" ? "katex" : "unicode";
 }
 
-function ensureKatexStyle(doc: Document): void {
+/**
+ * Add KaTeX's stylesheet to the document a formula is shown in (in the
+ * References panel, the main window's). Each window needs its own copy.
+ */
+function ensureKatexStyle(targetDoc: Document): void {
   try {
-    // Try to use the main window document which has a proper <head>
-    const mainWindow = Zotero.getMainWindow?.();
-    const targetDoc = mainWindow?.document || doc;
-
     if (!targetDoc) {
       Zotero.debug(
         `[${config.addonName}] ensureKatexStyle: no document available`,
@@ -180,6 +180,10 @@ function ensureKatexStyle(doc: Document): void {
   }
 }
 
+/**
+ * Load KaTeX into the main window. Its functions render into elements of any
+ * Zotero window: the nodes they build are moved into the element's document.
+ */
 async function ensureKatexLoaded(): Promise<boolean> {
   if (katexModule && renderMathInElement) {
     return true;
@@ -280,7 +284,7 @@ export async function renderMathContent(
 
   // Wrap entire KaTeX rendering in try-catch for safety
   try {
-    // Load KaTeX CSS
+    // Load KaTeX CSS into the window the container is in
     ensureKatexStyle(container.ownerDocument);
 
     // Preprocess LaTeX environments (eqnarray* → aligned)

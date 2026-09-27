@@ -3,6 +3,8 @@ import {
   InlineHintHelper,
   configureInlineHintInput,
 } from "./inspire/panel/InlineHintHelper";
+import { showAbstractContextMenu as showAbstractCopyMenu } from "./inspire/panel/abstractContextMenu";
+import { popupReporter } from "./inspire/panel/reporter";
 import { literatureSearchHistory } from "./inspire/searchHistory";
 import { cleanMathTitle } from "../utils/mathTitle";
 import { getJournalAbbreviations } from "../utils/journalAbbreviations";
@@ -248,8 +250,6 @@ import {
   type FieldChange,
   type InspireLiteratureSearchResponse,
   renderMathContent,
-  containsLatexMath,
-  getRenderMode,
   // EntryListRenderer (Phase 0.1 refactor)
   EntryListRenderer,
   type EntryRenderContext,
@@ -1482,8 +1482,6 @@ export class InspireReferencePanelController {
   private static lastGlobalCitationEventKey?: string;
   private static lastGlobalCitationEventTs = 0;
   private static globalCitationInFlightKey?: string;
-  // Anchor search length for mapping selection back to LaTeX source
-  private static readonly ANCHOR_SEARCH_MAX_LENGTH = 30;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // FTR-MULTI-PDF-FIX-V3: Performance statistics for PDF cache monitoring
@@ -15130,178 +15128,27 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.showToast(getString("references-panel-copy-failed"));
   }
 
-  private getCleanKatexText(element: HTMLElement, doc: Document): string {
-    const clone = element.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll(".katex-mathml").forEach((node) => node.remove());
-    return (clone.textContent || "").trim();
-  }
-
   /**
-   * Show context menu for abstract with copy options.
-   * Provides "Copy" (rendered text) and "Copy as LaTeX" (original source) options.
+   * Show the copy menu of an abstract (hover card or abstract tooltip). The
+   * card and tooltip stay open while the menu is.
    */
   private showAbstractContextMenu(
     event: MouseEvent,
     container: HTMLElement,
   ): void {
-    const mainWindow = Zotero.getMainWindow();
-    const doc = mainWindow?.document || container.ownerDocument;
-
-    // Get selection from container's document context (important for tooltips/popups)
-    const containerWindow = container.ownerDocument.defaultView;
-    const selection =
-      containerWindow?.getSelection?.() || mainWindow?.getSelection?.();
-
-    // Get clean selected text by removing KaTeX's hidden MathML content
-    // KaTeX duplicates content (MathML + visible HTML), so selection.toString() has duplicates
-    let selectedText = "";
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      const fragment = range.cloneContents();
-      // Create a temporary container to clean the selection
-      const tempDiv = doc.createElement("div");
-      tempDiv.appendChild(fragment);
-      selectedText = this.getCleanKatexText(tempDiv, doc);
-    }
-
-    const latexSource =
-      container.dataset.latexSource || container.textContent || "";
-    const hasLatex = containsLatexMath(latexSource);
-    const renderMode = getRenderMode();
-
-    // Remove existing popup if any
-    const popupId = "zinspire-abstract-context-popup";
-    const existingPopup = doc.getElementById(popupId);
-    if (existingPopup) {
-      existingPopup.remove();
-    }
-
-    // Create XUL menupopup
-    const popup = (doc as any).createXULElement("menupopup") as XUL.MenuPopup;
-    popup.id = popupId;
-
-    // Copy option (copies selected or all rendered text)
-    const copyItem = (doc as any).createXULElement("menuitem");
-    const copyLabel = selectedText
-      ? getString("references-panel-abstract-copy-selection")
-      : getString("references-panel-abstract-copy");
-    copyItem.setAttribute("label", copyLabel);
-    copyItem.addEventListener("command", async () => {
-      const textToCopy = selectedText || container.textContent || "";
-      await copyToClipboard(textToCopy);
-      this.showToast(getString("references-panel-abstract-copied"));
-    });
-    popup.appendChild(copyItem);
-
-    // Copy as LaTeX option (only shown if LaTeX is present and in KaTeX mode)
-    if (hasLatex && renderMode === "katex") {
-      const copyLatexItem = (doc as any).createXULElement("menuitem");
-      copyLatexItem.setAttribute(
-        "label",
-        getString("references-panel-abstract-copy-latex"),
-      );
-      copyLatexItem.addEventListener("command", async () => {
-        let textToCopy = latexSource; // Default to full source
-
-        if (selectedText) {
-          // Try exact match first (works for non-math selections)
-          if (latexSource.includes(selectedText)) {
-            textToCopy = selectedText;
-          } else {
-            // Selection likely contains rendered math - try to locate region using anchors
-            // KaTeX includes both visible HTML and hidden MathML in the DOM.
-            // textContent includes BOTH, but selection only captures visible text.
-            // We need to get only the visible text content.
-            const fullText = this.getCleanKatexText(container, doc);
-
-            const selectionStart = fullText.indexOf(selectedText);
-
-            if (selectionStart !== -1) {
-              const beforeSel = fullText.substring(0, selectionStart);
-              const afterSel = fullText.substring(
-                selectionStart + selectedText.length,
-              );
-
-              // Find anchor text before selection that exists in source
-              let anchorBefore = "";
-              const maxAnchor =
-                InspireReferencePanelController.ANCHOR_SEARCH_MAX_LENGTH;
-              for (
-                let len = Math.min(maxAnchor, beforeSel.length);
-                len > 0;
-                len--
-              ) {
-                const candidate = beforeSel.slice(-len);
-                if (latexSource.includes(candidate)) {
-                  anchorBefore = candidate;
-                  break;
-                }
-              }
-
-              // Find anchor text after selection that exists in source
-              let anchorAfter = "";
-              for (
-                let len = Math.min(maxAnchor, afterSel.length);
-                len > 0;
-                len--
-              ) {
-                const candidate = afterSel.slice(0, len);
-                const searchStart = anchorBefore
-                  ? latexSource.indexOf(anchorBefore) + anchorBefore.length
-                  : 0;
-                if (latexSource.indexOf(candidate, searchStart) !== -1) {
-                  anchorAfter = candidate;
-                  break;
-                }
-              }
-
-              // Extract text between anchors in source
-              const startAnchorPos = anchorBefore
-                ? latexSource.indexOf(anchorBefore)
-                : -1;
-              const sourceStart =
-                startAnchorPos !== -1
-                  ? startAnchorPos + anchorBefore.length
-                  : 0;
-
-              const endAnchorPos = anchorAfter
-                ? latexSource.indexOf(anchorAfter, sourceStart)
-                : -1;
-              const sourceEnd =
-                endAnchorPos !== -1 ? endAnchorPos : latexSource.length;
-
-              if (sourceStart < sourceEnd) {
-                textToCopy = latexSource.substring(sourceStart, sourceEnd);
-              } else if (!anchorBefore && !anchorAfter) {
-                Zotero.debug(
-                  `[${config.addonName}] Abstract anchor matching failed, copying full source`,
-                );
-              }
-            }
-          }
+    showAbstractCopyMenu(event, container, {
+      notify: (message) => this.showToast(message),
+      onOpen: () => {
+        // Set flag to prevent preview/tooltip from hiding while menu is open
+        this.abstractContextMenuOpen = true;
+        // Phase 0.4 Refactor: Use HoverPreviewController
+        this.hoverPreview?.setContextMenuOpen(true);
+        if (this.abstractHideTimeout) {
+          clearTimeout(this.abstractHideTimeout);
+          this.abstractHideTimeout = undefined;
         }
-
-        await copyToClipboard(textToCopy);
-        this.showToast(getString("references-panel-abstract-latex-copied"));
-      });
-      popup.appendChild(copyLatexItem);
-    }
-
-    // Add popup to document and open at mouse position
-    // Set flag to prevent preview/tooltip from hiding while menu is open
-    this.abstractContextMenuOpen = true;
-    // Phase 0.4 Refactor: Use HoverPreviewController
-    this.hoverPreview?.setContextMenuOpen(true);
-    if (this.abstractHideTimeout) {
-      clearTimeout(this.abstractHideTimeout);
-      this.abstractHideTimeout = undefined;
-    }
-
-    doc.documentElement.appendChild(popup);
-    popup.addEventListener(
-      "popuphidden",
-      () => {
-        popup.remove();
+      },
+      onClose: () => {
         // Clear flag and schedule hide after menu closes
         this.abstractContextMenuOpen = false;
         // Phase 0.4 Refactor: HoverPreviewController schedules hide when context menu closes
@@ -15309,9 +15156,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         // Legacy: also schedule old tooltip hide
         this.scheduleTooltipHide();
       },
-      { once: true },
-    );
-    popup.openPopupAtScreen(event.screenX, event.screenY, true);
+    });
   }
 
   private async handleLinkAction(
@@ -17884,14 +17729,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   private showToast(message: string) {
-    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
-    const toast = new ztoolkit.ProgressWindow(config.addonName, {
-      closeOnClick: true,
-    });
-    toast.win.changeHeadline(config.addonName, icon);
-    toast.createLine({ text: message });
-    toast.show();
-    toast.startCloseTimer(3000);
+    popupReporter.notify(message);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -18449,7 +18287,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       getFilteredEntries: () => this.getFilteredEntries(this.allEntries),
       importReference: (recid, target) => this.importReference(recid, target),
       promptForSaveTarget: (anchor) => this.promptForSaveTarget(anchor),
-      showToast: (message) => this.showToast(message),
+      // The panel's notices and the import's progress: popups by the main
+      // window, as for every notice of the panel
+      reporter: {
+        notify: (message) => this.showToast(message),
+        startProgress: (text) => popupReporter.startProgress(text),
+      },
       updateRowStatus: (entry) => this.updateRowStatus(entry),
       onSelectionChange: (count) => this.updateBatchToolbarVisibility(count),
       // One batch import at a time, across panels: Import waits for it
