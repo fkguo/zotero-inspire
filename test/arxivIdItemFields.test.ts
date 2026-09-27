@@ -5,6 +5,11 @@
 // gives: preprint watch, the funding export (apiUtils), the arXiv column
 // (displayed value and sort key), the INSPIRE lookup of an item without recid
 // (metadataService) and the arXiv comparison of the smart update.
+//
+// Each row keeps what the readers gave before they switched to the shared
+// field rules of arxivId.ts (the previous commit fixed those values); `changed`
+// lists the intentional behaviour changes, with the new values and the reason.
+// Preprint watch and the funding export now both use arxivIdFromItem.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,8 +23,7 @@ vi.mock("../src/modules/inspire/rateLimiter", () => ({
 
 import { getPref } from "../src/utils/prefs";
 import { inspireFetch } from "../src/modules/inspire/rateLimiter";
-import { extractArxivIdFromItem as preprintWatchArxivId } from "../src/modules/inspire/preprintWatchService";
-import { extractArxivIdFromItem as apiUtilsArxivId } from "../src/modules/inspire/apiUtils";
+import { arxivIdFromItem } from "../src/modules/arxiv/arxivId";
 import { registerInspireItemTreeColumns } from "../src/modules/inspire/itemTreeColumns";
 import { getInspireMeta } from "../src/modules/inspire/metadataService";
 import { compareItemWithInspire } from "../src/modules/inspire/smartUpdate";
@@ -95,17 +99,29 @@ function smartUpdateArxivLocal(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Field layouts. Each row: fields, then what the current code gives for
-//   preprint watch / funding export / arXiv column / INSPIRE lookup path.
+// Field layouts. Each row: fields, then what the code gave before the switch
+// for preprint watch / funding export / arXiv column / INSPIRE lookup path.
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface Row {
-  name: string;
-  fields: Fields;
+interface Results {
   preprintWatch: string | null;
   apiUtils: string | undefined;
   column: string;
   lookup: string | null;
+}
+
+interface Row extends Results {
+  name: string;
+  fields: Fields;
+  /** Intentional behaviour changes: the new results and their reason */
+  changed?: Partial<Results> & { reason: string };
+}
+
+/** What a reader gives now: the changed value if any, else the old one */
+function now<K extends keyof Results>(row: Row, key: K): Results[K] {
+  return row.changed && key in row.changed
+    ? (row.changed[key] as Results[K])
+    : row[key];
 }
 
 const ROWS: Row[] = [
@@ -135,6 +151,11 @@ const ROWS: Row[] = [
     apiUtils: "2301.12345",
     column: "20230112345\t2301.12345",
     lookup: "arxiv/2301.12345v2",
+    changed: {
+      lookup: "arxiv/2301.12345",
+      reason:
+        "the INSPIRE lookup drops the version (INSPIRE has no record for 2301.12345v2)",
+    },
   },
   {
     name: "Extra arXiv line with a space after the colon",
@@ -143,6 +164,11 @@ const ROWS: Row[] = [
     apiUtils: "2301.12345",
     column: "",
     lookup: "arxiv/2301.12345",
+    changed: {
+      preprintWatch: "2301.12345",
+      column: "20230112345\t2301.12345",
+      reason: "every reader accepts a space after arXiv:",
+    },
   },
   {
     name: "Extra _eprint line",
@@ -151,6 +177,12 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "",
     lookup: "arxiv/2301.12345",
+    changed: {
+      preprintWatch: "2301.12345",
+      apiUtils: "2301.12345",
+      column: "20230112345\t2301.12345",
+      reason: "every reader reads _eprint lines",
+    },
   },
   {
     name: "Extra old-style ID",
@@ -167,6 +199,13 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "",
     lookup: "arxiv/math.GT%2F0309136",
+    changed: {
+      preprintWatch: "math/0309136",
+      apiUtils: "math/0309136",
+      column: "20030900136\tmath/0309136",
+      lookup: "arxiv/math%2F0309136",
+      reason: "math.GT/0309136 is math/0309136",
+    },
   },
   {
     name: "Extra arXiv text not at the start of a line",
@@ -175,6 +214,14 @@ const ROWS: Row[] = [
     apiUtils: "2301.12345",
     column: "20230112345\t2301.12345",
     lookup: "arxiv/2301.12345",
+    changed: {
+      preprintWatch: null,
+      apiUtils: undefined,
+      column: "",
+      lookup: null,
+      reason:
+        "only lines starting with arXiv:, _eprint: or DOI: 10.48550/arXiv. count",
+    },
   },
   {
     name: "Extra upper-case prefix",
@@ -183,6 +230,11 @@ const ROWS: Row[] = [
     apiUtils: "2301.12345",
     column: "20230112345\t2301.12345",
     lookup: null,
+    changed: {
+      lookup: "arxiv/2301.12345",
+      reason:
+        "the INSPIRE lookup reads the prefix in any case, like the other readers",
+    },
   },
   {
     name: "Extra truncated ID",
@@ -191,6 +243,13 @@ const ROWS: Row[] = [
     apiUtils: "2301.1",
     column: "00000023011\t2301.1",
     lookup: "arxiv/2301.1",
+    changed: {
+      preprintWatch: null,
+      apiUtils: undefined,
+      column: "",
+      lookup: null,
+      reason: "not an arXiv identifier",
+    },
   },
   {
     name: "Extra four-digit number after 2014",
@@ -199,6 +258,13 @@ const ROWS: Row[] = [
     apiUtils: "1501.0123",
     column: "20150100123\t1501.0123",
     lookup: "arxiv/1501.0123",
+    changed: {
+      preprintWatch: null,
+      apiUtils: undefined,
+      column: "",
+      lookup: null,
+      reason: "not an arXiv identifier",
+    },
   },
   {
     name: "Extra impossible month",
@@ -207,6 +273,13 @@ const ROWS: Row[] = [
     apiUtils: "2313.12345",
     column: "20231312345\t2313.12345",
     lookup: "arxiv/2313.12345",
+    changed: {
+      preprintWatch: null,
+      apiUtils: undefined,
+      column: "",
+      lookup: null,
+      reason: "not an arXiv identifier",
+    },
   },
   {
     name: "Extra arXiv DOI line",
@@ -215,6 +288,14 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "",
     lookup: "doi/10.48550%2FarXiv.2301.12345",
+    changed: {
+      preprintWatch: "2301.12345",
+      apiUtils: "2301.12345",
+      column: "20230112345\t2301.12345",
+      lookup: "arxiv/2301.12345",
+      reason:
+        "an arXiv DOI line names the paper (INSPIRE finds no record by arXiv DOI)",
+    },
   },
   {
     name: "Journal abbreviation (legacy layout)",
@@ -223,6 +304,10 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "20230112345\t2301.12345",
     lookup: null,
+    changed: {
+      apiUtils: "2301.12345",
+      reason: "the funding export reads the same fields as preprint watch",
+    },
   },
   {
     name: "Journal abbreviation and Extra disagree",
@@ -234,6 +319,11 @@ const ROWS: Row[] = [
     apiUtils: "2302.00001",
     column: "20230112345\t2301.12345",
     lookup: "arxiv/2302.00001",
+    changed: {
+      preprintWatch: "2302.00001",
+      column: "20230200001\t2302.00001",
+      reason: "Extra is read before Journal Abbr",
+    },
   },
   {
     name: "URL abs page with version",
@@ -250,6 +340,13 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "",
     lookup: null,
+    changed: {
+      preprintWatch: "2301.12345",
+      apiUtils: "2301.12345",
+      column: "20230112345\t2301.12345",
+      lookup: "arxiv/2301.12345",
+      reason: "pdf pages count like abs pages",
+    },
   },
   {
     name: "URL pdf file with version",
@@ -258,6 +355,13 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "",
     lookup: null,
+    changed: {
+      preprintWatch: "2301.12345",
+      apiUtils: "2301.12345",
+      column: "20230112345\t2301.12345",
+      lookup: "arxiv/2301.12345",
+      reason: "pdf pages count like abs pages",
+    },
   },
   {
     name: "URL on export.arxiv.org",
@@ -298,6 +402,13 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "",
     lookup: "arxiv/math.GT%2F0309136",
+    changed: {
+      preprintWatch: "math/0309136",
+      apiUtils: "math/0309136",
+      column: "20030900136\tmath/0309136",
+      lookup: "arxiv/math%2F0309136",
+      reason: "math.GT/0309136 is math/0309136",
+    },
   },
   {
     name: "Archive ID (arXiv translator preprint layout)",
@@ -306,6 +417,10 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "20230112345\t2301.12345",
     lookup: null,
+    changed: {
+      apiUtils: "2301.12345",
+      reason: "the funding export reads the same fields as preprint watch",
+    },
   },
   {
     name: "arXiv DOI",
@@ -314,6 +429,10 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "20230112345\t2301.12345",
     lookup: null,
+    changed: {
+      apiUtils: "2301.12345",
+      reason: "the funding export reads the same fields as preprint watch",
+    },
   },
   {
     name: "arXiv DOI of an old-style ID",
@@ -322,6 +441,12 @@ const ROWS: Row[] = [
     apiUtils: undefined,
     column: "",
     lookup: null,
+    changed: {
+      preprintWatch: "hep-ph/0101001",
+      apiUtils: "hep-ph/0101001",
+      column: "20010100001\thep-ph/0101001",
+      reason: "arXiv DOIs of old-style identifiers are read",
+    },
   },
   {
     name: "Archive Location with arXiv prefix",
@@ -330,6 +455,11 @@ const ROWS: Row[] = [
     apiUtils: "2301.12345",
     column: "",
     lookup: null,
+    changed: {
+      preprintWatch: "2301.12345",
+      column: "20230112345\t2301.12345",
+      reason: "every reader reads Archive Location marked as arXiv",
+    },
   },
   {
     name: "Archive Location with Archive arXiv",
@@ -338,6 +468,11 @@ const ROWS: Row[] = [
     apiUtils: "2301.12345",
     column: "",
     lookup: "literature/2301.12345",
+    changed: {
+      preprintWatch: "2301.12345",
+      column: "20230112345\t2301.12345",
+      reason: "every reader reads Archive Location marked as arXiv",
+    },
   },
   {
     name: "INSPIRE recid in Archive Location",
@@ -370,19 +505,32 @@ const ROWS: Row[] = [
 
 describe("arXiv ID read from item fields", () => {
   it.each(ROWS)("preprint watch: $name", (row) => {
-    expect(preprintWatchArxivId(fakeItem(row.fields))).toBe(row.preprintWatch);
+    expect(arxivIdFromItem(fakeItem(row.fields))).toBe(
+      now(row, "preprintWatch"),
+    );
   });
 
   it.each(ROWS)("funding export: $name", (row) => {
-    expect(apiUtilsArxivId(fakeItem(row.fields))).toBe(row.apiUtils);
+    expect(arxivIdFromItem(fakeItem(row.fields)) ?? undefined).toBe(
+      now(row, "apiUtils"),
+    );
   });
 
   it.each(ROWS)("arXiv column: $name", (row) => {
-    expect(arxivColumnValue(row.fields)).toBe(row.column);
+    expect(arxivColumnValue(row.fields)).toBe(now(row, "column"));
   });
 
   it.each(ROWS)("INSPIRE lookup: $name", async (row) => {
-    expect(await inspireLookupPath(row.fields)).toBe(row.lookup);
+    expect(await inspireLookupPath(row.fields)).toBe(now(row, "lookup"));
+  });
+
+  it("lists only results that changed", () => {
+    for (const row of ROWS) {
+      const { reason, ...changed } = row.changed ?? { reason: "" };
+      for (const key of Object.keys(changed) as (keyof Results)[]) {
+        expect(changed[key], `${row.name}: ${key}`).not.toEqual(row[key]);
+      }
+    }
   });
 });
 
@@ -417,15 +565,26 @@ describe("smart update: arXiv difference", () => {
     ["arXiv:hep-ph/0101001", "hep-ph/0101001", "no change"],
     ["arXiv:2301.12345 [hep-ph]", "2302.00001", "2301.12345"],
     ["", "2301.12345", null],
-    ["arXiv:2301.12345v2", "2301.12345", "2301.12345v2"],
-    ["arXiv: 2301.12345", "2301.12345", null],
-    ["_eprint: 2301.12345", "2301.12345", null],
-    ["arXiv:math.GT/0309136", "math/0309136", "math.GT/0309136"],
-    ["Report number: arXiv:2301.12345", "2301.12345", "no change"],
     ["ARXIV:2301.12345", "2301.12345", "no change"],
-    ["arXiv:2301.1", "2301.12345", "2301.1"],
-    ["arXiv:1234.5678 [hep-ph]", "1234.5678", "no change"],
   ])("Extra %j vs INSPIRE %j -> %j", (extra, inspire, expected) => {
     expect(smartUpdateArxivLocal({ extra }, inspire)).toBe(expected);
   });
+
+  // Intentional changes: the identifiers are compared, not their notation
+  it.each([
+    ["arXiv:2301.12345v2", "2301.12345", "2301.12345v2", "no change"],
+    ["arXiv: 2301.12345", "2301.12345", null, "no change"],
+    ["_eprint: 2301.12345", "2301.12345", null, "no change"],
+    ["arXiv:math.GT/0309136", "math/0309136", "math.GT/0309136", "no change"],
+    // only lines that start with the prefix count; a malformed ID is none
+    ["Report number: arXiv:2301.12345", "2301.12345", "no change", null],
+    ["arXiv:2301.1", "2301.12345", "2301.1", null],
+    // INSPIRE never returns an impossible number such as 1234.5678 (month 34)
+    ["arXiv:1234.5678 [hep-ph]", "1234.5678", "no change", null],
+  ])(
+    "Extra %j vs INSPIRE %j -> %j before -> %j after",
+    (extra, inspire, _before, after) => {
+      expect(smartUpdateArxivLocal({ extra }, inspire)).toBe(after);
+    },
+  );
 });

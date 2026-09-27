@@ -138,6 +138,8 @@ describe("parseArxivId: formats found by Zotero.Utilities.extractIdentifiers", (
     /((?:[^A-Za-z]|^)([\-A-Za-z\.]+\/\d{7})(?:(v[0-9]+)|)(?!\d))|((?:\D|^)(\d{4}\.\d{4,5})(?:(v[0-9]+)|)(?!\d))/g;
   const zoteroArxivIds = (text: string) =>
     [...text.matchAll(ZOTERO_ARXIV_RE)].map((m) => m[2] || m[5]);
+  const COPIED_FROM =
+    "regex copied from Zotero 10.0.3 utilities.js extractIdentifiers()";
 
   it.each([
     ["0706.0044", "0706.0044"],
@@ -150,7 +152,7 @@ describe("parseArxivId: formats found by Zotero.Utilities.extractIdentifiers", (
     ["https://arxiv.org/abs/math.GT/0309136v1", "math/0309136"],
   ])("text %j: Zotero finds one ID, parsed as %j", (text, canonical) => {
     const found = zoteroArxivIds(text);
-    expect(found).toHaveLength(1);
+    expect(found, COPIED_FROM).toHaveLength(1);
     expect(parseArxivId(found[0])?.id).toBe(canonical);
   });
 
@@ -159,7 +161,7 @@ describe("parseArxivId: formats found by Zotero.Utilities.extractIdentifiers", (
     ["1501.0123", "1501.0123"],
     ["foo.XX/0101001", "foo.XX/0101001"],
   ])("text %j: Zotero finds %j, which is no arXiv identifier", (text, id) => {
-    expect(zoteroArxivIds(text)).toEqual([id]);
+    expect(zoteroArxivIds(text), COPIED_FROM).toEqual([id]);
     expect(parseArxivId(id)).toBeNull();
   });
 });
@@ -341,5 +343,162 @@ describe("arxivIdFromItem", () => {
       ),
     ).toBe("2301.12345");
     expect(arxivIdFromItem(item({ title: "No identifier" }))).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Archive Location. Regression: an INSPIRE recid there was returned as an
+// arXiv ID. Fields that do not exist for a type read back as "" (getField).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function fakeItem(fields: Record<string, string> = {}): any {
+  return {
+    id: 1,
+    itemType: "journalArticle",
+    getField: (field: string) => fields[field] ?? "",
+  };
+}
+
+describe("arxivIdFromItem: Archive Location (from apiUtils.extractArxivIdFromItem)", () => {
+  it("does not read an INSPIRE recid in Archive Location as an arXiv ID", () => {
+    expect(
+      arxivIdFromItem(
+        fakeItem({ archive: "INSPIRE", archiveLocation: "1234567" }),
+      ),
+    ).toBeNull();
+    expect(
+      arxivIdFromItem(fakeItem({ archiveLocation: "1234567" })),
+    ).toBeNull();
+  });
+
+  it("requires an arXiv marker even when Archive Location looks like an arXiv ID", () => {
+    expect(
+      arxivIdFromItem(
+        fakeItem({ archive: "INSPIRE", archiveLocation: "2101.01234" }),
+      ),
+    ).toBeNull();
+  });
+
+  it.each([
+    ["arXiv:2101.01234", "2101.01234"],
+    ["arXiv: 2101.01234", "2101.01234"],
+    ["arXiv:2101.01234v2", "2101.01234"],
+    ["ARXIV:0704.0001", "0704.0001"],
+    ["arXiv:1412.9999", "1412.9999"],
+    ["arXiv:1501.00001", "1501.00001"],
+    ["arXiv:hep-ph/0001234", "hep-ph/0001234"],
+    ["arXiv:hep-th/9108001", "hep-th/9108001"],
+    // the old scheme's documented range is 9107-0703
+    ["arXiv:hep-th/9107001", "hep-th/9107001"],
+    ["arXiv:math/0703001", "math/0703001"],
+  ])("reads the ID from Archive Location %s", (archiveLocation, id) => {
+    expect(arxivIdFromItem(fakeItem({ archiveLocation }))).toBe(id);
+  });
+
+  it("reads Archive Location when Archive is arXiv", () => {
+    expect(
+      arxivIdFromItem(
+        fakeItem({ archive: "arXiv", archiveLocation: "2101.01234" }),
+      ),
+    ).toBe("2101.01234");
+    expect(
+      arxivIdFromItem(
+        fakeItem({ archive: "ARXIV", archiveLocation: "hep-th/9901001v1" }),
+      ),
+    ).toBe("hep-th/9901001");
+  });
+
+  // Intentional change: the subject class is dropped from the ID (before, the
+  // funding export kept it: math.GT/0309136 is an alias of math/0309136)
+  it.each([
+    [
+      { archiveLocation: "arXiv:math.GT/0309136" },
+      "math.GT/0309136",
+      "math/0309136",
+    ],
+    [
+      { archiveLocation: "arXiv:q-bio.BM/0401004" },
+      "q-bio.BM/0401004",
+      "q-bio/0401004",
+    ],
+    [
+      { archive: "arXiv", archiveLocation: "math.DG/0211159" },
+      "math.DG/0211159",
+      "math/0211159",
+    ],
+  ])(
+    "reads Archive Location %j: %j before -> %j after",
+    (fields, _before, after) => {
+      expect(arxivIdFromItem(fakeItem(fields))).toBe(after);
+    },
+  );
+
+  it("rejects values that are not arXiv IDs even when marked as arXiv", () => {
+    expect(
+      arxivIdFromItem(fakeItem({ archiveLocation: "arXiv:1234567" })),
+    ).toBeNull();
+    expect(
+      arxivIdFromItem(
+        fakeItem({ archive: "arXiv", archiveLocation: "1234567" }),
+      ),
+    ).toBeNull();
+    expect(
+      arxivIdFromItem(
+        fakeItem({ archive: "arXiv", archiveLocation: "hep-ph/000123" }),
+      ),
+    ).toBeNull();
+    // a subject class must be one of its archive's classes (hep-ph has none)
+    expect(
+      arxivIdFromItem(fakeItem({ archiveLocation: "arXiv:math.GTX/0309136" })),
+    ).toBeNull();
+    expect(
+      arxivIdFromItem(fakeItem({ archiveLocation: "arXiv:hep-ph.GT/9901001" })),
+    ).toBeNull();
+    // an archive name is letters, joined by single hyphens
+    expect(
+      arxivIdFromItem(fakeItem({ archiveLocation: "arXiv:---/9901001" })),
+    ).toBeNull();
+  });
+
+  it.each([
+    // impossible month or version, or a zero sequence number
+    "arXiv:9913.12345",
+    "arXiv:hep-ph/0013123",
+    "arXiv:2301.12345v0",
+    "arXiv:2101.00000",
+    "arXiv:hep-ph/0001000",
+    // four-digit sequence numbers ran 0704-1412, five-digit ones from 1501
+    "arXiv:2301.1234",
+    "arXiv:1412.00001",
+    "arXiv:0703.0001",
+    // old-style identifiers ran 9107-0703
+    "arXiv:hep-th/9106001",
+    "arXiv:hep-ph/0704001",
+  ])(
+    "rejects a value outside arXiv's identifier scheme: %s",
+    (archiveLocation) => {
+      expect(arxivIdFromItem(fakeItem({ archiveLocation }))).toBeNull();
+    },
+  );
+
+  it("still prefers Extra and URL over Archive Location", () => {
+    expect(
+      arxivIdFromItem(
+        fakeItem({
+          extra: "arXiv:2301.12345 [hep-ph]",
+          archive: "INSPIRE",
+          archiveLocation: "1234567",
+        }),
+      ),
+    ).toBe("2301.12345");
+    expect(
+      arxivIdFromItem(
+        fakeItem({
+          url: "https://arxiv.org/abs/hep-ph/0001234",
+          archive: "INSPIRE",
+          archiveLocation: "1234567",
+        }),
+      ),
+    ).toBe("hep-ph/0001234");
   });
 });

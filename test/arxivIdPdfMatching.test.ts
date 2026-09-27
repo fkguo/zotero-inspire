@@ -7,6 +7,11 @@
 // strong-match test, linked-reference matching, author-year matching with PDF
 // reference data, numeric labels resolved from the PDF reference list, and the
 // arXiv tokens of the Zotero-native citation overlay.
+//
+// Cases written "before -> after" are the intentional behaviour changes of the
+// strict parser (parseArxivId): "before" is what normalizeArxivId gave until it
+// switched to the parser (the previous commit fixed those values), "after" is
+// what it gives now.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -105,40 +110,40 @@ describe("normalizeArxivId", () => {
   });
 
   it.each([
-    // Subclass form of an old-style identifier (an alias of math/0309136)
-    ["math.GT/0309136", null],
-    ["math.GT/0309136v2", null],
-    ["https://arxiv.org/abs/math.GT/0309136", null],
-    // A version above 99 is kept on the identifier
-    ["2301.12345v100", "2301.12345v100"],
-    // A pdf URL with a version keeps the version
-    ["https://arxiv.org/pdf/2301.12345v2.pdf", "2301.12345v2"],
-    // export.arxiv.org and query strings are not recognised
-    ["https://export.arxiv.org/abs/2301.12345", null],
+    // The subclass form of an old-style identifier is an alias of the
+    // identifier without it (arxiv.org/abs/math.GT/0309136 is math/0309136)
+    ["math.GT/0309136", null, "math/0309136"],
+    ["math.GT/0309136v2", null, "math/0309136"],
+    ["https://arxiv.org/abs/math.GT/0309136", null, "math/0309136"],
+    // Versions of any length are dropped
+    ["2301.12345v100", "2301.12345v100", "2301.12345"],
+    ["https://arxiv.org/pdf/2301.12345v2.pdf", "2301.12345v2", "2301.12345"],
+    // export.arxiv.org, query strings and the arXiv DOI are recognised
+    ["https://export.arxiv.org/abs/2301.12345", null, "2301.12345"],
     [
       "https://arxiv.org/abs/2301.12345?context=hep-ph",
       "2301.12345?context=hep-ph",
+      "2301.12345",
     ],
-    // The arXiv DOI form is not recognised
-    ["10.48550/arXiv.2301.12345", null],
-    // Incomplete or impossible numbers are passed through as they are
-    ["2301.1", "2301.1"],
-    ["2301.123456", "2301.123456"],
-    ["1501.0123", "1501.0123"],
-    ["1412.00001", "1412.00001"],
-    ["2313.12345", "2313.12345"],
-    ["0612.1234", "0612.1234"],
-    ["2301.00000", "2301.00000"],
-    ["2301.12345.", "2301.12345."],
-    ["hep-ph/010100", "hep-ph/010100"],
-    ["hep-ph/01010011", "hep-ph/01010011"],
-    ["hep-ph/0113001", "hep-ph/0113001"],
-    ["hep-ph/0704001", "hep-ph/0704001"],
-    // Unknown archive names are passed through
-    ["gt/0309136", "gt/0309136"],
-    ["foo-bar/0101001", "foo-bar/0101001"],
-  ])("%j -> %j (current)", (input, expected) => {
-    expect(normalizeArxivId(input)).toBe(expected);
+    ["10.48550/arXiv.2301.12345", null, "2301.12345"],
+    // Incomplete or impossible numbers are no longer passed through
+    ["2301.1", "2301.1", null],
+    ["2301.123456", "2301.123456", null],
+    ["1501.0123", "1501.0123", null],
+    ["1412.00001", "1412.00001", null],
+    ["2313.12345", "2313.12345", null],
+    ["0612.1234", "0612.1234", null],
+    ["2301.00000", "2301.00000", null],
+    ["2301.12345.", "2301.12345.", null],
+    ["hep-ph/010100", "hep-ph/010100", null],
+    ["hep-ph/01010011", "hep-ph/01010011", null],
+    ["hep-ph/0113001", "hep-ph/0113001", null],
+    ["hep-ph/0704001", "hep-ph/0704001", null],
+    // Nor are archive names arXiv never had
+    ["gt/0309136", "gt/0309136", null],
+    ["foo-bar/0101001", "foo-bar/0101001", null],
+  ])("%j: %j before -> %j after", (input, _before, after) => {
+    expect(normalizeArxivId(input)).toBe(after);
   });
 
   it("reads the id of an arXiv details object", () => {
@@ -171,12 +176,12 @@ describe("identifier index by arXiv ID", () => {
 
   it("indexes each normalized ID once, first entry first", () => {
     const indexes = buildIdentifierIndexes(entries);
+    // Before: the truncated ID was indexed too, as ["2301.1", 5]
     expect([...indexes.arxivIndex.entries()]).toEqual([
       ["2301.12345", 0],
       ["1501.01234", 1],
       ["hep-ph/0101001", 2],
       ["math/0309136", 3],
-      ["2301.1", 5],
     ]);
   });
 
@@ -197,13 +202,13 @@ describe("identifier index by arXiv ID", () => {
   });
 
   it.each([
-    // The subclass form is not found
-    ["math.GT/0309136", -1],
-    // A truncated ID finds an entry with the same truncated ID
-    ["2301.1", 5],
-  ])("finds %j at %i (current)", (query, expected) => {
+    // The subclass form finds the entry of its canonical form
+    ["math.GT/0309136", -1, 3],
+    // A truncated ID no longer finds an entry with the same truncated ID
+    ["2301.1", 5, -1],
+  ])("finds %j at %i before -> %i after", (query, _before, after) => {
     const indexes = buildIdentifierIndexes(entries);
-    expect(findByArxiv(indexes, query)).toBe(expected);
+    expect(findByArxiv(indexes, query)).toBe(after);
   });
 });
 
@@ -229,15 +234,15 @@ describe("scoring by arXiv ID", () => {
   });
 
   it.each([
-    // The subclass form does not match its canonical form
-    ["math.GT/0309136", "math/0309136", false],
-    // Identical malformed IDs match each other
-    ["2301.1", "2301.1", true],
-    ["2313.12345", "2313.12345", true],
-    ["gt/0309136", "gt/0309136", true],
+    // The subclass form matches its canonical form
+    ["math.GT/0309136", "math/0309136", false, true],
+    // Identical malformed IDs no longer match each other
+    ["2301.1", "2301.1", true, false],
+    ["2313.12345", "2313.12345", true, false],
+    ["gt/0309136", "gt/0309136", true, false],
   ])(
-    "PDF %j vs INSPIRE %j -> arXiv match %s (current)",
-    (pdfId, details, matched) => {
+    "PDF %j vs INSPIRE %j -> arXiv match %s before -> %s after",
+    (pdfId, details, _before, matched) => {
       const score = calculateCompositeScore(paper(pdfId), entry("e", details));
       expect(score.arxivMatch).toBe(matched);
       expect(getStrongMatchKind(paper(pdfId), entry("e", details))).toEqual(
@@ -282,21 +287,21 @@ describe("linked-reference matching by arXiv ID", () => {
     expect(matcher.matchLinkedReference("1", [paper("1501.0123")])).toEqual([]);
   });
 
-  it("does not match the subclass form (current)", () => {
+  it("matches the subclass form to its canonical form (before: no match)", () => {
     const matcher = new LabelMatcher(entries, 7003);
     expect(
       matcher.matchLinkedReference("3", [paper("math.GT/0309136")]),
-    ).toEqual([]);
-  });
-
-  it("matches identical truncated IDs (current)", () => {
-    const matcher = new LabelMatcher(entries, 7004);
-    expect(matcher.matchLinkedReference("4", [paper("2301.1")])).toMatchObject([
+    ).toMatchObject([
       {
-        entryId: "fourth",
-        matchedIdentifier: { type: "arxiv", value: "2301.1" },
+        entryId: "third",
+        matchedIdentifier: { type: "arxiv", value: "math/0309136" },
       },
     ]);
+  });
+
+  it("does not match identical truncated IDs (before: matched fourth)", () => {
+    const matcher = new LabelMatcher(entries, 7004);
+    expect(matcher.matchLinkedReference("4", [paper("2301.1")])).toEqual([]);
   });
 });
 
@@ -353,7 +358,7 @@ describe("author-year precise matching by arXiv ID", () => {
     ).toBeNull();
   });
 
-  it("does not match the subclass form (current)", () => {
+  it("matches the subclass form to its canonical form (before: no match)", () => {
     expect(
       findPreciseMatch(
         entries,
@@ -361,10 +366,10 @@ describe("author-year precise matching by arXiv ID", () => {
         ["Smith"],
         null,
       ),
-    ).toBeNull();
+    ).toMatchObject({ entryId: "smith-c", score: SCORE.ARXIV_EXACT });
   });
 
-  it("matches identical truncated IDs (current)", () => {
+  it("does not match identical truncated IDs (before: matched smith-d)", () => {
     expect(
       findPreciseMatch(
         entries,
@@ -372,7 +377,7 @@ describe("author-year precise matching by arXiv ID", () => {
         ["Smith"],
         null,
       ),
-    ).toMatchObject({ entryId: "smith-d", score: SCORE.ARXIV_EXACT });
+    ).toBeNull();
   });
 
   it("resolves an author-year citation through the PDF reference list", () => {
@@ -431,12 +436,10 @@ describe("numeric label resolved by the arXiv ID of the PDF reference", () => {
     });
   });
 
-  it("does not use the subclass form (current)", () => {
-    expect(
-      matcherFor("math.GT/0309136")
-        .match("1")
-        .map((result) => result.entryId),
-    ).not.toContain("third");
+  it("finds the entry for the subclass form (before: not found)", () => {
+    expect(matcherFor("math.GT/0309136").match("1")[0]).toMatchObject({
+      entryId: "third",
+    });
   });
 });
 
@@ -532,21 +535,24 @@ describe("native overlay arXiv tokens", () => {
     "H. Author, Title eight, arXiv:2301.1 [hep-ph].",
   ];
 
-  it("records the normalized arXiv ID of each reference (current)", () => {
+  it("records the normalized arXiv ID of each reference", () => {
     const nativePackage = buildNativePackage(texts);
     const arxivByLabel = texts.map(
       (_, index) =>
         nativePackage.tokenMap.get(String(index + 1))?.[0]?.arxiv ?? null,
     );
+    // Before, the last four references kept what the token pattern captured:
+    // "1501.0123", "2301.12345.", "2313.12345" and "2301.1"; none of these
+    // could match an INSPIRE entry, so the matches below are unchanged
     expect(arxivByLabel).toEqual([
       "2301.12345",
       "2301.12345",
       "hep-ph/0101001",
       null,
-      "1501.0123",
-      "2301.12345.",
-      "2313.12345",
-      "2301.1",
+      null,
+      null,
+      null,
+      null,
     ]);
   });
 

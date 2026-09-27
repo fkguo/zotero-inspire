@@ -191,13 +191,15 @@ describe("getFundingForItem - arXiv ID of the item", () => {
     expect(result.arxivId).toBe("2101.01234");
   });
 
-  it("reads no arXiv ID from the legacy Journal Abbr layout", async () => {
+  // Intentional change: the export reads the same fields as preprint watch
+  // (before, an arXiv ID only in Journal Abbr gave none)
+  it("reads the arXiv ID of the legacy Journal Abbr layout", async () => {
     const result = await getFundingForItem(
       regularItemWithoutPdf(90003, {
         journalAbbreviation: "arXiv:2301.12345 [hep-ph]",
       }),
     );
-    expect(result.arxivId).toBeUndefined();
+    expect(result.arxivId).toBe("2301.12345");
   });
 });
 

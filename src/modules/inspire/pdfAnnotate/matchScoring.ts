@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { InspireReferenceEntry, InspireArxivDetails } from "../types";
+import { parseArxivId } from "../../arxiv/arxivId";
 import type { PDFPaperInfo } from "./pdfReferencesParser";
 import { SCORE, YEAR_DELTA, AUTHOR_SCORE } from "./constants";
 import {
@@ -25,61 +26,19 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Normalize arXiv ID for matching.
- * Handles various formats:
- * - "2301.12345v2" -> "2301.12345"
- * - "arXiv:2301.12345" -> "2301.12345"
- * - "hep-ph/0101234v1" -> "hep-ph/0101234"
- * - "https://arxiv.org/abs/2301.12345" -> "2301.12345"
+ * Canonical arXiv ID for matching (see parseArxivId): "2301.12345v2",
+ * "arXiv:2301.12345" and "https://arxiv.org/abs/2301.12345" give "2301.12345";
+ * "math.GT/0309136v1" gives "math/0309136". Anything that is not an arXiv
+ * identifier (an incomplete number, an unknown archive) gives null.
  *
  * @param id - arXiv ID string or details object
- * @returns Normalized arXiv ID or null
+ * @returns Canonical arXiv ID or null
  */
 export function normalizeArxivId(
   id?: string | InspireArxivDetails | null,
 ): string | null {
-  if (!id) return null;
-  let raw: string | undefined;
-  if (typeof id === "string") {
-    raw = id;
-  } else if (typeof id === "object") {
-    raw = id.id;
-  }
-  if (!raw) return null;
-
-  let normalized = raw.toLowerCase().trim();
-
-  // Remove URL prefix (https://arxiv.org/abs/ or /pdf/)
-  normalized = normalized.replace(
-    /^https?:\/\/(?:www\.)?arxiv\.org\/(?:abs|pdf)\//i,
-    "",
-  );
-
-  // Remove arXiv: prefix
-  normalized = normalized.replace(/^arxiv\s*:\s*/i, "");
-
-  // Remove version suffix (v1, v2, ..., v99)
-  normalized = normalized.replace(/v\d{1,2}$/i, "");
-
-  // Remove trailing .pdf
-  normalized = normalized.replace(/\.pdf$/i, "");
-
-  // Validate format
-  // New format: YYMM.NNNNN (after April 2007)
-  if (/^\d{4}\.\d{4,5}$/.test(normalized)) {
-    return normalized;
-  }
-  // Old format: subject-class/YYMMNNN (before 2007)
-  if (/^[a-z-]+\/\d{7}$/.test(normalized)) {
-    return normalized;
-  }
-
-  // Return as-is if it looks like an arXiv ID but doesn't match strict patterns
-  if (/^\d{4}\.\d+/.test(normalized) || /^[a-z-]+\/\d+/.test(normalized)) {
-    return normalized;
-  }
-
-  return null;
+  const raw = typeof id === "string" ? id : id?.id;
+  return parseArxivId(raw)?.id ?? null;
 }
 
 /**

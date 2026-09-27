@@ -22,6 +22,7 @@ import { inspireFetch } from "./rateLimiter";
 import { localCache } from "./localCache";
 import { LRUCache } from "./utils";
 import { fetchInspireMetaByRecid } from "./metadataService";
+import { arxivIdFromItem } from "../arxiv/arxivId";
 import type { jsobject } from "./types";
 import type { InspireLiteratureSearchResponse } from "./apiTypes";
 import type {
@@ -42,15 +43,6 @@ export const ARXIV_DOI_PREFIX = "10.48550/arXiv";
 
 /** Regex to match arXiv info in journalAbbreviation field */
 const ARXIV_JOURNAL_ABBREV_REGEX = /^arXiv:/i;
-
-/** Regex to extract arXiv ID from various formats */
-const ARXIV_ID_EXTRACT_REGEX = /arXiv:([\d.]+|[a-z-]+\/\d{7})/i;
-
-/** Regex to extract arXiv ID from URL */
-const ARXIV_URL_REGEX = /arxiv\.org\/abs\/([\d.]+|[a-z-]+\/\d{7})/i;
-
-/** Regex to extract arXiv ID from arXiv DOI */
-const ARXIV_DOI_REGEX = /10\.48550\/arXiv\.([\d.]+)/i;
 
 /** Concurrent API request limit */
 const CONCURRENCY = 3;
@@ -315,7 +307,7 @@ const PREPRINT_WATCH_ITEM_TYPES: ReadonlySet<string> = new Set([
  */
 export function isUnpublishedPreprint(item: Zotero.Item): boolean {
   if (item.itemType === "preprint") {
-    return extractArxivIdFromItem(item) !== null;
+    return arxivIdFromItem(item) !== null;
   }
   // Skip non-journal articles
   if (item.itemType !== "journalArticle") return false;
@@ -353,51 +345,6 @@ export function isUnpublishedPreprint(item: Zotero.Item): boolean {
   return false;
 }
 
-/**
- * Extract arXiv ID from a Zotero item.
- * Priority: journalAbbreviation > Extra > URL > Archive ID > DOI
- * (fields that do not exist for the item type read back as "", so the same
- * lookup works for journalArticle and preprint items).
- */
-export function extractArxivIdFromItem(item: Zotero.Item): string | null {
-  // Try journalAbbreviation first (most reliable for our plugin)
-  const journalAbbrev = item.getField("journalAbbreviation") as string;
-  if (journalAbbrev) {
-    const match = journalAbbrev.match(ARXIV_ID_EXTRACT_REGEX);
-    if (match) return match[1];
-  }
-
-  // Try Extra field
-  const extra = item.getField("extra") as string;
-  if (extra) {
-    const match = extra.match(ARXIV_ID_EXTRACT_REGEX);
-    if (match) return match[1];
-  }
-
-  // Try URL
-  const url = item.getField("url") as string;
-  if (url?.includes("arxiv.org")) {
-    const match = url.match(ARXIV_URL_REGEX);
-    if (match) return match[1];
-  }
-
-  // Try Archive ID (Zotero's arXiv translator stores "arXiv:ID" there for preprints)
-  const archiveID = item.getField("archiveID") as string;
-  if (archiveID) {
-    const match = archiveID.match(ARXIV_ID_EXTRACT_REGEX);
-    if (match) return match[1];
-  }
-
-  // Try DOI (arXiv DOI format: 10.48550/arXiv.2301.12345)
-  const doi = item.getField("DOI") as string;
-  if (doi && isArxivDoi(doi)) {
-    const match = doi.match(ARXIV_DOI_REGEX);
-    if (match) return match[1];
-  }
-
-  return null;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Library Scanning (Optimized for performance)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -424,7 +371,7 @@ async function findItemByArxivId(arxivId: string): Promise<Zotero.Item | null> {
 
     const items = await Zotero.Items.getAsync(ids);
     for (const item of items) {
-      if (!item.deleted && extractArxivIdFromItem(item) === arxivId) {
+      if (!item.deleted && arxivIdFromItem(item) === arxivId) {
         return item;
       }
     }
@@ -528,7 +475,7 @@ export async function findUnpublishedPreprints(
           const items = await Zotero.Items.getAsync([entry.itemId]);
           if (items.length > 0 && !items[0].deleted) {
             // Verify arXiv ID matches
-            const foundArxivId = extractArxivIdFromItem(items[0]);
+            const foundArxivId = arxivIdFromItem(items[0]);
             if (foundArxivId === entry.arxivId) {
               item = items[0];
             }
@@ -609,7 +556,7 @@ async function updateCacheFromItems(items: Zotero.Item[]): Promise<void> {
   const seenArxivIds = new Set<string>();
 
   for (const item of items) {
-    const arxivId = extractArxivIdFromItem(item);
+    const arxivId = arxivIdFromItem(item);
     if (!arxivId) continue;
     seenArxivIds.add(arxivId);
 
@@ -781,7 +728,7 @@ export async function batchCheckPublicationStatus(
       const currentIndex = index++;
       const item = items[currentIndex];
 
-      const arxivId = extractArxivIdFromItem(item);
+      const arxivId = arxivIdFromItem(item);
       if (!arxivId) {
         results[currentIndex] = {
           itemID: item.id,
@@ -1421,7 +1368,7 @@ export async function trackPreprintCandidates(
   }
 
   for (const item of candidates) {
-    const arxivId = extractArxivIdFromItem(item);
+    const arxivId = arxivIdFromItem(item);
     if (!arxivId) continue;
 
     const existing = getCacheEntry(cache, arxivId);

@@ -20,14 +20,12 @@ import { inspireFetch } from "./rateLimiter";
 import { crossrefFetch } from "./crossrefService";
 import { LRUCache } from "./utils";
 import { localCache } from "./localCache";
+import { arxivIdsFromFields } from "../arxiv/arxivId";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RegExp Constants (hoisted to module level for performance)
 // ─────────────────────────────────────────────────────────────────────────────
 const ARXIV_REGEX = /arxiv/i;
-const ARXIV_ID_REGEX = /(arXiv:|_eprint:)(.+)/;
-const ARXIV_URL_REGEX =
-  /(?:arxiv.org[/]abs[/]|arXiv:)([a-z.-]+[/]\d+|\d+[.]\d+)/i;
 const RECID_FROM_URL_REGEX = /[^/]*$/;
 const DOI_IN_EXTRA_REGEX = /DOI:(.+)/i;
 const DOI_ORG_IN_EXTRA_REGEX = /doi\.org\/(.+)/i;
@@ -64,21 +62,17 @@ function extractIdentifierFromItem(
   }
 
   // arXiv from Extra field
-  if (extra.includes("arXiv:") || extra.includes("_eprint:")) {
-    const match = extra.match(ARXIV_ID_REGEX);
-    if (match) {
-      const arxivSplit = match[2].split(" ");
-      const arxivId = arxivSplit[0] === "" ? arxivSplit[1] : arxivSplit[0];
-      return { idtype: "arxiv", value: arxivId, searchOrNot: 0 };
-    }
+  const extraArxivId = arxivIdsFromFields({ extra })[0];
+  if (extraArxivId) {
+    return { idtype: "arxiv", value: extraArxivId, searchOrNot: 0 };
   }
 
   // Check URL for various identifiers
   if (URL_IDENTIFIER_REGEX.test(url)) {
     // arXiv from URL
-    const arxivUrlMatch = ARXIV_URL_REGEX.exec(url);
-    if (arxivUrlMatch) {
-      return { idtype: "arxiv", value: arxivUrlMatch[1], searchOrNot: 0 };
+    const urlArxivId = arxivIdsFromFields({ url })[0];
+    if (urlArxivId) {
+      return { idtype: "arxiv", value: urlArxivId, searchOrNot: 0 };
     }
 
     // DOI from URL

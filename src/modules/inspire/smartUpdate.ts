@@ -2,6 +2,7 @@ import { config } from "../../../package.json";
 import { getString } from "../../utils/locale";
 import { getPref } from "../../utils/prefs";
 import type { jsobject } from "./types";
+import { arxivIdsFromFields } from "../arxiv/arxivId";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Smart Update Types
@@ -695,11 +696,10 @@ function extractCitationsFromExtra(extra: string): {
 }
 
 /**
- * Extract arXiv ID from Extra field
+ * Canonical arXiv ID of the Extra field (see arxivCandidatesFromExtra)
  */
 function extractArxivFromExtra(extra: string): string | null {
-  const match = extra.match(/arXiv:([^\s\]]+)/i);
-  return match ? match[1] : null;
+  return arxivIdsFromFields({ extra })[0] ?? null;
 }
 
 /**

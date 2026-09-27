@@ -6,14 +6,13 @@
 //     recids, so the panel showed another paper's references and citations
 //     (URLs below are taken from real library items);
 //   - a reference linked to an INSPIRE data record got that record's number
-//     as a literature recid;
-//   - an INSPIRE recid in Archive Location was returned as an arXiv ID.
+//     as a literature recid.
+// (The Archive Location cases of the arXiv ID moved to arxivId.test.ts.)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from "vitest";
 import {
   deriveRecidFromItem,
-  extractArxivIdFromItem,
   extractRecidFromRecordRef,
   extractRecidFromUrl,
   extractRecidFromUrls,
@@ -220,141 +219,5 @@ describe("deriveRecidFromItem", () => {
         }),
       ),
     ).toBe("1234567");
-  });
-});
-
-describe("extractArxivIdFromItem (apiUtils)", () => {
-  it("does not read an INSPIRE recid in Archive Location as an arXiv ID", () => {
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archive: "INSPIRE", archiveLocation: "1234567" }),
-      ),
-    ).toBeUndefined();
-    expect(
-      extractArxivIdFromItem(fakeItem({ archiveLocation: "1234567" })),
-    ).toBeUndefined();
-  });
-
-  it("requires an arXiv marker even when Archive Location looks like an arXiv ID", () => {
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archive: "INSPIRE", archiveLocation: "2101.01234" }),
-      ),
-    ).toBeUndefined();
-  });
-
-  it.each([
-    ["arXiv:2101.01234", "2101.01234"],
-    ["arXiv: 2101.01234", "2101.01234"],
-    ["arXiv:2101.01234v2", "2101.01234"],
-    ["ARXIV:0704.0001", "0704.0001"],
-    ["arXiv:1412.9999", "1412.9999"],
-    ["arXiv:1501.00001", "1501.00001"],
-    ["arXiv:hep-ph/0001234", "hep-ph/0001234"],
-    ["arXiv:hep-th/9108001", "hep-th/9108001"],
-    // the old scheme's documented range is 9107-0703
-    ["arXiv:hep-th/9107001", "hep-th/9107001"],
-    ["arXiv:math/0703001", "math/0703001"],
-    // old style with a subject class (math, cs, nlin and q-bio only)
-    ["arXiv:math.GT/0309136", "math.GT/0309136"],
-    ["arXiv:q-bio.BM/0401004", "q-bio.BM/0401004"],
-  ])("reads the ID from Archive Location %s", (archiveLocation, id) => {
-    expect(extractArxivIdFromItem(fakeItem({ archiveLocation }))).toBe(id);
-  });
-
-  it("reads Archive Location when Archive is arXiv", () => {
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archive: "arXiv", archiveLocation: "2101.01234" }),
-      ),
-    ).toBe("2101.01234");
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archive: "ARXIV", archiveLocation: "hep-th/9901001v1" }),
-      ),
-    ).toBe("hep-th/9901001");
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archive: "arXiv", archiveLocation: "math.DG/0211159" }),
-      ),
-    ).toBe("math.DG/0211159");
-  });
-
-  it("rejects values that are not arXiv IDs even when marked as arXiv", () => {
-    expect(
-      extractArxivIdFromItem(fakeItem({ archiveLocation: "arXiv:1234567" })),
-    ).toBeUndefined();
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archive: "arXiv", archiveLocation: "1234567" }),
-      ),
-    ).toBeUndefined();
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archive: "arXiv", archiveLocation: "hep-ph/000123" }),
-      ),
-    ).toBeUndefined();
-    // a subject class has exactly two letters, and only math, cs, nlin and
-    // q-bio identifiers carry one
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archiveLocation: "arXiv:math.GTX/0309136" }),
-      ),
-    ).toBeUndefined();
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archiveLocation: "arXiv:hep-ph.GT/9901001" }),
-      ),
-    ).toBeUndefined();
-    // an archive name is letters, joined by single hyphens
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({ archiveLocation: "arXiv:---/9901001" }),
-      ),
-    ).toBeUndefined();
-  });
-
-  it.each([
-    // impossible month or version, or a zero sequence number
-    "arXiv:9913.12345",
-    "arXiv:hep-ph/0013123",
-    "arXiv:2301.12345v0",
-    "arXiv:2101.00000",
-    "arXiv:hep-ph/0001000",
-    // four-digit sequence numbers ran 0704-1412, five-digit ones from 1501
-    "arXiv:2301.1234",
-    "arXiv:1412.00001",
-    "arXiv:0703.0001",
-    // old-style identifiers ran 9107-0703
-    "arXiv:hep-th/9106001",
-    "arXiv:hep-ph/0704001",
-  ])(
-    "rejects a value outside arXiv's identifier scheme: %s",
-    (archiveLocation) => {
-      expect(
-        extractArxivIdFromItem(fakeItem({ archiveLocation })),
-      ).toBeUndefined();
-    },
-  );
-
-  it("still prefers Extra and URL over Archive Location", () => {
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({
-          extra: "arXiv:2301.12345 [hep-ph]",
-          archive: "INSPIRE",
-          archiveLocation: "1234567",
-        }),
-      ),
-    ).toBe("2301.12345");
-    expect(
-      extractArxivIdFromItem(
-        fakeItem({
-          url: "https://arxiv.org/abs/hep-ph/0001234",
-          archive: "INSPIRE",
-          archiveLocation: "1234567",
-        }),
-      ),
-    ).toBe("hep-ph/0001234");
   });
 });
