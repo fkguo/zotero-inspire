@@ -236,7 +236,7 @@ export class HoverPreviewRenderer {
   buildContent(card: HTMLDivElement, ctx: PreviewRenderContext): void {
     const { entry } = ctx;
     const s = this.strings;
-    const dark = isDarkMode();
+    const dark = isDarkMode(this.doc);
 
     // Clear previous content
     card.replaceChildren();
@@ -492,7 +492,7 @@ export class HoverPreviewRenderer {
         s.dotAdd || getString("references-panel-button-add") || "";
       importBtn.setAttribute("aria-label", importBtn.title);
       applyRefEntryMarkerStyle(importBtn);
-      applyRefEntryMarkerColor(importBtn, false);
+      applyRefEntryMarkerColor(importBtn, false, isDarkMode(this.doc));
       importBtn.style.border = "none";
       importBtn.style.background = "transparent";
       importBtn.style.padding = "0";
@@ -822,12 +822,12 @@ export class HoverPreviewRenderer {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Position the preview card relative to a row element.
+   * Position the preview card relative to a row element, within the viewport
+   * of the window the card is in.
    * Prefers right side of row, falls back to below if no space.
    */
   positionRelativeToRow(card: HTMLDivElement, row: HTMLElement): void {
-    const mainWindow = Zotero.getMainWindow();
-    const doc = mainWindow?.document || this.doc;
+    const doc = card.ownerDocument;
     const viewportWidth = doc.documentElement?.clientWidth || 800;
     const viewportHeight = doc.documentElement?.clientHeight || 600;
 
@@ -873,13 +873,13 @@ export class HoverPreviewRenderer {
   }
 
   /**
-   * Position the preview card relative to a rect (e.g., button position).
+   * Position the preview card relative to a rect (e.g., button position),
+   * within the viewport of the window the card is in.
    * Uses BOTTOM positioning so card anchors at bottom and expands upward.
    * This keeps pagination buttons near the anchor when content changes.
    */
   positionRelativeToRect(card: HTMLDivElement, rect: PositionRect): void {
-    const mainWindow = Zotero.getMainWindow();
-    const doc = mainWindow?.document || this.doc;
+    const doc = card.ownerDocument;
     const viewportWidth = doc.documentElement?.clientWidth || 800;
     const viewportHeight = doc.documentElement?.clientHeight || 600;
 

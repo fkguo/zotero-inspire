@@ -6,6 +6,10 @@ import {
   type BatchImportManagerOptions,
 } from "../src/modules/inspire/panel/BatchImportManager";
 import { EntryListRenderer } from "../src/modules/inspire/panel/EntryListRenderer";
+import {
+  popupReporter,
+  type Reporter,
+} from "../src/modules/inspire/panel/reporter";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 import type { SaveTargetSelection } from "../src/modules/pickerUI";
 import { InspireReferencePanelController } from "../src/modules/zinspire";
@@ -232,12 +236,19 @@ function setUpManager(
     promptForSaveTarget: vi
       .fn<BatchImportManagerOptions["promptForSaveTarget"]>()
       .mockResolvedValue(TARGET),
-    showToast: vi.fn<BatchImportManagerOptions["showToast"]>(),
+    // The notices the manager gives through its reporter
+    showToast: vi.fn<Reporter["notify"]>(),
     updateRowStatus: vi.fn<BatchImportManagerOptions["updateRowStatus"]>(),
     onSelectionChange: vi.fn<(count: number) => void>(),
     onImportStateChange: vi.fn<(inProgress: boolean) => void>(),
   };
-  const manager = new BatchImportManager(options);
+  const manager = new BatchImportManager({
+    ...options,
+    reporter: {
+      notify: options.showToast,
+      startProgress: (text) => popupReporter.startProgress(text),
+    },
+  });
   openedManagers.push(manager);
 
   /** Replace the list element, as the panel does when it re-renders. */
@@ -1095,6 +1106,63 @@ describe("batch import", () => {
       failed: 0,
       cancelled: false,
     });
+  });
+
+  it("in a window of its own, reports through its reporter and stops on Escape there", async () => {
+    const ids = ["r1", "r2", "r3", "r4", "r5"];
+    const panel = setUpManager(ids.map((id) => entry(id)));
+    // The main Zotero window is another window than the panel's
+    const mainWindow = new JSDOM("", { url: "https://zotero.test/" }).window;
+    (globalThis as any).Zotero.getMainWindow = () => mainWindow;
+    const shown: string[] = [];
+    const manager = new BatchImportManager({
+      ...panel.options,
+      reporter: {
+        notify: (message) => shown.push(`notice: ${message}`),
+        startProgress: (text) => {
+          shown.push(`progress: ${text}`);
+          return {
+            update: (text, percent) => shown.push(`${percent} %: ${text}`),
+            close: () => shown.push("progress closed"),
+          };
+        },
+      },
+    });
+    openedManagers.push(manager);
+    const imports = holdImports(panel.options);
+    manager.selectAll();
+    const escape = (win: typeof mainWindow) => {
+      const event = new win.KeyboardEvent("keydown", {
+        key: "Escape",
+        cancelable: true,
+      });
+      win.dispatchEvent(event);
+      return event;
+    };
+
+    const run = manager.handleBatchImport(panel.anchor);
+    await vi.waitFor(() => expect(imports.calls).toHaveLength(3));
+    imports.calls[0].settle(100);
+    await vi.waitFor(() => expect(imports.calls).toHaveLength(4));
+    expect(escape(mainWindow).defaultPrevented).toBe(false);
+    expect(escape(panel.dom.window).defaultPrevented).toBe(true);
+    for (const call of imports.calls.slice(1)) call.settle(100);
+
+    expect(await run).toEqual({ success: 4, failed: 0, cancelled: true });
+    const importing = (done: number) =>
+      msg("references-panel-batch-importing", { done, total: 5 });
+    expect(shown).toEqual([
+      `progress: ${importing(0)}`,
+      `20 %: ${importing(1)}`,
+      `40 %: ${importing(2)}`,
+      `60 %: ${importing(3)}`,
+      `80 %: ${importing(4)}`,
+      "progress closed",
+      `notice: ${msg("references-panel-batch-import-cancelled", { done: 4, total: 5 })}`,
+    ]);
+    // Nothing went to the popups by the main window
+    expect(progressWindows).toHaveLength(0);
+    expect(panel.options.showToast).not.toHaveBeenCalled();
   });
 });
 

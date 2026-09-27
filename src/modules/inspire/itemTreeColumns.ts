@@ -1,5 +1,5 @@
 import { config } from "../../../package.json";
-import { extractArxivIdFromItem } from "./preprintWatchService";
+import { arxivIdFieldsOfItem, arxivIdsFromFields } from "../arxiv/arxivId";
 import { LRUCache } from "./utils";
 import { getPref } from "../../utils/prefs";
 
@@ -183,66 +183,32 @@ function encodeSortDisplayValue(sortKey: string, display: string): string {
   return `${sortKey || display}${SORT_DISPLAY_SEPARATOR}${display}`;
 }
 
-function normalizeArxivTwoDigitYear(twoDigit: string): string | null {
-  const yy = Number.parseInt(twoDigit, 10);
-  if (!Number.isFinite(yy) || yy < 0 || yy > 99) {
-    return null;
-  }
-  // arXiv started in 1991. Prefer 19xx for 91-99, otherwise 20xx.
-  return String(yy >= 91 ? 1900 + yy : 2000 + yy);
-}
-
+/**
+ * Sort key of a canonical arXiv ID (parseArxivId): year, month and the
+ * zero-padded sequence number, so that old-style (1991-2007) and new-style
+ * identifiers sort together by date.
+ */
 function buildArxivSortKey(arxivId: string): string {
-  const trimmed = (arxivId || "").trim();
-  if (!trimmed) return "";
-
-  const normalized = trimmed.replace(/v\d+$/i, "");
-
-  // New-style: YYMM.NNNNN (post-2007). Example: 2301.12345
-  const newMatch = normalized.match(/^(\d{4})\.(\d{4,5})$/);
-  if (newMatch) {
-    const yymm = newMatch[1];
-    const seqRaw = newMatch[2];
-    const year = normalizeArxivTwoDigitYear(yymm.slice(0, 2));
-    const month = yymm.slice(2, 4);
-    if (year && /^[01]\d$/.test(month)) {
-      return `${year}${month}${seqRaw.padStart(ARXIV_SORT_PAD, "0")}`;
-    }
-  }
-
-  // Old-style: archive/YYMMNNN. Example: hep-th/9802109, hep-ph/0610008
-  const oldMatch = normalized.match(/^[a-z-]+\/(\d{7})$/i);
-  if (oldMatch) {
-    const digits = oldMatch[1];
-    const year = normalizeArxivTwoDigitYear(digits.slice(0, 2));
-    const month = digits.slice(2, 4);
-    const seq = digits.slice(4, 7);
-    if (year && /^[01]\d$/.test(month)) {
-      return `${year}${month}${seq.padStart(ARXIV_SORT_PAD, "0")}`;
-    }
-    // Fall back to numeric-only sorting
-    return digits.padStart(11, "0");
-  }
-
-  // Fallback: numeric-only (keeps ordering stable for unusual formats)
-  const numeric = normalized.replace(/\D/g, "");
-  return numeric ? numeric.padStart(11, "0") : normalized;
+  const newStyle = arxivId.match(/^(\d\d)(\d\d)\.(\d{4,5})$/);
+  const match = newStyle ?? arxivId.match(/^[a-z-]+\/(\d\d)(\d\d)(\d{3})$/);
+  if (!match) return "";
+  const [, yy, mm, seq] = match;
+  // Old-style years 91-99 are 1991-1999, all other years 20YY
+  const year = (!newStyle && Number(yy) >= 91 ? 1900 : 2000) + Number(yy);
+  return `${year}${mm}${seq.padStart(ARXIV_SORT_PAD, "0")}`;
 }
 
 function getArxivCellData(item: Zotero.Item): string {
   const key = getItemCacheKey(item);
-  const journalAbbrev = asString(item.getField("journalAbbreviation"));
-  const extra = asString(item.getField("extra"));
-  const url = asString(item.getField("url"));
-  const doi = asString(item.getField("DOI"));
-  const signature = `${journalAbbrev}\n${extra}\n${url}\n${doi}`;
+  const fields = arxivIdFieldsOfItem(item);
+  const signature = Object.values(fields).join("\n");
 
   const cached = arxivValueCache.get(key);
   if (cached && cached.signature === signature) {
     return cached.value;
   }
 
-  const arxivId = extractArxivIdFromItem(item) || "";
+  const arxivId = arxivIdsFromFields(fields)[0] ?? "";
   const sortKey = arxivId ? buildArxivSortKey(arxivId) : "";
   const encoded = encodeSortDisplayValue(sortKey, arxivId);
   arxivValueCache.set(key, { signature, value: encoded });

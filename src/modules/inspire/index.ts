@@ -254,7 +254,6 @@ export {
   // Detection functions
   isArxivDoi,
   isUnpublishedPreprint,
-  extractArxivIdFromItem,
   // Scanning functions
   findUnpublishedPreprints,
   // Check functions

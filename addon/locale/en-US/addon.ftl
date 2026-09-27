@@ -269,6 +269,13 @@ references-panel-author-profile-collapse = Collapse
 references-panel-author-profile-expand = Expand
 references-panel-author-preview-view-papers = View all papers
 references-panel-author-copied = Copied
+references-panel-author-library-count =
+  { $count ->
+    [one] 1 paper in your library
+   *[other] { $count } papers in your library
+  }
+references-panel-author-search-arxiv = Search arXiv for this author
+references-panel-author-search-inspire = Search INSPIRE for this author
 references-panel-author-orcid-label = ORCID
 references-panel-author-bai-label = BAI
 references-panel-author-recid-label = INSPIRE ID

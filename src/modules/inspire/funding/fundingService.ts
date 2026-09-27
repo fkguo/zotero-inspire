@@ -2,7 +2,7 @@ import { extractAcknowledgmentSection } from "./acknowledgmentExtractor";
 import { extractFundingInfo } from "./fundingExtractor";
 import { filterFunding } from "./fundingFilter";
 import { FundingResult } from "./types";
-import { extractArxivIdFromItem } from "../apiUtils";
+import { arxivIdFromItem } from "../../arxiv/arxivId";
 import { LRUCache } from "../utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ async function extractAndCacheFunding(item: Zotero.Item): Promise<FundingResult>
   }
 
   const title = metadataItem.getField("title") as string || "";
-  const arxivId = extractArxivIdFromItem(metadataItem);
+  const arxivId = arxivIdFromItem(metadataItem) ?? undefined;
   const doi = metadataItem.getField("DOI") as string || "";
 
   if (!pdfAttachment) {

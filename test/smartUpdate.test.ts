@@ -31,7 +31,7 @@ describe("compareItemWithInspire (arXiv journalAbbreviation fallback)", () => {
 
     const item = createItem({
       title: "Test Paper",
-      extra: "arXiv:1234.5678 [hep-ph]\n",
+      extra: "arXiv:2301.12345 [hep-ph]\n",
       journalAbbreviation: "",
     });
 
@@ -39,7 +39,7 @@ describe("compareItemWithInspire (arXiv journalAbbreviation fallback)", () => {
       item as any,
       {
         title: "Test Paper",
-        arxiv: { value: "1234.5678", categories: ["hep-ph"] },
+        arxiv: { value: "2301.12345", categories: ["hep-ph"] },
       } as any,
     );
 
@@ -53,7 +53,7 @@ describe("compareItemWithInspire (arXiv journalAbbreviation fallback)", () => {
 
     const item = createItem({
       title: "Test Paper",
-      extra: "arXiv:1234.5678 [hep-ph]\n",
+      extra: "arXiv:2301.12345 [hep-ph]\n",
       journalAbbreviation: "",
     });
 
@@ -61,7 +61,7 @@ describe("compareItemWithInspire (arXiv journalAbbreviation fallback)", () => {
       item as any,
       {
         title: "Test Paper",
-        arxiv: { value: "1234.5678", categories: ["hep-ph"] },
+        arxiv: { value: "2301.12345", categories: ["hep-ph"] },
       } as any,
     );
 
@@ -82,14 +82,14 @@ describe("compareItemWithInspire (effective item type)", () => {
 
     const item = createItem({
       title: "Test Paper",
-      extra: "arXiv:1234.5678 [hep-ph]\n",
+      extra: "arXiv:2301.12345 [hep-ph]\n",
       journalAbbreviation: "",
     });
     item.itemType = "preprint";
 
     const meta = {
       title: "Test Paper",
-      arxiv: { value: "1234.5678", categories: ["hep-ph"] },
+      arxiv: { value: "2301.12345", categories: ["hep-ph"] },
     } as any;
 
     // Still a preprint: no journalAbbreviation fallback
