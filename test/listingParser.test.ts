@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   assembleSpecDay,
   ListingParseError,
-  listingId,
   parseCatchupPage,
   parseNewPage,
   parseRecentIndex,
@@ -496,16 +495,5 @@ describe("assembleSpecDay", () => {
     );
     const day = assembleSpecDay("cs.GL", [latest], 0);
     expect(day).toMatchObject({ total: 0, entries: [], nextDay: null });
-  });
-});
-
-describe("listingId", () => {
-  it("accepts the identifiers listings print", () => {
-    expect(listingId("2609.28538")).toBe("2609.28538");
-    expect(listingId("1411.4567")).toBe("1411.4567");
-    expect(listingId("math/0702261")).toBe("math/0702261");
-    expect(listingId("math.GT/0309136")).toBe("math/0309136");
-    expect(listingId("2609.1")).toBeNull();
-    expect(listingId("")).toBeNull();
   });
 });

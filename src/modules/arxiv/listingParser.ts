@@ -12,6 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { parseListingDate, type IsoDate } from "./arxivDates";
+import { parseArxivId } from "./arxivId";
 import {
   LISTING_SECTIONS,
   type ListingAuthor,
@@ -45,17 +46,6 @@ const SECTION_HEADING =
   /^(New|Cross|Replacement)\s+submissions\s*\(\s*(?:continued\s*,\s*)?showing\s+(?:(?:first|last)\s+)?(\d+)\s+of\s+(\d+)\s+entries\s*\)$/;
 
 const CATEGORY_ID = /^[a-z]+(?:-[a-z]+)*(?:\.[A-Za-z]+(?:-[A-Za-z]+)*)?$/;
-
-/**
- * Canonical form of an identifier printed in a listing: new style
- * YYMM.NNNN(N), or old style archive/YYMMNNN without the subject class.
- */
-export function listingId(raw: string): string | null {
-  const value = raw.trim();
-  if (/^\d{4}\.\d{4,5}$/.test(value)) return value;
-  const old = value.match(/^([a-z]+(?:-[a-z]+)?)(?:\.[A-Za-z-]+)?\/(\d{7})$/);
-  return old ? `${old[1]}/${old[2]}` : null;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Text helpers
@@ -203,15 +193,19 @@ function parseEntry(
     (link.getAttribute("href") ?? "").startsWith("/abs/"),
   );
   const rawId = absLink?.getAttribute("href")?.slice("/abs/".length) ?? "";
-  const id = listingId(rawId);
+  const id = parseArxivId(rawId)?.id;
   if (!id) throw new ListingParseError(`Entry without identifier: "${rawId}"`);
 
+  // The version is only in the entry's HTML link, when it has one
   let version: number | undefined;
   for (const link of queryAll(dt, "a")) {
     const html = (link.getAttribute("href") ?? "").match(
-      /^https:\/\/arxiv\.org\/html\/(.+)v(\d+)$/,
+      /^https:\/\/arxiv\.org\/html\/(.+)$/,
     );
-    if (html && listingId(html[1]) === id) version = Number(html[2]);
+    const linked = html ? parseArxivId(html[1]) : null;
+    if (linked?.id === id && linked.version !== undefined) {
+      version = linked.version;
+    }
   }
 
   const titleElement = dd.querySelector(".list-title");

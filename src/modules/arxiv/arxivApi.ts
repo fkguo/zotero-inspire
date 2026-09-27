@@ -14,7 +14,7 @@ import {
   type ArxivFetchErrorKind,
   type ArxivScheduler,
 } from "./arxivFetch";
-import { listingId } from "./listingParser";
+import { parseArxivId } from "./arxivId";
 
 const API_URL = "https://export.arxiv.org/api/query";
 const ATOM = "http://www.w3.org/2005/Atom";
@@ -205,11 +205,10 @@ function childText(
 
 /** "http://arxiv.org/abs/1706.03762v7" -> identifier and version */
 function entryId(text: string): { id: string; version: number } | null {
-  const match = text
-    .trim()
-    .match(/^https?:\/\/(?:www\.|export\.)?arxiv\.org\/abs\/(.+)v(\d+)$/);
-  const id = match ? listingId(match[1]) : null;
-  return id ? { id, version: Number(match![2]) } : null;
+  const parsed = parseArxivId(text);
+  return parsed?.version === undefined
+    ? null
+    : { id: parsed.id, version: parsed.version };
 }
 
 /**
