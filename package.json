@@ -42,6 +42,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.14.0",
+    "@fluent/syntax": "^0.19.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
     "@types/pako": "^2.0.4",

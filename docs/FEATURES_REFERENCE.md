@@ -132,7 +132,7 @@ The **⭐ Favorites** tab provides quick access to favorite authors, papers, and
 | Hover over title              | Show abstract tooltip                              |
 | Hover over author name        | Show author profile preview card                   |
 | Click refresh button          | Reload current view (bypass cache)                 |
-| Click copy all BibTeX button  | Copy all visible entries as BibTeX                 |
+| Click export button           | Open export menu (clipboard, file, citation style) |
 | Right-click entry (in panel)  | Context menu with favorite option                  |
 
 ### 1.8 Citation Graph

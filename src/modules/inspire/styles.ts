@@ -116,30 +116,8 @@ export const CONTAINER_STYLES = {
   } as CSSProperties,
 } as const;
 
-/** Chart/visualization styles */
-export const CHART_STYLES = {
-  noData: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    color: "var(--fill-tertiary, #9ca3af)",
-    fontSize: "12px",
-  } as CSSProperties,
-  noDataItalic: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    color: "var(--fill-tertiary, #9ca3af)",
-    fontSize: "12px",
-    fontStyle: "italic",
-  } as CSSProperties,
-} as const;
-
 /**
  * Get dark mode aware chart "no data" styles.
- * Use this instead of CHART_STYLES for proper dark mode support.
  */
 export function getChartNoDataStyle(): CSSProperties {
   const dark = isDarkMode();
@@ -155,7 +133,6 @@ export function getChartNoDataStyle(): CSSProperties {
 
 /**
  * Get dark mode aware chart "no data" italic styles.
- * Use this instead of CHART_STYLES for proper dark mode support.
  */
 export function getChartNoDataItalicStyle(): CSSProperties {
   const dark = isDarkMode();

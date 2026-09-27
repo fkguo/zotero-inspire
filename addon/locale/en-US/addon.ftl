@@ -311,7 +311,6 @@ zoteroinspire-refresh-button =
 zoteroinspire-copy-all-button =
     .tooltiptext = Export references (BibTeX/LaTeX)
 references-panel-bibtex-fetching = Fetching entries...
-references-panel-bibtex-all-copied = { $count } BibTeX entries copied to clipboard
 references-panel-bibtex-all-failed = Failed to fetch entries
 references-panel-no-recid-entries = No INSPIRE records to export
 

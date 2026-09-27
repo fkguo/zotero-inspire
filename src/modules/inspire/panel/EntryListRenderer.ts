@@ -10,7 +10,8 @@
 // NOT responsible for:
 // - Event handling (handled by main controller via event delegation)
 // - Business logic (import, link, copy, etc.)
-// - State management (selectedEntryIDs, focusedEntryID owned by controller)
+// - State management (selectedEntryIDs owned by BatchImportManager,
+//   focusedEntryID by the controller)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../../../package.json";
