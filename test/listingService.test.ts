@@ -219,6 +219,20 @@ describe("new", () => {
     expect(sections).toEqual({ new: 119, cross: 111, replace: 101 });
   });
 
+  it("fetches an alias from its canonical category's page", async () => {
+    const { clock, site, service } = setup();
+    site.html(
+      LIST_URL("math-ph"),
+      newPageHtml("math-ph", "2026-09-25", smallDay("math-ph")),
+    );
+    const result = await clock.run(service.loadNew(["math.MP", "math-ph"]));
+    expect(site.sent.map((request) => request.url)).toEqual([
+      LIST_URL("math-ph"),
+    ]);
+    expect(result.days[0].specs.map((item) => item.spec)).toEqual(["math-ph"]);
+    expect(result.days[0].entries[0].matchedCategories).toEqual(["math-ph"]);
+  });
+
   it("reads an archive page and an empty day", async () => {
     const { clock, site, service } = setup();
     site.html(

@@ -1,12 +1,18 @@
 #!/usr/bin/env node
-// Generate src/modules/arxiv/arxivArchives.json, the table of arXiv archives
-// that old-style identifiers (archive/YYMMNNN, 1991-07 to 2007-03) can name,
-// from arXiv's own taxonomy, arxiv-base arxiv/taxonomy/definitions.py.
+// Generate two tables from arXiv's own taxonomy, arxiv-base
+// arxiv/taxonomy/definitions.py:
 //
-// The table keeps every archive of a non-test group that started before
-// 2007-04, discontinued ones included (alg-geom, chao-dyn, q-alg, ...), and
-// for each archive the subject classes of its categories (math.GT -> "GT"),
-// which may follow the archive name in an identifier (math.GT/0309136).
+// src/modules/arxiv/arxivArchives.json, the archives that old-style
+// identifiers (archive/YYMMNNN, 1991-07 to 2007-03) can name: every archive
+// of a non-test group that started before 2007-04, discontinued ones included
+// (alg-geom, chao-dyn, q-alg, ...), and for each archive the subject classes
+// of its categories (math.GT -> "GT"), which may follow the archive name in an
+// identifier (math.GT/0309136).
+//
+// src/modules/arxiv/arxivCategories.json, the categories one can browse
+// today: the active groups, archives and categories with their names, each
+// category with its archive and group, its canonical name and its aliases
+// (math.MP is an alias of math-ph: papers of one are listed in the other).
 //
 // Usage (regenerate before each release):
 //   node scripts/generate-arxiv-archives.mjs [--commit <sha>] [--file <path>]
@@ -21,14 +27,15 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_COMMIT = "a5985f621b07a4031c9e9b4f870a2206a9aa15a7";
 const DEFINITIONS_PATH = "arxiv/taxonomy/definitions.py";
 const OLD_SCHEME_END = "2007-04-01";
-const OUTPUT = join(
+const OUTPUT_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
   "src",
   "modules",
   "arxiv",
-  "arxivArchives.json",
 );
+const OUTPUT = join(OUTPUT_DIR, "arxivArchives.json");
+const CATEGORIES_OUTPUT = join(OUTPUT_DIR, "arxivCategories.json");
 
 function parseArgs(argv) {
   const args = { commit: DEFAULT_COMMIT, file: null };
@@ -95,6 +102,79 @@ function entries(block, kind) {
   return result;
 }
 
+/** The string map `name = { "a": "b", ... }` (CATEGORY_ALIASES) */
+function stringMap(source, name) {
+  const start = source.search(new RegExp(`^${name}\\s*=\\s*\\{`, "m"));
+  if (start < 0) throw new Error(`${name} not found`);
+  const end = source.indexOf("}", start);
+  const map = new Map();
+  const pair = /(["'])([^"']+)\1\s*:\s*(["'])([^"']+)\3/g;
+  for (const [, , key, , value] of source.slice(start, end).matchAll(pair)) {
+    map.set(key, value);
+  }
+  if (map.size === 0) throw new Error(`${name} is empty`);
+  return map;
+}
+
+/** Active groups, archives and categories with names and aliases */
+function activeTaxonomy(groups, archives, categories, aliasOf) {
+  const activeGroups = [...groups.values()].filter(
+    (group) => group.is_active && !group.is_test,
+  );
+  const groupIds = new Set(activeGroups.map((group) => group.id));
+  const activeArchives = [...archives.values()].filter(
+    (archive) => archive.is_active && groupIds.has(archive.in_group),
+  );
+  const archiveGroup = new Map(
+    activeArchives.map((archive) => [archive.id, archive.in_group]),
+  );
+  const aliasesOf = new Map();
+  for (const [alias, canonical] of aliasOf) {
+    for (const [id, other] of [
+      [alias, canonical],
+      [canonical, alias],
+    ]) {
+      aliasesOf.set(id, [...(aliasesOf.get(id) ?? []), other]);
+    }
+  }
+  const byId = (a, b) => a.id.localeCompare(b.id);
+  const table = [...categories.values()]
+    .filter(
+      (category) => category.is_active && archiveGroup.has(category.in_archive),
+    )
+    .map((category) => ({
+      id: category.id,
+      name: category.full_name,
+      archive: category.in_archive,
+      group: archiveGroup.get(category.in_archive),
+      canonical: aliasOf.get(category.id) ?? category.id,
+      aliases: (aliasesOf.get(category.id) ?? []).sort(),
+    }))
+    .sort(byId);
+  for (const [alias, canonical] of aliasOf) {
+    for (const id of [alias, canonical]) {
+      if (!table.some((category) => category.id === id)) {
+        throw new Error(
+          `Alias pair ${alias} / ${canonical}: ${id} is not active`,
+        );
+      }
+    }
+  }
+  return {
+    groups: activeGroups
+      .map((group) => ({ id: group.id, name: group.full_name }))
+      .sort(byId),
+    archives: activeArchives
+      .map((archive) => ({
+        id: archive.id,
+        name: archive.full_name,
+        group: archive.in_group,
+      }))
+      .sort(byId),
+    categories: table,
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const url = `https://raw.githubusercontent.com/arXiv/arxiv-base/${args.commit}/${DEFINITIONS_PATH}`;
@@ -145,6 +225,28 @@ async function main() {
   };
   await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\n`);
   console.log(`${table.length} archives written to ${OUTPUT}`);
+
+  const taxonomy = activeTaxonomy(
+    groups,
+    archives,
+    categories,
+    stringMap(source, "CATEGORY_ALIASES"),
+  );
+  await writeFile(
+    CATEGORIES_OUTPUT,
+    `${JSON.stringify(
+      {
+        source: output.source,
+        generatedBy: output.generatedBy,
+        ...taxonomy,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  console.log(
+    `${taxonomy.categories.length} categories written to ${CATEGORIES_OUTPUT}`,
+  );
 }
 
 main().catch((error) => {

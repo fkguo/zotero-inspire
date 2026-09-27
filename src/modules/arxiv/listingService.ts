@@ -27,6 +27,7 @@ import {
   scheduledAnnouncementBetween,
   type IsoDate,
 } from "./arxivDates";
+import { subscriptionPageSpecs } from "./arxivCategories";
 import {
   ARXIV_WEB_INTERVAL_MS,
   ArxivFetchError,
@@ -235,11 +236,16 @@ export class ListingService {
   // The three modes
   // ───────────────────────────────────────────────────────────────────────────
 
-  /** The newest announcement day of `specs` (categories or archives) */
+  /**
+   * The newest announcement day of a subscription. In all modes the
+   * subscription is a list of categories and whole archives; an alias counts
+   * as its canonical category (`subscriptionPageSpecs`).
+   */
   async loadNew(
-    specs: readonly string[],
+    subscription: readonly string[],
     options: ListingLoadOptions = {},
   ): Promise<ListingLoadResult> {
+    const specs = subscriptionPageSpecs(subscription);
     const run = new Run(options);
     const batch = await this.latestBatch(run, specs, null);
     if (batch.date) {
@@ -256,9 +262,10 @@ export class ListingService {
 
   /** The last five announcement days, newest first */
   async loadRecent(
-    specs: readonly string[],
+    subscription: readonly string[],
     options: ListingLoadOptions = {},
   ): Promise<ListingLoadResult> {
+    const specs = subscriptionPageSpecs(subscription);
     const run = new Run(options);
     const index = await this.recentIndex(run);
     if (!index.ok) {
@@ -292,10 +299,11 @@ export class ListingService {
    * when every page of a day fails (the next day is then unknown).
    */
   async loadCatchup(
-    specs: readonly string[],
+    subscription: readonly string[],
     start: IsoDate,
     options: ListingLoadOptions = {},
   ): Promise<ListingLoadResult> {
+    const specs = subscriptionPageSpecs(subscription);
     const run = new Run(options);
     const index = await this.recentIndex(run);
     if (!index.ok) {
@@ -404,10 +412,11 @@ export class ListingService {
    * `latest`: the day was the newest announcement day (loaded from /new).
    */
   async reloadDay(
-    specs: readonly string[],
+    subscription: readonly string[],
     date: IsoDate,
     options: ListingLoadOptions & { latest?: boolean } = {},
   ): Promise<ListingLoadResult> {
+    const specs = subscriptionPageSpecs(subscription);
     const run = new Run(options);
     if (options.latest) {
       // A category whose /new already showed this day keeps its copy; the

@@ -1,0 +1,1382 @@
+{
+  "source": "https://github.com/arXiv/arxiv-base/blob/a5985f621b07a4031c9e9b4f870a2206a9aa15a7/arxiv/taxonomy/definitions.py",
+  "generatedBy": "scripts/generate-arxiv-archives.mjs",
+  "groups": [
+    {
+      "id": "grp_cs",
+      "name": "Computer Science"
+    },
+    {
+      "id": "grp_econ",
+      "name": "Economics"
+    },
+    {
+      "id": "grp_eess",
+      "name": "Electrical Engineering and Systems Science"
+    },
+    {
+      "id": "grp_math",
+      "name": "Mathematics"
+    },
+    {
+      "id": "grp_physics",
+      "name": "Physics"
+    },
+    {
+      "id": "grp_q-bio",
+      "name": "Quantitative Biology"
+    },
+    {
+      "id": "grp_q-fin",
+      "name": "Quantitative Finance"
+    },
+    {
+      "id": "grp_stat",
+      "name": "Statistics"
+    }
+  ],
+  "archives": [
+    {
+      "id": "astro-ph",
+      "name": "Astrophysics",
+      "group": "grp_physics"
+    },
+    {
+      "id": "cond-mat",
+      "name": "Condensed Matter",
+      "group": "grp_physics"
+    },
+    {
+      "id": "cs",
+      "name": "Computer Science",
+      "group": "grp_cs"
+    },
+    {
+      "id": "econ",
+      "name": "Economics",
+      "group": "grp_econ"
+    },
+    {
+      "id": "eess",
+      "name": "Electrical Engineering and Systems Science",
+      "group": "grp_eess"
+    },
+    {
+      "id": "gr-qc",
+      "name": "General Relativity and Quantum Cosmology",
+      "group": "grp_physics"
+    },
+    {
+      "id": "hep-ex",
+      "name": "High Energy Physics - Experiment",
+      "group": "grp_physics"
+    },
+    {
+      "id": "hep-lat",
+      "name": "High Energy Physics - Lattice",
+      "group": "grp_physics"
+    },
+    {
+      "id": "hep-ph",
+      "name": "High Energy Physics - Phenomenology",
+      "group": "grp_physics"
+    },
+    {
+      "id": "hep-th",
+      "name": "High Energy Physics - Theory",
+      "group": "grp_physics"
+    },
+    {
+      "id": "math",
+      "name": "Mathematics",
+      "group": "grp_math"
+    },
+    {
+      "id": "math-ph",
+      "name": "Mathematical Physics",
+      "group": "grp_physics"
+    },
+    {
+      "id": "nlin",
+      "name": "Nonlinear Sciences",
+      "group": "grp_physics"
+    },
+    {
+      "id": "nucl-ex",
+      "name": "Nuclear Experiment",
+      "group": "grp_physics"
+    },
+    {
+      "id": "nucl-th",
+      "name": "Nuclear Theory",
+      "group": "grp_physics"
+    },
+    {
+      "id": "physics",
+      "name": "Physics",
+      "group": "grp_physics"
+    },
+    {
+      "id": "q-bio",
+      "name": "Quantitative Biology",
+      "group": "grp_q-bio"
+    },
+    {
+      "id": "q-fin",
+      "name": "Quantitative Finance",
+      "group": "grp_q-fin"
+    },
+    {
+      "id": "quant-ph",
+      "name": "Quantum Physics",
+      "group": "grp_physics"
+    },
+    {
+      "id": "stat",
+      "name": "Statistics",
+      "group": "grp_stat"
+    }
+  ],
+  "categories": [
+    {
+      "id": "astro-ph.CO",
+      "name": "Cosmology and Nongalactic Astrophysics",
+      "archive": "astro-ph",
+      "group": "grp_physics",
+      "canonical": "astro-ph.CO",
+      "aliases": []
+    },
+    {
+      "id": "astro-ph.EP",
+      "name": "Earth and Planetary Astrophysics",
+      "archive": "astro-ph",
+      "group": "grp_physics",
+      "canonical": "astro-ph.EP",
+      "aliases": []
+    },
+    {
+      "id": "astro-ph.GA",
+      "name": "Astrophysics of Galaxies",
+      "archive": "astro-ph",
+      "group": "grp_physics",
+      "canonical": "astro-ph.GA",
+      "aliases": []
+    },
+    {
+      "id": "astro-ph.HE",
+      "name": "High Energy Astrophysical Phenomena",
+      "archive": "astro-ph",
+      "group": "grp_physics",
+      "canonical": "astro-ph.HE",
+      "aliases": []
+    },
+    {
+      "id": "astro-ph.IM",
+      "name": "Instrumentation and Methods for Astrophysics",
+      "archive": "astro-ph",
+      "group": "grp_physics",
+      "canonical": "astro-ph.IM",
+      "aliases": []
+    },
+    {
+      "id": "astro-ph.SR",
+      "name": "Solar and Stellar Astrophysics",
+      "archive": "astro-ph",
+      "group": "grp_physics",
+      "canonical": "astro-ph.SR",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.dis-nn",
+      "name": "Disordered Systems and Neural Networks",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.dis-nn",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.mes-hall",
+      "name": "Mesoscale and Nanoscale Physics",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.mes-hall",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.mtrl-sci",
+      "name": "Materials Science",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.mtrl-sci",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.other",
+      "name": "Other Condensed Matter",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.other",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.quant-gas",
+      "name": "Quantum Gases",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.quant-gas",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.soft",
+      "name": "Soft Condensed Matter",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.soft",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.stat-mech",
+      "name": "Statistical Mechanics",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.stat-mech",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.str-el",
+      "name": "Strongly Correlated Electrons",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.str-el",
+      "aliases": []
+    },
+    {
+      "id": "cond-mat.supr-con",
+      "name": "Superconductivity",
+      "archive": "cond-mat",
+      "group": "grp_physics",
+      "canonical": "cond-mat.supr-con",
+      "aliases": []
+    },
+    {
+      "id": "cs.AI",
+      "name": "Artificial Intelligence",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.AI",
+      "aliases": []
+    },
+    {
+      "id": "cs.AR",
+      "name": "Hardware Architecture",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.AR",
+      "aliases": []
+    },
+    {
+      "id": "cs.CC",
+      "name": "Computational Complexity",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.CC",
+      "aliases": []
+    },
+    {
+      "id": "cs.CE",
+      "name": "Computational Engineering, Finance, and Science",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.CE",
+      "aliases": []
+    },
+    {
+      "id": "cs.CG",
+      "name": "Computational Geometry",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.CG",
+      "aliases": []
+    },
+    {
+      "id": "cs.CL",
+      "name": "Computation and Language",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.CL",
+      "aliases": []
+    },
+    {
+      "id": "cs.CR",
+      "name": "Cryptography and Security",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.CR",
+      "aliases": []
+    },
+    {
+      "id": "cs.CV",
+      "name": "Computer Vision and Pattern Recognition",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.CV",
+      "aliases": []
+    },
+    {
+      "id": "cs.CY",
+      "name": "Computers and Society",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.CY",
+      "aliases": []
+    },
+    {
+      "id": "cs.DB",
+      "name": "Databases",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.DB",
+      "aliases": []
+    },
+    {
+      "id": "cs.DC",
+      "name": "Distributed, Parallel, and Cluster Computing",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.DC",
+      "aliases": []
+    },
+    {
+      "id": "cs.DL",
+      "name": "Digital Libraries",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.DL",
+      "aliases": []
+    },
+    {
+      "id": "cs.DM",
+      "name": "Discrete Mathematics",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.DM",
+      "aliases": []
+    },
+    {
+      "id": "cs.DS",
+      "name": "Data Structures and Algorithms",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.DS",
+      "aliases": []
+    },
+    {
+      "id": "cs.ET",
+      "name": "Emerging Technologies",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.ET",
+      "aliases": []
+    },
+    {
+      "id": "cs.FL",
+      "name": "Formal Languages and Automata Theory",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.FL",
+      "aliases": []
+    },
+    {
+      "id": "cs.GL",
+      "name": "General Literature",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.GL",
+      "aliases": []
+    },
+    {
+      "id": "cs.GR",
+      "name": "Graphics",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.GR",
+      "aliases": []
+    },
+    {
+      "id": "cs.GT",
+      "name": "Computer Science and Game Theory",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.GT",
+      "aliases": []
+    },
+    {
+      "id": "cs.HC",
+      "name": "Human-Computer Interaction",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.HC",
+      "aliases": []
+    },
+    {
+      "id": "cs.IR",
+      "name": "Information Retrieval",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.IR",
+      "aliases": []
+    },
+    {
+      "id": "cs.IT",
+      "name": "Information Theory",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.IT",
+      "aliases": ["math.IT"]
+    },
+    {
+      "id": "cs.LG",
+      "name": "Machine Learning",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.LG",
+      "aliases": []
+    },
+    {
+      "id": "cs.LO",
+      "name": "Logic in Computer Science",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.LO",
+      "aliases": []
+    },
+    {
+      "id": "cs.MA",
+      "name": "Multiagent Systems",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.MA",
+      "aliases": []
+    },
+    {
+      "id": "cs.MM",
+      "name": "Multimedia",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.MM",
+      "aliases": []
+    },
+    {
+      "id": "cs.MS",
+      "name": "Mathematical Software",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.MS",
+      "aliases": []
+    },
+    {
+      "id": "cs.NA",
+      "name": "Numerical Analysis",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "math.NA",
+      "aliases": ["math.NA"]
+    },
+    {
+      "id": "cs.NE",
+      "name": "Neural and Evolutionary Computing",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.NE",
+      "aliases": []
+    },
+    {
+      "id": "cs.NI",
+      "name": "Networking and Internet Architecture",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.NI",
+      "aliases": []
+    },
+    {
+      "id": "cs.OH",
+      "name": "Other Computer Science",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.OH",
+      "aliases": []
+    },
+    {
+      "id": "cs.OS",
+      "name": "Operating Systems",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.OS",
+      "aliases": []
+    },
+    {
+      "id": "cs.PF",
+      "name": "Performance",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.PF",
+      "aliases": []
+    },
+    {
+      "id": "cs.PL",
+      "name": "Programming Languages",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.PL",
+      "aliases": []
+    },
+    {
+      "id": "cs.RO",
+      "name": "Robotics",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.RO",
+      "aliases": []
+    },
+    {
+      "id": "cs.SC",
+      "name": "Symbolic Computation",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.SC",
+      "aliases": []
+    },
+    {
+      "id": "cs.SD",
+      "name": "Sound",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.SD",
+      "aliases": []
+    },
+    {
+      "id": "cs.SE",
+      "name": "Software Engineering",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.SE",
+      "aliases": []
+    },
+    {
+      "id": "cs.SI",
+      "name": "Social and Information Networks",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "cs.SI",
+      "aliases": []
+    },
+    {
+      "id": "cs.SY",
+      "name": "Systems and Control",
+      "archive": "cs",
+      "group": "grp_cs",
+      "canonical": "eess.SY",
+      "aliases": ["eess.SY"]
+    },
+    {
+      "id": "econ.EM",
+      "name": "Econometrics",
+      "archive": "econ",
+      "group": "grp_econ",
+      "canonical": "econ.EM",
+      "aliases": []
+    },
+    {
+      "id": "econ.GN",
+      "name": "General Economics",
+      "archive": "econ",
+      "group": "grp_econ",
+      "canonical": "econ.GN",
+      "aliases": ["q-fin.EC"]
+    },
+    {
+      "id": "econ.TH",
+      "name": "Theoretical Economics",
+      "archive": "econ",
+      "group": "grp_econ",
+      "canonical": "econ.TH",
+      "aliases": []
+    },
+    {
+      "id": "eess.AS",
+      "name": "Audio and Speech Processing",
+      "archive": "eess",
+      "group": "grp_eess",
+      "canonical": "eess.AS",
+      "aliases": []
+    },
+    {
+      "id": "eess.IV",
+      "name": "Image and Video Processing",
+      "archive": "eess",
+      "group": "grp_eess",
+      "canonical": "eess.IV",
+      "aliases": []
+    },
+    {
+      "id": "eess.SP",
+      "name": "Signal Processing",
+      "archive": "eess",
+      "group": "grp_eess",
+      "canonical": "eess.SP",
+      "aliases": []
+    },
+    {
+      "id": "eess.SY",
+      "name": "Systems and Control",
+      "archive": "eess",
+      "group": "grp_eess",
+      "canonical": "eess.SY",
+      "aliases": ["cs.SY"]
+    },
+    {
+      "id": "gr-qc",
+      "name": "General Relativity and Quantum Cosmology",
+      "archive": "gr-qc",
+      "group": "grp_physics",
+      "canonical": "gr-qc",
+      "aliases": []
+    },
+    {
+      "id": "hep-ex",
+      "name": "High Energy Physics - Experiment",
+      "archive": "hep-ex",
+      "group": "grp_physics",
+      "canonical": "hep-ex",
+      "aliases": []
+    },
+    {
+      "id": "hep-lat",
+      "name": "High Energy Physics - Lattice",
+      "archive": "hep-lat",
+      "group": "grp_physics",
+      "canonical": "hep-lat",
+      "aliases": []
+    },
+    {
+      "id": "hep-ph",
+      "name": "High Energy Physics - Phenomenology",
+      "archive": "hep-ph",
+      "group": "grp_physics",
+      "canonical": "hep-ph",
+      "aliases": []
+    },
+    {
+      "id": "hep-th",
+      "name": "High Energy Physics - Theory",
+      "archive": "hep-th",
+      "group": "grp_physics",
+      "canonical": "hep-th",
+      "aliases": []
+    },
+    {
+      "id": "math-ph",
+      "name": "Mathematical Physics",
+      "archive": "math-ph",
+      "group": "grp_physics",
+      "canonical": "math-ph",
+      "aliases": ["math.MP"]
+    },
+    {
+      "id": "math.AC",
+      "name": "Commutative Algebra",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.AC",
+      "aliases": []
+    },
+    {
+      "id": "math.AG",
+      "name": "Algebraic Geometry",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.AG",
+      "aliases": []
+    },
+    {
+      "id": "math.AP",
+      "name": "Analysis of PDEs",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.AP",
+      "aliases": []
+    },
+    {
+      "id": "math.AT",
+      "name": "Algebraic Topology",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.AT",
+      "aliases": []
+    },
+    {
+      "id": "math.CA",
+      "name": "Classical Analysis and ODEs",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.CA",
+      "aliases": []
+    },
+    {
+      "id": "math.CO",
+      "name": "Combinatorics",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.CO",
+      "aliases": []
+    },
+    {
+      "id": "math.CT",
+      "name": "Category Theory",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.CT",
+      "aliases": []
+    },
+    {
+      "id": "math.CV",
+      "name": "Complex Variables",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.CV",
+      "aliases": []
+    },
+    {
+      "id": "math.DG",
+      "name": "Differential Geometry",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.DG",
+      "aliases": []
+    },
+    {
+      "id": "math.DS",
+      "name": "Dynamical Systems",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.DS",
+      "aliases": []
+    },
+    {
+      "id": "math.FA",
+      "name": "Functional Analysis",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.FA",
+      "aliases": []
+    },
+    {
+      "id": "math.GM",
+      "name": "General Mathematics",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.GM",
+      "aliases": []
+    },
+    {
+      "id": "math.GN",
+      "name": "General Topology",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.GN",
+      "aliases": []
+    },
+    {
+      "id": "math.GR",
+      "name": "Group Theory",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.GR",
+      "aliases": []
+    },
+    {
+      "id": "math.GT",
+      "name": "Geometric Topology",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.GT",
+      "aliases": []
+    },
+    {
+      "id": "math.HO",
+      "name": "History and Overview",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.HO",
+      "aliases": []
+    },
+    {
+      "id": "math.IT",
+      "name": "Information Theory",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "cs.IT",
+      "aliases": ["cs.IT"]
+    },
+    {
+      "id": "math.KT",
+      "name": "K-Theory and Homology",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.KT",
+      "aliases": []
+    },
+    {
+      "id": "math.LO",
+      "name": "Logic",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.LO",
+      "aliases": []
+    },
+    {
+      "id": "math.MG",
+      "name": "Metric Geometry",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.MG",
+      "aliases": []
+    },
+    {
+      "id": "math.MP",
+      "name": "Mathematical Physics",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math-ph",
+      "aliases": ["math-ph"]
+    },
+    {
+      "id": "math.NA",
+      "name": "Numerical Analysis",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.NA",
+      "aliases": ["cs.NA"]
+    },
+    {
+      "id": "math.NT",
+      "name": "Number Theory",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.NT",
+      "aliases": []
+    },
+    {
+      "id": "math.OA",
+      "name": "Operator Algebras",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.OA",
+      "aliases": []
+    },
+    {
+      "id": "math.OC",
+      "name": "Optimization and Control",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.OC",
+      "aliases": []
+    },
+    {
+      "id": "math.PR",
+      "name": "Probability",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.PR",
+      "aliases": []
+    },
+    {
+      "id": "math.QA",
+      "name": "Quantum Algebra",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.QA",
+      "aliases": []
+    },
+    {
+      "id": "math.RA",
+      "name": "Rings and Algebras",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.RA",
+      "aliases": []
+    },
+    {
+      "id": "math.RT",
+      "name": "Representation Theory",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.RT",
+      "aliases": []
+    },
+    {
+      "id": "math.SG",
+      "name": "Symplectic Geometry",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.SG",
+      "aliases": []
+    },
+    {
+      "id": "math.SP",
+      "name": "Spectral Theory",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.SP",
+      "aliases": []
+    },
+    {
+      "id": "math.ST",
+      "name": "Statistics Theory",
+      "archive": "math",
+      "group": "grp_math",
+      "canonical": "math.ST",
+      "aliases": ["stat.TH"]
+    },
+    {
+      "id": "nlin.AO",
+      "name": "Adaptation and Self-Organizing Systems",
+      "archive": "nlin",
+      "group": "grp_physics",
+      "canonical": "nlin.AO",
+      "aliases": []
+    },
+    {
+      "id": "nlin.CD",
+      "name": "Chaotic Dynamics",
+      "archive": "nlin",
+      "group": "grp_physics",
+      "canonical": "nlin.CD",
+      "aliases": []
+    },
+    {
+      "id": "nlin.CG",
+      "name": "Cellular Automata and Lattice Gases",
+      "archive": "nlin",
+      "group": "grp_physics",
+      "canonical": "nlin.CG",
+      "aliases": []
+    },
+    {
+      "id": "nlin.PS",
+      "name": "Pattern Formation and Solitons",
+      "archive": "nlin",
+      "group": "grp_physics",
+      "canonical": "nlin.PS",
+      "aliases": []
+    },
+    {
+      "id": "nlin.SI",
+      "name": "Exactly Solvable and Integrable Systems",
+      "archive": "nlin",
+      "group": "grp_physics",
+      "canonical": "nlin.SI",
+      "aliases": []
+    },
+    {
+      "id": "nucl-ex",
+      "name": "Nuclear Experiment",
+      "archive": "nucl-ex",
+      "group": "grp_physics",
+      "canonical": "nucl-ex",
+      "aliases": []
+    },
+    {
+      "id": "nucl-th",
+      "name": "Nuclear Theory",
+      "archive": "nucl-th",
+      "group": "grp_physics",
+      "canonical": "nucl-th",
+      "aliases": []
+    },
+    {
+      "id": "physics.acc-ph",
+      "name": "Accelerator Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.acc-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.ao-ph",
+      "name": "Atmospheric and Oceanic Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.ao-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.app-ph",
+      "name": "Applied Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.app-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.atm-clus",
+      "name": "Atomic and Molecular Clusters",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.atm-clus",
+      "aliases": []
+    },
+    {
+      "id": "physics.atom-ph",
+      "name": "Atomic Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.atom-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.bio-ph",
+      "name": "Biological Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.bio-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.chem-ph",
+      "name": "Chemical Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.chem-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.class-ph",
+      "name": "Classical Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.class-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.comp-ph",
+      "name": "Computational Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.comp-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.data-an",
+      "name": "Data Analysis, Statistics and Probability",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.data-an",
+      "aliases": []
+    },
+    {
+      "id": "physics.ed-ph",
+      "name": "Physics Education",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.ed-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.flu-dyn",
+      "name": "Fluid Dynamics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.flu-dyn",
+      "aliases": []
+    },
+    {
+      "id": "physics.gen-ph",
+      "name": "General Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.gen-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.geo-ph",
+      "name": "Geophysics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.geo-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.hist-ph",
+      "name": "History and Philosophy of Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.hist-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.ins-det",
+      "name": "Instrumentation and Detectors",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.ins-det",
+      "aliases": []
+    },
+    {
+      "id": "physics.med-ph",
+      "name": "Medical Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.med-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.optics",
+      "name": "Optics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.optics",
+      "aliases": []
+    },
+    {
+      "id": "physics.plasm-ph",
+      "name": "Plasma Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.plasm-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.pop-ph",
+      "name": "Popular Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.pop-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.soc-ph",
+      "name": "Physics and Society",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.soc-ph",
+      "aliases": []
+    },
+    {
+      "id": "physics.space-ph",
+      "name": "Space Physics",
+      "archive": "physics",
+      "group": "grp_physics",
+      "canonical": "physics.space-ph",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.BM",
+      "name": "Biomolecules",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.BM",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.CB",
+      "name": "Cell Behavior",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.CB",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.GN",
+      "name": "Genomics",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.GN",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.MN",
+      "name": "Molecular Networks",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.MN",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.NC",
+      "name": "Neurons and Cognition",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.NC",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.OT",
+      "name": "Other Quantitative Biology",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.OT",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.PE",
+      "name": "Populations and Evolution",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.PE",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.QM",
+      "name": "Quantitative Methods",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.QM",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.SC",
+      "name": "Subcellular Processes",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.SC",
+      "aliases": []
+    },
+    {
+      "id": "q-bio.TO",
+      "name": "Tissues and Organs",
+      "archive": "q-bio",
+      "group": "grp_q-bio",
+      "canonical": "q-bio.TO",
+      "aliases": []
+    },
+    {
+      "id": "q-fin.CP",
+      "name": "Computational Finance",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "q-fin.CP",
+      "aliases": []
+    },
+    {
+      "id": "q-fin.EC",
+      "name": "Economics",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "econ.GN",
+      "aliases": ["econ.GN"]
+    },
+    {
+      "id": "q-fin.GN",
+      "name": "General Finance",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "q-fin.GN",
+      "aliases": []
+    },
+    {
+      "id": "q-fin.MF",
+      "name": "Mathematical Finance",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "q-fin.MF",
+      "aliases": []
+    },
+    {
+      "id": "q-fin.PM",
+      "name": "Portfolio Management",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "q-fin.PM",
+      "aliases": []
+    },
+    {
+      "id": "q-fin.PR",
+      "name": "Pricing of Securities",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "q-fin.PR",
+      "aliases": []
+    },
+    {
+      "id": "q-fin.RM",
+      "name": "Risk Management",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "q-fin.RM",
+      "aliases": []
+    },
+    {
+      "id": "q-fin.ST",
+      "name": "Statistical Finance",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "q-fin.ST",
+      "aliases": []
+    },
+    {
+      "id": "q-fin.TR",
+      "name": "Trading and Market Microstructure",
+      "archive": "q-fin",
+      "group": "grp_q-fin",
+      "canonical": "q-fin.TR",
+      "aliases": []
+    },
+    {
+      "id": "quant-ph",
+      "name": "Quantum Physics",
+      "archive": "quant-ph",
+      "group": "grp_physics",
+      "canonical": "quant-ph",
+      "aliases": []
+    },
+    {
+      "id": "stat.AP",
+      "name": "Applications",
+      "archive": "stat",
+      "group": "grp_stat",
+      "canonical": "stat.AP",
+      "aliases": []
+    },
+    {
+      "id": "stat.CO",
+      "name": "Computation",
+      "archive": "stat",
+      "group": "grp_stat",
+      "canonical": "stat.CO",
+      "aliases": []
+    },
+    {
+      "id": "stat.ME",
+      "name": "Methodology",
+      "archive": "stat",
+      "group": "grp_stat",
+      "canonical": "stat.ME",
+      "aliases": []
+    },
+    {
+      "id": "stat.ML",
+      "name": "Machine Learning",
+      "archive": "stat",
+      "group": "grp_stat",
+      "canonical": "stat.ML",
+      "aliases": []
+    },
+    {
+      "id": "stat.OT",
+      "name": "Other Statistics",
+      "archive": "stat",
+      "group": "grp_stat",
+      "canonical": "stat.OT",
+      "aliases": []
+    },
+    {
+      "id": "stat.TH",
+      "name": "Statistics Theory",
+      "archive": "stat",
+      "group": "grp_stat",
+      "canonical": "math.ST",
+      "aliases": ["math.ST"]
+    }
+  ]
+}
