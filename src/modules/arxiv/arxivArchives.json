@@ -1,0 +1,380 @@
+{
+  "source": "https://github.com/arXiv/arxiv-base/blob/a5985f621b07a4031c9e9b4f870a2206a9aa15a7/arxiv/taxonomy/definitions.py",
+  "generatedBy": "scripts/generate-arxiv-archives.mjs",
+  "archives": [
+    {
+      "id": "acc-phys",
+      "name": "Accelerator Physics",
+      "active": false,
+      "start": "1994-11",
+      "end": "1996-09",
+      "subjectClasses": []
+    },
+    {
+      "id": "adap-org",
+      "name": "Adaptation, Noise, and Self-Organizing Systems",
+      "active": false,
+      "start": "1993-03",
+      "end": "1999-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "alg-geom",
+      "name": "Algebraic Geometry",
+      "active": false,
+      "start": "1992-02",
+      "end": "1997-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "ao-sci",
+      "name": "Atmospheric-Oceanic Sciences",
+      "active": false,
+      "start": "1995-02",
+      "end": "1996-09",
+      "subjectClasses": []
+    },
+    {
+      "id": "astro-ph",
+      "name": "Astrophysics",
+      "active": true,
+      "start": "1992-04",
+      "subjectClasses": ["CO", "EP", "GA", "HE", "IM", "SR"]
+    },
+    {
+      "id": "atom-ph",
+      "name": "Atomic, Molecular and Optical Physics",
+      "active": false,
+      "start": "1995-09",
+      "end": "1996-09",
+      "subjectClasses": []
+    },
+    {
+      "id": "bayes-an",
+      "name": "Bayesian Analysis",
+      "active": false,
+      "start": "1995-06",
+      "end": "1996-11",
+      "subjectClasses": []
+    },
+    {
+      "id": "chao-dyn",
+      "name": "Chaotic Dynamics",
+      "active": false,
+      "start": "1993-01",
+      "end": "1999-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "chem-ph",
+      "name": "Chemical Physics",
+      "active": false,
+      "start": "1994-03",
+      "end": "1996-09",
+      "subjectClasses": []
+    },
+    {
+      "id": "cmp-lg",
+      "name": "Computation and Language",
+      "active": false,
+      "start": "1994-04",
+      "end": "1998-09",
+      "subjectClasses": []
+    },
+    {
+      "id": "comp-gas",
+      "name": "Cellular Automata and Lattice Gases",
+      "active": false,
+      "start": "1993-02",
+      "end": "1999-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "cond-mat",
+      "name": "Condensed Matter",
+      "active": true,
+      "start": "1992-04",
+      "subjectClasses": [
+        "dis-nn",
+        "mes-hall",
+        "mtrl-sci",
+        "other",
+        "quant-gas",
+        "soft",
+        "stat-mech",
+        "str-el",
+        "supr-con"
+      ]
+    },
+    {
+      "id": "cs",
+      "name": "Computer Science",
+      "active": true,
+      "start": "1993-01",
+      "subjectClasses": [
+        "AI",
+        "AR",
+        "CC",
+        "CE",
+        "CG",
+        "CL",
+        "CR",
+        "CV",
+        "CY",
+        "DB",
+        "DC",
+        "DL",
+        "DM",
+        "DS",
+        "ET",
+        "FL",
+        "GL",
+        "GR",
+        "GT",
+        "HC",
+        "IR",
+        "IT",
+        "LG",
+        "LO",
+        "MA",
+        "MM",
+        "MS",
+        "NA",
+        "NE",
+        "NI",
+        "OH",
+        "OS",
+        "PF",
+        "PL",
+        "RO",
+        "SC",
+        "SD",
+        "SE",
+        "SI",
+        "SY"
+      ]
+    },
+    {
+      "id": "dg-ga",
+      "name": "Differential Geometry",
+      "active": false,
+      "start": "1994-06",
+      "end": "1997-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "funct-an",
+      "name": "Functional Analysis",
+      "active": false,
+      "start": "1992-04",
+      "end": "1997-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "gr-qc",
+      "name": "General Relativity and Quantum Cosmology",
+      "active": true,
+      "start": "1992-07",
+      "subjectClasses": []
+    },
+    {
+      "id": "hep-ex",
+      "name": "High Energy Physics - Experiment",
+      "active": true,
+      "start": "1994-04",
+      "subjectClasses": []
+    },
+    {
+      "id": "hep-lat",
+      "name": "High Energy Physics - Lattice",
+      "active": true,
+      "start": "1992-02",
+      "subjectClasses": []
+    },
+    {
+      "id": "hep-ph",
+      "name": "High Energy Physics - Phenomenology",
+      "active": true,
+      "start": "1992-03",
+      "subjectClasses": []
+    },
+    {
+      "id": "hep-th",
+      "name": "High Energy Physics - Theory",
+      "active": true,
+      "start": "1991-08",
+      "subjectClasses": []
+    },
+    {
+      "id": "math",
+      "name": "Mathematics",
+      "active": true,
+      "start": "1992-02",
+      "subjectClasses": [
+        "AC",
+        "AG",
+        "AP",
+        "AT",
+        "CA",
+        "CO",
+        "CT",
+        "CV",
+        "DG",
+        "DS",
+        "FA",
+        "GM",
+        "GN",
+        "GR",
+        "GT",
+        "HO",
+        "IT",
+        "KT",
+        "LO",
+        "MG",
+        "MP",
+        "NA",
+        "NT",
+        "OA",
+        "OC",
+        "PR",
+        "QA",
+        "RA",
+        "RT",
+        "SG",
+        "SP",
+        "ST"
+      ]
+    },
+    {
+      "id": "math-ph",
+      "name": "Mathematical Physics",
+      "active": true,
+      "start": "1996-09",
+      "subjectClasses": []
+    },
+    {
+      "id": "mtrl-th",
+      "name": "Materials Theory",
+      "active": false,
+      "start": "1994-11",
+      "end": "1996-09",
+      "subjectClasses": []
+    },
+    {
+      "id": "nlin",
+      "name": "Nonlinear Sciences",
+      "active": true,
+      "start": "1993-01",
+      "subjectClasses": ["AO", "CD", "CG", "PS", "SI"]
+    },
+    {
+      "id": "nucl-ex",
+      "name": "Nuclear Experiment",
+      "active": true,
+      "start": "1994-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "nucl-th",
+      "name": "Nuclear Theory",
+      "active": true,
+      "start": "1992-10",
+      "subjectClasses": []
+    },
+    {
+      "id": "patt-sol",
+      "name": "Pattern Formation and Solitons",
+      "active": false,
+      "start": "1993-02",
+      "end": "1999-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "physics",
+      "name": "Physics",
+      "active": true,
+      "start": "1996-10",
+      "subjectClasses": [
+        "acc-ph",
+        "ao-ph",
+        "app-ph",
+        "atm-clus",
+        "atom-ph",
+        "bio-ph",
+        "chem-ph",
+        "class-ph",
+        "comp-ph",
+        "data-an",
+        "ed-ph",
+        "flu-dyn",
+        "gen-ph",
+        "geo-ph",
+        "hist-ph",
+        "ins-det",
+        "med-ph",
+        "optics",
+        "plasm-ph",
+        "pop-ph",
+        "soc-ph",
+        "space-ph"
+      ]
+    },
+    {
+      "id": "plasm-ph",
+      "name": "Plasma Physics",
+      "active": false,
+      "start": "1995-09",
+      "end": "1996-09",
+      "subjectClasses": []
+    },
+    {
+      "id": "q-alg",
+      "name": "Quantum Algebra and Topology",
+      "active": false,
+      "start": "1994-12",
+      "end": "1997-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "q-bio",
+      "name": "Quantitative Biology",
+      "active": true,
+      "start": "2003-09",
+      "subjectClasses": [
+        "BM",
+        "CB",
+        "GN",
+        "MN",
+        "NC",
+        "OT",
+        "PE",
+        "QM",
+        "SC",
+        "TO"
+      ]
+    },
+    {
+      "id": "quant-ph",
+      "name": "Quantum Physics",
+      "active": true,
+      "start": "1994-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "solv-int",
+      "name": "Exactly Solvable and Integrable Systems",
+      "active": false,
+      "start": "1993-04",
+      "end": "1999-12",
+      "subjectClasses": []
+    },
+    {
+      "id": "supr-con",
+      "name": "Superconductivity",
+      "active": false,
+      "start": "1994-11",
+      "end": "1996-09",
+      "subjectClasses": []
+    }
+  ]
+}
