@@ -504,8 +504,8 @@ export class HoverPreviewController {
           return;
         }
         if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-          const mainWindow = Zotero.getMainWindow?.();
-          const selection = mainWindow?.getSelection?.();
+          // The selection of the window the card is in
+          const selection = this.doc.defaultView?.getSelection?.();
           const selectedText = selection?.toString();
           if (selectedText) {
             e.preventDefault();

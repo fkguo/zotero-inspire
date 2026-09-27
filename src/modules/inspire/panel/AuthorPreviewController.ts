@@ -61,6 +61,21 @@ export interface AuthorPreviewControllerOptions {
   hideDelay?: number;
 }
 
+/**
+ * Author searches on arXiv and INSPIRE for a name as a paper gives it: the
+ * links of the card's local form.
+ */
+export function authorSearchUrls(name: string): {
+  arxiv: string;
+  inspire: string;
+} {
+  const query = encodeURIComponent(name.trim());
+  return {
+    arxiv: `https://arxiv.org/search/?searchtype=author&query=${query}`,
+    inspire: `https://inspirehep.net/authors?q=${query}`,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Utility function for copyable values
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,6 +178,25 @@ export class AuthorPreviewController {
     this.anchor = anchor;
     this.showTimeout = setTimeout(() => {
       this.showAuthor(authorInfo, anchor, loadProfile);
+    }, this.showDelay);
+  }
+
+  /**
+   * Schedule the card's local form, which requests nothing from INSPIRE: the
+   * author's name, the number of their papers in the library (from
+   * `countInLibrary`), and author searches on arXiv and INSPIRE that open in
+   * the system browser.
+   */
+  scheduleLocalAuthor(
+    authorInfo: AuthorSearchInfo,
+    anchor: Element,
+    countInLibrary: (authorInfo: AuthorSearchInfo) => Promise<number>,
+  ): void {
+    this.cancelShow();
+    this.cancelHide();
+    this.anchor = anchor;
+    this.showTimeout = setTimeout(() => {
+      this.showLocalAuthor(authorInfo, anchor, countInLibrary);
     }, this.showDelay);
   }
 
@@ -271,6 +305,40 @@ export class AuthorPreviewController {
       });
   }
 
+  /**
+   * Show the local form of the card; the count is added once it is known.
+   */
+  private showLocalAuthor(
+    authorInfo: AuthorSearchInfo,
+    anchor: Element,
+    countInLibrary: (authorInfo: AuthorSearchInfo) => Promise<number>,
+  ): void {
+    const key = `local:${this.getAuthorKey(authorInfo)}`;
+    const card = this.getCard();
+    this.currentKey = key;
+
+    this.renderLocalCard(card, authorInfo);
+    this.positionCard(card, anchor);
+
+    this.callbacks.onShow?.(authorInfo);
+
+    countInLibrary(authorInfo).then(
+      (count) => {
+        if (this.currentKey !== key) {
+          return;
+        }
+        this.renderLocalCard(card, authorInfo, count);
+        this.positionCard(card, anchor);
+      },
+      (err) => {
+        // The card stays without a count
+        Zotero.debug(
+          `[${config.addonName}] [AuthorPreviewController] Library count failed: ${err}`,
+        );
+      },
+    );
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Internal - Card Management
   // ─────────────────────────────────────────────────────────────────────────────
@@ -344,7 +412,7 @@ export class AuthorPreviewController {
     const doc = card.ownerDocument;
     card.replaceChildren();
     const copiedText = getString("references-panel-author-copied");
-    const dark = isDarkMode();
+    const dark = isDarkMode(doc);
 
     // Title with name and BAI
     const title = doc.createElement("div");
@@ -527,6 +595,65 @@ export class AuthorPreviewController {
     if (actions.children.length) {
       card.appendChild(actions);
     }
+
+    card.style.display = "block";
+  }
+
+  /**
+   * Render the card's local form: name, papers in the library (once
+   * counted), and author searches on arXiv and INSPIRE.
+   */
+  private renderLocalCard(
+    card: HTMLDivElement,
+    authorInfo: AuthorSearchInfo,
+    libraryCount?: number,
+  ): void {
+    const doc = card.ownerDocument;
+    card.replaceChildren();
+    const dark = isDarkMode(doc);
+
+    const title = doc.createElement("div");
+    title.style.fontWeight = "600";
+    title.style.marginBottom = "4px";
+    title.textContent = authorInfo.fullName;
+    card.appendChild(title);
+
+    if (libraryCount !== undefined) {
+      const count = doc.createElement("div");
+      count.style.color = "var(--fill-secondary, #64748b)";
+      count.textContent = getString("references-panel-author-library-count", {
+        args: { count: libraryCount },
+      });
+      card.appendChild(count);
+    }
+
+    const actions = doc.createElement("div");
+    actions.style.display = "flex";
+    actions.style.flexWrap = "wrap";
+    actions.style.gap = "8px";
+    actions.style.marginTop = "6px";
+    const urls = authorSearchUrls(authorInfo.fullName);
+    const searches = [
+      ["arXiv", urls.arxiv, getString("references-panel-author-search-arxiv")],
+      [
+        "INSPIRE",
+        urls.inspire,
+        getString("references-panel-author-search-inspire"),
+      ],
+    ];
+    for (const [label, url, tooltip] of searches) {
+      const link = doc.createElement("a");
+      applyMetaLinkStyle(link, dark);
+      link.href = url;
+      link.textContent = label;
+      link.title = tooltip;
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        Zotero.launchURL(url);
+      });
+      actions.appendChild(link);
+    }
+    card.appendChild(actions);
 
     card.style.display = "block";
   }

@@ -12,11 +12,17 @@ type CSSProperties = Partial<CSSStyleDeclaration>;
 
 type RGB = { r: number; g: number; b: number };
 
-let cachedDarkMode: { value: boolean; ts: number } | null = null;
+type DarkModeReading = { value: boolean; ts: number };
+
+// Plugin UI is not only shown in the main window, so the theme is read and
+// kept per window document; calls that find no document share one slot.
+let darkModeReadings = new WeakMap<Document, DarkModeReading>();
+let darkModeReadingWithoutDocument: DarkModeReading | null = null;
 const DARK_MODE_CACHE_MS = 750;
 
 export function invalidateDarkModeCache(): void {
-  cachedDarkMode = null;
+  darkModeReadings = new WeakMap();
+  darkModeReadingWithoutDocument = null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,28 +208,42 @@ export function toStyleString(styles: CSSProperties): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Check if the current Zotero theme is dark mode.
+ * Check if Zotero shows the dark theme in a window: the window of `doc`, or
+ * by default the main window. The answer is kept for a moment per document.
  * Uses multiple detection methods for reliability:
  * 1. Check Zotero's platform-darkmode attribute (most reliable)
  * 2. Check data-color-scheme attribute
  * 3. Infer from CSS variables (--fill-primary / --material-background)
  * 4. Fall back to system preference via matchMedia
  */
-export function isDarkMode(): boolean {
+export function isDarkMode(doc?: Document): boolean {
   const now = Date.now();
-  if (cachedDarkMode && now - cachedDarkMode.ts < DARK_MODE_CACHE_MS) {
-    return cachedDarkMode.value;
+  if (!doc) {
+    try {
+      doc = Zotero.getMainWindow?.()?.document;
+    } catch {
+      doc = undefined;
+    }
+  }
+  const cached = doc
+    ? darkModeReadings.get(doc)
+    : darkModeReadingWithoutDocument;
+  if (cached && now - cached.ts < DARK_MODE_CACHE_MS) {
+    return cached.value;
   }
 
   const setCache = (value: boolean): boolean => {
-    cachedDarkMode = { value, ts: now };
+    const reading = { value, ts: now };
+    if (doc) {
+      darkModeReadings.set(doc, reading);
+    } else {
+      darkModeReadingWithoutDocument = reading;
+    }
     return value;
   };
 
   try {
-    // Try to get the main window document
-    const mainWindow = Zotero.getMainWindow?.();
-    const doc = mainWindow?.document;
+    const win = doc?.defaultView;
 
     if (doc) {
       // Check Zotero-specific dark mode attribute (most reliable for Zotero 7)
@@ -285,7 +305,7 @@ export function isDarkMode(): boolean {
       };
 
       try {
-        const styles = mainWindow?.getComputedStyle?.(doc.documentElement);
+        const styles = win?.getComputedStyle?.(doc.documentElement);
         if (styles) {
           const fillPrimary = styles.getPropertyValue("--fill-primary").trim();
           const fillPrimaryRgb = parseCssColor(fillPrimary);
@@ -309,8 +329,8 @@ export function isDarkMode(): boolean {
     }
 
     // Fallback: Check system preference via matchMedia
-    if (mainWindow?.matchMedia) {
-      const mediaQuery = mainWindow.matchMedia("(prefers-color-scheme: dark)");
+    if (win?.matchMedia) {
+      const mediaQuery = win.matchMedia("(prefers-color-scheme: dark)");
       if (mediaQuery) {
         return setCache(mediaQuery.matches);
       }
@@ -371,13 +391,14 @@ export const TAB_COLORS = {
 } as const;
 
 /**
- * Get dark mode aware tab colors.
+ * Get dark mode aware tab colors, for the theme of `doc` (default: the main
+ * window).
  */
-export function getTabColors(): {
+export function getTabColors(doc?: Document): {
   activeBackground: string;
   activeText: string;
 } {
-  const dark = isDarkMode();
+  const dark = isDarkMode(doc);
   return {
     activeBackground: dark ? "rgba(96, 165, 250, 0.2)" : "#e6f2ff",
     activeText: dark ? "#93c5fd" : "#0b2d66",
@@ -413,13 +434,14 @@ export interface PickerColors {
 }
 
 /**
- * Get dark mode aware colors for picker dialogs.
+ * Get dark mode aware colors for picker dialogs, for the theme of `doc`
+ * (default: the main window).
  * Centralizes color definitions for consistent styling across picker UIs.
  */
-export function getPickerColors(): PickerColors {
-  const dark = isDarkMode();
+export function getPickerColors(doc?: Document): PickerColors {
+  const dark = isDarkMode(doc);
   // Use consistent selection colors with tabs
-  const tabColors = getTabColors();
+  const tabColors = getTabColors(doc);
   return {
     // Panel/container backgrounds
     panelBg: dark ? "#1e1e1e" : "#fff",

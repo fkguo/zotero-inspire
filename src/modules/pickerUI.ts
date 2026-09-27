@@ -147,12 +147,13 @@ export function applyRefEntryMarkerStyle(el: HTMLElement): void {
 /**
  * Apply color to the marker based on local item presence.
  * Uses brighter colors in dark mode for better visibility.
+ * @param dark - Optional dark mode flag (defaults to isDarkMode())
  */
 export function applyRefEntryMarkerColor(
   el: HTMLElement,
   hasLocalItem: boolean,
+  dark = isDarkMode(),
 ): void {
-  const dark = isDarkMode();
   // Green for local items, red for not local - brighter in dark mode
   const localColor = dark ? "#22c55e" : "#1a8f4d";
   const notLocalColor = dark ? "#ef4444" : "#d93025";
@@ -858,6 +859,12 @@ export interface SaveTargetPickerOptions {
    * Defaults to true.
    */
   confirmOnDoubleClick?: boolean;
+  /**
+   * Document of the window to show the picker in: it covers that window,
+   * is placed within its viewport and follows its theme. Defaults to the
+   * main Zotero window.
+   */
+  document?: Document;
 }
 
 export function showTargetPickerUI(
@@ -874,16 +881,19 @@ export function showTargetPickerUI(
     const confirmOnEnter = pickerOptions?.confirmOnEnter !== false;
     const confirmOnDoubleClick = pickerOptions?.confirmOnDoubleClick !== false;
 
-    // FIX: Use main Zotero window to escape CSS containment context
+    // FIX: Use main Zotero window (or the window given in the options) to
+    // escape CSS containment context
     // The panel body has `contain: layout` which breaks position:fixed
     // FIX-PICKER-ZINDEX-ROOT: Use documentElement instead of body to avoid stacking context isolation
     // In Zotero 7's XUL/XHTML environment, document.body returns an internal html:div with position:relative,
     // which creates a new stacking context and prevents our overlay from appearing above splitters/sidebars.
-    const mainWindow = Zotero.getMainWindow();
-    const doc = mainWindow?.document || body.ownerDocument;
-    const appendTarget = mainWindow?.document?.documentElement || body;
+    const hostDoc = pickerOptions?.document;
+    const mainWindow = hostDoc ? undefined : Zotero.getMainWindow();
+    const doc = hostDoc || mainWindow?.document || body.ownerDocument;
+    const appendTarget =
+      hostDoc?.documentElement || mainWindow?.document?.documentElement || body;
     // Use shared color config for dark mode consistency
-    const colors = getPickerColors();
+    const colors = getPickerColors(hostDoc);
 
     const previousScrollTop = listEl.scrollTop;
     const previousScrollLeft = listEl.scrollLeft;
@@ -1118,7 +1128,7 @@ export function showTargetPickerUI(
       panel.style.left = `${left}px`;
     }
 
-    // Append to main window body to escape CSS containment context
+    // Append to the window's root element to escape CSS containment context
     appendTarget.appendChild(overlay);
 
     // Add resize handles after appending panel to DOM

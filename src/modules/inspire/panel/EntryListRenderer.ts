@@ -181,7 +181,7 @@ export class EntryListRenderer {
   updateFocusState(row: HTMLDivElement, isFocused: boolean): void {
     if (isFocused) {
       row.classList.add("zinspire-entry-focused");
-      const dark = isDarkMode();
+      const dark = isDarkMode(this.doc);
       if (dark) {
         row.style.backgroundColor = "rgba(0, 96, 223, 0.2)";
         row.style.boxShadow = "inset 3px 0 0 #3584e4";
@@ -218,7 +218,7 @@ export class EntryListRenderer {
     if (marker) {
       marker.textContent = hasLocalItem ? "●" : "⊕";
       marker.dataset.state = hasLocalItem ? "local" : "missing";
-      applyRefEntryMarkerColor(marker, hasLocalItem);
+      applyRefEntryMarkerColor(marker, hasLocalItem, isDarkMode(this.doc));
       marker.setAttribute(
         "title",
         hasLocalItem ? this.strings.dotLocal : this.strings.dotAdd,
@@ -240,7 +240,13 @@ export class EntryListRenderer {
     ) as HTMLButtonElement | null;
     if (pdfButton) {
       const pdfStrings = { pdfOpen: this.strings.pdfOpen, pdfFind: this.strings.pdfFind };
-      renderPdfButtonIcon(this.doc, pdfButton, state, pdfStrings);
+      renderPdfButtonIcon(
+        this.doc,
+        pdfButton,
+        state,
+        pdfStrings,
+        isDarkMode(this.doc),
+      );
     }
   }
 
@@ -305,7 +311,7 @@ export class EntryListRenderer {
     ctx: EntryRenderContext,
   ): void {
     // Cache dark mode value for this render (avoid multiple isDarkMode() calls)
-    const dark = ctx.darkMode ?? isDarkMode();
+    const dark = ctx.darkMode ?? isDarkMode(this.doc);
 
     // Store entry ID and recid for event delegation
     row.dataset.entryId = entry.id;
@@ -331,7 +337,7 @@ export class EntryListRenderer {
     if (marker) {
       marker.textContent = entry.localItemID ? "●" : "⊕";
       marker.dataset.state = entry.localItemID ? "local" : "missing";
-      applyRefEntryMarkerColor(marker, Boolean(entry.localItemID));
+      applyRefEntryMarkerColor(marker, Boolean(entry.localItemID), dark);
       marker.setAttribute(
         "title",
         entry.localItemID ? this.strings.dotLocal : this.strings.dotAdd,

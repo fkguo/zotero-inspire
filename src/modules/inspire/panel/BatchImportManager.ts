@@ -15,7 +15,7 @@ import {
   createMockSignal,
 } from "../index";
 import type { SaveTargetSelection } from "../../pickerUI";
-import { ProgressWindowHelper } from "zotero-plugin-toolkit";
+import type { Reporter } from "./reporter";
 
 // XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -45,7 +45,10 @@ export interface BatchImportResult {
  * Options for BatchImportManager initialization.
  */
 export interface BatchImportManagerOptions {
-  /** Callback to get the document for UI operations */
+  /**
+   * Callback to get the document for UI operations; Escape pressed in its
+   * window stops a running import
+   */
   getDocument: () => Document;
   /** Callback to get the body element for attaching dialogs */
   getBody: () => HTMLElement;
@@ -67,8 +70,8 @@ export interface BatchImportManagerOptions {
   promptForSaveTarget: (
     anchor: HTMLElement,
   ) => Promise<SaveTargetSelection | null>;
-  /** Callback to show a toast notification */
-  showToast: (message: string) => void;
+  /** Where notices and the import's progress are shown */
+  reporter: Reporter;
   /** Callback to update a single row's status in the list */
   updateRowStatus: (entry: InspireReferenceEntry) => void;
   /** Callback when batch toolbar visibility should be updated */
@@ -243,7 +246,9 @@ export class BatchImportManager {
       `[${config.addonName}] handleBatchImport: started, selectedEntryIDs.size=${this.selectedEntryIDs.size}`,
     );
     if (this.selectedEntryIDs.size === 0) {
-      this.options.showToast(getString("references-panel-batch-no-selection"));
+      this.options.reporter.notify(
+        getString("references-panel-batch-no-selection"),
+      );
       return null;
     }
 
@@ -256,7 +261,9 @@ export class BatchImportManager {
     );
 
     if (selectedEntries.length === 0) {
-      this.options.showToast(getString("references-panel-batch-no-selection"));
+      this.options.reporter.notify(
+        getString("references-panel-batch-no-selection"),
+      );
       return null;
     }
 
@@ -321,7 +328,9 @@ export class BatchImportManager {
     }
 
     if (entriesToImport.length === 0) {
-      this.options.showToast(getString("references-panel-batch-no-selection"));
+      this.options.reporter.notify(
+        getString("references-panel-batch-no-selection"),
+      );
       return null;
     }
 
@@ -713,20 +722,17 @@ export class BatchImportManager {
         this.importAbort?.abort();
       }
     };
-    const mainWindow = Zotero.getMainWindow();
-    mainWindow?.addEventListener("keydown", escapeHandler, true);
+    // In the panel's window (for the References panel, the main window)
+    const panelWindow =
+      this.options.getDocument().defaultView ?? Zotero.getMainWindow();
+    panelWindow?.addEventListener("keydown", escapeHandler, true);
 
-    // Progress window
-    const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
-    const progressWindow = new ProgressWindowHelper(config.addonName);
-    progressWindow.win.changeHeadline(config.addonName, icon);
-    progressWindow.createLine({
-      text: getString("references-panel-batch-importing", {
+    // Progress display
+    const progress = this.options.reporter.startProgress(
+      getString("references-panel-batch-importing", {
         args: { done: 0, total },
       }),
-      progress: 0,
-    });
-    progressWindow.show(-1);
+    );
 
     // Concurrency limiter
     const CONCURRENCY = 3;
@@ -759,12 +765,12 @@ export class BatchImportManager {
 
         done++;
         const percent = Math.round((done / total) * 100);
-        progressWindow.changeLine({
-          text: getString("references-panel-batch-importing", {
+        progress.update(
+          getString("references-panel-batch-importing", {
             args: { done, total },
           }),
-          progress: percent,
-        });
+          percent,
+        );
       }
     };
 
@@ -775,26 +781,26 @@ export class BatchImportManager {
       }
       await Promise.all(workers);
     } finally {
-      mainWindow?.removeEventListener("keydown", escapeHandler, true);
+      panelWindow?.removeEventListener("keydown", escapeHandler, true);
       this.importAbort = undefined;
 
-      progressWindow.close();
+      progress.close();
 
       // Show result toast
       if (signal.aborted) {
-        this.options.showToast(
+        this.options.reporter.notify(
           getString("references-panel-batch-import-cancelled", {
             args: { done, total },
           }),
         );
       } else if (failed > 0) {
-        this.options.showToast(
+        this.options.reporter.notify(
           getString("references-panel-batch-import-partial", {
             args: { success, total, failed },
           }),
         );
       } else {
-        this.options.showToast(
+        this.options.reporter.notify(
           getString("references-panel-batch-import-success", {
             args: { count: success },
           }),
