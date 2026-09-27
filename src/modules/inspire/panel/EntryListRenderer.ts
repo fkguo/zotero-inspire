@@ -4,8 +4,10 @@
 //
 // Responsibilities:
 // - Create and update entry row DOM elements
-// - Manage row pooling via RowPoolManager
+// - Manage row pooling via RowPoolManager (References panel), or build every
+//   row anew (a list that draws each page itself)
 // - Handle visual state (focus, selection, link status)
+// - Per-row choices that depend on where the list comes from (EntryRowAdapter)
 //
 // NOT responsible for:
 // - Event handling (handled by main controller via event delegation)
@@ -45,7 +47,11 @@ import {
   renderPdfButtonIcon,
   PdfButtonState,
 } from "../../pickerUI";
-import { RowPoolManager, type RowPoolManagerOptions } from "./RowPoolManager";
+import {
+  RowPoolManager,
+  createEntryRowTemplate,
+  type EntryRowStyles,
+} from "./RowPoolManager";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -73,6 +79,65 @@ export interface EntryRenderContext {
 }
 
 /**
+ * State and target of a row's PDF button.
+ */
+export interface PdfButtonSpec {
+  /** Icon, and whether the button can be clicked */
+  state: PdfButtonState;
+  /** Tooltip (default: "Open PDF" or "Find Full Text", by state) */
+  title?: string;
+  /**
+   * Page the button opens, kept as the button's `data-url` for the list's
+   * click handler
+   */
+  url?: string;
+}
+
+/**
+ * Per-row choices that depend on where the list comes from. Each one left
+ * out is the References panel's choice.
+ */
+export interface EntryRowAdapter {
+  /**
+   * Whether the BibTeX button can copy (References panel: the paper has an
+   * INSPIRE record)
+   */
+  canCopyBibtex?: (entry: InspireReferenceEntry) => boolean;
+  /**
+   * Whether the TeX-key button can copy (References panel: the paper has a
+   * TeX key or an INSPIRE record)
+   */
+  canCopyTexkey?: (entry: InspireReferenceEntry) => boolean;
+  /**
+   * State and target of the PDF button; `hasPdf` is the render context's
+   * answer (References panel: panelPdfButton)
+   */
+  pdfButton?: (entry: InspireReferenceEntry, hasPdf: boolean) => PdfButtonSpec;
+  /** Text after the title (References panel: ";") */
+  titleSuffix?: string;
+  /**
+   * Abstract shown below the paper's other lines, if any (References panel:
+   * none). Written as plain text; the list may render its formulas later,
+   * which later updates of the row keep while the text stays the same.
+   */
+  abstract?: (entry: InspireReferenceEntry) => string | undefined;
+}
+
+/**
+ * The References panel's PDF button: open the PDF of a paper in the library,
+ * or find its full text; disabled for papers not in the library.
+ */
+export function panelPdfButton(
+  entry: InspireReferenceEntry,
+  hasPdf: boolean,
+): PdfButtonSpec {
+  if (!entry.localItemID) {
+    return { state: PdfButtonState.DISABLED };
+  }
+  return { state: hasPdf ? PdfButtonState.HAS_PDF : PdfButtonState.FIND_PDF };
+}
+
+/**
  * Options for EntryListRenderer initialization.
  */
 export interface EntryListRendererOptions {
@@ -80,7 +145,26 @@ export interface EntryListRendererOptions {
   document: Document;
   /** Maximum size of the row pool (default: 150) */
   maxPoolSize?: number;
+  /**
+   * Reuse row elements through a row pool, as the References panel does
+   * (default). false: every row is built anew and the renderer keeps no
+   * rows, for a list that draws each of its pages itself.
+   */
+  pooled?: boolean;
+  /** Per-row choices (default: the References panel's) */
+  adapter?: EntryRowAdapter;
 }
+
+/** Style applicators of the row template. */
+const ROW_STYLES: EntryRowStyles = {
+  applyRowStyle: applyRefEntryRowStyle,
+  applyTextContainerStyle: applyRefEntryTextContainerStyle,
+  applyMarkerStyle: applyRefEntryMarkerStyle,
+  applyContentStyle: applyRefEntryContentStyle,
+  applyLinkButtonStyle: applyRefEntryLinkButtonStyle,
+  applyBibTeXButtonStyle: applyBibTeXButtonStyle,
+  applyPdfButtonStyle: applyPdfButtonStyle,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EntryListRenderer Class
@@ -89,31 +173,30 @@ export interface EntryListRendererOptions {
 /**
  * Renders entry list rows for the INSPIRE References Panel.
  *
- * Uses RowPoolManager for efficient row creation/recycling (PERF-13).
+ * Uses RowPoolManager for efficient row creation/recycling (PERF-13), unless
+ * built with `pooled: false`.
  * All event handling is done by the main controller via event delegation.
  */
 export class EntryListRenderer {
   private doc: Document;
-  private poolManager: RowPoolManager;
+  // Absent when rows are not pooled
+  private poolManager?: RowPoolManager;
   private rowCache = new Map<string, HTMLElement>();
   private strings: ReturnType<typeof getCachedStrings>;
+  private adapter: EntryRowAdapter;
 
   constructor(options: EntryListRendererOptions) {
     this.doc = options.document;
     this.strings = getCachedStrings();
+    this.adapter = options.adapter ?? {};
 
     // Initialize pool manager with style applicators
-    const poolOptions: RowPoolManagerOptions = {
-      maxPoolSize: options.maxPoolSize,
-      applyRowStyle: applyRefEntryRowStyle,
-      applyTextContainerStyle: applyRefEntryTextContainerStyle,
-      applyMarkerStyle: applyRefEntryMarkerStyle,
-      applyContentStyle: applyRefEntryContentStyle,
-      applyLinkButtonStyle: applyRefEntryLinkButtonStyle,
-      applyBibTeXButtonStyle: applyBibTeXButtonStyle,
-      applyPdfButtonStyle: applyPdfButtonStyle,
-    };
-    this.poolManager = new RowPoolManager(poolOptions);
+    if (options.pooled !== false) {
+      this.poolManager = new RowPoolManager({
+        maxPoolSize: options.maxPoolSize,
+        ...ROW_STYLES,
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -122,9 +205,15 @@ export class EntryListRenderer {
 
   /**
    * Create a single entry row element.
-   * Gets a row from pool (or creates new) and fills with entry data.
+   * Gets a row from pool (or creates new) and fills with entry data. Without
+   * a pool, the row is always new and the renderer does not keep it.
    */
   createRow(entry: InspireReferenceEntry, ctx: EntryRenderContext): HTMLDivElement {
+    if (!this.poolManager) {
+      const row = createEntryRowTemplate(this.doc, ROW_STYLES);
+      this.updateRowContent(row, entry, ctx);
+      return row;
+    }
     const row = this.poolManager.getRow(this.doc);
     this.updateRowContent(row, entry, ctx);
     this.rowCache.set(entry.id, row);
@@ -262,18 +351,18 @@ export class EntryListRenderer {
   }
 
   /**
-   * Recycle a single row back to the pool.
+   * Recycle a single row back to the pool (nothing to do without a pool).
    */
   recycleRow(row: HTMLDivElement): void {
-    this.poolManager.returnRow(row);
+    this.poolManager?.returnRow(row);
   }
 
   /**
    * Recycle rows from a container element to the pool.
-   * Returns number of rows recycled.
+   * Returns number of rows recycled (0 without a pool).
    */
   recycleRowsFromContainer(container: HTMLElement): number {
-    return this.poolManager.recycleFromContainer(container);
+    return this.poolManager?.recycleFromContainer(container) ?? 0;
   }
 
   /**
@@ -291,10 +380,10 @@ export class EntryListRenderer {
   }
 
   /**
-   * Get pool statistics for debugging.
+   * Get pool statistics for debugging (undefined without a pool).
    */
   getPoolStats() {
-    return this.poolManager.getStats();
+    return this.poolManager?.getStats();
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -363,7 +452,10 @@ export class EntryListRenderer {
     if (bibtexButton) {
       bibtexButton.textContent = "📋";
       bibtexButton.setAttribute("title", this.strings.copyBibtex);
-      if (entry.recid) {
+      const canCopy = this.adapter.canCopyBibtex
+        ? this.adapter.canCopyBibtex(entry)
+        : Boolean(entry.recid);
+      if (canCopy) {
         bibtexButton.disabled = false;
         bibtexButton.style.opacity = "1";
         bibtexButton.style.cursor = "pointer";
@@ -381,7 +473,10 @@ export class EntryListRenderer {
     if (texkeyButton) {
       texkeyButton.textContent = "T";
       texkeyButton.setAttribute("title", this.strings.copyTexkey);
-      if (entry.texkey || entry.recid) {
+      const canCopy = this.adapter.canCopyTexkey
+        ? this.adapter.canCopyTexkey(entry)
+        : Boolean(entry.texkey || entry.recid);
+      if (canCopy) {
         texkeyButton.disabled = false;
         texkeyButton.style.opacity = "1";
         texkeyButton.style.cursor = "pointer";
@@ -398,16 +493,17 @@ export class EntryListRenderer {
     ) as HTMLButtonElement | null;
 
     if (pdfButton) {
-      const hasLocalItem = Boolean(entry.localItemID);
       const hasPdf = ctx.hasPdf ? ctx.hasPdf(entry) : false;
-      const pdfStrings = { pdfOpen: this.strings.pdfOpen, pdfFind: this.strings.pdfFind };
-
-      if (hasLocalItem && hasPdf) {
-        renderPdfButtonIcon(this.doc, pdfButton, PdfButtonState.HAS_PDF, pdfStrings, dark);
-      } else if (hasLocalItem && !hasPdf) {
-        renderPdfButtonIcon(this.doc, pdfButton, PdfButtonState.FIND_PDF, pdfStrings, dark);
+      const spec = (this.adapter.pdfButton ?? panelPdfButton)(entry, hasPdf);
+      const pdfStrings = {
+        pdfOpen: spec.title ?? this.strings.pdfOpen,
+        pdfFind: spec.title ?? this.strings.pdfFind,
+      };
+      renderPdfButtonIcon(this.doc, pdfButton, spec.state, pdfStrings, dark);
+      if (spec.url) {
+        pdfButton.dataset.url = spec.url;
       } else {
-        renderPdfButtonIcon(this.doc, pdfButton, PdfButtonState.DISABLED, undefined, dark);
+        delete pdfButton.dataset.url;
       }
     }
 
@@ -440,7 +536,7 @@ export class EntryListRenderer {
       ".zinspire-ref-entry__title-link",
     ) as HTMLAnchorElement | null;
     if (titleLink) {
-      titleLink.textContent = entry.title + ";";
+      titleLink.textContent = entry.title + (this.adapter.titleSuffix ?? ";");
       titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
       titleLink.style.wordBreak = "break-word";
       // Make long titles wrap even when they contain long unbroken segments
@@ -549,8 +645,51 @@ export class EntryListRenderer {
       }
     }
 
+    // Abstract row (created only for lists that show abstracts)
+    this.updateAbstract(row, this.adapter.abstract?.(entry));
+
     // Apply focus state if this entry is focused
     this.updateFocusState(row, ctx.focusedEntryID === entry.id);
+  }
+
+  /**
+   * Show the abstract below the other lines of the row, or hide the abstract
+   * line of a reused row. The text is rewritten only when it changes, so
+   * formulas the list has rendered into it stay.
+   */
+  private updateAbstract(row: HTMLDivElement, text: string | undefined): void {
+    let abstractEl = row.querySelector(
+      ".zinspire-ref-entry__abstract",
+    ) as HTMLElement | null;
+    if (!text) {
+      if (abstractEl) {
+        abstractEl.replaceChildren();
+        delete abstractEl.dataset.latexSource;
+        abstractEl.style.display = "none";
+      }
+      return;
+    }
+    if (!abstractEl) {
+      const content = row.querySelector(".zinspire-ref-entry__content");
+      if (!content) return;
+      abstractEl = this.doc.createElement("div");
+      abstractEl.classList.add("zinspire-ref-entry__abstract");
+      abstractEl.style.cssText = `
+        margin-top: 2px;
+        color: var(--fill-secondary, #555);
+        overflow: hidden;
+        overflow-wrap: break-word;
+        word-break: break-word;
+        max-width: 100%;
+        white-space: normal;
+      `;
+      content.appendChild(abstractEl);
+    }
+    abstractEl.style.display = "";
+    if (abstractEl.dataset.latexSource !== text) {
+      abstractEl.textContent = text;
+      abstractEl.dataset.latexSource = text;
+    }
   }
 
   /**

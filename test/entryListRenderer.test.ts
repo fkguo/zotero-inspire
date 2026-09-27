@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "../package.json";
 import {
   EntryListRenderer,
+  panelPdfButton,
   type EntryRenderContext,
+  type EntryRowAdapter,
 } from "../src/modules/inspire/panel/EntryListRenderer";
 import { invalidateDarkModeCache } from "../src/modules/inspire/styles";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
@@ -11,6 +13,8 @@ import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 // The row renderer of the References panel: what a row shows for a paper,
 // the focus and theme colours, and the reuse of row elements through the
 // row pool. "main" stands in for the main Zotero window, where the panel is.
+// A list of another origin can make its own per-row choices (an adapter) and
+// can draw its rows without the pool; the last two parts check those.
 
 let main: DOMWindow;
 
@@ -220,5 +224,180 @@ describe("References panel row", () => {
       hitCount: 1,
       missCount: 1,
     });
+  });
+});
+
+describe("rows of a list with its own choices", () => {
+  /** Choices a list of arXiv papers would make. */
+  const arxivList: EntryRowAdapter = {
+    canCopyBibtex: () => true,
+    canCopyTexkey: (entry) => Boolean(entry.texkey),
+    pdfButton: (entry, hasPdf) =>
+      entry.localItemID
+        ? panelPdfButton(entry, hasPdf)
+        : {
+            state: "has-pdf",
+            title: "Open on arXiv",
+            url: `https://arxiv.org/abs/${(entry.arxivDetails as { id: string }).id}`,
+          },
+    titleSuffix: "",
+    abstract: (entry) => entry.abstract,
+  };
+  const newPaper = (fields: Partial<InspireReferenceEntry> = {}) =>
+    paper({
+      id: "2609.28544@2026-09-28",
+      recid: undefined,
+      texkey: undefined,
+      inspireUrl: undefined,
+      arxivDetails: { id: "2609.28544" },
+      publicationInfo: undefined,
+      citationCount: undefined,
+      abstract: "The mass $m_\\pi$ of the lightest meson.",
+      ...fields,
+    });
+
+  it("uses the list's choices for the buttons, the title and the abstract", () => {
+    const renderer = new EntryListRenderer({
+      document: main.document,
+      adapter: arxivList,
+    });
+
+    const row = renderer.createRow(newPaper(), context());
+
+    expect(part(row, "bibtex").disabled).toBe(false);
+    expect(part(row, "texkey").disabled).toBe(true);
+    expect(part(row, "pdf").dataset.state).toBe("has-pdf");
+    expect(part(row, "pdf").disabled).toBe(false);
+    expect(part(row, "pdf").getAttribute("title")).toBe("Open on arXiv");
+    expect(part(row, "pdf").dataset.url).toBe(
+      "https://arxiv.org/abs/2609.28544",
+    );
+    expect(part(row, "title-link").textContent).toBe("Hadronic molecules");
+    const abstract = part(row, "abstract");
+    expect(abstract.textContent).toBe(
+      "The mass $m_\\pi$ of the lightest meson.",
+    );
+    expect(abstract.style.display).toBe("");
+    // Below the paper's other lines
+    expect(abstract.parentElement === part(row, "content")).toBe(true);
+    expect(abstract.previousElementSibling === part(row, "stats-button")).toBe(
+      true,
+    );
+
+    // Once the paper is in the library, its PDF button is the panel's
+    renderer.updateRow(row, newPaper({ localItemID: 9 }), context());
+    expect(part(row, "pdf").dataset.state).toBe("find-pdf");
+    expect(part(row, "pdf").getAttribute("title")).toBe(
+      msg("references-panel-pdf-find"),
+    );
+    expect(part(row, "pdf").dataset.url).toBeUndefined();
+  });
+
+  it("keeps the panel's choices that the list leaves out", () => {
+    const renderer = new EntryListRenderer({
+      document: main.document,
+      adapter: { titleSuffix: "" },
+    });
+
+    const row = renderer.createRow(
+      paper({ recid: undefined, texkey: undefined, localItemID: 3 }),
+      context(),
+    );
+
+    expect(part(row, "title-link").textContent).toBe("Hadronic molecules");
+    expect(part(row, "bibtex").disabled).toBe(true);
+    expect(part(row, "texkey").disabled).toBe(true);
+    expect(part(row, "pdf").dataset.state).toBe("find-pdf");
+    expect(row.querySelector(".zinspire-ref-entry__abstract")).toBeNull();
+  });
+
+  it("keeps formulas rendered into the abstract while its text stays the same", () => {
+    const renderer = new EntryListRenderer({
+      document: main.document,
+      adapter: arxivList,
+    });
+    const entry = newPaper();
+    const row = renderer.createRow(entry, context());
+    // The list renders the formulas once the row is in view
+    const abstract = part(row, "abstract");
+    abstract.innerHTML =
+      'The mass <span class="katex">m</span> of the lightest meson.';
+
+    entry.localItemID = 9;
+    renderer.updateRow(row, entry, context());
+    expect(abstract.querySelector(".katex")).not.toBeNull();
+
+    entry.abstract = "A revised abstract.";
+    renderer.updateRow(row, entry, context());
+    expect(abstract.querySelector(".katex")).toBeNull();
+    expect(abstract.textContent).toBe("A revised abstract.");
+  });
+
+  it("hides the abstract line when a reused row shows a paper without one", () => {
+    const renderer = new EntryListRenderer({
+      document: main.document,
+      adapter: arxivList,
+    });
+    const list = main.document.createElement("div");
+    const row = renderer.createRow(newPaper(), context());
+    list.appendChild(row);
+
+    renderer.recycleRowsFromContainer(list);
+    const reused = renderer.createRow(
+      newPaper({ id: "2609.00001@2026-09-28", abstract: undefined }),
+      context(),
+    );
+
+    expect(reused === row).toBe(true);
+    const abstract = part(reused, "abstract");
+    expect(abstract.style.display).toBe("none");
+    expect(abstract.textContent).toBe("");
+    expect(abstract.dataset.latexSource).toBeUndefined();
+  });
+});
+
+describe("rows without the row pool", () => {
+  it("builds every row anew and keeps none of them", () => {
+    const renderer = new EntryListRenderer({
+      document: main.document,
+      pooled: false,
+    });
+    const page = main.document.createElement("div");
+    const entries = Array.from({ length: 500 }, (_, i) =>
+      paper({ id: `${i}-p${i}`, recid: `p${i}`, title: `Paper ${i}` }),
+    );
+
+    page.appendChild(renderer.createRows(entries, context()));
+
+    const rows = [...page.children] as HTMLElement[];
+    expect(new Set(rows).size).toBe(500);
+    expect(rows.map((row) => row.dataset.entryId)).toEqual(
+      entries.map((e) => e.id),
+    );
+    expect(renderer.getRowByEntryId("0-p0")).toBeUndefined();
+    expect(renderer.getPoolStats()).toBeUndefined();
+    // Nothing goes back to a pool; the next page gets new rows
+    expect(renderer.recycleRowsFromContainer(page)).toBe(0);
+    const next = renderer.createRow(entries[0], context());
+    expect(rows.includes(next)).toBe(false);
+    expect(next.parentElement).toBeNull();
+  });
+
+  it("draws the same row as the pooled renderer", () => {
+    const entry = paper({ localItemID: 55, isRelated: true });
+    const ctx = context({ hasPdf: () => true, focusedEntryID: entry.id });
+
+    const pooled = new EntryListRenderer({ document: main.document });
+    const unpooled = new EntryListRenderer({
+      document: main.document,
+      pooled: false,
+    });
+
+    expect(unpooled.createRow(entry, ctx).outerHTML).toBe(
+      pooled.createRow(entry, ctx).outerHTML,
+    );
+    // The two rows came from different paths: only one renderer has a pool
+    expect(pooled.getPoolStats()).toMatchObject({ missCount: 1 });
+    expect(unpooled.getPoolStats()).toBeUndefined();
   });
 });
