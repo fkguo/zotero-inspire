@@ -603,6 +603,80 @@ describe("recent", () => {
     expect(site.sent).toHaveLength(1 + 5);
   });
 
+  it("stops instead of leaving a day out when a next-day link cannot be fetched", async () => {
+    // The index request fails and the cached index of Wednesday is used;
+    // /new shows Friday; Wednesday's catch-up page fails once
+    const { clock, site, service, store } = setup();
+    await store.putRecentIndex("math", {
+      dates: [
+        "2026-09-23",
+        "2026-09-22",
+        "2026-09-21",
+        "2026-09-18",
+        "2026-09-17",
+      ],
+      fetchedAt: Date.parse("2026-09-23T12:00:00Z"),
+    });
+    serveDays(site, ["hep-ph"], INDEX.slice(1).reverse(), "2026-09-25");
+    site.page(INDEX_URL, { status: 500 });
+    const saved = site.routes.get(CATCHUP_URL("hep-ph", "2026-09-23"))!;
+    site.page(CATCHUP_URL("hep-ph", "2026-09-23"), (attempt) =>
+      attempt === 1 ? { status: 500 } : (saved as never),
+    );
+    const result = await clock.run(service.loadRecent(["hep-ph"]));
+    expect(result.days.map((day) => day.date)).toEqual(["2026-09-25"]);
+    expect(result.stopped).toMatchObject({
+      reason: "http",
+      date: "2026-09-23",
+    });
+    expect(result.stopped?.message).toMatch(/day after 2026-09-23/);
+
+    // On retry the link is found and Thursday is not left out
+    const retry = await clock.run(service.loadRecent(["hep-ph"]));
+    expect(retry.days.map((day) => `${day.date} ${day.status}`)).toEqual([
+      "2026-09-25 complete",
+      "2026-09-24 complete",
+      "2026-09-23 complete",
+      "2026-09-22 complete",
+      "2026-09-21 complete",
+    ]);
+  });
+
+  it("needs no link when no weekday lies between the index and /new", async () => {
+    // The index still ends on Thursday (its request failed; the cached
+    // copy is used), /new shows Friday, Thursday's catch-up page fails
+    const { clock, site, service, store } = setup("2026-09-25T00:10:00Z");
+    await store.putRecentIndex("math", {
+      dates: [
+        "2026-09-24",
+        "2026-09-23",
+        "2026-09-22",
+        "2026-09-21",
+        "2026-09-18",
+      ],
+      fetchedAt: Date.parse("2026-09-24T12:00:00Z"),
+    });
+    serveDays(
+      site,
+      ["hep-ph"],
+      ["2026-09-18", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"],
+      "2026-09-25",
+    );
+    site.page(INDEX_URL, { status: 500 });
+    site.page(CATCHUP_URL("hep-ph", "2026-09-24"), { status: 500 });
+    const result = await clock.run(service.loadRecent(["hep-ph"]));
+    expect(result.stopped).toBeUndefined();
+    expect(result.days.map((day) => `${day.date} ${day.status}`)).toEqual([
+      "2026-09-25 complete",
+      "2026-09-24 failed",
+      "2026-09-23 complete",
+      "2026-09-22 complete",
+      "2026-09-21 complete",
+    ]);
+    // Thursday's page was asked once, for Thursday itself
+    expect(site.count(CATCHUP_URL("hep-ph", "2026-09-24"))).toBe(1);
+  });
+
   it("marks the newest day incomplete for a category whose /new is behind the index", async () => {
     const { clock, site, service } = setup();
     serveDays(

@@ -19,6 +19,7 @@
 
 import { config } from "../../../package.json";
 import {
+  addDays,
   earliestCatchupDate,
   isWithinRetention,
   latestScheduledListingDate,
@@ -726,12 +727,17 @@ export class ListingService {
   ): Promise<IsoDate[]> {
     const days: IsoDate[] = [];
     let date = from;
-    while (!run.stopped) {
+    // Only when a weekday lies between can a listing lie between (Friday
+    // to Monday, Thursday to Friday need no link)
+    while (!run.stopped && nextListingWeekday(addDays(date, 1)) < to) {
       let next: IsoDate | null = null;
+      let found = false;
+      let lastFailure: SpecFailure | null = null;
       for (const spec of specs) {
         const cached = await this.store.getDay(spec, date);
         if (cached?.source === "catchup" && cached.nextDay) {
           next = cached.nextDay;
+          found = true;
           break;
         }
         const result = await this.guarded(run, () =>
@@ -740,9 +746,25 @@ export class ListingService {
         // Only a page just fetched shows the current link
         if (result.ok && !result.fetchFailed) {
           next = result.listing.nextDay ?? null;
+          found = true;
           break;
         }
+        lastFailure = result.ok
+          ? failure(result.fetchFailed!.reason, result.fetchFailed!.message)
+          : result;
         if (run.stopped) break;
+      }
+      if (!found) {
+        // Without the link the days up to `to` are unknown: no date list
+        // with a gap
+        if (lastFailure) {
+          run.stop(
+            lastFailure.reason,
+            `The announcement day after ${date} could not be found: ${lastFailure.message}`,
+            date,
+          );
+        }
+        break;
       }
       if (!next || next >= to || next <= date) break;
       days.push(next);
