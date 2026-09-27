@@ -190,6 +190,15 @@ describe("getFundingForItem - arXiv ID of the item", () => {
     );
     expect(result.arxivId).toBe("2101.01234");
   });
+
+  it("reads no arXiv ID from the legacy Journal Abbr layout", async () => {
+    const result = await getFundingForItem(
+      regularItemWithoutPdf(90003, {
+        journalAbbreviation: "arXiv:2301.12345 [hep-ph]",
+      }),
+    );
+    expect(result.arxivId).toBeUndefined();
+  });
 });
 
 // ── helpers ──────────────────────────────────────────────────────────────────
