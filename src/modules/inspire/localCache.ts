@@ -7,6 +7,7 @@
 import * as pako from "pako";
 import { config } from "../../../package.json";
 import { getPref } from "../../utils/prefs";
+import { isWithinRetention } from "../arxiv/arxivDates";
 import type {
   InspireReferenceEntry,
   LocalCacheFile,
@@ -555,9 +556,12 @@ class InspireLocalCache {
       type === "refs" ||
       type === "preprintCandidates" ||
       type === "citation_graph" ||
-      type === "pdfmap"
+      type === "pdfmap" ||
+      type === "arxiv_listing"
     ) {
-      ttl = DEFAULT_TTL_REFS; // keep indefinitely (pdfmap invalidated by file mtime/size)
+      // keep indefinitely (pdfmap invalidated by file mtime/size; arXiv
+      // listings dropped by announcement date in purgeExpired)
+      ttl = DEFAULT_TTL_REFS;
     } else if (type === "author_profile" || type === "academic_tree") {
       ttl = DEFAULT_TTL_AUTHOR_PROFILE; // 2 hours for author profiles (offline fallback)
     } else {
@@ -851,6 +855,7 @@ class InspireLocalCache {
         "author",
         "refs",
         "pdfmap",
+        "arxiv_listing",
       ];
 
       const getTypeFromFilePath = (filePath: string): LocalCacheType | null => {
@@ -866,7 +871,8 @@ class InspireLocalCache {
           t === "refs" ||
           t === "preprintCandidates" ||
           t === "citation_graph" ||
-          t === "pdfmap"
+          t === "pdfmap" ||
+          t === "arxiv_listing"
         )
           return DEFAULT_TTL_REFS;
         if (t === "author_profile" || t === "academic_tree") return DEFAULT_TTL_AUTHOR_PROFILE;
@@ -876,6 +882,20 @@ class InspireLocalCache {
       const processFile = async (filePath: string): Promise<number> => {
         try {
           const t = getTypeFromFilePath(filePath);
+          if (t === "arxiv_listing") {
+            // A day's listing ends in its announcement date
+            // (arxiv_listing_day_<spec>_<YYYY-MM-DD>); it is kept for
+            // LISTING_RETENTION_DAYS after that date, whenever it was fetched
+            const fileName = filePath.split(/[\\/]/).pop() ?? "";
+            const date = fileName.match(
+              /^arxiv_listing_day_.+_(\d{4}-\d{2}-\d{2})\.json(?:\.gz)?$/,
+            )?.[1];
+            if (date && !isWithinRetention(date, Date.now())) {
+              await IOUtils.remove(filePath);
+              return 1;
+            }
+            return 0;
+          }
           const ttlHours = t ? getTTLHoursForType(t) : undefined;
 
           // Permanent caches don't expire (skip heavy checks).

@@ -371,7 +371,8 @@ export type LocalCacheType =
   | "crossref"
   | "author_profile" // FTR-AUTHOR-PROFILE: Author profile cache (permanent)
   | "author_papers" // FTR-AUTHOR-PROFILE: Author papers list cache (permanent)
-  | "pdfmap"; // FTR-PDF-PARSE-PERSIST: parsed PDF reference-label mapping (invalidated by file mtime/size)
+  | "pdfmap" // FTR-PDF-PARSE-PERSIST: parsed PDF reference-label mapping (invalidated by file mtime/size)
+  | "arxiv_listing"; // arXiv browser: listings of announcement days (dropped 100 days after the announcement)
 
 /**
  * Local cache file structure for persistent storage.
