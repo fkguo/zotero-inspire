@@ -615,6 +615,7 @@ export type FluentMessageId =
   | 'references-panel-texkey-failed'
   | 'references-panel-toast-added'
   | 'references-panel-toast-bibtex-success'
+  | 'references-panel-toast-link-target-gone'
   | 'references-panel-toast-linked'
   | 'references-panel-toast-missing'
   | 'references-panel-toast-no-pdf'

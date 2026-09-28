@@ -14600,7 +14600,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       },
       onUnlink: async (entry) => {
         if (entry.localItemID) {
-          await this.unlinkReference(entry.localItemID);
+          await this.unlinkReference(this.currentItemID, entry.localItemID);
           entry.isRelated = false;
           // Use targeted row update instead of full list re-render
           const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
@@ -15181,33 +15181,42 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     anchor?: HTMLElement,
     options?: { skipRerender?: boolean },
   ) {
-    if (!this.currentItemID) {
+    // The item whose list the user acts on, kept for the whole action:
+    // another item may be selected before the relation is written
+    const itemID = this.currentItemID;
+    if (!itemID) {
       return;
     }
     // If item is not in library, add it first then link
     if (!entry.localItemID) {
       const target = anchor ?? this.body;
-      await this.handleAddAndLinkAction(entry, target);
+      await this.handleAddAndLinkAction(entry, target, itemID);
       return;
     }
     if (entry.isRelated) {
-      await this.unlinkReference(entry.localItemID);
+      await this.unlinkReference(itemID, entry.localItemID);
       entry.isRelated = false;
       if (!options?.skipRerender) {
         this.renderReferenceList();
       }
       return;
     }
-    await this.linkExistingReference(entry.localItemID);
+    await this.linkExistingReference(itemID, entry.localItemID);
     entry.isRelated = true;
     if (!options?.skipRerender) {
       this.renderReferenceList();
     }
   }
 
+  /**
+   * Import the paper of `entry`, then relate it to the item `itemID` — the
+   * item whose list the link button was clicked in, even if another item is
+   * selected during the import.
+   */
   private async handleAddAndLinkAction(
     entry: InspireReferenceEntry,
     anchor: HTMLElement,
+    itemID: number,
   ) {
     if (entry.localItemID) {
       return;
@@ -15216,6 +15225,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
+    // An item already in the trash at the click is related as before; one
+    // erased or moved to the trash during the import is not (checked below)
+    const trashedAtClick = Boolean(Zotero.Items.get(itemID)?.deleted);
     const selection = await this.promptForSaveTarget(anchor);
     if (!selection) {
       return;
@@ -15226,13 +15238,23 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       entry.displayText = buildDisplayText(entry);
       // Invalidate searchText so it will be recalculated on next filter
       entry.searchText = "";
-      // Automatically link after adding
-      await this.linkExistingReference(newItem.id);
-      entry.isRelated = true;
-      this.renderReferenceList({ preserveScroll: true });
-      setTimeout(() => {
-        this.restoreScrollPositionIfNeeded();
-      }, 0);
+      // Automatically link after adding, unless the item has been deleted or
+      // moved to the trash in the meantime
+      const item = Zotero.Items.get(itemID);
+      if (item && (!item.deleted || trashedAtClick)) {
+        await this.linkExistingReference(itemID, newItem.id);
+        entry.isRelated = true;
+      } else {
+        this.showToast(getString("references-panel-toast-link-target-gone"));
+      }
+      // Redraw the list only while it is that item's: the list of an item
+      // selected meanwhile is left as the user sees it
+      if (this.currentItemID === itemID) {
+        this.renderReferenceList({ preserveScroll: true });
+        setTimeout(() => {
+          this.restoreScrollPositionIfNeeded();
+        }, 0);
+      }
       // ISSUE-110: optionally fetch the PDF right after adding (opt-in pref).
       void this.maybeAutoFindFullText(entry, newItem);
     }
@@ -17234,40 +17256,52 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     );
   }
 
-  private async linkExistingReference(localItemID: number) {
-    if (!this.currentItemID || localItemID === this.currentItemID) {
+  /**
+   * Relate the library item `localItemID` to the item `itemID`, given by the
+   * caller rather than read from the current selection, which may have
+   * changed while the caller waited.
+   */
+  private async linkExistingReference(
+    itemID: number | undefined,
+    localItemID: number,
+  ) {
+    if (!itemID || localItemID === itemID) {
       return;
     }
-    const currentItem = Zotero.Items.get(this.currentItemID);
+    const item = Zotero.Items.get(itemID);
     const targetItem = Zotero.Items.get(localItemID);
-    if (!currentItem || !targetItem) {
+    if (!item || !targetItem) {
       return;
     }
-    const updated = currentItem.addRelatedItem(targetItem);
-    if (targetItem.addRelatedItem(currentItem)) {
+    const updated = item.addRelatedItem(targetItem);
+    if (targetItem.addRelatedItem(item)) {
       await targetItem.saveTx();
     }
     if (updated) {
-      await currentItem.saveTx();
+      await item.saveTx();
       this.showToast(getString("references-panel-toast-linked"));
     }
   }
 
-  private async unlinkReference(localItemID: number) {
-    if (!this.currentItemID || localItemID === this.currentItemID) {
+  /** Remove the relation between `localItemID` and the item `itemID`. */
+  private async unlinkReference(
+    itemID: number | undefined,
+    localItemID: number,
+  ) {
+    if (!itemID || localItemID === itemID) {
       return;
     }
-    const currentItem = Zotero.Items.get(this.currentItemID);
+    const item = Zotero.Items.get(itemID);
     const targetItem = Zotero.Items.get(localItemID);
-    if (!currentItem || !targetItem) {
+    if (!item || !targetItem) {
       return;
     }
-    const updated = await currentItem.removeRelatedItem(targetItem);
-    if (await targetItem.removeRelatedItem(currentItem)) {
+    const updated = await item.removeRelatedItem(targetItem);
+    if (await targetItem.removeRelatedItem(item)) {
       await targetItem.saveTx();
     }
     if (updated) {
-      await currentItem.saveTx();
+      await item.saveTx();
       this.showToast(
         getString("references-panel-toast-unlinked") || "Related item unlinked",
       );

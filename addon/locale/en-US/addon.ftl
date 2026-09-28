@@ -224,6 +224,7 @@ references-panel-related-badge-tooltip = Shares { $count } references with the c
 references-panel-link-existing = Click to unlink the related item
 references-panel-link-missing = Link as related item
 references-panel-toast-linked = Related item linked successfully
+references-panel-toast-link-target-gone = Not linked: the item it was to be linked to has been deleted or moved to the trash
 references-panel-toast-added = Reference added to your library
 references-panel-toast-missing = Article not found in INSPIRE-HEP
 references-panel-toast-no-pdf = This item has no PDF attachment
