@@ -24,6 +24,7 @@ import {
 } from "./modules/inspire/enrichConfig";
 import { getPref, setPref } from "./utils/prefs";
 import { registerPrefsScripts } from "./modules/prefScript";
+import { takeCreatedByPluginMark } from "./modules/inspire/library/itemCreation";
 import {
   getExternalToken,
   ensureExternalToken,
@@ -275,8 +276,11 @@ async function onNotify(
     // These were just imported from INSPIRE panel and don't need auto-update
     // This prevents duplicate note creation due to race condition between
     // panel import and onNotify auto-update
+    // Items the plugin created are skipped too (an arXiv paper added from
+    // arXiv data has no recid on purpose); their mark is removed here
     const itemsNeedingUpdate = regularItems.filter(
-      (item: Zotero.Item) => !deriveRecidFromItem(item),
+      (item: Zotero.Item) =>
+        !takeCreatedByPluginMark(item) && !deriveRecidFromItem(item),
     );
     if (itemsNeedingUpdate.length === 0) {
       return;
