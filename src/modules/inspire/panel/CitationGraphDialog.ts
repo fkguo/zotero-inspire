@@ -33,12 +33,9 @@ import {
   buildFieldsParam,
 } from "../constants";
 import { createAbortControllerWithSignal, ReaderTabHelper } from "../utils";
-import {
-  copyToClipboard,
-  deriveRecidFromItem,
-  findItemByRecid,
-} from "../apiUtils";
+import { copyToClipboard, deriveRecidFromItem } from "../apiUtils";
 import { fetchReferencesEntries } from "../referencesService";
+import { findItemByRecid, LibraryIndexError } from "../library/arxivIndex";
 import type {
   CitationGraphEdgeData,
   CitationGraphNodeData,
@@ -1715,7 +1712,15 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       return;
     }
 
-    const existing = await findItemByRecid(recid).catch(() => null);
+    let existing: Zotero.Item | null;
+    try {
+      existing = await findItemByRecid(recid);
+    } catch (err) {
+      // Without the check the paper could be added twice: add nothing
+      if (!(err instanceof LibraryIndexError)) throw err;
+      this.showToast(getString("references-panel-library-lookup-failed-add"));
+      return;
+    }
     if (existing?.id) {
       entry.localItemID = existing.id;
       this.applyLocalItemId(recid, existing.id);
@@ -3942,7 +3947,14 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
 
     // Try to find the item in Zotero
-    const item = await findItemByRecid(recid);
+    let item: Zotero.Item | null;
+    try {
+      item = await findItemByRecid(recid);
+    } catch (err) {
+      if (!(err instanceof LibraryIndexError)) throw err;
+      this.showToast(getString("references-panel-library-lookup-failed"));
+      return;
+    }
 
     if (item) {
       // Item exists in Zotero - jump to it

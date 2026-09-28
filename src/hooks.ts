@@ -42,6 +42,7 @@ import {
   registerZInspireBibtexEndpoint,
   unregisterZInspireBibtexEndpoint,
 } from "./modules/connectorInspireBibtexApi";
+import { stopLibraryIndex } from "./modules/inspire/library/arxivIndex";
 
 // Track background timers for cleanup on shutdown (PERF-FIX-1)
 let purgeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -188,6 +189,7 @@ function onShutdown(): void {
     preprintCheckTimer = undefined;
   }
   stopBackgroundCheck();
+  stopLibraryIndex();
 
   // PERF-FIX-2: Stop MemoryMonitor interval if running
   MemoryMonitor.getInstance().stop();

@@ -21,8 +21,12 @@ vi.mock("../src/modules/inspire/localCache", () => ({
 import { getCachedCitationGraphOneHop } from "../src/modules/inspire/citationGraphService";
 import { CitationGraphDialog } from "../src/modules/inspire/panel/CitationGraphDialog";
 import { BatchImportManager } from "../src/modules/inspire/panel/BatchImportManager";
+import {
+  LibraryIndexError,
+  stopLibraryIndex,
+} from "../src/modules/inspire/library/arxivIndex";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
-import { FakeLibrary } from "./fakeLibrary";
+import { FakeLibrary, GROUP_LIBRARY } from "./fakeLibrary";
 
 let lib: FakeLibrary;
 let toasts: string[];
@@ -63,7 +67,10 @@ beforeEach(() => {
     },
   });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  stopLibraryIndex();
+  vi.unstubAllGlobals();
+});
 
 function entry(
   recid: string,
@@ -170,21 +177,28 @@ describe("citation graph: adding a paper and clicking a node", () => {
     expect(dialog.promptForSaveTarget).not.toHaveBeenCalled();
   });
 
-  it("takes an item in the trash as the paper's item", async () => {
-    const item = lib.put({ fields: pluginFields("100"), deleted: true });
+  // Intentional change: before, the item in the trash was taken as the
+  // paper's item and nothing was added
+  it("adds a paper whose only item is in the trash", async () => {
+    lib.put({ fields: pluginFields("100"), deleted: true });
     const dialog = graphDialog();
     const e = entry("100");
     await dialog.importEntryToLibrary(e);
-    expect(e.localItemID).toBe(item.id);
-    expect(dialog.promptForSaveTarget).not.toHaveBeenCalled();
+    expect(e.localItemID).toBeUndefined();
+    expect(dialog.promptForSaveTarget).toHaveBeenCalled();
   });
 
-  it("goes on to add the paper when the lookup fails", async () => {
+  // Intentional change: before, a failed lookup was taken for "not in the
+  // library" and the paper was added
+  it("adds nothing and says so when the library cannot be read", async () => {
     lib.put({ fields: pluginFields("100") });
     lib.queryError = new Error("database is locked");
     const dialog = graphDialog();
     await dialog.importEntryToLibrary(entry("100"));
-    expect(dialog.promptForSaveTarget).toHaveBeenCalled();
+    expect(dialog.promptForSaveTarget).not.toHaveBeenCalled();
+    expect(toasts).toEqual([
+      "zoteroinspire-references-panel-library-lookup-failed-add",
+    ]);
   });
 
   it("selects the paper's item on a click on its node", async () => {
@@ -194,8 +208,36 @@ describe("citation graph: adding a paper and clicking a node", () => {
     expect(selected).toEqual([[item.id]]);
   });
 
-  it("selects an item in the trash on a click on its node", async () => {
-    const item = lib.put({ fields: pluginFields("100"), deleted: true });
+  // Intentional change: before, the item in the trash was selected
+  it("says a paper whose only item is in the trash is not in the library", async () => {
+    lib.put({ fields: pluginFields("100"), deleted: true });
+    const dialog = graphDialog();
+    await dialog.handleNodeClick("100", { ctrlKey: false, metaKey: false });
+    expect(selected).toEqual([]);
+    expect(toasts).toEqual([
+      'zoteroinspire-references-panel-citation-graph-not-in-library {"title":"100"}',
+    ]);
+  });
+
+  // Intentional change: before, the click did nothing (the lookup's failure
+  // went unhandled)
+  it("says so on a click when the library cannot be read", async () => {
+    lib.put({ fields: pluginFields("100") });
+    lib.queryError = new Error("database is locked");
+    const dialog = graphDialog();
+    await dialog.handleNodeClick("100", { ctrlKey: false, metaKey: false });
+    expect(selected).toEqual([]);
+    expect(toasts).toEqual([
+      "zoteroinspire-references-panel-library-lookup-failed",
+    ]);
+  });
+
+  it("selects an item of a library whose items are not loaded yet", async () => {
+    const item = lib.put({
+      libraryID: GROUP_LIBRARY,
+      fields: pluginFields("100"),
+    });
+    lib.unloadedLibraries.add(GROUP_LIBRARY);
     const dialog = graphDialog();
     await dialog.handleNodeClick("100", { ctrlKey: false, metaKey: false });
     expect(selected).toEqual([[item.id]]);
@@ -245,34 +287,78 @@ describe("batch import: duplicate check against the library", () => {
     m.dispose();
   });
 
+  // Intentional changes: items in the trash are no duplicates, and every
+  // field that holds an arXiv ID is read
   it.each([
-    ["an item in the trash", { ...pluginFields("100") }, true, "recid"],
+    ["an item in the trash", { ...pluginFields("100") }, true, "recid", null],
     [
       "an arXiv ID only in the URL",
       { url: "https://arxiv.org/abs/2301.12345" },
       false,
       null,
+      "arxiv",
     ],
   ])(
-    "with %s: duplicate %s",
-    async (_name, fields: Record<string, string>, deleted, before) => {
+    "with %s: duplicate %s before -> %s after",
+    async (_name, fields: Record<string, string>, deleted, _before, after) => {
       const item = lib.put({ fields, deleted });
       const m = manager();
       const duplicates = await (m as any).detectDuplicates([
         entry("100", { arxivDetails: { id: "2301.12345" } }),
       ]);
-      expect(duplicates.get("e100")?.matchType ?? null).toBe(before);
-      if (before) expect(duplicates.get("e100")?.localItemID).toBe(item.id);
+      expect(duplicates.get("e100")?.matchType ?? null).toBe(after);
+      if (after) expect(duplicates.get("e100")?.localItemID).toBe(item.id);
       m.dispose();
     },
   );
 
-  it("reports no duplicates when the lookup fails", async () => {
+  it("gives the first of several items with a paper's identifier", async () => {
+    const withoutRecid = lib.put({ fields: { extra: "arXiv:2301.12345" } });
+    const withRecid = lib.put({ fields: pluginFields("999") });
+    await lib.edit(withRecid, { extra: "arXiv:2301.12345" });
+    const m = manager();
+    const duplicates = await (m as any).detectDuplicates([
+      entry("100", { arxivDetails: { id: "2301.12345" } }),
+    ]);
+    // The item with a recid comes first
+    expect(duplicates.get("e100")).toEqual({
+      localItemID: withRecid.id,
+      matchType: "arxiv",
+    });
+    expect(withoutRecid.id).toBeLessThan(withRecid.id);
+    m.dispose();
+  });
+
+  // Intentional change: before, a failed lookup gave no duplicates and every
+  // selected paper was imported
+  it("imports nothing and says so when the library cannot be read", async () => {
     lib.put({ fields: pluginFields("100") });
     lib.queryError = new Error("database is locked");
-    const m = manager();
-    const duplicates = await (m as any).detectDuplicates([entry("100")]);
-    expect(duplicates.size).toBe(0);
+    const entries = [entry("100"), entry("200")];
+    const notify = vi.fn();
+    const importReference = vi.fn();
+    const promptForSaveTarget = vi.fn();
+    const m = new BatchImportManager({
+      getDocument: () => ({}) as Document,
+      getBody: () => ({}) as HTMLElement,
+      getListElement: () => ({ querySelectorAll: () => [] }) as any,
+      getAllEntries: () => entries,
+      getFilteredEntries: () => entries,
+      importReference,
+      promptForSaveTarget,
+      reporter: { notify, startProgress: vi.fn() as any },
+      updateRowStatus: vi.fn(),
+    });
+    await expect((m as any).detectDuplicates(entries)).rejects.toThrow(
+      LibraryIndexError,
+    );
+    m.selectAll();
+    expect(await m.handleBatchImport({} as HTMLElement)).toBeNull();
+    expect(notify).toHaveBeenCalledWith(
+      "zoteroinspire-references-panel-batch-duplicate-check-failed",
+    );
+    expect(promptForSaveTarget).not.toHaveBeenCalled();
+    expect(importReference).not.toHaveBeenCalled();
     m.dispose();
   });
 });

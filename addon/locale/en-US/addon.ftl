@@ -227,6 +227,8 @@ references-panel-toast-linked = Related item linked successfully
 references-panel-toast-link-target-gone = Not linked: the item it was to be linked to has been deleted or moved to the trash
 references-panel-toast-added = Reference added to your library
 references-panel-toast-missing = Article not found in INSPIRE-HEP
+references-panel-library-lookup-failed = Could not read your library. Please try again.
+references-panel-library-lookup-failed-add = Could not check whether this paper is already in your library, so it was not added. Please try again.
 references-panel-toast-no-pdf = This item has no PDF attachment
 references-panel-toast-selected = Item selected in library
 references-panel-toast-bibtex-success = BibTeX copied to clipboard
@@ -451,6 +453,7 @@ references-panel-batch-duplicate-skip-all = Skip all duplicates
 references-panel-batch-duplicate-import-all = Import all anyway
 references-panel-batch-duplicate-confirm = Confirm selection
 references-panel-batch-duplicate-cancel = Cancel
+references-panel-batch-duplicate-check-failed = Could not check your library for these papers, so nothing was imported. Please try again.
 
 # PDF Citation Lookup (FTR-PDF-ANNOTATE)
 pdf-annotate-lookup-button = Look up in References

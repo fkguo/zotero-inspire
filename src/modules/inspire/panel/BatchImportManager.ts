@@ -15,6 +15,7 @@ import {
   createMockSignal,
 } from "../index";
 import type { SaveTargetSelection } from "../../pickerUI";
+import { LibraryIndexError } from "../library/arxivIndex";
 import type { Reporter } from "./reporter";
 
 // XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
@@ -300,6 +301,17 @@ export class BatchImportManager {
           this.detectDuplicates(selectedEntries).then(resolve, reject);
         },
       );
+    } catch (err) {
+      // Without the check, papers already in the library would be added
+      // again: import nothing, and say so
+      if (!(err instanceof LibraryIndexError)) throw err;
+      Zotero.debug(`[${config.addonName}] handleBatchImport: ${err}`);
+      if (!this.disposed) {
+        this.options.reporter.notify(
+          getString("references-panel-batch-duplicate-check-failed"),
+        );
+      }
+      return null;
     } finally {
       this.cancelDuplicateSearch = undefined;
     }
@@ -407,17 +419,13 @@ export class BatchImportManager {
       }
     }
 
-    // Batch query for each identifier type (priority: recid > arXiv > DOI)
+    // Batch query for each identifier type (priority: recid > arXiv > DOI);
+    // of several items with one identifier, the first (with a recid first,
+    // then by item ID)
     const [recidMatches, arxivMatches, doiMatches] = await Promise.all([
-      recids.length > 0
-        ? findItemsByRecids(recids)
-        : Promise.resolve(new Map<string, number>()),
-      arxivIds.length > 0
-        ? findItemsByArxivs(arxivIds)
-        : Promise.resolve(new Map<string, number>()),
-      dois.length > 0
-        ? findItemsByDOIs(dois)
-        : Promise.resolve(new Map<string, number>()),
+      findItemsByRecids(recids),
+      findItemsByArxivs(arxivIds),
+      findItemsByDOIs(dois),
     ]);
 
     // Add already-local entries
@@ -431,24 +439,24 @@ export class BatchImportManager {
     }
 
     // Process matches in priority order
-    for (const [recid, localItemID] of recidMatches) {
+    for (const [recid, [hit]] of recidMatches) {
       const entry = entryByRecid.get(recid);
       if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "recid" });
+        duplicates.set(entry.id, { localItemID: hit.itemID, matchType: "recid" });
       }
     }
 
-    for (const [arxivId, localItemID] of arxivMatches) {
+    for (const [arxivId, [hit]] of arxivMatches) {
       const entry = entryByArxiv.get(arxivId);
       if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "arxiv" });
+        duplicates.set(entry.id, { localItemID: hit.itemID, matchType: "arxiv" });
       }
     }
 
-    for (const [doi, localItemID] of doiMatches) {
+    for (const [doi, [hit]] of doiMatches) {
       const entry = entryByDOI.get(doi);
       if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "doi" });
+        duplicates.set(entry.id, { localItemID: hit.itemID, matchType: "doi" });
       }
     }
 

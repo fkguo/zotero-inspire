@@ -19,15 +19,35 @@ import { InspireReferencePanelController } from "../src/modules/zinspire";
 // INSPIRE requests, clipboard and progress windows are replaced by fakes; the
 // panel's list, rows, toolbar and duplicate dialog are real DOM (jsdom).
 
+// Each fake gives the item ID found for each identifier; the lookups give a
+// list of hits, which asHits makes of it
 const library = vi.hoisted(() => ({
   findItemsByRecids: vi.fn(),
   findItemsByArxivs: vi.fn(),
   findItemsByDOIs: vi.fn(),
 }));
+vi.mock("../src/modules/inspire/library/arxivIndex", async (importOriginal) => {
+  const asHits =
+    (find: (...args: any[]) => Promise<Map<string, number>>) =>
+    async (...args: any[]) =>
+      new Map(
+        [...(await find(...args))].map(([key, itemID]) => [
+          key,
+          [{ itemID, libraryID: 1, hasRecid: true }],
+        ]),
+      );
+  return {
+    ...(await importOriginal<
+      typeof import("../src/modules/inspire/library/arxivIndex")
+    >()),
+    findItemsByRecids: asHits(library.findItemsByRecids),
+    findItemsByArxivs: asHits(library.findItemsByArxivs),
+    findItemsByDOIs: asHits(library.findItemsByDOIs),
+  };
+});
 const clipboard = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
 vi.mock("../src/modules/inspire/apiUtils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/modules/inspire/apiUtils")>()),
-  ...library,
   ...clipboard,
 }));
 const network = vi.hoisted(() => ({ inspireFetch: vi.fn() }));
