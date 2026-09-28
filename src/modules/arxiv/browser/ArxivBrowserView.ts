@@ -52,6 +52,10 @@ import { ListPane, type ListUpdate } from "./ListPane";
 import { AuthorPreviewController } from "../../inspire/panel/AuthorPreviewController";
 import { HoverPreviewController } from "../../inspire/panel/HoverPreviewController";
 import { writeMarks, type LocalPaper } from "../../inspire/library/localStatus";
+import {
+  firstPdfAttachmentID,
+  openLocalPdf,
+} from "../../inspire/library/localPdf";
 import { countAuthorPapers } from "./authorCount";
 import { DetailPane } from "./DetailPane";
 import { PaneDivider } from "./PaneDivider";
@@ -100,6 +104,12 @@ export interface ArxivBrowserViewOptions {
    * function that stops following.
    */
   followLibrary?: (listener: () => void) => () => void;
+  /**
+   * Follow the library's items: `listener` is called after items are added,
+   * changed, moved to the trash or deleted (a PDF attached to a paper, say).
+   * Returns the function that stops following.
+   */
+  followItems?: (listener: () => void) => () => void;
   /** Show an item in the main window's library */
   showInLibrary?: (itemID: number) => void;
 }
@@ -158,6 +168,7 @@ export class ArxivBrowserView {
   /** Counts the library's changes: a lookup older than one is not written */
   private libraryChanges = 0;
   private readonly stopFollowingLibrary: (() => void) | undefined;
+  private readonly stopFollowingItems: (() => void) | undefined;
   private disposed = false;
 
   constructor(
@@ -329,6 +340,18 @@ export class ArxivBrowserView {
         canCopyTexkey: () => false,
       },
     });
+    // A paper's PDF: the first PDF among its items in the library (the green
+    // button), otherwise arXiv's, in the web browser
+    const itemWithPdf = (entry: BrowserEntry) =>
+      (entry.localItemIDs ?? []).find(
+        (itemID) => firstPdfAttachmentID(itemID) !== null,
+      );
+    const hasPdf = (entry: BrowserEntry) => itemWithPdf(entry) !== undefined;
+    const openPdf = (entry: BrowserEntry) => {
+      const itemID = itemWithPdf(entry);
+      if (itemID !== undefined) void openLocalPdf(itemID);
+      else this.actions.openPdf(entry.listing.id);
+    };
     this.detail = new DetailPane({
       container: detailContainer,
       actions: this.actions,
@@ -336,6 +359,7 @@ export class ArxivBrowserView {
         this.showAuthorCard(fullName, anchor),
       onAuthorLeave: () => this.authorCard.scheduleHide(),
       showInLibrary,
+      openPdf,
     });
     this.listPane = new ListPane({
       container: listContainer,
@@ -346,6 +370,8 @@ export class ArxivBrowserView {
       onFocus: (entry) => this.detail.show(entry),
       showInLibrary,
       onLibraryRetry: () => this.recheckLibrary(),
+      hasPdf,
+      openPdf,
       onAuthorHover: (entry, index, anchor) =>
         this.showAuthorCard(entry.authors[index], anchor),
       onAuthorLeave: () => this.authorCard.scheduleHide(),
@@ -362,6 +388,9 @@ export class ArxivBrowserView {
     this.stopFollowingLibrary = options.followLibrary?.(() =>
       this.recheckLibrary(),
     );
+    this.stopFollowingItems = options.followItems?.(() => {
+      if (!this.disposed) this.listPane.refreshPdfButtons();
+    });
 
     this.onSubscriptionChange(this.subscriptions.current);
   }
@@ -377,6 +406,7 @@ export class ArxivBrowserView {
     this.doc.removeEventListener("keydown", this.onKeyDown);
     this.stopFollowing();
     this.stopFollowingLibrary?.();
+    this.stopFollowingItems?.();
     this.stopCountdown();
     const win = this.doc.defaultView;
     if (this.filterTimer !== undefined) win?.clearTimeout(this.filterTimer);

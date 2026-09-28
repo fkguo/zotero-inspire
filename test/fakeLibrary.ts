@@ -46,6 +46,8 @@ export interface FakeItemSpec {
   fields?: Record<string, string>;
   /** In the trash */
   deleted?: boolean;
+  /** The item an attachment or note belongs to */
+  parentItemID?: number;
 }
 
 export interface FakeItem {
@@ -62,6 +64,8 @@ export interface FakeItem {
   isAttachment(): boolean;
   isPDFAttachment(): boolean;
   getDisplayTitle(): string;
+  /** Its attachments, those in the trash left out unless asked for */
+  getAttachments(includeTrashed?: boolean): number[];
   addRelatedItem(other: FakeItem): boolean;
   removeRelatedItem(other: FakeItem): Promise<boolean>;
   saveTx(): Promise<void>;
@@ -273,6 +277,15 @@ export class FakeLibrary {
       isAttachment: () => itemType === "attachment",
       isPDFAttachment: () => itemType === "attachment",
       getDisplayTitle: () => fields.title ?? "",
+      getAttachments: (includeTrashed = false) =>
+        [...this.items.values()]
+          .filter(
+            (child) =>
+              child.parentItemID === id &&
+              child.itemType === "attachment" &&
+              (includeTrashed || !this.isTrashed(child.id)),
+          )
+          .map((child) => child.id),
       // Relations by item key, as Zotero keeps them within a library
       addRelatedItem(other: FakeItem) {
         if (this.relatedItems.includes(other.key)) return false;
@@ -286,6 +299,7 @@ export class FakeLibrary {
         return true;
       },
       saveTx: async () => undefined,
+      parentItemID: spec.parentItemID,
     };
     this.items.set(id, item);
     this.writeFields(item, fields, spec.fields ?? {});

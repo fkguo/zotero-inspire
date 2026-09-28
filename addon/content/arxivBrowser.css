@@ -496,9 +496,7 @@
 
 /* Rows: the entry list's rows, read-only here */
 
-.arxiv-browser__row .zinspire-ref-entry__checkbox,
-.arxiv-browser__row .zinspire-ref-entry__link,
-.arxiv-browser__row .zinspire-ref-entry__texkey {
+.arxiv-browser__row .zinspire-ref-entry__checkbox {
   display: none;
 }
 

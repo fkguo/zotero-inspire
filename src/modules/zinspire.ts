@@ -268,6 +268,7 @@ import {
 } from "./inspire";
 import { onLibraryIndexChange } from "./inspire/library/arxivIndex";
 import { loadedItem, refreshLocalState } from "./inspire/library/localStatus";
+import { firstPdfAttachmentID, openLocalPdf } from "./inspire/library/localPdf";
 import { applyLocalMarker } from "./inspire/panel/localMarker";
 
 // Re-export for external use
@@ -15219,20 +15220,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    * Returns the attachment ID if found, null otherwise.
    */
   private getFirstPdfAttachmentID(parentItemID: number): number | null {
-    // An item of a library whose items are not loaded yet shows no PDF
-    const parentItem = loadedItem(parentItemID);
-    if (!parentItem) {
-      return null;
-    }
-    const attachmentIDs = parentItem.getAttachments?.() || [];
-    // Find the first PDF attachment
-    for (const id of attachmentIDs) {
-      const attachment = Zotero.Items.get(id) as Zotero.Item | undefined;
-      if (attachment?.isPDFAttachment?.()) {
-        return id;
-      }
-    }
-    return null;
+    return firstPdfAttachmentID(parentItemID);
   }
 
   private async waitForFirstPdfAttachmentID(
@@ -15335,29 +15323,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    * Returns true if PDF was opened successfully, false otherwise.
    */
   private async openPdfForLocalItem(itemID: number): Promise<boolean> {
-    if (!Zotero.Reader || typeof Zotero.Reader.open !== "function") {
-      return false;
-    }
-    try {
-      const attachmentID = this.getFirstPdfAttachmentID(itemID);
-      if (!attachmentID) {
-        return false;
-      }
-      const reader =
-        (await Zotero.Reader.open(attachmentID, undefined, {
-          allowDuplicate: false,
-        })) || null;
-      if (reader) {
-        ReaderTabHelper.focusReader(reader as _ZoteroTypes.ReaderInstance);
-        return true;
-      }
-      return false;
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] Failed to open PDF for item ${itemID}: ${err}`,
-      );
-      return false;
-    }
+    return openLocalPdf(itemID);
   }
 
   /**

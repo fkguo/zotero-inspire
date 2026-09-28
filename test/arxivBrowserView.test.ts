@@ -66,6 +66,8 @@ beforeEach(() => {
     debug: vi.fn(),
     launchURL: vi.fn(),
     getMainWindow: () => win,
+    // Items the tests mark as in the library have no PDF
+    Items: { get: () => false },
     Prefs: {
       get: (key: string) => prefs[key],
       set: (key: string, value: unknown) => {
@@ -663,10 +665,26 @@ describe("arXiv browser: read-only actions and keys", () => {
     title.dispatchEvent(click);
     expect(click.defaultPrevented).toBe(true);
     expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/abs/2609.28538");
-    row.querySelector<HTMLButtonElement>(".zinspire-ref-entry__pdf")!.click();
+    // Not green: the paper is not in the library
+    const pdf = row.querySelector<HTMLButtonElement>(
+      ".zinspire-ref-entry__pdf",
+    )!;
+    expect(pdf.dataset.state).toBe("online");
+    expect(pdf.disabled).toBe(false);
+    pdf.click();
     expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/pdf/2609.28538");
     key(root.querySelector(".arxiv-browser__list")!, "Enter");
     expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/abs/2609.28538");
+  });
+
+  it("has no buttons for relating items or TeX keys in its rows", async () => {
+    const { root } = await loaded();
+    expect(rows(root).length).toBeGreaterThan(0);
+    for (const row of rows(root)) {
+      expect(row.querySelector(".zinspire-ref-entry__link")).toBeNull();
+      expect(row.querySelector(".zinspire-ref-entry__texkey")).toBeNull();
+      expect(row.querySelector(".zinspire-ref-entry__bibtex")).not.toBeNull();
+    }
   });
 
   it("copies arXiv's BibTeX, asking arxiv.org once and in turn", async () => {

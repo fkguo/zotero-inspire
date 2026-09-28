@@ -11,7 +11,7 @@ import { config } from "../../../../package.json";
 import { getArxivApiScheduler, getArxivWebScheduler } from "../arxivFetch";
 import { onLibraryIndexChange } from "../../inspire/library/arxivIndex";
 import { ArxivBrowserView } from "./ArxivBrowserView";
-import { itemsWithArxivIds } from "./browserLibrary";
+import { followItems, itemsWithArxivIds } from "./browserLibrary";
 
 export const ARXIV_BROWSER_WINDOWTYPE = `${config.addonRef}:arxiv-browser`;
 export const ARXIV_BROWSER_URL = `chrome://${config.addonRef}/content/arxivBrowser.xhtml`;
@@ -31,6 +31,7 @@ const createView: ArxivBrowserContentFactory = (root) =>
   new ArxivBrowserView(root, {
     inLibrary: itemsWithArxivIds,
     followLibrary: onLibraryIndexChange,
+    followItems,
   });
 
 /** The open window; set as soon as it is opened, before it has loaded */

@@ -347,11 +347,14 @@ export function applyPdfButtonStyle(el: HTMLElement): void {
  * - has-pdf: Item has PDF attachment (green document icon)
  * - find-pdf: Item in library but no PDF (blue download icon)
  * - disabled: Item not in library (gray document icon)
+ * - online: Paper not in the library whose PDF opens on the web (gray
+ *   document icon, clickable; arXiv browser)
  */
 export const PdfButtonState = {
   HAS_PDF: "has-pdf",
   FIND_PDF: "find-pdf",
   DISABLED: "disabled",
+  ONLINE: "online",
 } as const;
 
 export type PdfButtonState = (typeof PdfButtonState)[keyof typeof PdfButtonState];
@@ -392,6 +395,14 @@ export function renderPdfButtonIcon(
   if (state === PdfButtonState.HAS_PDF) {
     // Has PDF - green document icon, clickable
     const svg = createDocumentSvg(doc, greenColor);
+    button.appendChild(svg);
+    button.setAttribute("title", strings?.pdfOpen ?? "Open PDF");
+    button.style.opacity = "1";
+    button.style.cursor = "pointer";
+    button.disabled = false;
+  } else if (state === PdfButtonState.ONLINE) {
+    // PDF on the web - gray document icon, clickable
+    const svg = createDocumentSvg(doc, grayColor);
     button.appendChild(svg);
     button.setAttribute("title", strings?.pdfOpen ?? "Open PDF");
     button.style.opacity = "1";

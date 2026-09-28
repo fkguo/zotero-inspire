@@ -17,7 +17,10 @@ import {
   ArxivBrowserView,
   type ArxivBrowserViewOptions,
 } from "../src/modules/arxiv/browser/ArxivBrowserView";
-import { itemsWithArxivIds } from "../src/modules/arxiv/browser/browserLibrary";
+import {
+  followItems,
+  itemsWithArxivIds,
+} from "../src/modules/arxiv/browser/browserLibrary";
 import { EntryListRenderer } from "../src/modules/inspire/panel/EntryListRenderer";
 import {
   findItemsByArxivs,
@@ -178,6 +181,7 @@ async function open(options: Partial<ArxivBrowserViewOptions> = {}) {
     // As browserWindow.ts gives them
     inLibrary: itemsWithArxivIds,
     followLibrary: onLibraryIndexChange,
+    followItems,
     ...options,
   });
   await settle();
@@ -213,6 +217,15 @@ function marks(root: HTMLElement): Record<string, string> {
   }
   return shown;
 }
+const pdfOf = (root: HTMLElement, id: string) =>
+  rows(root)
+    .find((row) => idOf(row) === id)!
+    .querySelector<HTMLButtonElement>(".zinspire-ref-entry__pdf")!;
+/** The PDF button's state of each paper listed, by arXiv ID */
+const pdfStates = (root: HTMLElement): Record<string, string | undefined> =>
+  Object.fromEntries(
+    rows(root).map((row) => [idOf(row), pdfOf(root, idOf(row)).dataset.state]),
+  );
 const states = (root: HTMLElement) =>
   new Set(
     rows(root).map(
@@ -438,6 +451,87 @@ describe("arXiv browser: in the library", () => {
     await lib.add({ fields: { archiveID: "arXiv:2609.28538" } });
     await flushPromises();
     expect(inLibrary).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws the PDF button green only for a PDF in the library and opens it in Zotero; other PDFs open on arXiv", async () => {
+    const withPdf = lib.put({ fields: { archiveID: "arXiv:2609.28538" } });
+    const pdf = lib.put({ itemType: "attachment", parentItemID: withPdf.id });
+    lib.put({ fields: { archiveID: "arXiv:2609.28544" } });
+    const openReader = vi.fn(async () => ({ focus: vi.fn() }));
+    (globalThis as any).Zotero.Reader = { open: openReader };
+    const launch = vi.fn();
+    const root = await open({ launch });
+    await vi.waitFor(() =>
+      expect(marks(root)).toEqual({ "2609.28538": "●", "2609.28544": "●" }),
+    );
+    expect(pdfStates(root)).toMatchObject({
+      "2609.28538": "has-pdf",
+      "2609.28544": "online",
+      "2609.28555": "online",
+    });
+
+    pdfOf(root, "2609.28538").click();
+    expect(openReader).toHaveBeenLastCalledWith(pdf.id, undefined, {
+      allowDuplicate: false,
+    });
+    pdfOf(root, "2609.28555").click();
+    expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/pdf/2609.28555");
+    expect(openReader).toHaveBeenCalledTimes(1);
+    // The detail pane's PDF button too
+    rows(root)[0].click();
+    [
+      ...root.querySelectorAll<HTMLButtonElement>(
+        ".arxiv-browser__detail button",
+      ),
+    ]
+      .find(
+        (button) => button.textContent === msg("arxiv-browser-open-pdf-button"),
+      )!
+      .click();
+    await vi.waitFor(() => expect(openReader).toHaveBeenCalledTimes(2));
+  });
+
+  it("draws the PDF button green when another of the paper's items has the PDF, and opens that PDF", async () => {
+    // The item a click on the mark selects comes first (it has an INSPIRE
+    // record); only the other one has a PDF
+    lib.put({
+      fields: {
+        archiveID: "arXiv:2609.28538",
+        archive: "INSPIRE",
+        archiveLocation: "3061234",
+      },
+    });
+    const second = lib.put({
+      fields: { url: "https://arxiv.org/abs/2609.28538" },
+    });
+    const pdf = lib.put({ itemType: "attachment", parentItemID: second.id });
+    const openReader = vi.fn(async () => ({ focus: vi.fn() }));
+    (globalThis as any).Zotero.Reader = { open: openReader };
+    const root = await open();
+    await vi.waitFor(() => expect(marks(root)).toEqual({ "2609.28538": "②" }));
+    expect(pdfStates(root)["2609.28538"]).toBe("has-pdf");
+    pdfOf(root, "2609.28538").click();
+    expect(openReader).toHaveBeenLastCalledWith(pdf.id, undefined, {
+      allowDuplicate: false,
+    });
+  });
+
+  it("turns the PDF button green when a PDF is attached while listed, and grey when it goes to the trash", async () => {
+    const paper = lib.put({ fields: { archiveID: "arXiv:2609.28538" } });
+    const root = await open();
+    await vi.waitFor(() => expect(marks(root)).toEqual({ "2609.28538": "●" }));
+    expect(pdfStates(root)["2609.28538"]).toBe("online");
+    const pdf = await lib.add({
+      itemType: "attachment",
+      parentItemID: paper.id,
+    });
+    await vi.waitFor(() =>
+      expect(pdfStates(root)["2609.28538"]).toBe("has-pdf"),
+    );
+    await lib.trash(pdf);
+    await vi.waitFor(() =>
+      expect(pdfStates(root)["2609.28538"]).toBe("online"),
+    );
   });
 
   it("keeps the marks of a lookup made after a change when an older one answers later", async () => {

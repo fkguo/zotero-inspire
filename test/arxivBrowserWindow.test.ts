@@ -20,7 +20,10 @@ import {
   unregisterArxivBrowserMenu,
 } from "../src/modules/arxiv/browser/browserEntryPoints";
 import type { ArxivBrowserViewOptions } from "../src/modules/arxiv/browser/ArxivBrowserView";
-import { itemsWithArxivIds } from "../src/modules/arxiv/browser/browserLibrary";
+import {
+  followItems,
+  itemsWithArxivIds,
+} from "../src/modules/arxiv/browser/browserLibrary";
 import { onLibraryIndexChange } from "../src/modules/inspire/library/arxivIndex";
 
 // The options the window gives the content it builds
@@ -97,6 +100,10 @@ beforeEach(() => {
     getMainWindow: () => main,
     getMainWindows: () => [main],
     MenuManager: menus,
+    Notifier: {
+      registerObserver: vi.fn(() => "observer"),
+      unregisterObserver: vi.fn(),
+    },
     Prefs: { get: () => undefined, set: vi.fn() },
   });
   vi.stubGlobal("Services", { wm: mediator });
@@ -191,12 +198,13 @@ describe("arXiv browser window", () => {
     expect(root.querySelector(".arxiv-browser__editor")).not.toBeNull();
   });
 
-  it("gives its content the library index, for the marks of papers in the library", () => {
+  it("gives its content the library index and the library's items, for the marks and PDF buttons", () => {
     onArxivBrowserLoad(browser as unknown as Window);
 
     expect(views.options).toHaveLength(1);
     expect(views.options[0].inLibrary).toBe(itemsWithArxivIds);
     expect(views.options[0].followLibrary).toBe(onLibraryIndexChange);
+    expect(views.options[0].followItems).toBe(followItems);
   });
 
   it("closed by hand, stops its content and cancels the queued requests", () => {

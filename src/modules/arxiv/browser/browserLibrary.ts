@@ -3,9 +3,11 @@
 // with a paper's arXiv identifier in any library, items in the trash left
 // out, in the index's order (the References panel's: items with an INSPIRE
 // recid first, then by item ID). When the library cannot be read, nothing
-// is known.
+// is known. Changes of the library's items (a PDF attached) are followed for
+// the PDF buttons.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { config } from "../../../../package.json";
 import {
   findItemsByArxivs,
   LibraryIndexError,
@@ -28,4 +30,17 @@ export async function itemsWithArxivIds(
   return new Map(
     [...found].map(([id, hits]) => [id, hits.map((hit) => hit.itemID)]),
   );
+}
+
+/**
+ * Call `listener` after items of the library are added, changed, moved to
+ * the trash or deleted; returns the function that stops it
+ */
+export function followItems(listener: () => void): () => void {
+  const observerID = Zotero.Notifier.registerObserver(
+    { notify: async () => listener() },
+    ["item"],
+    `${config.addonRef}-arxivBrowserItems`,
+  );
+  return () => Zotero.Notifier.unregisterObserver(observerID);
 }

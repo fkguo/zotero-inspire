@@ -341,6 +341,33 @@ export class EntryListRenderer {
     }
   }
 
+  /**
+   * Draw a row's PDF button from the adapter (state, tooltip and target),
+   * given whether the paper has a PDF in the library
+   */
+  updatePdfButton(
+    row: HTMLDivElement,
+    entry: InspireReferenceEntry,
+    hasPdf: boolean,
+    dark = isDarkMode(this.doc),
+  ): void {
+    const pdfButton = row.querySelector(
+      ".zinspire-ref-entry__pdf",
+    ) as HTMLButtonElement | null;
+    if (!pdfButton) return;
+    const spec = (this.adapter.pdfButton ?? panelPdfButton)(entry, hasPdf);
+    const pdfStrings = {
+      pdfOpen: spec.title ?? this.strings.pdfOpen,
+      pdfFind: spec.title ?? this.strings.pdfFind,
+    };
+    renderPdfButtonIcon(this.doc, pdfButton, spec.state, pdfStrings, dark);
+    if (spec.url) {
+      pdfButton.dataset.url = spec.url;
+    } else {
+      delete pdfButton.dataset.url;
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Cache and Pool Management
   // ─────────────────────────────────────────────────────────────────────────────
@@ -485,24 +512,12 @@ export class EntryListRenderer {
     }
 
     // Update PDF button - shows PDF status and allows opening/finding PDF
-    const pdfButton = row.querySelector(
-      ".zinspire-ref-entry__pdf",
-    ) as HTMLButtonElement | null;
-
-    if (pdfButton) {
-      const hasPdf = ctx.hasPdf ? ctx.hasPdf(entry) : false;
-      const spec = (this.adapter.pdfButton ?? panelPdfButton)(entry, hasPdf);
-      const pdfStrings = {
-        pdfOpen: spec.title ?? this.strings.pdfOpen,
-        pdfFind: spec.title ?? this.strings.pdfFind,
-      };
-      renderPdfButtonIcon(this.doc, pdfButton, spec.state, pdfStrings, dark);
-      if (spec.url) {
-        pdfButton.dataset.url = spec.url;
-      } else {
-        delete pdfButton.dataset.url;
-      }
-    }
+    this.updatePdfButton(
+      row,
+      entry,
+      ctx.hasPdf ? ctx.hasPdf(entry) : false,
+      dark,
+    );
 
     // Update label (reference number like [1], [2], etc.)
     const labelSpan = row.querySelector(

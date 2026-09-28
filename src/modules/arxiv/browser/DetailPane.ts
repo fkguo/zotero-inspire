@@ -32,6 +32,8 @@ export interface DetailPaneOptions {
   onAuthorLeave(): void;
   /** Show a paper that is in the library there */
   showInLibrary?(itemID: number): void;
+  /** Open the paper's PDF (default: arXiv's, in the web browser) */
+  openPdf?(entry: BrowserEntry): void;
 }
 
 /** The name of a category or archive, if arXiv's table has it */
@@ -197,7 +199,9 @@ export class DetailPane {
         actions.openAbstractPage(listing.id),
       ),
       button(doc, getString("arxiv-browser-open-pdf-button"), () =>
-        actions.openPdf(listing.id),
+        this.options.openPdf
+          ? this.options.openPdf(entry)
+          : actions.openPdf(listing.id),
       ),
     );
     parts.push(buttons);

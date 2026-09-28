@@ -64,6 +64,10 @@ export interface ListPaneOptions {
   showInLibrary?(itemID: number): void;
   /** The library could not be read and a mark was clicked: try again */
   onLibraryRetry?(): void;
+  /** Whether the paper has a PDF in the library (its PDF button is green) */
+  hasPdf?(entry: BrowserEntry): boolean;
+  /** Open the paper's PDF (default: arXiv's, in the web browser) */
+  openPdf?(entry: BrowserEntry): void;
   /** The pointer is on the name of a paper's author (its index) */
   onAuthorHover?(entry: BrowserEntry, index: number, anchor: HTMLElement): void;
   onAuthorLeave?(): void;
@@ -91,6 +95,8 @@ export class ListPane {
   private focusedKey: string | null = null;
   /** Rows of the page shown, by row key */
   private readonly rows = new Map<string, HTMLDivElement>();
+  /** The papers of those rows, by row key */
+  private readonly rowEntries = new Map<string, BrowserEntry>();
   private observer: IntersectionObserver | null = null;
   private retryEnabled = true;
   private message: string | null = null;
@@ -106,11 +112,16 @@ export class ListPane {
       adapter: {
         canCopyBibtex: () => true,
         canCopyTexkey: () => false,
-        pdfButton: (entry) => ({
-          state: PdfButtonState.HAS_PDF,
-          title: getString("arxiv-browser-open-pdf"),
-          url: pdfUrl((entry as BrowserEntry).listing.id),
-        }),
+        // Green as in the References panel only for a PDF in the library;
+        // otherwise arXiv's PDF, opened in the web browser
+        pdfButton: (entry, hasPdf) =>
+          hasPdf
+            ? { state: PdfButtonState.HAS_PDF }
+            : {
+                state: PdfButtonState.ONLINE,
+                title: getString("arxiv-browser-open-pdf"),
+                url: pdfUrl((entry as BrowserEntry).listing.id),
+              },
         titleSuffix: "",
         abstract: (entry) => entry.abstract || undefined,
         metaSuffix: (entry) => this.metaSuffix(entry as BrowserEntry),
@@ -157,6 +168,7 @@ export class ListPane {
     this.setFocus(null, false);
     this.observer?.disconnect();
     this.rows.clear();
+    this.rowEntries.clear();
     const empty = html(this.doc, "div", "arxiv-browser__empty", text);
     if (extra) empty.append(html(this.doc, "br"), extra);
     this.list.replaceChildren(empty);
@@ -302,8 +314,27 @@ export class ListPane {
   refreshLibraryMarks(entries: Iterable<BrowserEntry>): void {
     for (const entry of entries) {
       const row = this.rows.get(entry.id);
-      if (row) this.renderer.updateLocalState(row, entry);
+      if (!row) continue;
+      this.renderer.updateLocalState(row, entry);
+      this.renderer.updatePdfButton(row, entry, this.hasPdf(entry));
     }
+  }
+
+  /**
+   * Items of the library changed (a PDF attached, say): redraw the PDF
+   * buttons of the papers shown that are in the library
+   */
+  refreshPdfButtons(): void {
+    for (const [key, entry] of this.rowEntries) {
+      const row = this.rows.get(key);
+      if (row && entry.localItemID) {
+        this.renderer.updatePdfButton(row, entry, this.hasPdf(entry));
+      }
+    }
+  }
+
+  private hasPdf(entry: BrowserEntry): boolean {
+    return Boolean(entry.localItemID) && Boolean(this.options.hasPdf?.(entry));
   }
 
   dispose(): void {
@@ -330,12 +361,14 @@ export class ListPane {
     const scrollTop = this.list.scrollTop;
     this.observer?.disconnect();
     this.rows.clear();
+    this.rowEntries.clear();
     const context: EntryRenderContext = {
       selectedEntryIDs: new Set(),
       focusedEntryID: this.focusedKey ?? undefined,
       viewMode: "references",
       maxAuthors: Number(getPref("max_authors")) || 3,
       getCitationValue: () => 0,
+      hasPdf: (entry) => this.hasPdf(entry as BrowserEntry),
       darkMode: isDarkMode(doc),
     };
     const fragment = doc.createDocumentFragment();
@@ -349,6 +382,7 @@ export class ListPane {
         const row = this.renderer.createRow(block.entry, context);
         this.decorate(row, block.entry);
         this.rows.set(block.entry.id, row);
+        this.rowEntries.set(block.entry.id, block.entry);
         fragment.append(row);
       }
     }
@@ -496,6 +530,10 @@ export class ListPane {
   /** The row's own parts: the abstract's toggle */
   private decorate(row: HTMLDivElement, entry: BrowserEntry): void {
     row.classList.add("arxiv-browser__row");
+    // No relating to the item shown and no TeX keys here (the row keeps the
+    // References panel's other buttons)
+    row.querySelector(".zinspire-ref-entry__link")?.remove();
+    row.querySelector(".zinspire-ref-entry__texkey")?.remove();
     // The References panel's hint ("click to see the author's papers") does
     // not hold here: a click on a name does nothing
     row
@@ -705,7 +743,8 @@ export class ListPane {
       void actions.copyBibtex(id);
     } else if (target.closest(".zinspire-ref-entry__pdf")) {
       event.preventDefault();
-      actions.openPdf(id);
+      if (this.options.openPdf) this.options.openPdf(entry);
+      else actions.openPdf(id);
     } else if (target.closest(".zinspire-ref-entry__author-link")) {
       event.preventDefault();
     } else if (target.closest(".zinspire-ref-entry__dot")) {
