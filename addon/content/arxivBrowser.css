@@ -54,3 +54,210 @@
   color: var(--fill-secondary, #6b7280);
   text-align: center;
 }
+
+/* Toolbar rows above the list */
+
+.arxiv-browser__toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--material-toolbar, #f3f4f6);
+}
+
+.arxiv-browser__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.arxiv-browser__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.arxiv-browser__select {
+  max-width: 260px;
+}
+
+.arxiv-browser__button {
+  padding: 2px 8px;
+}
+
+.arxiv-browser__button--primary {
+  font-weight: 600;
+}
+
+.arxiv-browser__summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.arxiv-browser__chip {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--fill-quinary, #e5e7eb);
+  color: var(--fill-secondary, #4b5563);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.arxiv-browser__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+/* Subscription editor: a panel over the window's content */
+
+.arxiv-browser__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.arxiv-browser__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(900px, 94vw);
+  max-height: 92vh;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--material-background, #fff);
+  color: var(--fill-primary, #1f2937);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.arxiv-browser__editor-title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.arxiv-browser__field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.arxiv-browser__field input {
+  flex: 1 1 auto;
+}
+
+.arxiv-browser__editor-columns {
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.arxiv-browser__editor-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 3 1 0;
+  min-width: 0;
+}
+
+.arxiv-browser__editor-tree {
+  height: 46vh;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--fill-quinary, #e5e7eb);
+  border-radius: 4px;
+}
+
+.arxiv-browser__editor-group > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 2px 0;
+}
+
+.arxiv-browser__editor-group .arxiv-browser__editor-group {
+  margin-left: 14px;
+}
+
+.arxiv-browser__editor-group .arxiv-browser__editor-group > summary {
+  font-weight: normal;
+}
+
+.arxiv-browser__editor-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 14px;
+  padding: 1px 0;
+}
+
+.arxiv-browser__editor-row[hidden],
+.arxiv-browser__editor-group[hidden] {
+  display: none;
+}
+
+.arxiv-browser__editor-side {
+  flex: 2 1 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.arxiv-browser__editor-heading {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.arxiv-browser__editor-selected {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.arxiv-browser__editor-chosen {
+  padding: 1px 0;
+}
+
+.arxiv-browser__editor-chosen > span {
+  display: inline-block;
+  min-width: 110px;
+}
+
+.arxiv-browser__editor-chosen > button {
+  margin-left: 2px;
+  padding: 0 5px;
+}
+
+.arxiv-browser__editor-none {
+  list-style: none;
+  color: var(--fill-secondary, #6b7280);
+}
+
+.arxiv-browser__editor-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.arxiv-browser__editor-estimate p {
+  margin: 2px 0;
+  color: var(--fill-secondary, #4b5563);
+  font-size: 12px;
+}
+
+.arxiv-browser__editor-estimate .arxiv-browser__editor-warning {
+  color: var(--accent-orange, #b45309);
+}
+
+.arxiv-browser__editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

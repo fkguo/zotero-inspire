@@ -713,3 +713,38 @@ academic-tree-education-year = Education ended { $year } (INSPIRE)
 arxiv-browser-window =
     .title = arXiv Browser
 arxiv-browser-empty = Create or choose a subscription to browse arXiv listings.
+arxiv-browser-subscription = Subscription
+arxiv-browser-subscription-new = New…
+arxiv-browser-subscription-edit = Edit…
+arxiv-browser-subscription-delete = Delete
+arxiv-browser-subscription-delete-confirm = Delete the subscription “{ $name }”?
+arxiv-browser-subscription-default-name = Subscription { $number }
+arxiv-browser-editor-title-new = New subscription
+arxiv-browser-editor-title-edit = Edit subscription
+arxiv-browser-editor-name = Name
+arxiv-browser-editor-search = Search categories (name or identifier)
+arxiv-browser-editor-selected = Chosen (their listings are shown in this order)
+arxiv-browser-editor-none-selected = No category chosen yet.
+arxiv-browser-editor-whole-archive = All of { $archive } ({ $count } categories, one listing page)
+arxiv-browser-editor-alias = the same listing as { $canonical }
+arxiv-browser-editor-move-up = Move up
+arxiv-browser-editor-move-down = Move down
+arxiv-browser-editor-remove = Remove
+arxiv-browser-editor-sections = Show:
+arxiv-browser-section-new = New submissions
+arxiv-browser-section-cross = Cross-lists
+arxiv-browser-section-replace = Replacements
+arxiv-browser-editor-estimate =
+    A first load sends arXiv, for new: { $new ->
+        [1] 1 request
+       *[other] { $new } requests (at least { $newTime })
+    }; for recent: { $recent } requests (at least { $recentTime }); for catch-up: { $catchup ->
+        [1] 1 request
+       *[other] { $catchup } requests
+    } per announcement day. arXiv asks for 15 s between requests; days already loaded come from the cache.
+arxiv-browser-editor-many = Many categories: a first recent load takes at least { $time }. If they lie in one archive, subscribing to the whole archive needs one request per day (its listing then covers all its categories); or split them into several subscriptions.
+arxiv-browser-editor-save = Save
+arxiv-browser-editor-cancel = Cancel
+arxiv-browser-duration-seconds = { $count } s
+arxiv-browser-duration-minutes = { $count } min
+arxiv-browser-duration-minutes-seconds = { $minutes } min { $seconds } s

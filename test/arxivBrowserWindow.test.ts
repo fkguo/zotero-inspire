@@ -74,6 +74,7 @@ beforeEach(() => {
     getMainWindow: () => main,
     getMainWindows: () => [main],
     MenuManager: menus,
+    Prefs: { get: () => undefined, set: vi.fn() },
   });
   vi.stubGlobal("Services", { wm: mediator });
   vi.stubGlobal("addon", {
@@ -154,9 +155,17 @@ describe("arXiv browser window", () => {
     const root = browser.document.getElementById("arxiv-browser-root")!;
     expect(root.querySelector(".arxiv-browser__list")).not.toBeNull();
     expect(root.querySelector(".arxiv-browser__detail")).not.toBeNull();
-    expect(root.querySelector(".arxiv-browser__empty")?.textContent).toBe(
+    // Without subscriptions it offers to make one
+    const empty = root.querySelector(".arxiv-browser__empty")!;
+    expect(empty.firstChild?.textContent).toBe(
       `${config.addonRef}-arxiv-browser-empty`,
     );
+    const makeNew = empty.querySelector("button")!;
+    expect(makeNew.textContent).toBe(
+      `${config.addonRef}-arxiv-browser-subscription-new`,
+    );
+    makeNew.dispatchEvent(new browser.MouseEvent("click"));
+    expect(root.querySelector(".arxiv-browser__editor")).not.toBeNull();
   });
 
   it("closed by hand, stops its content and cancels the queued requests", () => {

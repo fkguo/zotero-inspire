@@ -66,3 +66,6 @@ pref("__prefsPrefix__.favorite_authors", "[]"); // JSON array of FavoriteAuthor 
 pref("__prefsPrefix__.favorite_papers", "[]"); // JSON array of FavoritePaper objects
 // Favorite presentations (FTR-FAVORITE-PRESENTATIONS)
 pref("__prefsPrefix__.favorite_presentations", "[]"); // JSON array of FavoritePresentation objects
+// arXiv browser (stage 3a)
+pref("__prefsPrefix__.arxiv_subscriptions", "[]"); // JSON array of the browser's subscriptions (name, categories, shown sections)
+pref("__prefsPrefix__.arxiv_browser_default_subscription", ""); // id of the subscription the window opens with (empty: the first one)

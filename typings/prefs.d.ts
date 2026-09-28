@@ -65,6 +65,8 @@ declare namespace _ZoteroTypes {
       "favorite_authors": string;
       "favorite_papers": string;
       "favorite_presentations": string;
+      "arxiv_subscriptions": string;
+      "arxiv_browser_default_subscription": string;
     };
   }
 }

@@ -5,9 +5,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getString } from "../../../utils/locale";
+import { button, html } from "./dom";
+import { SubscriptionBar } from "./SubscriptionBar";
+import type { ArxivSubscription } from "./subscriptions";
+
+export interface ArxivBrowserViewOptions {
+  /** Asks the user a yes/no question (default: the window's confirm) */
+  confirm?: (message: string) => boolean;
+}
 
 export class ArxivBrowserView {
   readonly doc: Document;
+  /** Subscription and list controls */
+  readonly toolbar: HTMLElement;
+  readonly subscriptions: SubscriptionBar;
   /** The list pane: day index, pages and the list */
   readonly listPane: HTMLElement;
   readonly list: HTMLElement;
@@ -15,37 +26,62 @@ export class ArxivBrowserView {
   readonly detail: HTMLElement;
   private disposed = false;
 
-  constructor(readonly root: HTMLElement) {
-    this.doc = root.ownerDocument;
+  constructor(
+    readonly root: HTMLElement,
+    options: ArxivBrowserViewOptions = {},
+  ) {
+    const doc = root.ownerDocument;
+    this.doc = doc;
     root.replaceChildren();
 
-    const main = this.element("div", "arxiv-browser__main");
-    this.listPane = this.element("div", "arxiv-browser__list-pane");
-    this.list = this.element("div", "arxiv-browser__list");
+    this.toolbar = html(doc, "div", "arxiv-browser__toolbar");
+    this.subscriptions = new SubscriptionBar({
+      host: root,
+      confirm:
+        options.confirm ??
+        ((message) => doc.defaultView?.confirm(message) ?? false),
+      onChange: (subscription) => this.showSubscription(subscription),
+    });
+    this.toolbar.append(this.subscriptions.element);
+
+    const main = html(doc, "div", "arxiv-browser__main");
+    this.listPane = html(doc, "div", "arxiv-browser__list-pane");
+    this.list = html(doc, "div", "arxiv-browser__list");
     this.list.tabIndex = 0;
     this.listPane.append(this.list);
-    this.detail = this.element("div", "arxiv-browser__detail");
+    this.detail = html(doc, "div", "arxiv-browser__detail");
     main.append(this.listPane, this.detail);
-    root.append(main);
+    root.append(this.toolbar, main);
 
-    this.showEmpty(getString("arxiv-browser-empty"));
-  }
-
-  /** Show a message in place of the list */
-  showEmpty(message: string): void {
-    const empty = this.element("div", "arxiv-browser__empty");
-    empty.textContent = message;
-    this.list.replaceChildren(empty);
+    this.showSubscription(this.subscriptions.current);
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.subscriptions.dispose();
   }
 
-  private element(tag: string, className: string): HTMLElement {
-    const element = this.doc.createElement(tag);
-    element.className = className;
-    return element;
+  /** The chosen subscription changed */
+  private showSubscription(subscription: ArxivSubscription | undefined): void {
+    if (!subscription) {
+      this.showEmpty(getString("arxiv-browser-empty"), true);
+      return;
+    }
+    this.list.replaceChildren();
+  }
+
+  /** Show a message in place of the list */
+  private showEmpty(message: string, offerNew = false): void {
+    const empty = html(this.doc, "div", "arxiv-browser__empty", message);
+    if (offerNew) {
+      empty.append(
+        html(this.doc, "br"),
+        button(this.doc, getString("arxiv-browser-subscription-new"), () =>
+          this.subscriptions.openEditor(undefined),
+        ),
+      );
+    }
+    this.list.replaceChildren(empty);
   }
 }

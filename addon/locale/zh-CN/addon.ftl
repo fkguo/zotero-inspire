@@ -704,3 +704,35 @@ academic-tree-education-year = 教育经历结束于 { $year } 年（INSPIRE）
 arxiv-browser-window =
     .title = arXiv 浏览器
 arxiv-browser-empty = 新建或选择一个订阅以浏览 arXiv 列表。
+arxiv-browser-subscription = 订阅
+arxiv-browser-subscription-new = 新建…
+arxiv-browser-subscription-edit = 编辑…
+arxiv-browser-subscription-delete = 删除
+arxiv-browser-subscription-delete-confirm = 删除订阅“{ $name }”？
+arxiv-browser-subscription-default-name = 订阅 { $number }
+arxiv-browser-editor-title-new = 新建订阅
+arxiv-browser-editor-title-edit = 编辑订阅
+arxiv-browser-editor-name = 名称
+arxiv-browser-editor-search = 搜索分类（名称或代号）
+arxiv-browser-editor-selected = 已选（各分类的列表按此顺序排列）
+arxiv-browser-editor-none-selected = 尚未选择分类。
+arxiv-browser-editor-whole-archive = 整个 { $archive }（{ $count } 个分类，一个列表页）
+arxiv-browser-editor-alias = 与 { $canonical } 为同一列表
+arxiv-browser-editor-move-up = 上移
+arxiv-browser-editor-move-down = 下移
+arxiv-browser-editor-remove = 移除
+arxiv-browser-editor-sections = 显示：
+arxiv-browser-section-new = 新投稿
+arxiv-browser-section-cross = 交叉列表
+arxiv-browser-section-replace = 替换稿
+arxiv-browser-editor-estimate =
+    首次加载需向 arXiv 发出：new { $new ->
+        [1] 1 次请求
+       *[other] { $new } 次请求（至少 { $newTime }）
+    }；recent { $recent } 次请求（至少 { $recentTime }）；catch-up 每个公告日 { $catchup } 次请求。arXiv 要求两次请求间隔 15 秒；已加载过的日子取自缓存。
+arxiv-browser-editor-many = 分类较多：首次加载 recent 至少需要 { $time }。若所选分类集中在一个大类中，可改为订阅整个大类（每日只需一次请求，其列表包括该大类的全部分类）；或拆成几个订阅。
+arxiv-browser-editor-save = 保存
+arxiv-browser-editor-cancel = 取消
+arxiv-browser-duration-seconds = { $count } 秒
+arxiv-browser-duration-minutes = { $count } 分钟
+arxiv-browser-duration-minutes-seconds = { $minutes } 分 { $seconds } 秒
