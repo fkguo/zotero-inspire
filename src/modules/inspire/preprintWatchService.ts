@@ -500,10 +500,11 @@ type InspireAnswer =
 async function checkPublicationStatus(
   arxivId: string,
   signal?: AbortSignal,
+  background = false,
 ): Promise<InspireAnswer> {
   const url = `${INSPIRE_API_BASE}/literature?q=eprint:${encodeURIComponent(arxivId)}&${buildFieldsParam(API_FIELDS_PREPRINT_CHECK).slice(1)}`;
 
-  const response = await inspireFetch(url, { signal });
+  const response = await inspireFetch(url, { signal, background });
   if (!response.ok) throw new Error(`INSPIRE HTTP ${response.status}`);
 
   const data =
@@ -639,7 +640,10 @@ export async function batchCheckPublicationStatus(
     signal?: AbortSignal;
     /** Called as items are answered: items answered so far, all items */
     onProgress?: (done: number, total: number) => void;
-    /** Background check: reuse recent answers from the cache */
+    /**
+     * Background check: reuse recent answers from the cache, and send the
+     * requests after those a user is waiting for
+     */
     background?: boolean;
   },
 ): Promise<PreprintCheckResult[]> {
@@ -692,6 +696,7 @@ export async function batchCheckPublicationStatus(
           const answer = await checkPublicationStatus(
             arxivId,
             options?.signal,
+            options?.background,
           );
           updateCacheEntry(
             cache,

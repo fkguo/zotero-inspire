@@ -718,6 +718,16 @@ describe("the background check at startup", () => {
     expect(shouldRunBackgroundCheck()).toBe(false);
   });
 
+  it("sends its INSPIRE requests as background requests, after the ones a user waits for", async () => {
+    preprint("2406.00023");
+    answers.set("2406.00023", [unpublishedRecord("2406.00023", 73)]);
+    await runBackgroundCheck(showResults);
+    await batchCheckPublicationStatus([preprint("2406.00024")] as any);
+    expect(mocks.fetch.mock.calls.map((call) => call[1]?.background)).toEqual(
+      [true, false],
+    );
+  });
+
   it("shows nothing when no preprint is published, and records a check without preprints as done", async () => {
     preprint("2406.00022");
     answers.set("2406.00022", [unpublishedRecord("2406.00022", 72)]);

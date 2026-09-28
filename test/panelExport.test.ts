@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InspireReferencePanelController } from "../src/modules/zinspire";
 import { METADATA_BATCH_SIZE } from "../src/modules/inspire/constants";
+import { resetRateLimiter } from "../src/modules/inspire/rateLimiter";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 import { getString } from "../src/utils/locale";
 
@@ -104,6 +105,9 @@ describe("References panel export cancellation", () => {
     // Progress windows close themselves after a delay; keep those timers
     // from outliving the test.
     vi.useFakeTimers();
+    // The fake clock stands still: the INSPIRE send window starts empty in
+    // each test, as in a new session
+    resetRateLimiter();
     progressWindows = [];
     fetchMock = vi.fn(pendingUntilAborted);
     copyText = vi.fn();
