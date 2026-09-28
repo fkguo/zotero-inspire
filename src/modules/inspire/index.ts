@@ -262,14 +262,15 @@ export {
   // Update functions
   updatePreprintWithPublicationInfo,
   batchUpdatePreprints,
-  trackPreprintCandidates,
   removePreprintFromCache,
   // Background check support
   shouldRunBackgroundCheck,
   updateLastCheckTime,
+  runBackgroundCheck,
+  startBackgroundCheck,
+  stopBackgroundCheck,
+  beginManualCheck,
   clearPreprintCache,
-  // Cache cleanup
-  cleanupLegacyPreprintFiles,
   // Types
   type PreprintWatchCache,
   type PreprintWatchEntry,

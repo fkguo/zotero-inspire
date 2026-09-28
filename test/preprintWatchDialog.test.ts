@@ -76,8 +76,13 @@ vi.mock("zotero-plugin-toolkit", async (importOriginal) => {
 });
 
 import { ZInspire } from "../src/modules/inspire/itemUpdater";
-import { clearPreprintCache } from "../src/modules/inspire/preprintWatchService";
 import {
+  clearPreprintCache,
+  startBackgroundCheck,
+  stopBackgroundCheck,
+} from "../src/modules/inspire/preprintWatchService";
+import {
+  CACHE_FILE,
   FakeZotero,
   abortError,
   deferred,
@@ -128,6 +133,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  stopBackgroundCheck();
   dom.window.close();
   // A TypeError caught and logged by the plugin would let a test pass without
   // running the code it is about
@@ -268,5 +274,138 @@ describe("checking the selected items", () => {
       text: msg("preprint-check-cancelled"),
       type: "fail",
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The scope of the collection and "all" entries
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Texts of the lines of the check's progress window */
+function progressTexts(): string[] {
+  const window = progressWindows.find((w) =>
+    w.lines.some((line) => line.text.includes("preprint-check-progress")),
+  );
+  return window ? window.lines.map((line) => line.text) : [];
+}
+
+describe("checking all preprints", () => {
+  it("checks the preprints of every editable library with INSPIRE, whatever the cache holds", async () => {
+    zotero.libraries.push(
+      { libraryID: 2, libraryType: "group", editable: true, name: "Group" },
+      {
+        libraryID: 3,
+        libraryType: "group",
+        editable: false,
+        name: "Read-only",
+      },
+    );
+    const now = Date.now();
+    zotero.files.set(CACHE_FILE, {
+      version: 1,
+      lastFullScan: now,
+      lastCheck: now,
+      entries: [
+        {
+          arxivId: "2411.00001",
+          itemId: 1,
+          lastChecked: now,
+          status: "unpublished",
+        },
+      ],
+    });
+    const cached = preprint("2411.00001");
+    const neverCached = preprint("2411.00002");
+    const inGroup = preprint("2411.00003", 2);
+    preprint("2411.00004", 3);
+    answers.set("2411.00001", [publishedRecord("2411.00001", 1)]);
+    answers.set("2411.00002", [unpublishedRecord("2411.00002", 2)]);
+    answers.set("2411.00003", [publishedRecord("2411.00003", 3)]);
+
+    const run = new ZInspire().checkAllPreprintsInLibrary();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    const boxes = [
+      ...overlay()!.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"][data-item-id]',
+      ),
+    ];
+    button("preprint-cancel").click();
+    await run;
+
+    expect(
+      mocks.fetch.mock.calls.map(([url]) => requestedArxivId(url)).sort(),
+    ).toEqual(["2411.00001", "2411.00002", "2411.00003"]);
+    expect(boxes.map((box) => Number(box.dataset.itemId))).toEqual([
+      cached.id,
+      inGroup.id,
+    ]);
+    expect(progressTexts()[0]).toBe(
+      msg("preprint-check-progress", { current: 0, total: 3 }),
+    );
+    expect(progressTexts().at(-1)).toBe(
+      msg("preprint-check-progress", { current: 3, total: 3 }),
+    );
+    expect(neverCached.saveTx).not.toHaveBeenCalled();
+  });
+});
+
+describe("checking a collection", () => {
+  it("asks INSPIRE even about preprints answered earlier in the session", async () => {
+    const a = preprint("2412.00001");
+    zotero.addCollection(5, [a]);
+    zotero.selectedCollectionID = 5;
+    answers.set("2412.00001", [unpublishedRecord("2412.00001", 1)]);
+    await new ZInspire().checkPreprintsInCollection();
+    answers.set("2412.00001", [publishedRecord("2412.00001", 1)]);
+
+    const run = new ZInspire().checkPreprintsInCollection();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    button("preprint-cancel").click();
+    await run;
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("manual checks and the background check", () => {
+  it("stops a background check in progress", async () => {
+    const signal = startBackgroundCheck()!;
+    zotero.selectedItems = [preprint("2408.10001")];
+    answers.set("2408.10001", [unpublishedRecord("2408.10001", 1)]);
+
+    await new ZInspire().checkSelectedItemsPreprints();
+
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("stops a background check before scanning for all preprints", async () => {
+    const signal = startBackgroundCheck()!;
+    preprint("2408.10003");
+    answers.set("2408.10003", [unpublishedRecord("2408.10003", 3)]);
+    const stoppedAtScan: boolean[] = [];
+    const Search = (Zotero as any).Search;
+    const search = Search.prototype.search;
+    Search.prototype.search = function (this: unknown) {
+      stoppedAtScan.push(signal.aborted);
+      return search.call(this);
+    };
+
+    await new ZInspire().checkAllPreprintsInLibrary();
+
+    expect(stoppedAtScan.length).toBeGreaterThan(0);
+    expect(stoppedAtScan.every(Boolean)).toBe(true);
+  });
+
+  it("keeps a background check from starting until its results dialog is closed", async () => {
+    zotero.selectedItems = [preprint("2408.10002")];
+    answers.set("2408.10002", [publishedRecord("2408.10002", 2)]);
+
+    const run = new ZInspire().checkSelectedItemsPreprints();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    expect(startBackgroundCheck()).toBeNull();
+    button("preprint-cancel").click();
+    await run;
+
+    expect(startBackgroundCheck()).not.toBeNull();
   });
 });

@@ -457,13 +457,23 @@ export interface PreprintUpdateOptions {
 }
 
 /**
- * Single entry in the unified preprint watch cache.
+ * Single entry in the unified preprint watch cache: INSPIRE's last answer
+ * about one arXiv ID (shared by every item and library with that ID).
  */
 export interface PreprintWatchEntry {
   arxivId: string; // Stable identifier (e.g., "2301.12345")
-  itemId?: number; // Zotero item ID for fast lookup (may become stale)
-  lastChecked: number; // Timestamp of last INSPIRE check
-  status: "unpublished" | "published" | "error";
+  /**
+   * When INSPIRE gave this answer (ms since 1970); answers reused from the
+   * cache do not change it. 0: not answered since the cache format changed
+   * (the entry is kept, but counts as never checked).
+   */
+  lastChecked: number;
+  /**
+   * published: the record has a journal publication; unpublished: a record
+   * without one; not_in_inspire: no record. Failed requests are not stored;
+   * "error" occurs only in entries carried over from cache version 1.
+   */
+  status: "unpublished" | "published" | "not_in_inspire" | "error";
   publicationInfo?: PublicationInfo; // Only set when status === "published"
 }
 
@@ -473,7 +483,5 @@ export interface PreprintWatchEntry {
  */
 export interface PreprintWatchCache {
   version: number; // Cache format version
-  lastFullScan: number; // Timestamp of last full library scan
-  lastCheck: number; // Timestamp of last batch check
   entries: PreprintWatchEntry[];
 }

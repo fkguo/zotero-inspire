@@ -6,7 +6,10 @@
  *
  * Key design principles:
  * - Reuses existing functions from metadataService.ts
- * - Three-layer caching (memory -> disk -> network)
+ * - Every check scans the collection or the editable libraries for its
+ *   preprints; the cache file keeps INSPIRE's answers only
+ * - A check asks INSPIRE about every preprint; only the background check at
+ *   startup reuses recent answers from the cache
  * - Worker pattern for concurrent API calls (max 3)
  * - Incremental library scanning to avoid UI freezing
  */
@@ -20,8 +23,8 @@ import {
 } from "./constants";
 import { inspireFetch } from "./rateLimiter";
 import { localCache } from "./localCache";
-import { LRUCache } from "./utils";
 import { fetchInspireMetaByRecid } from "./metadataService";
+import { createAbortControllerWithSignal } from "./utils";
 import { arxivIdFromItem } from "../arxiv/arxivId";
 import type { jsobject } from "./types";
 import type { InspireLiteratureSearchResponse } from "./apiTypes";
@@ -50,23 +53,50 @@ const CONCURRENCY = 3;
 /** Batch size for library scanning (to avoid UI freezing) */
 const SCAN_BATCH_SIZE = 100;
 
-/** Unified preprint watch cache version */
-const PREPRINT_WATCH_CACHE_VERSION = 1;
+/**
+ * Unified preprint watch cache version.
+ * 2: an entry holds INSPIRE's last answer about an arXiv ID (published,
+ *    unpublished or no record) and the time INSPIRE gave it; failed requests
+ *    are not stored.
+ * 1: answers taken from the cache renewed their time, and failed requests and
+ *    papers without an INSPIRE record were stored as "unpublished". Version-1
+ *    entries are kept until INSPIRE answers again, but count as never checked.
+ */
+const PREPRINT_WATCH_CACHE_VERSION = 2;
 
 /** Cache file name (without extension) */
 const PREPRINT_WATCH_CACHE_FILE = "preprintWatch";
+
+/**
+ * Background check: an answer younger than this is reused instead of asking
+ * INSPIRE again. Shorter than the day between two daily background checks, so
+ * the answers of the previous one are always renewed, while those of a manual
+ * check earlier the same day are reused.
+ */
+const BACKGROUND_REUSE_MS = 20 * 60 * 60 * 1000;
+
+/** Background check: a paper without an INSPIRE record is asked about again at most this often */
+const BACKGROUND_NO_RECORD_REUSE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Answers are written to disk after this many, so that a check stopped early keeps them */
+const SAVE_EVERY_ANSWERS = 100;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Caching (Unified single-file cache)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Memory cache: arXiv ID -> publication status (session-only) */
-const publicationStatusCache = new LRUCache<string, PublicationInfo | null>(
-  500,
-);
+/** The preprint watch cache, with the file it is written back to */
+interface LoadedPreprintWatchCache {
+  cache: PreprintWatchCache;
+  /** null without a cache folder, or for a file this version cannot read (left unchanged) */
+  saveTo: string | null;
+}
 
-/** In-memory cache of the unified preprint watch data */
-let preprintWatchCacheMemory: PreprintWatchCache | null = null;
+/** The cache read from the file of the current cache folder */
+let preprintWatchCacheLoad: {
+  filePath: string | null;
+  loaded: Promise<LoadedPreprintWatchCache>;
+} | null = null;
 
 /**
  * Get cache directory path from localCache.
@@ -85,56 +115,113 @@ async function getPreprintWatchCachePath(): Promise<string | null> {
 }
 
 /**
- * Load the unified preprint watch cache from disk.
+ * The unified preprint watch cache: read from disk on first use, then shared
+ * by all checks (so that concurrent checks add their answers to the same
+ * object). Read again when the cache folder was changed in Preferences; a
+ * check still running keeps writing to the file it read. Empty when there is
+ * no cache folder or file.
  */
-async function loadPreprintWatchCache(): Promise<PreprintWatchCache | null> {
-  // Return memory cache if available
-  if (preprintWatchCacheMemory) {
-    return preprintWatchCacheMemory;
-  }
-
+async function loadPreprintWatchCache(): Promise<LoadedPreprintWatchCache> {
   const filePath = await getPreprintWatchCachePath();
-  if (!filePath) return null;
+  if (!preprintWatchCacheLoad || preprintWatchCacheLoad.filePath !== filePath) {
+    preprintWatchCacheLoad = {
+      filePath,
+      loaded: readPreprintWatchCache(filePath),
+    };
+  }
+  return preprintWatchCacheLoad.loaded;
+}
+
+async function readPreprintWatchCache(
+  filePath: string | null,
+): Promise<LoadedPreprintWatchCache> {
+  if (!filePath) return { cache: createEmptyCache(), saveTo: null };
+  const empty = { cache: createEmptyCache(), saveTo: filePath };
 
   try {
     const exists = await IOUtils.exists(filePath);
-    if (!exists) return null;
+    if (!exists) return empty;
 
-    const cached = (await IOUtils.readJSON(filePath)) as PreprintWatchCache;
+    const cached = (await IOUtils.readJSON(filePath)) as {
+      version?: unknown;
+      entries?: unknown;
+    } | null;
 
-    // Version check
-    if (cached.version !== PREPRINT_WATCH_CACHE_VERSION) {
-      Zotero.debug(
-        `[${config.addonName}] Preprint watch cache version mismatch, discarding`,
-      );
-      await IOUtils.remove(filePath, { ignoreAbsent: true });
-      return null;
+    if (Array.isArray(cached?.entries)) {
+      if (cached.version === PREPRINT_WATCH_CACHE_VERSION) {
+        return { cache: cached as PreprintWatchCache, saveTo: filePath };
+      }
+      if (cached.version === 1) {
+        return {
+          cache: upgradeVersion1Cache(cached.entries),
+          saveTo: filePath,
+        };
+      }
     }
 
-    preprintWatchCacheMemory = cached;
-    return cached;
+    // Another version of the plugin wrote it: leave the file as it is
+    Zotero.debug(
+      `[${config.addonName}] Preprint watch cache has an unknown format (version ${cached?.version}); it is left unchanged`,
+    );
+    return { cache: createEmptyCache(), saveTo: null };
   } catch (e) {
     Zotero.debug(
       `[${config.addonName}] Failed to load preprint watch cache: ${e}`,
     );
-    return null;
+    return empty;
   }
 }
 
 /**
- * Save the unified preprint watch cache to disk.
+ * Entries of a version-1 cache, kept until INSPIRE answers again. Their
+ * status stays, but lastChecked 0 makes them count as never checked: a
+ * version-1 time may come from an answer taken from the cache, and its
+ * "unpublished" may stand for a failed request or a missing record.
  */
-async function savePreprintWatchCache(
-  cache: PreprintWatchCache,
+function upgradeVersion1Cache(entries: unknown[]): PreprintWatchCache {
+  const upgraded: PreprintWatchEntry[] = [];
+  for (const entry of entries as Array<Partial<PreprintWatchEntry> | null>) {
+    if (typeof entry?.arxivId !== "string") continue;
+    upgraded.push({
+      arxivId: entry.arxivId,
+      status: entry.status ?? "unpublished",
+      lastChecked: 0,
+      ...(entry.publicationInfo
+        ? { publicationInfo: entry.publicationInfo }
+        : {}),
+    });
+  }
+  return { version: PREPRINT_WATCH_CACHE_VERSION, entries: upgraded };
+}
+
+/** Writes of the cache file, one after the other (two checks can save at the same time) */
+let preprintWatchCacheWrites: Promise<void> = Promise.resolve();
+
+/**
+ * Save the unified preprint watch cache to the file it was read from. Writes
+ * run one after the other, each with the cache as it is when the write
+ * starts, so the last write holds every answer recorded before it. The file
+ * is replaced only once the new content is complete on disk (written to a
+ * temporary file first, as Zotero writes its own files), so quitting during
+ * a write cannot leave it cut short.
+ */
+function savePreprintWatchCache(
+  loaded: LoadedPreprintWatchCache,
 ): Promise<void> {
-  const filePath = await getPreprintWatchCachePath();
-  if (!filePath) return;
+  preprintWatchCacheWrites = preprintWatchCacheWrites.then(() =>
+    writePreprintWatchCache(loaded),
+  );
+  return preprintWatchCacheWrites;
+}
+
+async function writePreprintWatchCache({
+  cache,
+  saveTo,
+}: LoadedPreprintWatchCache): Promise<void> {
+  if (!saveTo) return;
 
   try {
-    // Update memory cache
-    preprintWatchCacheMemory = cache;
-
-    await IOUtils.writeJSON(filePath, cache);
+    await IOUtils.writeJSON(saveTo, cache, { tmpPath: `${saveTo}.tmp` });
     Zotero.debug(
       `[${config.addonName}] Saved preprint watch cache (${cache.entries.length} entries)`,
     );
@@ -151,8 +238,6 @@ async function savePreprintWatchCache(
 function createEmptyCache(): PreprintWatchCache {
   return {
     version: PREPRINT_WATCH_CACHE_VERSION,
-    lastFullScan: 0,
-    lastCheck: 0,
     entries: [],
   };
 }
@@ -179,77 +264,6 @@ function updateCacheEntry(
     cache.entries[idx] = entry;
   } else {
     cache.entries.push(entry);
-  }
-}
-
-/**
- * Remove published/not-found entries from cache.
- * Keep unpublished and error entries for future checks.
- */
-function prunePublishedEntries(cache: PreprintWatchCache): void {
-  cache.entries = cache.entries.filter((e) => e.status !== "published");
-}
-
-/**
- * Cleanup legacy per-arxivId cache files (preprint_*.json.gz).
- * Call this on startup to migrate to the new unified cache.
- */
-export async function cleanupLegacyPreprintFiles(): Promise<number> {
-  const cacheDir = await getCacheDir();
-  if (!cacheDir) return 0;
-
-  try {
-    const children = await IOUtils.getChildren(cacheDir);
-    const legacyFiles = children.filter(
-      (path) =>
-        path.includes("/preprint_") &&
-        !path.includes("preprintWatch") &&
-        !path.includes("preprintCandidates") &&
-        (path.endsWith(".json") || path.endsWith(".json.gz")),
-    );
-
-    if (legacyFiles.length === 0) return 0;
-
-    let deleted = 0;
-    for (const filePath of legacyFiles) {
-      try {
-        await IOUtils.remove(filePath);
-        deleted++;
-      } catch {
-        // Ignore individual file deletion errors
-      }
-    }
-
-    if (deleted > 0) {
-      Zotero.debug(
-        `[${config.addonName}] Cleaned up ${deleted} legacy preprint cache files`,
-      );
-    }
-    return deleted;
-  } catch (e) {
-    Zotero.debug(`[${config.addonName}] Failed to cleanup legacy files: ${e}`);
-    return 0;
-  }
-}
-
-/**
- * Also cleanup the old preprintCandidates file during migration.
- */
-async function cleanupOldCandidatesFile(): Promise<void> {
-  const cacheDir = await getCacheDir();
-  if (!cacheDir) return;
-
-  const oldFile = PathUtils.join(cacheDir, "preprintCandidates_global.json.gz");
-  const oldFileJson = PathUtils.join(
-    cacheDir,
-    "preprintCandidates_global.json",
-  );
-
-  try {
-    await IOUtils.remove(oldFile, { ignoreAbsent: true });
-    await IOUtils.remove(oldFileJson, { ignoreAbsent: true });
-  } catch {
-    // Ignore errors
   }
 }
 
@@ -350,37 +364,6 @@ export function isUnpublishedPreprint(item: Zotero.Item): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Find Zotero item by arXiv ID.
- * Returns null if not found or deleted.
- */
-async function findItemByArxivId(arxivId: string): Promise<Zotero.Item | null> {
-  // journalArticle: legacy layout keeps the ID in journalAbbreviation.
-  // preprint: the ID lives in Extra (written by this plugin on every update).
-  const probes: Array<{ itemType: string; field: string }> = [
-    { itemType: "journalArticle", field: "journalAbbreviation" },
-    { itemType: "preprint", field: "extra" },
-  ];
-  for (const probe of probes) {
-    const search = new Zotero.Search({
-      libraryID: Zotero.Libraries.userLibraryID,
-    });
-    search.addCondition("itemType", "is", probe.itemType);
-    search.addCondition(probe.field, "contains", `arXiv:${arxivId}`);
-    const ids = await search.search();
-    if (ids.length === 0) continue;
-
-    const items = await Zotero.Items.getAsync(ids);
-    for (const item of items) {
-      if (!item.deleted && arxivIdFromItem(item) === arxivId) {
-        return item;
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
  * IDs of all items in a library whose type is one of `types`
  * (one search per type; Zotero ANDs conditions, so "is A" and "is B" cannot
  * be combined in a single search).
@@ -399,9 +382,21 @@ async function searchItemIDsByTypes(
 }
 
 /**
- * Scan library for all unpublished arXiv preprints.
- * Uses batched loading to avoid UI freezing.
- * Now uses unified cache with arXiv IDs for stability.
+ * Libraries whose preprints are checked: the personal library and the group
+ * libraries the user can edit (a published preprint can only be updated
+ * there). Feeds and read-only groups are skipped.
+ */
+function editableLibraryIDs(): number[] {
+  return Zotero.Libraries.getAll()
+    .filter((library) => library.editable && library.libraryType !== "feed")
+    .map((library) => library.libraryID);
+}
+
+/**
+ * Find the unpublished arXiv preprints of a collection, of one library, or
+ * (without either) of every editable library. The items are scanned on every
+ * call, in batches to avoid UI freezing; the preprint watch cache only keeps
+ * INSPIRE's answers, not the list of preprints.
  */
 export async function findUnpublishedPreprints(
   libraryID?: number,
@@ -409,17 +404,10 @@ export async function findUnpublishedPreprints(
   options?: {
     signal?: AbortSignal;
     onProgress?: (found: number, scanned: number) => void;
-    /** Force full rescan even if cache exists */
-    forceRefresh?: boolean;
-    /** Disable cache usage */
-    useCache?: boolean;
   },
 ): Promise<Zotero.Item[]> {
-  const targetLibraryID = libraryID ?? Zotero.Libraries.userLibraryID;
   const preprints: Zotero.Item[] = [];
   const seen = new Set<number>();
-  const useCache = options?.useCache !== false;
-  const forceRefresh = options?.forceRefresh === true;
 
   // Collection mode: small scope, always do full scan
   if (collectionID) {
@@ -453,158 +441,76 @@ export async function findUnpublishedPreprints(
     return preprints;
   }
 
-  // Library mode: try to use cached arXiv IDs for fast lookup
+  // Library mode: scan the journal articles and preprints of each library
+  const libraryIDs =
+    libraryID !== undefined ? [libraryID] : editableLibraryIDs();
   let scanned = 0;
-  if (useCache && !forceRefresh) {
-    const cache = await loadPreprintWatchCache();
-    if (cache && cache.entries.length > 0) {
-      // Filter to only unpublished entries
-      const unpublishedEntries = cache.entries.filter(
-        (e) => e.status === "unpublished" || e.status === "error",
-      );
+  for (const scanLibraryID of libraryIDs) {
+    // Zotero loads a library's items when the library is first shown; one
+    // not shown in this session has no field data yet (Zotero's own code
+    // waits for it the same way before reading items)
+    const library = Zotero.Libraries.get(scanLibraryID);
+    if (library) await library.waitForDataLoad("item");
+    if (options?.signal?.aborted) return preprints;
 
-      // Try to find items by arXiv ID (stable) or itemId (fast fallback)
-      for (const entry of unpublishedEntries) {
-        if (options?.signal?.aborted) break;
+    const itemIDs = await searchItemIDsByTypes(
+      scanLibraryID,
+      PREPRINT_WATCH_ITEM_TYPES,
+    );
+
+    for (let i = 0; i < itemIDs.length; i += SCAN_BATCH_SIZE) {
+      if (options?.signal?.aborted) return preprints;
+      const batchIDs = itemIDs.slice(i, i + SCAN_BATCH_SIZE);
+      const batchItems = await Zotero.Items.getAsync(batchIDs);
+
+      for (const item of batchItems) {
         scanned++;
-
-        let item: Zotero.Item | null = null;
-
-        // Try itemId first (fast) if available
-        if (entry.itemId) {
-          const items = await Zotero.Items.getAsync([entry.itemId]);
-          if (items.length > 0 && !items[0].deleted) {
-            // Verify arXiv ID matches
-            const foundArxivId = arxivIdFromItem(items[0]);
-            if (foundArxivId === entry.arxivId) {
-              item = items[0];
-            }
-          }
-        }
-
-        // Fallback: search by arXiv ID
-        if (!item) {
-          item = await findItemByArxivId(entry.arxivId);
-        }
-
-        if (item && !item.deleted && isUnpublishedPreprint(item)) {
+        if (!item.deleted && isUnpublishedPreprint(item)) {
           if (!seen.has(item.id)) {
             preprints.push(item);
             seen.add(item.id);
           }
         }
-
-        options?.onProgress?.(preprints.length, scanned);
       }
 
-      // Update cache with current item IDs and return
-      await updateCacheFromItems(preprints);
-      return preprints;
+      // Yield main thread to avoid UI freezing
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      options?.onProgress?.(preprints.length, scanned);
     }
-  }
-
-  // Full library scan (first run or forced refresh)
-  const itemIDs = await searchItemIDsByTypes(
-    targetLibraryID,
-    PREPRINT_WATCH_ITEM_TYPES,
-  );
-
-  for (let i = 0; i < itemIDs.length; i += SCAN_BATCH_SIZE) {
-    if (options?.signal?.aborted) break;
-    const batchIDs = itemIDs.slice(i, i + SCAN_BATCH_SIZE);
-    const batchItems = await Zotero.Items.getAsync(batchIDs);
-
-    for (const item of batchItems) {
-      if (options?.signal?.aborted) break;
-      scanned++;
-      if (!item.deleted && isUnpublishedPreprint(item)) {
-        if (!seen.has(item.id)) {
-          preprints.push(item);
-          seen.add(item.id);
-        }
-      }
-    }
-
-    // Yield main thread to avoid UI freezing
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    options?.onProgress?.(preprints.length, scanned);
-  }
-
-  // Save to unified cache
-  if (useCache) {
-    await updateCacheFromItems(preprints);
-
-    // Cleanup legacy files on first full scan
-    await cleanupLegacyPreprintFiles();
-    await cleanupOldCandidatesFile();
   }
 
   return preprints;
-}
-
-/**
- * Update cache entries from found preprint items.
- * Creates entries with status "unpublished" for items not yet checked.
- */
-async function updateCacheFromItems(items: Zotero.Item[]): Promise<void> {
-  let cache = await loadPreprintWatchCache();
-  if (!cache) {
-    cache = createEmptyCache();
-  }
-
-  const now = Date.now();
-  const seenArxivIds = new Set<string>();
-
-  for (const item of items) {
-    const arxivId = arxivIdFromItem(item);
-    if (!arxivId) continue;
-    seenArxivIds.add(arxivId);
-
-    const existing = getCacheEntry(cache, arxivId);
-    if (existing) {
-      // Update itemId if changed
-      existing.itemId = item.id;
-    } else {
-      // New entry - not yet checked
-      cache.entries.push({
-        arxivId,
-        itemId: item.id,
-        lastChecked: 0,
-        status: "unpublished",
-      });
-    }
-  }
-
-  // Remove entries for arXiv IDs no longer in library
-  cache.entries = cache.entries.filter(
-    (e) => seenArxivIds.has(e.arxivId) || e.status === "published",
-  );
-
-  cache.lastFullScan = now;
-  await savePreprintWatchCache(cache);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INSPIRE API Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** INSPIRE's answer about one arXiv preprint */
+type InspireAnswer =
+  | { status: "published"; publicationInfo: PublicationInfo }
+  | { status: "unpublished" }
+  | { status: "not_in_inspire" };
+
 /**
- * Check publication status via INSPIRE API.
- * Returns publication info if published, null if still preprint.
+ * Ask INSPIRE about one arXiv preprint: "published" (its record has a journal
+ * publication), "unpublished" (a record without one) or "not_in_inspire" (no
+ * record). A failed or aborted request throws; it is not an answer.
  */
 async function checkPublicationStatus(
   arxivId: string,
   signal?: AbortSignal,
-): Promise<PublicationInfo | null> {
+): Promise<InspireAnswer> {
   const url = `${INSPIRE_API_BASE}/literature?q=eprint:${encodeURIComponent(arxivId)}&${buildFieldsParam(API_FIELDS_PREPRINT_CHECK).slice(1)}`;
 
   const response = await inspireFetch(url, { signal });
-  if (!response.ok) return null;
+  if (!response.ok) throw new Error(`INSPIRE HTTP ${response.status}`);
 
   const data =
     (await response.json()) as unknown as InspireLiteratureSearchResponse | null;
   const hits = data?.hits?.hits;
-  if (!hits?.length) return null;
+  if (!Array.isArray(hits)) throw new Error("Unexpected INSPIRE response");
+  if (!hits.length) return { status: "not_in_inspire" };
 
   const metadata = hits[0].metadata;
 
@@ -629,18 +535,21 @@ async function checkPublicationStatus(
       );
 
       return {
-        journalTitle: formattedJournalTitle,
-        volume: primary.journal_volume,
-        pageStart: primary.page_start || primary.artid,
-        year: primary.year,
-        doi: journalDoi ?? undefined,
-        recid: metadata.control_number?.toString(),
-        preprintDate: metadata.preprint_date,
+        status: "published",
+        publicationInfo: {
+          journalTitle: formattedJournalTitle,
+          volume: primary.journal_volume,
+          pageStart: primary.page_start || primary.artid,
+          year: primary.year,
+          doi: journalDoi ?? undefined,
+          recid: metadata.control_number?.toString(),
+          preprintDate: metadata.preprint_date,
+        },
       };
     }
   }
 
-  return null; // Still a preprint
+  return { status: "unpublished" }; // Still a preprint
 }
 
 /**
@@ -659,46 +568,47 @@ function extractPublishedDoi(
 }
 
 /**
- * Check publication status with caching (memory + unified disk cache).
- * The unified cache stores all preprint check results in a single file.
+ * The cached answer that the background check reuses instead of asking
+ * INSPIRE again: one INSPIRE gave less than BACKGROUND_REUSE_MS ago
+ * (BACKGROUND_NO_RECORD_REUSE_MS for a paper without an INSPIRE record).
  */
-async function checkPublicationStatusCached(
+function reusableAnswer(
+  entry: PreprintWatchEntry | undefined,
+  now: number,
+): InspireAnswer | null {
+  if (!entry || entry.lastChecked <= 0) return null;
+  const age = now - entry.lastChecked;
+  if (age < 0) return null;
+  switch (entry.status) {
+    case "published":
+      return entry.publicationInfo && age < BACKGROUND_REUSE_MS
+        ? { status: "published", publicationInfo: entry.publicationInfo }
+        : null;
+    case "unpublished":
+      return age < BACKGROUND_REUSE_MS ? { status: "unpublished" } : null;
+    case "not_in_inspire":
+      return age < BACKGROUND_NO_RECORD_REUSE_MS
+        ? { status: "not_in_inspire" }
+        : null;
+    default:
+      return null;
+  }
+}
+
+/** The cache entry for an answer INSPIRE gave at `answeredAt` */
+function cacheEntryForAnswer(
   arxivId: string,
-  signal?: AbortSignal,
-  forceRefresh = false,
-): Promise<PublicationInfo | null> {
-  // 1. Memory cache (fastest)
-  if (!forceRefresh && publicationStatusCache.has(arxivId)) {
-    return publicationStatusCache.get(arxivId) ?? null;
-  }
-
-  // 2. Unified disk cache
-  if (!forceRefresh) {
-    const cache = await loadPreprintWatchCache();
-    if (cache) {
-      const entry = getCacheEntry(cache, arxivId);
-      if (entry && entry.lastChecked > 0) {
-        // Check if cache is still fresh (24 hours)
-        const ageHours = (Date.now() - entry.lastChecked) / (60 * 60 * 1000);
-        if (ageHours < 24) {
-          const result = entry.publicationInfo ?? null;
-          publicationStatusCache.set(arxivId, result);
-          return result;
-        }
+  answer: InspireAnswer,
+  answeredAt: number,
+): PreprintWatchEntry {
+  return answer.status === "published"
+    ? {
+        arxivId,
+        status: "published",
+        lastChecked: answeredAt,
+        publicationInfo: answer.publicationInfo,
       }
-    }
-  }
-
-  // 3. Network request
-  const result = await checkPublicationStatus(arxivId, signal);
-
-  // Update memory cache
-  publicationStatusCache.set(arxivId, result);
-
-  // Note: Disk cache is updated in batch by batchCheckPublicationStatus
-  // to avoid frequent writes during batch operations
-
-  return result;
+    : { arxivId, status: answer.status, lastChecked: answeredAt };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -707,122 +617,125 @@ async function checkPublicationStatusCached(
 
 /**
  * Batch check publication status for multiple items using worker pattern.
- * Fixed concurrency to avoid API overload.
- * Updates the unified cache after all checks complete.
+ * Fixed concurrency to avoid API overload. INSPIRE is asked once per arXiv
+ * ID, also when the paper is in several items or libraries.
+ *
+ * A manual check asks INSPIRE about every item. The background check
+ * (`background: true`) reuses answers from the cache that INSPIRE gave
+ * recently (see reusableAnswer).
+ *
+ * The cache stores INSPIRE's answers with the time each was given; answers
+ * reused from the cache keep their time. A failed request gives an "error"
+ * result and leaves the item's cache entry as it was. When the signal aborts,
+ * the answers received so far are stored, and the results of the items
+ * answered so far are returned.
+ *
+ * A manual check is enclosed in beginManualCheck(), which stops a background
+ * check in progress: both would ask INSPIRE about the same preprints.
  */
 export async function batchCheckPublicationStatus(
   items: Zotero.Item[],
   options?: {
     signal?: AbortSignal;
-    onProgress?: (current: number, total: number, found: number) => void;
-    forceRefresh?: boolean;
+    /** Called as items are answered: items answered so far, all items */
+    onProgress?: (done: number, total: number) => void;
+    /** Background check: reuse recent answers from the cache */
+    background?: boolean;
   },
 ): Promise<PreprintCheckResult[]> {
-  const results: PreprintCheckResult[] = new Array(items.length);
-  let index = 0;
-  let foundCount = 0;
   const total = items.length;
+  const results: PreprintCheckResult[] = new Array(total);
+  let done = 0;
+
+  // Item indexes by arXiv ID
+  const itemIndexesByArxivId = new Map<string, number[]>();
+  items.forEach((item, index) => {
+    const arxivId = arxivIdFromItem(item);
+    if (!arxivId) {
+      results[index] = {
+        itemID: item.id,
+        arxivId: "",
+        title: item.getField("title") as string,
+        status: "error",
+        error: "Could not extract arXiv ID",
+      };
+      done++;
+      return;
+    }
+    const indexes = itemIndexesByArxivId.get(arxivId);
+    if (indexes) {
+      indexes.push(index);
+    } else {
+      itemIndexesByArxivId.set(arxivId, [index]);
+    }
+  });
+  if (done > 0) options?.onProgress?.(done, total);
+
+  const loaded = await loadPreprintWatchCache();
+  const { cache } = loaded;
+  const arxivIds = [...itemIndexesByArxivId.keys()];
+  let next = 0;
+  let unsavedAnswers = 0;
 
   const worker = async () => {
-    while (index < items.length && !options?.signal?.aborted) {
-      const currentIndex = index++;
-      const item = items[currentIndex];
+    while (next < arxivIds.length && !options?.signal?.aborted) {
+      const arxivId = arxivIds[next++];
 
-      const arxivId = arxivIdFromItem(item);
-      if (!arxivId) {
-        results[currentIndex] = {
-          itemID: item.id,
-          arxivId: "",
-          title: item.getField("title") as string,
-          status: "error",
-          error: "Could not extract arXiv ID",
-        };
-        continue;
+      let outcome:
+        | InspireAnswer
+        | { status: "error"; error: string }
+        | null = options?.background
+        ? reusableAnswer(getCacheEntry(cache, arxivId), Date.now())
+        : null;
+      if (!outcome) {
+        try {
+          const answer = await checkPublicationStatus(
+            arxivId,
+            options?.signal,
+          );
+          updateCacheEntry(
+            cache,
+            cacheEntryForAnswer(arxivId, answer, Date.now()),
+          );
+          outcome = answer;
+          if (++unsavedAnswers >= SAVE_EVERY_ANSWERS) {
+            unsavedAnswers = 0;
+            await savePreprintWatchCache(loaded);
+          }
+        } catch (error: any) {
+          outcome = {
+            status: "error",
+            error:
+              error?.name === "AbortError"
+                ? "Cancelled"
+                : error?.message || "Unknown error",
+          };
+        }
       }
 
-      try {
-        const pubInfo = await checkPublicationStatusCached(
+      for (const index of itemIndexesByArxivId.get(arxivId)!) {
+        results[index] = {
+          itemID: items[index].id,
           arxivId,
-          options?.signal,
-          options?.forceRefresh,
-        );
-
-        const isPublished = pubInfo !== null;
-        if (isPublished) foundCount++;
-
-        results[currentIndex] = {
-          itemID: item.id,
-          arxivId,
-          title: item.getField("title") as string,
-          status: isPublished ? "published" : "unpublished",
-          publicationInfo: pubInfo ?? undefined,
+          title: items[index].getField("title") as string,
+          ...outcome,
         };
-      } catch (error: any) {
-        if (error.name === "AbortError") throw error;
-        results[currentIndex] = {
-          itemID: item.id,
-          arxivId,
-          title: item.getField("title") as string,
-          status: "error",
-          error: error.message || "Unknown error",
-        };
+        done++;
       }
-
-      options?.onProgress?.(index, total, foundCount);
+      options?.onProgress?.(done, total);
     }
   };
 
   // Start worker pool
   const workers: Promise<void>[] = [];
-  for (let i = 0; i < Math.min(CONCURRENCY, items.length); i++) {
+  for (let i = 0; i < Math.min(CONCURRENCY, arxivIds.length); i++) {
     workers.push(worker());
   }
   await Promise.all(workers);
 
-  const filteredResults = results.filter(Boolean);
+  if (unsavedAnswers > 0) await savePreprintWatchCache(loaded);
 
-  // Update unified cache with all results
-  await updateCacheFromResults(filteredResults);
-
-  return filteredResults;
-}
-
-/**
- * Update unified cache from batch check results.
- */
-async function updateCacheFromResults(
-  results: PreprintCheckResult[],
-): Promise<void> {
-  if (!results.length) return;
-
-  let cache = await loadPreprintWatchCache();
-  if (!cache) {
-    cache = createEmptyCache();
-  }
-
-  const now = Date.now();
-
-  for (const result of results) {
-    if (!result.arxivId) continue;
-
-    const entry: PreprintWatchEntry = {
-      arxivId: result.arxivId,
-      itemId: result.itemID,
-      lastChecked: now,
-      status:
-        result.status === "published"
-          ? "published"
-          : result.status === "error"
-            ? "error"
-            : "unpublished",
-      publicationInfo: result.publicationInfo,
-    };
-
-    updateCacheEntry(cache, entry);
-  }
-
-  cache.lastCheck = now;
-  await savePreprintWatchCache(cache);
+  return results.filter(Boolean);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1340,52 +1253,11 @@ export function buildCheckSummary(
 }
 
 /**
- * Clear preprint status cache (memory only).
- * Unified disk cache is managed separately.
+ * Forget the preprint watch cache read in this session; the next check reads
+ * the file again.
  */
 export function clearPreprintCache(): void {
-  publicationStatusCache.clear();
-  preprintWatchCacheMemory = null;
-}
-
-/**
- * Add newly detected preprint candidates to the unified cache.
- * Used by notifier hooks to track new preprints without full-library rescans.
- */
-export async function trackPreprintCandidates(
-  items: Zotero.Item[],
-): Promise<void> {
-  if (!items?.length) return;
-
-  const candidates = items.filter(
-    (item) => item && !item.deleted && isUnpublishedPreprint(item),
-  );
-  if (!candidates.length) return;
-
-  let cache = await loadPreprintWatchCache();
-  if (!cache) {
-    cache = createEmptyCache();
-  }
-
-  for (const item of candidates) {
-    const arxivId = arxivIdFromItem(item);
-    if (!arxivId) continue;
-
-    const existing = getCacheEntry(cache, arxivId);
-    if (!existing) {
-      cache.entries.push({
-        arxivId,
-        itemId: item.id,
-        lastChecked: 0,
-        status: "unpublished",
-      });
-    } else {
-      // Update itemId if changed
-      existing.itemId = item.id;
-    }
-  }
-
-  await savePreprintWatchCache(cache);
+  preprintWatchCacheLoad = null;
 }
 
 /**
@@ -1393,16 +1265,143 @@ export async function trackPreprintCandidates(
  * Called after batchUpdatePreprints to clean up successfully updated items.
  */
 export async function removePreprintFromCache(arxivId: string): Promise<void> {
-  const cache = await loadPreprintWatchCache();
-  if (!cache) return;
-
-  cache.entries = cache.entries.filter((e) => e.arxivId !== arxivId);
-  await savePreprintWatchCache(cache);
+  const loaded = await loadPreprintWatchCache();
+  loaded.cache.entries = loaded.cache.entries.filter(
+    (e) => e.arxivId !== arxivId,
+  );
+  await savePreprintWatchCache(loaded);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Background Check Support
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** The background check in progress */
+let backgroundCheckController: AbortController | undefined;
+
+/** Manual checks in progress (see beginManualCheck) */
+let manualChecksInProgress = 0;
+
+/**
+ * Start a background check: returns the signal that stops it, or null while
+ * a manual check is in progress (it asks INSPIRE about the same preprints,
+ * and its results dialog may still be open).
+ * A background check takes minutes when it has many preprints to ask about;
+ * a manual check that starts meanwhile stops it.
+ */
+export function startBackgroundCheck(): AbortSignal | null {
+  if (manualChecksInProgress > 0) return null;
+  backgroundCheckController?.abort();
+  const { controller, signal } = createAbortControllerWithSignal();
+  backgroundCheckController = controller;
+  return signal;
+}
+
+/** Stop the background check in progress, if any */
+export function stopBackgroundCheck(): void {
+  backgroundCheckController?.abort();
+  backgroundCheckController = undefined;
+}
+
+/**
+ * Begin a manual check (from the scan or the first request to INSPIRE until
+ * its results dialog is closed and the chosen items are updated; calls may
+ * be nested): stops a background check in progress and keeps a new one from
+ * starting. Returns the function that ends the manual check.
+ */
+export function beginManualCheck(): () => void {
+  manualChecksInProgress++;
+  stopBackgroundCheck();
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    manualChecksInProgress--;
+  };
+}
+
+/**
+ * The background check at startup, as set by preprint_watch_auto_check: all
+ * editable libraries, reusing recent answers. `showResults` shows the results
+ * dialog when preprints were found published. A stopped check (by a manual
+ * check, or at shutdown) or one whose every result is an error is not
+ * recorded as done, so the next start checks the papers not answered yet.
+ */
+export async function runBackgroundCheck(
+  showResults: (results: PreprintCheckResult[]) => Promise<void>,
+): Promise<void> {
+  // Abort previous background check if still running; none while a manual
+  // check is in progress (it asks about the same preprints)
+  const signal = startBackgroundCheck();
+  if (!signal) {
+    Zotero.debug(
+      `[${config.addonName}] Manual preprint check in progress, skipping background check`,
+    );
+    return;
+  }
+
+  try {
+    // Check if preprint watch is enabled
+    const enabled = getPref("preprint_watch_enabled" as any) as boolean;
+    if (!enabled) {
+      Zotero.debug(
+        `[${config.addonName}] Preprint watch disabled, skipping background check`,
+      );
+      return;
+    }
+
+    // Check if we should run based on timing preference
+    if (!shouldRunBackgroundCheck()) {
+      return;
+    }
+
+    Zotero.debug(`[${config.addonName}] Starting background preprint check`);
+
+    // Find unpublished preprints in all editable libraries
+    const preprints = await findUnpublishedPreprints(undefined, undefined, {
+      signal,
+    });
+    if (signal.aborted) return;
+    if (preprints.length === 0) {
+      updateLastCheckTime();
+      Zotero.debug(
+        `[${config.addonName}] No unpublished preprints found in library`,
+      );
+      return;
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] Found ${preprints.length} unpublished preprints, checking INSPIRE...`,
+    );
+
+    // Check publication status, reusing recent answers (updates unified
+    // cache internally)
+    const results = await batchCheckPublicationStatus(preprints, {
+      signal,
+      background: true,
+    });
+    if (signal.aborted) return;
+    const summary = buildCheckSummary(results);
+    // Every result is an error (e.g. no network at startup, and no answer
+    // recent enough to reuse): not recorded as done, so a later start asks
+    // again. Reused answers count as results; failures among them are asked
+    // again by the next day's check (failures are not stored).
+    if (summary.errors < summary.total) updateLastCheckTime();
+
+    // If publications found, show results dialog for user to review and update
+    if (summary.published > 0) {
+      await showResults(results);
+    }
+
+    Zotero.debug(
+      `[${config.addonName}] Background preprint check completed: ${summary.published} published, ${summary.unpublished} unpublished, ${summary.notInInspire} not in INSPIRE, ${summary.errors} errors`,
+    );
+  } catch (err) {
+    Zotero.debug(
+      `[${config.addonName}] Background preprint check failed: ${err}`,
+    );
+  }
+}
 
 /**
  * Check if background preprint check should run based on last check time.
@@ -1412,12 +1411,15 @@ export function shouldRunBackgroundCheck(): boolean {
   const autoCheckMode = getPref("preprint_watch_auto_check" as any) as string;
   if (autoCheckMode === "never") return false;
 
+  // Seconds (see updateLastCheckTime). A value stored in milliseconds by an
+  // earlier version wrapped around to an arbitrary number; it lies outside the
+  // last day (almost surely), so the next check simply runs.
   const lastCheck = getPref("preprint_watch_last_check" as any) as number;
-  const now = Date.now();
+  const sinceLastCheck = Math.round(Date.now() / 1000) - lastCheck;
 
   if (autoCheckMode === "daily") {
-    const oneDayMs = 24 * 60 * 60 * 1000;
-    if (now - lastCheck < oneDayMs) {
+    const oneDay = 24 * 60 * 60;
+    if (sinceLastCheck >= 0 && sinceLastCheck < oneDay) {
       Zotero.debug(
         `[${config.addonName}] Skipping daily preprint check (already checked today)`,
       );
@@ -1429,11 +1431,12 @@ export function shouldRunBackgroundCheck(): boolean {
 }
 
 /**
- * Update last check timestamp.
+ * Update last check timestamp, in seconds as Zotero stores its own times: an
+ * integer preference holds 32 bits, too few for milliseconds.
  */
 export function updateLastCheckTime(): void {
   // Cast to any to handle type generation timing
-  setPref("preprint_watch_last_check" as any, Date.now());
+  setPref("preprint_watch_last_check" as any, Math.round(Date.now() / 1000));
 }
 
 // Re-export types for convenience
