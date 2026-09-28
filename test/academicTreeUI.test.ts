@@ -1207,6 +1207,56 @@ describe("Academic Tree window interactions", () => {
   });
 });
 
+it("takes the focus from a tree that keeps Escape for itself, closes on Escape and gives the focus back", async () => {
+  // Like Zotero's collection tree: its pane takes Escape from it and stops it
+  const pane = doc.createElement("div");
+  const tree = doc.createElement("div");
+  tree.tabIndex = 0;
+  pane.appendChild(tree);
+  pane.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+  doc.body.appendChild(pane);
+  tree.focus();
+
+  open();
+  await rootIs("1");
+  const graph = doc.querySelector('[role="dialog"]')!;
+  expect(graph.contains(doc.activeElement)).toBe(true);
+
+  const escape = new win.KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  doc.activeElement!.dispatchEvent(escape);
+
+  expect(doc.querySelector('[role="dialog"]')).toBeNull();
+  // Handled: a metadata update going on does not take it as a cancel
+  expect(escape.defaultPrevented).toBe(true);
+  expect(doc.activeElement).toBe(tree);
+});
+
+it("leaves the focus where it went meanwhile when it closes", async () => {
+  const tree = doc.createElement("div");
+  tree.tabIndex = 0;
+  const itemsList = doc.createElement("div");
+  itemsList.tabIndex = 0;
+  doc.body.append(tree, itemsList);
+  tree.focus();
+
+  open();
+  await rootIs("1");
+  // e.g. a node selected its item: Zotero focuses the items list
+  itemsList.focus();
+  dialog!.dispose();
+
+  expect(doc.activeElement).toBe(itemsList);
+});
+
 it("keeps exploration and export controls visible in the shared pill toolbar, with dismissible popups", async () => {
   open();
   await rootIs("1");

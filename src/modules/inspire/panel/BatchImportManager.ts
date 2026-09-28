@@ -498,6 +498,8 @@ export class BatchImportManager {
       };
       const escapeHandler = (e: KeyboardEvent) => {
         if (e.key === "Escape") {
+          // Handled here: a running update does not take it as a cancel
+          e.preventDefault();
           close(null);
         }
       };

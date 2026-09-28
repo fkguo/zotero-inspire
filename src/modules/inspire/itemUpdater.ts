@@ -76,6 +76,54 @@ import { openRunProgressWindow } from "./runProgressWindow";
 import { copyFundingInfo } from "./funding";
 // NOTE: CitationGraphDialog is imported lazily to avoid circular dependencies.
 
+// Zotero's own uses of Escape in the main window (zoteroPane.js, Zotero 10):
+// in a tab other than the library it moves the focus back into the reader;
+// in the collection tree it clears the collection filter, and with no filter
+// it only focuses the tree again, yet marks the key as handled all the same
+
+function isReaderTabSelected(): boolean {
+  const tabs = (Zotero.getMainWindow() as any)?.Zotero_Tabs;
+  return typeof tabs?.selectedIndex === "number" && tabs.selectedIndex > 0;
+}
+
+function isCollectionTreeWithoutFilter(event: KeyboardEvent): boolean {
+  const target = event.target as Element | null;
+  if (!target?.closest?.("#collection-tree")) {
+    return false;
+  }
+  const filter = target.ownerDocument?.getElementById(
+    "zotero-collections-search",
+  ) as HTMLInputElement | null;
+  return !filter?.value;
+}
+
+/** Input types in which nothing is typed (a checkbox, a button, …) */
+const NON_TEXT_INPUT_TYPES = new Set([
+  "checkbox",
+  "radio",
+  "button",
+  "submit",
+  "reset",
+  "image",
+  "file",
+  "color",
+  "range",
+  "hidden",
+]);
+
+/** The key event comes from a text field, whose own Escape it is */
+function isInTextField(event: Event): boolean {
+  return event.composedPath().some((node) => {
+    const element = node as HTMLElement;
+    return (
+      (element.localName === "input" &&
+        !NON_TEXT_INPUT_TYPES.has((element as HTMLInputElement).type)) ||
+      element.localName === "textarea" ||
+      element.isContentEditable === true
+    );
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ZInspire Class - Batch Update Controller
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,21 +265,51 @@ export class ZInspire {
   }
 
   /**
-   * Setup global Escape key listener to cancel ongoing operations
+   * Listen for Escape in the main window to cancel the runs. Escape is left
+   * to whatever else uses it: a text field (the search box clears), a menu,
+   * dialog or panel that handles it and so prevents its default, and Zotero
+   * in a reader tab (it moves the focus back into the reader). The key is
+   * seen first (capture) and not stopped; the decision waits until it has
+   * been handled everywhere.
    */
   private setupEscapeListener() {
     this.removeEscapeListener(); // Clean up any existing listener
-    this.escapeHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
+    const handler = (e: KeyboardEvent) => {
+      if (
+        e.key !== "Escape" ||
+        isInTextField(e) ||
+        isReaderTabSelected()
+      ) {
+        return;
+      }
+      // In the collection tree with no filter, Zotero marks the key as
+      // handled without using it; it still counts as handled if something
+      // before Zotero (e.g. a dialog) handled it. The filter is read before
+      // Zotero clears it.
+      let unusedByZotero = false;
+      const target = e.target as EventTarget | null;
+      const seeTargetReached = (reached: Event) => {
+        unusedByZotero = !reached.defaultPrevented;
+      };
+      if (isCollectionTreeWithoutFilter(e)) {
+        target?.addEventListener("keydown", seeTargetReached, true);
+      }
+      setTimeout(() => {
+        target?.removeEventListener("keydown", seeTargetReached, true);
+        // Not if the listener was removed meanwhile (the runs ended)
+        if (
+          (e.defaultPrevented && !unusedByZotero) ||
+          this.escapeHandler !== handler
+        ) {
+          return;
+        }
         this.cancelUpdate();
         Zotero.debug(
           `[${config.addonName}] Operation cancelled via Escape key`,
         );
-      }
+      }, 0);
     };
-    // Use Zotero main window for global key capture
+    this.escapeHandler = handler;
     const win = Zotero.getMainWindow();
     if (win) {
       win.addEventListener("keydown", this.escapeHandler, true);

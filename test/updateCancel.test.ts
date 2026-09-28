@@ -181,13 +181,21 @@ const askedIDs = () =>
 let selectedItems: Zotero.Item[];
 let mainDom: JSDOM;
 
-function pressEscapeInMainWindow() {
-  mainDom.window.dispatchEvent(
-    new mainDom.window.KeyboardEvent("keydown", {
-      key: "Escape",
-      bubbles: true,
-    }),
-  );
+/**
+ * Escape in the main window, e.g. in the items list; returns once the key
+ * has been handled everywhere
+ */
+async function pressEscapeInMainWindow(
+  target: EventTarget = mainDom.window.document.body,
+) {
+  const event = new mainDom.window.KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  target.dispatchEvent(event);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return event;
 }
 
 async function startMenuUpdate(inspire: ZInspire, items: Zotero.Item[]) {
@@ -262,7 +270,7 @@ describe("a cancelled metadata update", () => {
     expect(askedIDs()).toEqual([1, 2, 3]);
 
     // Escape while the three requests still wait, then a new update
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     await startMenuUpdate(inspire, [paper(7)]);
     expect(askedIDs()).toEqual([1, 2, 3, 7]);
 
@@ -282,7 +290,7 @@ describe("a cancelled metadata update", () => {
   it("does not show a finished notice when it ends after the next run", async () => {
     const inspire = new ZInspire();
     await startMenuUpdate(inspire, papers(1, 4));
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     // The first three requests of the cancelled run are still waiting
     const cancelledRequests = held.splice(0);
     await startMenuUpdate(inspire, [paper(5)]);
@@ -302,7 +310,7 @@ describe("a cancelled metadata update", () => {
   it("does not take the next run's Escape handling with it when it ends", async () => {
     const inspire = new ZInspire();
     await startMenuUpdate(inspire, papers(1, 4));
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     const cancelledRequests = held.splice(0);
     await startMenuUpdate(inspire, papers(11, 16));
     expect(askedIDs()).toEqual([1, 2, 3, 11, 12, 13]);
@@ -312,7 +320,7 @@ describe("a cancelled metadata update", () => {
     await settle();
 
     // Escape in the main window still cancels the new run
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3, 11, 12, 13]);
     expect(notices()).toEqual([
@@ -330,7 +338,7 @@ describe("cancelling", () => {
     inspire.updateSelectedCollection("full");
     await settle();
 
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3]);
     expect(notices()).toEqual([
@@ -471,7 +479,7 @@ describe("runs of different kinds", () => {
     await settle();
     expect(askedRecids()).toEqual(["1"]);
 
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     selectedItems = [paper(4)];
     void inspire.downloadReferencesCacheForSelection();
     await settle();
@@ -486,7 +494,7 @@ describe("runs of different kinds", () => {
     selectedItems = papers(1, 3);
     void inspire.downloadReferencesCacheForSelection();
     await settle();
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
 
     selectedItems = [paper(9)];
     const check = inspire.checkSelectedItemsPreprints();
@@ -510,7 +518,7 @@ describe("runs of different kinds", () => {
     await releaseReferences();
     expect(cachedRecids()).toEqual(["20"]);
 
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     await releaseAll();
 
     expect(askedIDs()).toEqual([1, 2, 3]);
@@ -525,7 +533,7 @@ describe("runs of different kinds", () => {
     await releaseAll();
     expect(askedIDs()).toEqual([10]);
 
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     await releaseReferences();
 
     expect(askedRecids()).toEqual(["1"]);
@@ -539,7 +547,7 @@ describe("runs of different kinds", () => {
     const check = inspire.checkSelectedItemsPreprints();
     await settle();
 
-    pressEscapeInMainWindow();
+    await pressEscapeInMainWindow();
     await check;
     await releaseAll();
 
@@ -562,5 +570,135 @@ describe("runs of different kinds", () => {
     expect(escape.defaultPrevented).toBe(false);
     expect(runWindows()).toEqual([]);
     expect(notices()).toEqual(["INSPIRE metadata updated for 0 items."]);
+  });
+});
+
+describe("Escape meant for something else", () => {
+  it("is left to a text field, e.g. the search box", async () => {
+    const inspire = new ZInspire();
+    await startMenuUpdate(inspire, papers(1, 6));
+    const searchBox = mainDom.window.document.createElement("input");
+    mainDom.window.document.body.appendChild(searchBox);
+
+    const escape = await pressEscapeInMainWindow(searchBox);
+    await releaseAll();
+
+    expect(escape.defaultPrevented).toBe(false);
+    expect(askedIDs()).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("is left to a dialog that handles it, also one opened after the run started", async () => {
+    const inspire = new ZInspire();
+    await startMenuUpdate(inspire, papers(1, 6));
+    const closeDialog = vi.fn((event: KeyboardEvent) => {
+      if (event.key === "Escape") event.preventDefault();
+    });
+    mainDom.window.addEventListener("keydown", closeDialog);
+
+    await pressEscapeInMainWindow();
+    await releaseAll();
+
+    expect(closeDialog).toHaveBeenCalledTimes(1);
+    expect(askedIDs()).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  /**
+   * Zotero's collection tree (zoteroPane.js): its pane takes Escape from the
+   * focused tree, clears the collection filter if there is one and marks
+   * the key as handled either way
+   */
+  function collectionTree(filter: string) {
+    const doc = mainDom.window.document;
+    const search = doc.createElement("input");
+    search.id = "zotero-collections-search";
+    search.value = filter;
+    const pane = doc.createElement("div");
+    pane.id = "zotero-collections-tree";
+    const tree = doc.createElement("div");
+    tree.id = "collection-tree";
+    pane.appendChild(tree);
+    pane.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && (event.target as Element).id === tree.id) {
+        search.value = "";
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+    doc.body.append(search, pane);
+    return tree;
+  }
+
+  it("cancels from the collection tree when Zotero has no filter to clear", async () => {
+    const inspire = new ZInspire();
+    await startMenuUpdate(inspire, papers(1, 6));
+
+    await pressEscapeInMainWindow(collectionTree(""));
+    await releaseAll();
+
+    expect(askedIDs()).toEqual([1, 2, 3]);
+  });
+
+  it("is left to Zotero to clear the collection filter", async () => {
+    const inspire = new ZInspire();
+    await startMenuUpdate(inspire, papers(1, 6));
+
+    await pressEscapeInMainWindow(collectionTree("cern"));
+    await releaseAll();
+
+    expect(askedIDs()).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("is left to a dialog that handles it while the collection tree has the focus", async () => {
+    const inspire = new ZInspire();
+    await startMenuUpdate(inspire, papers(1, 6));
+    const tree = collectionTree("");
+    // e.g. the preprint check's results, opened without taking the focus
+    const closeDialog = vi.fn((event: KeyboardEvent) => {
+      if (event.key === "Escape") event.preventDefault();
+    });
+    mainDom.window.document.addEventListener("keydown", closeDialog, true);
+
+    await pressEscapeInMainWindow(tree);
+    await releaseAll();
+
+    expect(closeDialog).toHaveBeenCalledTimes(1);
+    expect(askedIDs()).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("cancels from a checkbox, where nothing is typed", async () => {
+    const inspire = new ZInspire();
+    await startMenuUpdate(inspire, papers(1, 6));
+    const checkbox = mainDom.window.document.createElement("input");
+    checkbox.type = "checkbox";
+    mainDom.window.document.body.appendChild(checkbox);
+
+    await pressEscapeInMainWindow(checkbox);
+    await releaseAll();
+
+    expect(askedIDs()).toEqual([1, 2, 3]);
+  });
+
+  it("is left to Zotero in a reader tab", async () => {
+    const inspire = new ZInspire();
+    await startMenuUpdate(inspire, papers(1, 6));
+    (mainDom.window as any).Zotero_Tabs = { selectedIndex: 1 };
+
+    await pressEscapeInMainWindow();
+    await releaseAll();
+
+    expect(askedIDs()).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("still reaches Zotero when it cancels a run", async () => {
+    const inspire = new ZInspire();
+    await startMenuUpdate(inspire, papers(1, 6));
+    const zoteroKeyDown = vi.fn();
+    mainDom.window.document.addEventListener("keydown", zoteroKeyDown);
+
+    await pressEscapeInMainWindow();
+    await releaseAll();
+
+    expect(zoteroKeyDown).toHaveBeenCalledTimes(1);
+    expect(askedIDs()).toEqual([1, 2, 3]);
   });
 });

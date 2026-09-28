@@ -625,6 +625,23 @@ describe("duplicate dialog", () => {
     expect(panel.selected()).toEqual(["a", "b"]);
   });
 
+  it("marks the Escape that closes it as handled", async () => {
+    const panel = setUpManager([entry("a", { localItemID: 1 }), entry("b")]);
+    panel.manager.selectAll();
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    await panel.dialog();
+    const escape = new panel.dom.window.KeyboardEvent("keydown", {
+      key: "Escape",
+      cancelable: true,
+    });
+    panel.doc.dispatchEvent(escape);
+
+    expect(await run).toBeNull();
+    // A metadata update going on meanwhile leaves such an Escape alone
+    expect(escape.defaultPrevented).toBe(true);
+  });
+
   it.each([
     ["the Cancel button", "cancel"],
     ["the Confirm button", "confirm"],

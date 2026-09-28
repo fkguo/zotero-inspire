@@ -663,6 +663,8 @@ export class CitationGraphDialog {
     // Close on Esc
     const escHandler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Handled here: a running update does not take it as a cancel
+        e.preventDefault();
         this.dispose();
       }
     };
@@ -768,6 +770,25 @@ export class CitationGraphDialog {
 
     this.backdropEl = backdrop;
     this.dialogEl = dialog;
+
+    // Take the keyboard focus, as a dialog does, and give it back on close
+    // unless it has gone elsewhere meanwhile (e.g. Zotero focused the items
+    // list after a node selected its item). Left where it was (e.g. in
+    // Zotero's collection tree, which takes Escape for itself), Escape would
+    // not reach the dialog.
+    const focusBefore = this.doc.activeElement as HTMLElement | null;
+    dialog.tabIndex = -1;
+    dialog.style.outline = "none";
+    dialog.focus({ preventScroll: true });
+    const disposeBeforeFocus = this.dispose.bind(this);
+    this.dispose = () => {
+      const focusInGraph =
+        !this.disposed && backdrop.contains(this.doc.activeElement);
+      disposeBeforeFocus();
+      if (focusInGraph && focusBefore?.isConnected) {
+        focusBefore.focus({ preventScroll: true });
+      }
+    };
 
     this.ensureSpinnerStyles();
     this.setupResizeObserver();
