@@ -2404,10 +2404,24 @@ function applyItemType(
 }
 
 /**
+ * An arXiv paper's line in Extra: "arXiv:2401.00001 [hep-ph]" with the
+ * primary category for new-style identifiers, "arXiv:hep-ph/0101001" for
+ * old-style ones (their archive names the subject)
+ */
+export function arxivExtraLine(
+  arxivId: string,
+  primaryCategory: string | undefined,
+): string {
+  return /^\d/.test(arxivId)
+    ? `arXiv:${arxivId} [${primaryCategory}]`
+    : `arXiv:${arxivId}`;
+}
+
+/**
  * Preprint items: fill the fields Zotero's own arXiv translator uses
  * (Archive ID "arXiv:ID", Repository "arXiv") when they are still empty.
  */
-function setPreprintArxivFields(
+export function setPreprintArxivFields(
   item: Zotero.Item,
   metaInspire: jsobject,
 ): void {
@@ -2542,13 +2556,10 @@ export async function setInspireMeta(
 
       if (metaInspire.arxiv) {
         const arxivId = metaInspire.arxiv.value;
-        let arXivInfo = "";
-        if (/^\d/.test(arxivId)) {
-          const arxivPrimeryCategory = metaInspire.arxiv.categories[0];
-          arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`;
-        } else {
-          arXivInfo = "arXiv:" + arxivId;
-        }
+        const arXivInfo = arxivExtraLine(
+          arxivId,
+          metaInspire.arxiv.categories[0],
+        );
         const numberOfArxiv = (extra.match(ARXIV_EXTRA_LINE_REGEX) || "")
           .length;
         if (numberOfArxiv !== 1) {
