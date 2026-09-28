@@ -3136,6 +3136,23 @@ function reorderExtraFields(extra: string): string {
   return reordered.join("\n");
 }
 
+/**
+ * Extra with INSPIRE's citation count lines set, laid out as the INSPIRE
+ * update lays them out
+ */
+export function setInspireCitationLines(
+  extra: string,
+  citationCount: number,
+  citationCountWithoutSelf: number,
+): string {
+  const updated = setCitations(
+    extra,
+    citationCount,
+    citationCountWithoutSelf,
+  ).replace(/\n\n/gm, "\n");
+  return reorderExtraFields(updated);
+}
+
 function setCitations(
   extra: string,
   citation_count: number,

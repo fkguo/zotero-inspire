@@ -20,6 +20,7 @@ const FIELD_NAMES = [
   "DOI",
   "archiveLocation",
   "archive",
+  "citationKey",
 ];
 
 // Zotero's non-regular types come last, as in its schema
@@ -48,6 +49,10 @@ export interface FakeItemSpec {
   deleted?: boolean;
   /** The item an attachment or note belongs to */
   parentItemID?: number;
+  /** Zotero's dateAdded, "YYYY-MM-DD HH:MM:SS" (UTC) */
+  dateAdded?: string;
+  /** Creators in order; lastName only for a name in one field */
+  creators?: { firstName?: string; lastName: string }[];
 }
 
 export interface FakeItem {
@@ -70,6 +75,12 @@ export interface FakeItem {
   removeRelatedItem(other: FakeItem): Promise<boolean>;
   saveTx(): Promise<void>;
   parentItemID?: number;
+  getCreators(): { firstName: string; lastName: string }[];
+  /** Fields set since the last save */
+  hasChanged(): boolean;
+  /** Save the fields set since the last save (options kept in `saves`) */
+  save(options?: unknown): Promise<void>;
+  saves: unknown[];
 }
 
 interface Observer {
@@ -91,6 +102,8 @@ export class FakeLibrary {
   private readonly typeIDs = new Map<string, number>();
   private readonly items = new Map<number, FakeItem>();
   private readonly observers = new Map<string, Observer>();
+  /** Each item's field values as its object holds them */
+  private readonly fieldMaps = new WeakMap<FakeItem, Record<string, string>>();
   private nextItemID = 1;
   private nextObserver = 1;
   /** Error thrown by every query while set (Zotero.DB failing) */
@@ -115,7 +128,9 @@ export class FakeLibrary {
       CREATE TABLE libraries (libraryID INTEGER PRIMARY KEY, type TEXT NOT NULL, editable INT NOT NULL);
       CREATE TABLE itemTypes (itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
       CREATE TABLE fields (fieldID INTEGER PRIMARY KEY, fieldName TEXT);
-      CREATE TABLE items (itemID INTEGER PRIMARY KEY, itemTypeID INT NOT NULL, libraryID INT NOT NULL, key TEXT NOT NULL);
+      CREATE TABLE items (itemID INTEGER PRIMARY KEY, itemTypeID INT NOT NULL, libraryID INT NOT NULL, key TEXT NOT NULL, dateAdded TEXT NOT NULL DEFAULT '2026-01-01 00:00:00');
+      CREATE TABLE creators (creatorID INTEGER PRIMARY KEY, firstName TEXT, lastName TEXT);
+      CREATE TABLE itemCreators (itemID INT, creatorID INT, orderIndex INT);
       CREATE TABLE itemDataValues (valueID INTEGER PRIMARY KEY, value UNIQUE);
       CREATE TABLE itemData (itemID INT, fieldID INT, valueID, PRIMARY KEY (itemID, fieldID));
       CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY);
@@ -255,9 +270,30 @@ export class FakeLibrary {
     const libraryID = spec.libraryID ?? USER_LIBRARY;
     const key = `KEY${String(id).padStart(5, "0")}`;
     this.db
-      .prepare("INSERT INTO items VALUES (?, ?, ?, ?)")
-      .run(id, this.typeIDs.get(itemType)!, libraryID, key);
+      .prepare("INSERT INTO items VALUES (?, ?, ?, ?, ?)")
+      .run(
+        id,
+        this.typeIDs.get(itemType)!,
+        libraryID,
+        key,
+        spec.dateAdded ?? "2026-01-01 00:00:00",
+      );
+    const creators = (spec.creators ?? []).map((c) => ({
+      firstName: c.firstName ?? "",
+      lastName: c.lastName,
+    }));
+    creators.forEach((creator, orderIndex) => {
+      const { lastInsertRowid } = this.db
+        .prepare("INSERT INTO creators (firstName, lastName) VALUES (?, ?)")
+        .run(creator.firstName, creator.lastName);
+      this.db
+        .prepare("INSERT INTO itemCreators VALUES (?, ?, ?)")
+        .run(id, Number(lastInsertRowid), orderIndex);
+    });
     const fields: Record<string, string> = {};
+    const unsaved: Record<string, string> = {};
+    const write = (changes: Record<string, string>) =>
+      this.writeFields(item, fields, changes);
     const isTrashed = () => this.isTrashed(id);
     const item: FakeItem = {
       id,
@@ -270,7 +306,18 @@ export class FakeLibrary {
       relatedItems: [],
       getField: (name: string) => fields[name] ?? "",
       setField: (name: string, value: string) => {
+        if ((fields[name] ?? "") === value) return;
         fields[name] = value;
+        unsaved[name] = value;
+      },
+      getCreators: () => creators.map((c) => ({ ...c })),
+      hasChanged: () => Object.keys(unsaved).length > 0,
+      saves: [],
+      async save(options?: unknown) {
+        this.saves.push(options);
+        const changes = { ...unsaved };
+        for (const name of Object.keys(unsaved)) delete unsaved[name];
+        write(changes);
       },
       isRegularItem: () => !NON_REGULAR.has(itemType),
       isNote: () => itemType === "note",
@@ -302,6 +349,7 @@ export class FakeLibrary {
       parentItemID: spec.parentItemID,
     };
     this.items.set(id, item);
+    this.fieldMaps.set(item, fields);
     this.writeFields(item, fields, spec.fields ?? {});
     if (spec.deleted)
       this.db.prepare("INSERT INTO deletedItems VALUES (?)").run(id);
@@ -387,8 +435,7 @@ export class FakeLibrary {
     for (const [name, value] of Object.entries(changes)) {
       const fieldID = this.fieldIDs.get(name);
       if (fieldID === undefined) throw new Error(`no field ${name}`);
-      if (fields) fields[name] = value;
-      else item.setField(name, value);
+      (fields ?? this.fieldMaps.get(item)!)[name] = value;
       this.db
         .prepare("DELETE FROM itemData WHERE itemID = ? AND fieldID = ?")
         .run(item.id, fieldID);
