@@ -25,6 +25,14 @@ import {
 import { getPref, setPref } from "./utils/prefs";
 import { registerPrefsScripts } from "./modules/prefScript";
 import { takeCreatedByPluginMark } from "./modules/inspire/library/itemCreation";
+import { addArxivPapers } from "./modules/arxiv/addToLibrary";
+import { attachArxivPdf } from "./modules/arxiv/arxivPdf";
+import { lookupInspireByArxiv } from "./modules/arxiv/inspireByArxiv";
+import {
+  checkInspireCompletion,
+  findCompletionCandidates,
+  writeInspireCompletion,
+} from "./modules/inspire/library/inspireCompletion";
 import {
   getExternalToken,
   ensureExternalToken,
@@ -142,6 +150,19 @@ function exposeConsoleCommands(): void {
     // How long the arXiv browser took to show its last pages
     instance.arxivBrowserPaintTimes = () => paintTimes();
     instance.getExternalReadToken = () => getExternalReadToken();
+    // Adding arXiv papers and INSPIRE completion, for checks until the arXiv
+    // browser window has its buttons, e.g. in Run JavaScript:
+    //   await Zotero.ZoteroInspire.arxiv.addPapers(
+    //     [{ arxivId: "2609.28544" }],
+    //     { libraryID: 1, collectionIDs: [] }, { attachPdf: true })
+    instance.arxiv = {
+      addPapers: addArxivPapers,
+      attachPdf: attachArxivPdf,
+      lookupInspire: lookupInspireByArxiv,
+      completionCandidates: findCompletionCandidates,
+      checkCompletion: checkInspireCompletion,
+      writeCompletion: writeInspireCompletion,
+    };
   }
 }
 
