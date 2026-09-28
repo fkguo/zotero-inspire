@@ -4455,6 +4455,23 @@ export class InspireReferencePanelController {
   }
 
   /**
+   * The row that is or contains `el`, if that row shows `entry`. Each list the
+   * panel draws (another item or tab selected) hands the row elements to its
+   * own papers, so an action that waited for INSPIRE or Zotero may find the
+   * row it was started from showing another paper.
+   */
+  private rowShowing(
+    entry: InspireReferenceEntry,
+    el: Element | null | undefined,
+  ): HTMLDivElement | undefined {
+    const row = el?.closest?.(".zinspire-ref-entry") as
+      | HTMLDivElement
+      | null
+      | undefined;
+    return row?.dataset.entryId === entry.id ? row : undefined;
+  }
+
+  /**
    * Scroll the list to show entry at the given index.
    */
   private scrollToEntryByIndex(index: number): void {
@@ -17282,17 +17299,17 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
       // Update the clicked row immediately (marker + link + PDF button) without a full re-render.
       // A full render can reset pagination/scroll and delay visual updates for the active row.
-      const rowFromCaches =
-        (this.rowCache.get(entry.id) as HTMLDivElement | undefined) ||
-        (this.entryRenderer?.getRowByEntryId(entry.id) as
-          | HTMLDivElement
-          | undefined) ||
-        ((anchor.closest?.(".zinspire-ref-entry") as HTMLDivElement | null) ??
-          undefined);
-      if (rowFromCaches) {
-        this.rowCache.set(entry.id, rowFromCaches);
+      // Only a row that still shows this paper: if another list was drawn during the import,
+      // its papers have the rows, and this paper's state is read from the library when its
+      // list is drawn again.
+      const row =
+        this.rowShowing(entry, this.rowCache.get(entry.id)) ??
+        this.rowShowing(entry, this.entryRenderer?.getRowByEntryId(entry.id)) ??
+        this.rowShowing(entry, anchor);
+      if (row) {
+        this.rowCache.set(entry.id, row);
+        this.updateRowStatus(entry);
       }
-      this.updateRowStatus(entry);
       // ISSUE-110: optionally fetch the PDF right after adding (opt-in pref).
       void this.maybeAutoFindFullText(entry, newItem);
     }
@@ -17912,13 +17929,21 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     const originalText = button.textContent;
     button.textContent = "⏳";
     button.disabled = true;
+    // The result shows after INSPIRE's answer and is set back 1.5 s later: if
+    // another list was drawn in between, the row may show one of its papers,
+    // and is then left alone
+    const showText = (text: string) => {
+      if (this.rowShowing(entry, button)) {
+        button.textContent = text;
+      }
+    };
 
     try {
       const bibtex = await fetchBibTeX(entry.recid);
       if (bibtex) {
         const success = await copyToClipboard(bibtex);
         if (success) {
-          button.textContent = "✓";
+          showText("✓");
           // Show toast notification
           const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
           const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
@@ -17938,7 +17963,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         throw new Error("BibTeX not found");
       }
     } catch (_err) {
-      button.textContent = "✗";
+      showText("✗");
       Zotero.debug(`[${config.addonName}] BibTeX copy failed: ${_err}`);
       // Show error toast
       const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
@@ -17956,6 +17981,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
     // Restore original state after brief delay
     setTimeout(() => {
+      if (!this.rowShowing(entry, button)) {
+        return;
+      }
       button.textContent = originalText;
       button.disabled = false;
     }, 1500);
@@ -18018,6 +18046,14 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     const originalText = button.textContent;
     button.textContent = "⏳";
     button.disabled = true;
+    // The result shows once the key is found (from INSPIRE if need be) and is
+    // set back 1.5 s later: if another list was drawn in between, the row may
+    // show one of its papers, and is then left alone
+    const showText = (text: string) => {
+      if (this.rowShowing(entry, button)) {
+        button.textContent = text;
+      }
+    };
 
     try {
       let texkey = entry.texkey?.trim() || "";
@@ -18054,7 +18090,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
       const success = await copyToClipboard(texkey);
       if (success) {
-        button.textContent = "✓";
+        showText("✓");
         const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
         const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
           closeOnClick: true,
@@ -18070,7 +18106,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         throw new Error("Clipboard copy failed");
       }
     } catch (_err) {
-      button.textContent = "✗";
+      showText("✗");
       Zotero.debug(`[${config.addonName}] Texkey copy failed: ${_err}`);
       const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
       const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
@@ -18087,6 +18123,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
     // Restore original state after brief delay
     setTimeout(() => {
+      if (!this.rowShowing(entry, button)) {
+        return;
+      }
       button.textContent = originalText;
       button.disabled = false;
     }, 1500);
@@ -18130,6 +18169,13 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         pdfOpen: getString("references-panel-pdf-open" as FluentMessageId),
         pdfFind: getString("references-panel-pdf-find" as FluentMessageId),
       };
+      // The search takes a while: if another list was drawn meanwhile, the
+      // row may show one of its papers, and is then left alone
+      const showResult = (result: PdfButtonState) => {
+        if (this.rowShowing(entry, button)) {
+          renderPdfButtonIcon(doc, button, result, pdfStrings);
+        }
+      };
 
       try {
         // Match Zotero main-window context menu behavior:
@@ -18153,32 +18199,24 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
           );
           if (pdfID) {
             // Success - render PDF icon
-            renderPdfButtonIcon(
-              doc,
-              button,
-              PdfButtonState.HAS_PDF,
-              pdfStrings,
-            );
+            showResult(PdfButtonState.HAS_PDF);
             // Force UI refresh so the main window reflects the new attachment immediately.
             await this.notifyItemModifiedForUI(entry.localItemID, pdfID);
           } else {
             // Not found - restore original state
-            renderPdfButtonIcon(
-              doc,
-              button,
-              PdfButtonState.FIND_PDF,
-              pdfStrings,
-            );
+            showResult(PdfButtonState.FIND_PDF);
           }
         } else {
-          renderPdfButtonIcon(doc, button, PdfButtonState.FIND_PDF, pdfStrings);
+          showResult(PdfButtonState.FIND_PDF);
         }
       } catch (err) {
         Zotero.debug(`[${config.addonName}] Find Full Text failed: ${err}`);
-        renderPdfButtonIcon(doc, button, PdfButtonState.FIND_PDF, pdfStrings);
+        showResult(PdfButtonState.FIND_PDF);
       }
 
-      button.disabled = false;
+      if (this.rowShowing(entry, button)) {
+        button.disabled = false;
+      }
     }
   }
 

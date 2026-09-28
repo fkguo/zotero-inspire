@@ -1,5 +1,15 @@
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// INSPIRE requests of the row buttons (BibTeX, TeX key), answered by the tests
+const mocks = vi.hoisted(() => ({ inspireFetch: vi.fn() }));
+vi.mock("../src/modules/inspire/rateLimiter", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../src/modules/inspire/rateLimiter")
+  >()),
+  inspireFetch: mocks.inspireFetch,
+}));
+
 import { config } from "../package.json";
 import { EntryListRenderer } from "../src/modules/inspire/panel/EntryListRenderer";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
@@ -254,4 +264,300 @@ describe("References panel rows reused for another list", () => {
     expect(rows().map(shown)).toEqual(before);
     expect(before.every((row) => row.marker === "⊕")).toBe(true);
   });
+});
+
+describe("Row actions that show their result after a wait", () => {
+  // Adding a paper, Find Full Text and the copy buttons wait for INSPIRE or
+  // Zotero before they show their result in the row they were started from.
+  // Selecting another item meanwhile draws its list with the same row
+  // elements: the result must not show up in the row of a paper of that list.
+  let panel: ReturnType<typeof openPanel> | undefined;
+  afterEach(() => {
+    vi.useRealTimers();
+    mocks.inspireFetch.mockReset();
+    panel?.controller.destroy();
+    panel = undefined;
+  });
+
+  /** A promise and the function that fulfils it. */
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  /** What the rows show, with the state of their buttons. */
+  function look(rows: HTMLElement[]) {
+    const button = (row: HTMLElement, selector: string) => {
+      const el = row.querySelector(selector) as HTMLButtonElement;
+      return `${el.textContent}|${el.dataset.state ?? ""}|${el.disabled ? "off" : "on"}`;
+    };
+    return rows.map((row) => ({
+      ...shown(row),
+      pdfButton: button(row, ".zinspire-ref-entry__pdf"),
+      bibtex: button(row, ".zinspire-ref-entry__bibtex"),
+      texkey: button(row, ".zinspire-ref-entry__texkey"),
+    }));
+  }
+
+  /** Another item is selected: a loading message, then its list. */
+  async function switchTo(entries: InspireReferenceEntry[]) {
+    panel!.controller.renderMessage("Loading");
+    await panel!.show(entries);
+  }
+
+  /**
+   * Click ⊕ in `row` and confirm the save target. INSPIRE answers for the
+   * paper when the returned function is called, which resolves once the
+   * panel is done with the answer.
+   */
+  async function clickAdd(row: HTMLElement) {
+    const { controller } = panel!;
+    controller.promptForSaveTarget = vi.fn().mockResolvedValue({
+      libraryID: 1,
+      primaryRowID: "L1",
+      collectionIDs: [],
+      tags: [],
+      note: "",
+    });
+    const imported = deferred<{ id: number }>();
+    controller.importReference = vi.fn(() => imported.promise);
+    const add = vi.spyOn(controller, "handleAddAction");
+    (row.querySelector(".zinspire-ref-entry__dot") as HTMLElement).click();
+    await vi.waitFor(() =>
+      expect(controller.importReference).toHaveBeenCalled(),
+    );
+    return async (item: { id: number }) => {
+      imported.resolve(item);
+      await add.mock.results[0].value;
+    };
+  }
+
+  /**
+   * Library items for Find Full Text: `parentID` without attachments until
+   * `pdfFound` is called, which also ends Zotero's search.
+   */
+  function libraryWithFullTextSearch(parentID: number) {
+    const search = deferred<void>();
+    let attachments: number[] = [];
+    const addAvailableFiles = vi.fn(() => search.promise);
+    Object.assign((globalThis as any).Zotero, {
+      Items: {
+        get: (id: number) =>
+          id === parentID
+            ? { id, getAttachments: () => attachments }
+            : id === 801
+              ? { id, isPDFAttachment: () => true }
+              : null,
+      },
+      Attachments: { addAvailableFiles },
+    });
+    return {
+      addAvailableFiles,
+      pdfFound: () => {
+        attachments = [801];
+        search.resolve();
+      },
+    };
+  }
+
+  it("does not mark a paper of the new list when an add finishes after the switch", async () => {
+    panel = openPanel();
+    const { rows, show } = panel;
+    const oldList = [0, 1, 2, 3, 4].map((i) => paper("A", i));
+    const newList = [0, 1, 2, 3, 4].map((i) => paper("B", i));
+    await show(oldList);
+    const clicked = rows()[2];
+    const finish = await clickAdd(clicked);
+
+    // Another item is selected while INSPIRE is asked for the paper
+    await switchTo(newList);
+    expect(rows().includes(clicked)).toBe(true);
+    const before = look(rows());
+    await finish({ id: 901 });
+
+    expect(oldList[2].localItemID).toBe(901);
+    expect(look(rows())).toEqual(before);
+  });
+
+  it("marks the clicked row when no other list is drawn meanwhile", async () => {
+    panel = openPanel();
+    const { rows, show } = panel;
+    await show([0, 1, 2, 3, 4].map((i) => paper("A", i)));
+    const before = look(rows());
+    const finish = await clickAdd(rows()[2]);
+    await finish({ id: 901 });
+
+    const expected = [...before];
+    expected[2] = {
+      ...before[2],
+      marker: "●",
+      markerState: "local",
+      pdf: "find-pdf",
+      pdfButton: "|find-pdf|on",
+    };
+    expect(look(rows())).toEqual(expected);
+  });
+
+  it("does not show the PDF of an automatic Find Full Text in a row of the new list", async () => {
+    panel = openPanel();
+    const { controller, rows, show } = panel;
+    const library = libraryWithFullTextSearch(901);
+    (globalThis as any).Zotero.Prefs = {
+      get: (key: string) =>
+        key === `${config.prefsPrefix}.auto_find_fulltext_on_import`
+          ? true
+          : undefined,
+    };
+    const autoFind = vi.spyOn(controller, "maybeAutoFindFullText");
+    const oldList = [0, 1, 2, 3, 4].map((i) => paper("A", i));
+    const newList = [0, 1, 2, 3, 4].map((i) => paper("B", i));
+    await show(oldList);
+    const finish = await clickAdd(rows()[2]);
+    await switchTo(newList);
+    const before = look(rows());
+    await finish({ id: 901 });
+
+    // Zotero then finds a PDF for the added paper
+    expect(library.addAvailableFiles).toHaveBeenCalled();
+    library.pdfFound();
+    await autoFind.mock.results[0].value;
+
+    expect(look(rows())).toEqual(before);
+  });
+
+  it("does not show the result of Find Full Text in a row of the new list", async () => {
+    panel = openPanel();
+    const { controller, rows, show } = panel;
+    const library = libraryWithFullTextSearch(700);
+    const oldList = [0, 1, 2, 3, 4].map((i) =>
+      paper("A", i, i === 2 ? { localItemID: 700 } : {}),
+    );
+    const newList = [0, 1, 2, 3, 4].map((i) => paper("B", i));
+    await show(oldList);
+    const clicked = rows()[2];
+    expect(look([clicked])[0].pdfButton).toBe("|find-pdf|on");
+    const findFullText = vi.spyOn(controller, "handlePdfAction");
+    (clicked.querySelector(".zinspire-ref-entry__pdf") as HTMLElement).click();
+    expect(library.addAvailableFiles).toHaveBeenCalled();
+
+    // Another item is selected while Zotero looks for the PDF
+    await switchTo(newList);
+    expect(rows().includes(clicked)).toBe(true);
+    const before = look(rows());
+    library.pdfFound();
+    await findFullText.mock.results[0].value;
+
+    expect(look(rows())).toEqual(before);
+  });
+
+  it("shows the result of Find Full Text in the clicked row", async () => {
+    panel = openPanel();
+    const { controller, rows, show } = panel;
+    const library = libraryWithFullTextSearch(700);
+    await show(
+      [0, 1, 2, 3, 4].map((i) =>
+        paper("A", i, i === 2 ? { localItemID: 700 } : {}),
+      ),
+    );
+    const before = look(rows());
+    const findFullText = vi.spyOn(controller, "handlePdfAction");
+    (
+      rows()[2].querySelector(".zinspire-ref-entry__pdf") as HTMLElement
+    ).click();
+    expect(look(rows())[2].pdfButton).toBe("⏳|find-pdf|off");
+    library.pdfFound();
+    await findFullText.mock.results[0].value;
+
+    const expected = [...before];
+    expected[2] = { ...before[2], pdf: "has-pdf", pdfButton: "|has-pdf|on" };
+    expect(look(rows())).toEqual(expected);
+  });
+
+  /** The copy buttons and the INSPIRE answer each of them waits for. */
+  const copyButtons = [
+    {
+      name: "BibTeX",
+      button: "bibtex",
+      handler: "handleBibTeXCopy",
+      idle: "📋",
+      answer: { ok: true, text: async () => "@article{A2}" },
+    },
+    {
+      name: "TeX key",
+      button: "texkey",
+      handler: "handleTexkeyCopy",
+      idle: "T",
+      answer: {
+        ok: true,
+        json: async () => ({ metadata: { texkeys: ["AuthorA2:2024ab"] } }),
+      },
+    },
+  ] as const;
+
+  /**
+   * Click a copy button in `row`. INSPIRE answers when the returned function
+   * is called, which resolves once the panel shows the result.
+   */
+  function clickCopy(row: HTMLElement, copy: (typeof copyButtons)[number]) {
+    const { controller } = panel!;
+    (globalThis as any).Zotero.Utilities = {
+      Internal: { copyTextToClipboard: vi.fn() },
+    };
+    const inspire = deferred<unknown>();
+    mocks.inspireFetch.mockReturnValue(inspire.promise);
+    const handler = vi.spyOn(controller, copy.handler);
+    (
+      row.querySelector(`.zinspire-ref-entry__${copy.button}`) as HTMLElement
+    ).click();
+    expect(mocks.inspireFetch).toHaveBeenCalled();
+    return async () => {
+      inspire.resolve(copy.answer);
+      await handler.mock.results[0].value;
+    };
+  }
+
+  it.each(copyButtons)(
+    "does not show the $name copy result in a row of the new list",
+    async (copy) => {
+      panel = openPanel();
+      const { rows, show } = panel;
+      // The new list's papers have no INSPIRE record: nothing to copy
+      const newList = [0, 1, 2, 3, 4].map((i) =>
+        paper("B", i, { recid: undefined }),
+      );
+      await show([0, 1, 2, 3, 4].map((i) => paper("A", i)));
+      const clicked = rows()[2];
+      const answer = clickCopy(clicked, copy);
+
+      // Another item is selected while INSPIRE is asked
+      await switchTo(newList);
+      expect(rows().includes(clicked)).toBe(true);
+      const before = look(rows());
+      expect(before[2][copy.button]).toBe(`${copy.idle}||off`);
+      vi.useFakeTimers();
+      await answer();
+      expect(look(rows())).toEqual(before);
+      // The button would be set back after a moment
+      vi.advanceTimersByTime(1500);
+      expect(look(rows())).toEqual(before);
+    },
+  );
+
+  it.each(copyButtons)(
+    "shows the $name copy result in the clicked row",
+    async (copy) => {
+      panel = openPanel();
+      const { rows, show } = panel;
+      await show([0, 1, 2, 3, 4].map((i) => paper("A", i)));
+      const before = look(rows());
+      const answer = clickCopy(rows()[2], copy);
+      expect(look(rows())[2][copy.button]).toBe("⏳||off");
+      vi.useFakeTimers();
+      await answer();
+      expect(look(rows())[2][copy.button]).toBe("✓||off");
+      vi.advanceTimersByTime(1500);
+      expect(look(rows())).toEqual(before);
+    },
+  );
 });
