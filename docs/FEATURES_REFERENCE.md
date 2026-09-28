@@ -561,14 +561,18 @@ A Zotero item is identified as an unpublished preprint if:
 
 ### 8.2 Entry Points
 
-| Entry                   | Action                                     |
-| ----------------------- | ------------------------------------------ |
-| Item context menu       | Check Preprint Status for selected items   |
-| Collection context menu | Check Preprints in Collection              |
-| Collection context menu | Check All Preprints in Library (whole lib) |
-| Background (startup)    | Auto-check on first startup (once per day) |
+| Entry                   | Action                                                                                       |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| Item context menu       | Check Preprint Status for selected items                                                     |
+| Collection context menu | Check Preprints in Collection                                                                |
+| Collection context menu | Check All Preprints in Library (My Library and every editable group)                         |
+| Background (startup)    | Checks at startup as set by `preprint_watch_auto_check` (8.4), same scope as the entry above |
+
+The three menu entries ask INSPIRE about every preprint they find. The background check reuses INSPIRE answers younger than 20 hours; a paper INSPIRE has no record of is asked about again after 7 days at the earliest. A menu entry stops a background check in progress, and no background check starts until the entry's results dialog is closed; a background check that was stopped, or whose every result is an error (e.g. no network, and no answer recent enough to reuse), does not count as the day's check, and the next one continues with the papers not answered yet. The answers are kept in `preprintWatch.json` in the cache folder, each with the time INSPIRE gave it; a failed request is not stored and leaves the previous answer in place. The libraries are scanned on every check, so the file holds answers only, not the list of preprints.
 
 ### 8.3 Update Process
+
+Each preprint gets one of four outcomes: published, unpublished (INSPIRE has a record without a journal publication), not in INSPIRE (no record), or failed (the request failed or was stopped). The results dialog shows the number of each; when no preprint is published, a notification shows these numbers instead.
 
 When publications are found:
 
@@ -579,11 +583,11 @@ When publications are found:
 
 ### 8.4 Preferences
 
-| Preference                  | Type    | Default | Description                   |
-| --------------------------- | ------- | ------- | ----------------------------- |
-| `preprint_watch_enabled`    | boolean | true    | Master toggle                 |
-| `preprint_watch_auto_check` | string  | "daily" | Auto-check mode: daily/never  |
-| `preprint_watch_notify`     | boolean | true    | Show notification on findings |
+| Preference                  | Type    | Default | Description                                                                          |
+| --------------------------- | ------- | ------- | ------------------------------------------------------------------------------------ |
+| `preprint_watch_enabled`    | boolean | true    | Master toggle                                                                        |
+| `preprint_watch_auto_check` | string  | "never" | Background check: "startup" (every start), "daily" (first start of a day) or "never" |
+| `preprint_watch_notify`     | boolean | true    | Show notification on findings                                                        |
 
 ---
 

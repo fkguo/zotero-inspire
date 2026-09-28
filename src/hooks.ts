@@ -7,14 +7,8 @@ import {
   getReaderIntegration,
   recidLookupCache,
   MemoryMonitor,
-  findUnpublishedPreprints,
-  batchCheckPublicationStatus,
-  buildCheckSummary,
-  shouldRunBackgroundCheck,
-  updateLastCheckTime,
-  trackPreprintCandidates,
-  cleanupLegacyPreprintFiles,
-  createAbortController,
+  runBackgroundCheck,
+  stopBackgroundCheck,
   onRenderModeChange,
   deriveRecidFromItem,
   clearFundingCache,
@@ -51,7 +45,6 @@ import {
 // Track background timers for cleanup on shutdown (PERF-FIX-1)
 let purgeTimer: ReturnType<typeof setTimeout> | undefined;
 let preprintCheckTimer: ReturnType<typeof setTimeout> | undefined;
-let preprintCheckController: AbortController | undefined;
 let itemTreePrefsObserverID: symbol | undefined;
 
 async function onStartup() {
@@ -132,70 +125,12 @@ function exposeConsoleCommands(): void {
 
 /**
  * FTR-PREPRINT-WATCH: Run background preprint check based on preferences.
- * Non-interactive, only shows notification if publications found.
+ * Non-interactive, only shows the results dialog if publications found.
  */
 async function runBackgroundPreprintCheck(): Promise<void> {
-  // Abort previous background check if still running
-  preprintCheckController?.abort();
-  preprintCheckController = createAbortController();
-  const signal = preprintCheckController?.signal;
-
-  try {
-    // Check if preprint watch is enabled
-    const enabled = getPref("preprint_watch_enabled" as any) as boolean;
-    if (!enabled) {
-      Zotero.debug(
-        `[${config.addonName}] Preprint watch disabled, skipping background check`,
-      );
-      return;
-    }
-
-    // Check if we should run based on timing preference
-    if (!shouldRunBackgroundCheck()) {
-      return;
-    }
-
-    Zotero.debug(`[${config.addonName}] Starting background preprint check`);
-
-    // Update last check time
-    updateLastCheckTime();
-
-    // Find unpublished preprints in library
-    const preprints = await findUnpublishedPreprints(undefined, undefined, {
-      signal,
-    });
-    if (signal?.aborted) return;
-    if (preprints.length === 0) {
-      Zotero.debug(
-        `[${config.addonName}] No unpublished preprints found in library`,
-      );
-      return;
-    }
-
-    Zotero.debug(
-      `[${config.addonName}] Found ${preprints.length} unpublished preprints, checking INSPIRE...`,
-    );
-
-    // Check publication status (updates unified cache internally)
-    const results = await batchCheckPublicationStatus(preprints, { signal });
-    if (signal?.aborted) return;
-    const summary = buildCheckSummary(results);
-
-    // If publications found, show results dialog for user to review and update
-    if (summary.published > 0) {
-      // Show results dialog through ZInspire instance
-      // This allows user to select which items to update
-      await _globalThis.inspire.showBackgroundPreprintResults(results);
-    }
-
-    Zotero.debug(
-      `[${config.addonName}] Background preprint check completed: ${summary.published} published, ${summary.unpublished} unpublished, ${summary.errors} errors`,
-    );
-  } catch (err) {
-    Zotero.debug(
-      `[${config.addonName}] Background preprint check failed: ${err}`,
-    );
-  }
+  await runBackgroundCheck((results) =>
+    _globalThis.inspire.showBackgroundPreprintResults(results),
+  );
 }
 
 async function onMainWindowLoad(_win: Window): Promise<void> {
@@ -251,8 +186,7 @@ function onShutdown(): void {
     clearTimeout(preprintCheckTimer);
     preprintCheckTimer = undefined;
   }
-  preprintCheckController?.abort();
-  preprintCheckController = undefined;
+  stopBackgroundCheck();
 
   // PERF-FIX-2: Stop MemoryMonitor interval if running
   MemoryMonitor.getInstance().stop();
@@ -304,13 +238,6 @@ async function onNotify(
     if (regularItems.length === 0) {
       return;
     }
-
-    // Track potential preprint candidates to avoid full-library rescans later
-    trackPreprintCandidates(regularItems).catch((err) => {
-      Zotero.debug(
-        `[${config.addonName}] Failed to track preprint candidates: ${err}`,
-      );
-    });
 
     // FIX-DUPLICATE-NOTE: Skip items that already have an INSPIRE recid
     // These were just imported from INSPIRE panel and don't need auto-update

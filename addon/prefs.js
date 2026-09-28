@@ -49,7 +49,7 @@ pref("__prefsPrefix__.smart_update_protected_names", ""); // Comma-separated lis
 // Preprint watch settings (FTR-PREPRINT-WATCH)
 pref("__prefsPrefix__.preprint_watch_enabled", true); // Enable preprint publication monitoring
 pref("__prefsPrefix__.preprint_watch_auto_check", "never"); // Auto-check timing: "startup" | "daily" | "never"
-pref("__prefsPrefix__.preprint_watch_last_check", 0); // Last check timestamp
+pref("__prefsPrefix__.preprint_watch_last_check", 0); // Last background check (seconds since 1970)
 pref("__prefsPrefix__.preprint_watch_notify", true); // Show notification when publications found
 // Collaboration tag settings (FTR-COLLAB-TAGS)
 pref("__prefsPrefix__.collab_tag_enable", false); // Enable collaboration tagging
