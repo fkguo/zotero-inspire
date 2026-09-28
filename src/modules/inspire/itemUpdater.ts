@@ -147,6 +147,9 @@ interface CancellableRun {
  */
 interface UpdateRun extends CancellableRun {
   total: number;
+  /** Items taken off the queue and finished */
+  completed: number;
+  /** Items saved with INSPIRE data */
   counter: number;
   crossRefCounter: number;
   noRecidCount: number;
@@ -620,7 +623,6 @@ export class ZInspire {
     cancelByEscape: boolean,
   ) {
     const CONCURRENCY = 3;
-    let completed = 0;
     const total = items.length;
 
     if (!total) {
@@ -649,6 +651,7 @@ export class ZInspire {
       cancelled: false,
       cancelByEscape,
       total,
+      completed: 0,
       counter: 0,
       crossRefCounter: 0,
       noRecidCount: 0,
@@ -664,7 +667,7 @@ export class ZInspire {
         const item = queue[currentIndex];
 
         if (!item || !item.isRegularItem()) {
-          completed++;
+          run.completed++;
           continue;
         }
 
@@ -676,15 +679,15 @@ export class ZInspire {
           );
         }
 
-        completed++;
+        run.completed++;
 
         // Update progress; a failure here must not end the run
         if (!run.cancelled) {
-          const percent = Math.round((completed / total) * 100);
+          const percent = Math.round((run.completed / total) * 100);
           try {
             progressWindow.changeLine({
               icon: PLUGIN_ICON,
-              text: `Processing ${completed} of ${total} items...`,
+              text: `Processing ${run.completed} of ${total} items...`,
               progress: percent,
             });
           } catch (err) {
@@ -709,7 +712,7 @@ export class ZInspire {
 
       await Promise.all(workers);
       Zotero.debug(
-        `[${config.addonName}] updateItemsConcurrent: all workers finished, completed=${completed}`,
+        `[${config.addonName}] updateItemsConcurrent: all workers finished, completed=${run.completed}`,
       );
 
       // Finish
@@ -723,7 +726,7 @@ export class ZInspire {
       } else {
         // Cancelled - show stats
         this.closeActiveProgressWindow(progressWindow);
-        this.showCancelledStats(completed, total);
+        this.showCancelledStats(run);
       }
     } catch (err) {
       Zotero.debug(
@@ -736,9 +739,11 @@ export class ZInspire {
   }
 
   /**
-   * Show statistics when update was cancelled
+   * Show statistics when update was cancelled: the items processed (whatever
+   * INSPIRE answered; also the ones in progress at the cancel, which finish
+   * after it) and, of those, the items updated
    */
-  private showCancelledStats(completed: number, total: number) {
+  private showCancelledStats(run: UpdateRun) {
     const statsWindow = new ztoolkit.ProgressWindow(config.addonName, {
       closeOnClick: true,
     });
@@ -746,7 +751,12 @@ export class ZInspire {
     statsWindow.createLine({
       icon: PLUGIN_ICON,
       text: getString("update-cancelled-stats", {
-        args: { completed: completed.toString(), total: total.toString() },
+        args: {
+          completed: run.completed.toString(),
+          total: run.total.toString(),
+          // CrossRef counts only items without an INSPIRE record
+          updated: (run.counter + run.crossRefCounter).toString(),
+        },
       }),
     });
     statsWindow.show();

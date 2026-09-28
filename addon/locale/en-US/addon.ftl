@@ -312,7 +312,7 @@ references-panel-button-select = Select
 references-panel-button-open-pdf = Open PDF
 
 update-cancelled = Update cancelled by user
-update-cancelled-stats = Updated { $completed }/{ $total } items before cancellation
+update-cancelled-stats = Processed { $completed }/{ $total } items, { $updated } of them updated
 
 zoteroinspire-refresh-button =
     .tooltiptext = Refresh INSPIRE data

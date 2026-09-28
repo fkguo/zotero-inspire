@@ -14,6 +14,7 @@ import { JSDOM } from "jsdom";
 
 const mocks = vi.hoisted(() => ({
   getInspireMeta: vi.fn(),
+  getCrossrefCount: vi.fn(),
   fetchReferencesEntries: vi.fn(),
   cacheSet: vi.fn(),
   batchCheckPublicationStatus: vi.fn(),
@@ -74,6 +75,7 @@ vi.mock("../src/modules/inspire/metadataService", async (importOriginal) => ({
     typeof import("../src/modules/inspire/metadataService")
   >()),
   getInspireMeta: mocks.getInspireMeta,
+  getCrossrefCount: mocks.getCrossrefCount,
 }));
 vi.mock("../src/modules/inspire/localCache", () => ({
   localCache: {
@@ -134,6 +136,7 @@ function paper(id: number) {
     id,
     isRegularItem: () => true,
     getField: () => "",
+    setField: vi.fn(),
     hasTag: () => false,
     addTag: vi.fn(),
     removeTag: vi.fn(),
@@ -259,6 +262,16 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // An error caught and logged by the plugin would let a test pass without
+  // running the code it is about
+  const logged = (Zotero.debug as ReturnType<typeof vi.fn>).mock.calls.map(
+    ([text]) => String(text),
+  );
+  expect(
+    logged.filter((text) =>
+      /error updating item|fatal error|error:|Failed to/.test(text),
+    ),
+  ).toEqual([]);
   mainDom.window.close();
   vi.unstubAllGlobals();
 });
@@ -282,7 +295,7 @@ describe("a cancelled metadata update", () => {
     // Each run reports its own numbers: the cancelled one 3 of 6, the new
     // one its single item, which has no INSPIRE record
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
       "No INSPIRE recid was found for 1 item.",
     ]);
   });
@@ -303,7 +316,7 @@ describe("a cancelled metadata update", () => {
     expect(askedIDs()).toEqual([1, 2, 3, 5]);
     expect(notices()).toEqual([
       "No INSPIRE recid was found for 1 item.",
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"4"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"4","updated":"0"}',
     ]);
   });
 
@@ -324,8 +337,8 @@ describe("a cancelled metadata update", () => {
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3, 11, 12, 13]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"4"}',
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"4","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
     ]);
   });
 });
@@ -342,7 +355,7 @@ describe("cancelling", () => {
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
     ]);
   });
 
@@ -353,7 +366,24 @@ describe("cancelling", () => {
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
+    ]);
+  });
+
+  it("reports the items processed and, of those, the items updated", async () => {
+    // Citations: papers without an INSPIRE record get CrossRef's count
+    mocks.getCrossrefCount.mockResolvedValue(12);
+    const inspire = new ZInspire();
+    selectedItems = papers(1, 6);
+    inspire.updateSelectedItems("citations");
+    await settle();
+    inspire.cancelUpdate();
+    await releaseAll();
+
+    expect(askedIDs()).toEqual([1, 2, 3]);
+    expect(mocks.getCrossrefCount).toHaveBeenCalledTimes(3);
+    expect(notices()).toEqual([
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"3"}',
     ]);
   });
 
@@ -364,7 +394,7 @@ describe("cancelling", () => {
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
     ]);
   });
 
@@ -382,8 +412,8 @@ describe("cancelling", () => {
 
     expect(askedIDs()).toEqual([1, 2, 3, 11, 12, 13]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"5"}',
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"5"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"5","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"5","updated":"0"}',
     ]);
   });
 });

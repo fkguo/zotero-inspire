@@ -308,7 +308,7 @@ references-panel-button-select = 定位
 references-panel-button-open-pdf = 打开 PDF
 
 update-cancelled = 用户取消更新
-update-cancelled-stats = 取消前已更新 { $completed }/{ $total } 条
+update-cancelled-stats = 已处理 { $completed }/{ $total } 条，其中 { $updated } 条已更新
 
 zoteroinspire-refresh-button =
     .tooltiptext = 刷新 INSPIRE 数据
