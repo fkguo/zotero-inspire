@@ -46,9 +46,16 @@
   outline: none;
 }
 
-.arxiv-browser__main--dragging {
+.arxiv-browser__main--dragging,
+.arxiv-browser__main--dragging * {
   cursor: col-resize;
   user-select: none;
+}
+
+/* Their text can be selected and copied (the window's is not by default) */
+.arxiv-browser__list,
+.arxiv-browser__detail {
+  user-select: text;
 }
 
 .arxiv-browser__list {

@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // abstractContextMenu - Copy menu of an abstract (hover card, abstract tooltip)
-// Extracted from InspireReferencePanelController
+// Extracted from InspireReferencePanelController. The arXiv browser's
+// right-click menu is this menu with entries of its own added.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../../../package.json";
@@ -24,6 +25,24 @@ export interface AbstractContextMenuOptions {
   onOpen?: () => void;
   /** Called after the menu was closed and removed */
   onClose?: () => void;
+  /**
+   * Offer Copy only for selected text (default: without a selection, Copy
+   * takes the container's whole text)
+   */
+  selectionOnly?: boolean;
+  /**
+   * Whether to offer Copy as LaTeX when the container has formulas (default:
+   * yes)
+   */
+  latex?: boolean;
+  /** Entries after the copy entries; "-" for a separator */
+  items?: ReadonlyArray<ContextMenuItem | "-">;
+}
+
+/** An entry of the menu */
+export interface ContextMenuItem {
+  label: string;
+  run: () => void;
 }
 
 /** The text of rendered formulas without KaTeX's hidden MathML copy. */
@@ -31,6 +50,20 @@ function getCleanKatexText(element: HTMLElement): string {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.querySelectorAll(".katex-mathml").forEach((node) => node.remove());
   return (clone.textContent || "").trim();
+}
+
+/**
+ * The text selected in a window, without KaTeX's hidden MathML copy of the
+ * formulas (selection.toString() would have every formula twice)
+ */
+export function selectedTextIn(win: Window | null | undefined): string {
+  const selection = win?.getSelection?.();
+  if (!selection || selection.rangeCount === 0) return "";
+  const range = selection.getRangeAt(0);
+  // A temporary container to clean the selection
+  const tempDiv = range.startContainer.ownerDocument!.createElement("div");
+  tempDiv.appendChild(range.cloneContents());
+  return getCleanKatexText(tempDiv);
 }
 
 /**
@@ -47,21 +80,9 @@ export function showAbstractContextMenu(
     options.document || mainWindow?.document || container.ownerDocument;
 
   // Get selection from container's document context (important for tooltips/popups)
-  const containerWindow = container.ownerDocument.defaultView;
-  const selection =
-    containerWindow?.getSelection?.() || mainWindow?.getSelection?.();
-
-  // Get clean selected text by removing KaTeX's hidden MathML content
-  // KaTeX duplicates content (MathML + visible HTML), so selection.toString() has duplicates
-  let selectedText = "";
-  if (selection && selection.rangeCount > 0) {
-    const range = selection.getRangeAt(0);
-    const fragment = range.cloneContents();
-    // Create a temporary container to clean the selection
-    const tempDiv = doc.createElement("div");
-    tempDiv.appendChild(fragment);
-    selectedText = getCleanKatexText(tempDiv);
-  }
+  const selectedText = selectedTextIn(
+    container.ownerDocument.defaultView ?? mainWindow,
+  );
 
   const latexSource =
     container.dataset.latexSource || container.textContent || "";
@@ -80,20 +101,23 @@ export function showAbstractContextMenu(
   popup.id = popupId;
 
   // Copy option (copies selected or all rendered text)
-  const copyItem = (doc as any).createXULElement("menuitem");
-  const copyLabel = selectedText
-    ? getString("references-panel-abstract-copy-selection")
-    : getString("references-panel-abstract-copy");
-  copyItem.setAttribute("label", copyLabel);
-  copyItem.addEventListener("command", async () => {
-    const textToCopy = selectedText || container.textContent || "";
-    await copyToClipboard(textToCopy);
-    options.notify(getString("references-panel-abstract-copied"));
-  });
-  popup.appendChild(copyItem);
+  if (selectedText || !options.selectionOnly) {
+    const copyItem = (doc as any).createXULElement("menuitem");
+    const copyLabel = selectedText
+      ? getString("references-panel-abstract-copy-selection")
+      : getString("references-panel-abstract-copy");
+    copyItem.setAttribute("label", copyLabel);
+    copyItem.addEventListener("command", async () => {
+      // Each rendered formula once: without KaTeX's hidden MathML copy
+      const textToCopy = selectedText || getCleanKatexText(container);
+      await copyToClipboard(textToCopy);
+      options.notify(getString("references-panel-abstract-copied"));
+    });
+    popup.appendChild(copyItem);
+  }
 
   // Copy as LaTeX option (only shown if LaTeX is present and in KaTeX mode)
-  if (hasLatex && renderMode === "katex") {
+  if (options.latex !== false && hasLatex && renderMode === "katex") {
     const copyLatexItem = (doc as any).createXULElement("menuitem");
     copyLatexItem.setAttribute(
       "label",
@@ -181,6 +205,20 @@ export function showAbstractContextMenu(
       options.notify(getString("references-panel-abstract-latex-copied"));
     });
     popup.appendChild(copyLatexItem);
+  }
+
+  // The caller's entries
+  for (const item of options.items ?? []) {
+    if (item === "-") {
+      if (popup.childElementCount) {
+        popup.appendChild((doc as any).createXULElement("menuseparator"));
+      }
+      continue;
+    }
+    const menuItem = (doc as any).createXULElement("menuitem");
+    menuItem.setAttribute("label", item.label);
+    menuItem.addEventListener("command", () => item.run());
+    popup.appendChild(menuItem);
   }
 
   // Add popup to document and open at mouse position

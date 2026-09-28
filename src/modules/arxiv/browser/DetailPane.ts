@@ -208,6 +208,8 @@ export class DetailPane {
 
     if (listing.abstract) {
       const abstract = html(doc, "div", "arxiv-browser__detail-abstract");
+      // Its TeX, for the right-click menu's Copy as LaTeX
+      abstract.dataset.latexSource = listing.abstract;
       abstract.textContent = listing.abstract;
       void renderMathContent(listing.abstract, abstract);
       parts.push(abstract);

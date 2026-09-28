@@ -71,6 +71,18 @@ export class BrowserActions {
     this.launch(pdfUrl(id));
   }
 
+  /** Open a link in the web browser */
+  openLink(url: string): void {
+    this.launch(url);
+  }
+
+  /** Copy a text (a title, a link, the selection); `notice`: say so */
+  async copyText(text: string, notice = true): Promise<void> {
+    if ((await this.copy(text)) && notice) {
+      this.reporter.notify(getString("arxiv-browser-copied-text"));
+    }
+  }
+
   async copyId(id: string): Promise<void> {
     if (await this.copy(id)) {
       this.reporter.notify(

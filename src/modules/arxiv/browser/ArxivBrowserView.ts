@@ -30,7 +30,11 @@ import {
   type DayListing,
   type ListingSection,
 } from "../listingTypes";
-import { BrowserActions, windowReporter } from "./browserActions";
+import {
+  abstractPageUrl,
+  BrowserActions,
+  windowReporter,
+} from "./browserActions";
 import {
   arrangeList,
   filterGroups,
@@ -51,6 +55,12 @@ import {
 import { ListPane, type ListUpdate } from "./ListPane";
 import { AuthorPreviewController } from "../../inspire/panel/AuthorPreviewController";
 import { HoverPreviewController } from "../../inspire/panel/HoverPreviewController";
+import {
+  selectedTextIn,
+  showAbstractContextMenu,
+  type ContextMenuItem,
+} from "../../inspire/panel/abstractContextMenu";
+import type { Reporter } from "../../inspire/panel/reporter";
 import { writeMarks, type LocalPaper } from "../../inspire/library/localStatus";
 import {
   firstPdfAttachmentID,
@@ -129,6 +139,9 @@ export function openingSetting(): OpeningSelection {
     : "newest";
 }
 
+/** The panes whose text can be selected and copied */
+const PANES = ".arxiv-browser__list, .arxiv-browser__detail";
+
 export class ArxivBrowserView {
   readonly doc: Document;
   readonly toolbar: HTMLElement;
@@ -143,6 +156,8 @@ export class ArxivBrowserView {
   private readonly authorCounts = new Map<string, Promise<number>>();
   readonly loader: ListingLoader;
   readonly actions: BrowserActions;
+  /** The window's notices */
+  private readonly reporter: Reporter;
   private readonly clock: Clock;
   /** The days listed: a preset or days picked in the calendar */
   private selection: DaySelection;
@@ -183,8 +198,9 @@ export class ArxivBrowserView {
     root.replaceChildren();
 
     const notices = html(doc, "div", "arxiv-browser__notices");
+    this.reporter = windowReporter(notices);
     this.actions = new BrowserActions({
-      reporter: windowReporter(notices),
+      reporter: this.reporter,
       scheduler: options.webScheduler,
       launch: options.launch,
       copy: options.copy,
@@ -313,6 +329,8 @@ export class ArxivBrowserView {
     const listContainer = html(doc, "div", "arxiv-browser__list-pane");
     listContainer.append(html(doc, "div", "arxiv-browser__list"));
     const detailContainer = html(doc, "div", "arxiv-browser__detail");
+    // Takes the focus on a click, for Ctrl/Cmd+A
+    detailContainer.tabIndex = -1;
     this.divider = new PaneDivider(
       main,
       listContainer,
@@ -391,6 +409,7 @@ export class ArxivBrowserView {
       this.renderStatus();
     });
     doc.addEventListener("keydown", this.onKeyDown);
+    doc.addEventListener("contextmenu", this.onContextMenu);
     this.stopFollowingLibrary = options.followLibrary?.(() =>
       this.recheckLibrary(),
     );
@@ -410,6 +429,7 @@ export class ArxivBrowserView {
     if (this.disposed) return;
     this.disposed = true;
     this.doc.removeEventListener("keydown", this.onKeyDown);
+    this.doc.removeEventListener("contextmenu", this.onContextMenu);
     this.stopFollowing();
     this.stopFollowingLibrary?.();
     this.stopFollowingItems?.();
@@ -708,6 +728,76 @@ export class ArxivBrowserView {
     return label;
   }
 
+  /**
+   * The right-click menu in the list and the detail pane: copying the
+   * selection (and, in an abstract, all of it or its TeX), selecting the
+   * pane's text, a link's address, and the paper's title, identifier, arXiv
+   * page and BibTeX
+   */
+  private readonly onContextMenu = (event: MouseEvent): void => {
+    const target = event.target as Element | null;
+    const pane = target?.closest<HTMLElement>(PANES);
+    if (!target || !pane) return;
+    event.preventDefault();
+    const actions = this.actions;
+    const items: Array<ContextMenuItem | "-"> = [
+      {
+        label: getString("arxiv-browser-menu-select-all"),
+        run: () =>
+          this.doc.defaultView?.getSelection()?.selectAllChildren(pane),
+      },
+    ];
+    const link = target.closest<HTMLAnchorElement>("a[href^='http']");
+    if (link) {
+      items.push(
+        "-",
+        {
+          label: getString("arxiv-browser-menu-open-link"),
+          run: () => actions.openLink(link.href),
+        },
+        {
+          label: getString("arxiv-browser-menu-copy-link"),
+          run: () => void actions.copyText(link.href),
+        },
+      );
+    }
+    const entry = pane.classList.contains("arxiv-browser__detail")
+      ? this.detail.entry
+      : this.listPane.entryOf(target);
+    if (entry) {
+      const id = entry.listing.id;
+      items.push(
+        "-",
+        {
+          label: getString("arxiv-browser-menu-copy-title"),
+          run: () => void actions.copyText(entry.listing.title),
+        },
+        {
+          label: getString("arxiv-browser-copy-id"),
+          run: () => void actions.copyId(id),
+        },
+        {
+          label: getString("arxiv-browser-menu-copy-abs-link"),
+          run: () => void actions.copyText(abstractPageUrl(id)),
+        },
+        {
+          label: getString("arxiv-browser-copy-bibtex"),
+          run: () => void actions.copyBibtex(id),
+        },
+      );
+    }
+    // In an abstract (its TeX kept): Copy takes all of it when nothing is
+    // selected, and Copy as LaTeX is offered
+    const abstract = target.closest<HTMLElement>("[data-latex-source]");
+    showAbstractContextMenu(event, abstract ?? pane, {
+      document: this.doc,
+      notify: (message) => this.reporter.notify(message),
+      selectionOnly: !abstract,
+      latex: Boolean(abstract),
+      items,
+    });
+  };
+
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (event.defaultPrevented) return;
     const accel = event.ctrlKey || event.metaKey;
@@ -743,6 +833,26 @@ export class ArxivBrowserView {
         void this.actions.copyBibtex(focused.listing.id);
       }
       return;
+    }
+    if (accel && !event.shiftKey && !event.altKey) {
+      if (key.toLowerCase() === "c") {
+        // The selection, each formula once (without KaTeX's hidden copy)
+        const text = selectedTextIn(this.doc.defaultView);
+        if (text) {
+          event.preventDefault();
+          void this.actions.copyText(text, false);
+        }
+        return;
+      }
+      if (key.toLowerCase() === "a") {
+        // The text of the pane that has the focus
+        const pane = target?.closest(PANES);
+        if (pane) {
+          event.preventDefault();
+          this.doc.defaultView?.getSelection()?.selectAllChildren(pane);
+        }
+        return;
+      }
     }
     if (accel || event.altKey) return;
     // Space and Enter keep their meaning on buttons and links

@@ -22,6 +22,16 @@ import {
 } from "./arxivSite";
 import { flushPromises, VirtualClock } from "./virtualClock";
 
+// The right-click menu's Copy and Copy as LaTeX use the plugin's clipboard
+// helper directly
+const clipboard = vi.hoisted(() => ({
+  copyToClipboard: vi.fn(async (_text: string) => true),
+}));
+vi.mock("../src/modules/inspire/apiUtils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/modules/inspire/apiUtils")>()),
+  ...clipboard,
+}));
+
 // The arXiv browser window's content in a jsdom window, loading from a
 // simulated arxiv.org on a simulated clock (real hep-ph listing of Friday
 // 25 September 2026 where one is needed). getString() returns the message ID
@@ -985,6 +995,194 @@ describe("arXiv browser: read-only actions and keys", () => {
     expect(view.listPane.currentPage).toBe(0);
     await clock.advanceBy(60000);
     expect(site.sent.length).toBe(sent);
+  });
+});
+
+describe("arXiv browser: the right-click menu and copying", () => {
+  async function loaded() {
+    const env = environment();
+    subscribe(["hep-ph"]);
+    serveHepPh(env.site);
+    const view = env.open();
+    await env.settle();
+    clipboard.copyToClipboard.mockClear();
+    return { ...env, view };
+  }
+
+  /** Open the menu on an element: its entries ("-" for a separator) */
+  function menuAt(target: Element) {
+    const doc = win.document as any;
+    doc.createXULElement = (tag: string) => {
+      const element = doc.createElement(tag);
+      element.openPopupAtScreen = vi.fn();
+      return element;
+    };
+    const event = new win.MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    const popup = win.document.getElementById(
+      "zinspire-abstract-context-popup",
+    )!;
+    const entries = [...popup.children] as HTMLElement[];
+    return {
+      labels: entries.map((entry) =>
+        entry.tagName.toLowerCase() === "menuseparator"
+          ? "-"
+          : entry.getAttribute("label"),
+      ),
+      run(label: string) {
+        entries
+          .find((entry) => entry.getAttribute("label") === label)!
+          .dispatchEvent(new win.Event("command"));
+      },
+    };
+  }
+
+  it("offers Select All, the link's entries and the paper's on a row's title", async () => {
+    const { root, launch, copy, site, clock } = await loaded();
+    const title = rows(root)[0].querySelector<HTMLAnchorElement>(
+      ".zinspire-ref-entry__title-link",
+    )!;
+    const menu = menuAt(title);
+    expect(menu.labels).toEqual([
+      msg("arxiv-browser-menu-select-all"),
+      "-",
+      msg("arxiv-browser-menu-open-link"),
+      msg("arxiv-browser-menu-copy-link"),
+      "-",
+      msg("arxiv-browser-menu-copy-title"),
+      msg("arxiv-browser-copy-id"),
+      msg("arxiv-browser-menu-copy-abs-link"),
+      msg("arxiv-browser-copy-bibtex"),
+    ]);
+    const abs = "https://arxiv.org/abs/2609.28538";
+    menu.run(msg("arxiv-browser-menu-open-link"));
+    expect(launch).toHaveBeenLastCalledWith(abs);
+    menu.run(msg("arxiv-browser-menu-copy-link"));
+    await vi.waitFor(() => expect(copy).toHaveBeenLastCalledWith(abs));
+    menu.run(msg("arxiv-browser-menu-copy-title"));
+    await vi.waitFor(() =>
+      expect(copy).toHaveBeenLastCalledWith(title.textContent),
+    );
+    menu.run(msg("arxiv-browser-copy-id"));
+    await vi.waitFor(() => expect(copy).toHaveBeenLastCalledWith("2609.28538"));
+    menu.run(msg("arxiv-browser-menu-copy-abs-link"));
+    await vi.waitFor(() => expect(copy).toHaveBeenLastCalledWith(abs));
+    const bibtex = "@misc{x2026,\n  eprint={2609.28538}\n}";
+    site.html("https://arxiv.org/bibtex/2609.28538", `\n${bibtex}\n`);
+    menu.run(msg("arxiv-browser-copy-bibtex"));
+    await clock.advanceBy(20000);
+    expect(copy).toHaveBeenLastCalledWith(bibtex);
+
+    menu.run(msg("arxiv-browser-menu-select-all"));
+    const selection = win.getSelection()!;
+    expect(selection.toString()).toContain(title.textContent);
+    expect(
+      root
+        .querySelector(".arxiv-browser__list")!
+        .contains(selection.anchorNode),
+    ).toBe(true);
+  });
+
+  it("copies a selection, and in the detail pane's abstract all of it or, in KaTeX mode, its TeX", async () => {
+    const { root, view } = await loaded();
+    const title = rows(root)[0].querySelector<HTMLAnchorElement>(
+      ".zinspire-ref-entry__title-link",
+    )!;
+    win.getSelection()!.selectAllChildren(title);
+    const withSelection = menuAt(title);
+    expect(withSelection.labels[0]).toBe(
+      msg("references-panel-abstract-copy-selection"),
+    );
+    withSelection.run(msg("references-panel-abstract-copy-selection"));
+    await vi.waitFor(() =>
+      expect(clipboard.copyToClipboard).toHaveBeenLastCalledWith(
+        title.textContent,
+      ),
+    );
+
+    win.getSelection()!.removeAllRanges();
+    // The first paper whose abstract has a formula, shown in the detail pane
+    rows(root)
+      .find((row) =>
+        row
+          .querySelector<HTMLElement>(".zinspire-ref-entry__abstract")
+          ?.dataset.latexSource?.includes("$"),
+      )!
+      .click();
+    const abstract = root.querySelector<HTMLElement>(
+      ".arxiv-browser__detail-abstract",
+    )!;
+    expect(abstract.dataset.latexSource).toContain("$");
+    prefs[`${PREFIX}.latex_render_mode`] = "katex";
+    const menu = menuAt(abstract);
+    expect(menu.labels.slice(0, 3)).toEqual([
+      msg("references-panel-abstract-copy"),
+      msg("references-panel-abstract-copy-latex"),
+      msg("arxiv-browser-menu-select-all"),
+    ]);
+    menu.run(msg("references-panel-abstract-copy-latex"));
+    await vi.waitFor(() =>
+      expect(clipboard.copyToClipboard).toHaveBeenLastCalledWith(
+        view.listPane.focused!.listing.abstract,
+      ),
+    );
+    // Copy of the whole abstract takes each rendered formula once
+    const formula = win.document.createElement("span");
+    formula.innerHTML =
+      "<span class='katex'><span class='katex-mathml'>m_\\pi</span><span class='katex-html'>mπ</span></span>";
+    abstract.replaceChildren("Mass ", formula, " here.");
+    menuAt(abstract).run(msg("references-panel-abstract-copy"));
+    await vi.waitFor(() =>
+      expect(clipboard.copyToClipboard).toHaveBeenLastCalledWith(
+        "Mass mπ here.",
+      ),
+    );
+  });
+
+  it("copies the selection with Ctrl/Cmd+C, each formula once, and selects a pane with Ctrl/Cmd+A", async () => {
+    const { root, copy } = await loaded();
+    const list = root.querySelector<HTMLElement>(".arxiv-browser__list")!;
+    const detail = root.querySelector<HTMLElement>(".arxiv-browser__detail")!;
+    const title = rows(root)[0].querySelector<HTMLAnchorElement>(
+      ".zinspire-ref-entry__title-link",
+    )!;
+    win.getSelection()!.selectAllChildren(title);
+    key(list, "c", { metaKey: true });
+    await vi.waitFor(() =>
+      expect(copy).toHaveBeenLastCalledWith(title.textContent),
+    );
+    // A rendered formula: KaTeX keeps a hidden copy of it
+    const formula = win.document.createElement("span");
+    formula.innerHTML =
+      "<span class='katex'><span class='katex-mathml'>m_\\pi</span><span class='katex-html'>mπ</span></span>";
+    detail.append(formula);
+    win.getSelection()!.selectAllChildren(formula);
+    key(detail, "c", { ctrlKey: true });
+    await vi.waitFor(() => expect(copy).toHaveBeenLastCalledWith("mπ"));
+
+    list.focus();
+    key(list, "a", { metaKey: true });
+    expect(list.contains(win.getSelection()!.anchorNode)).toBe(true);
+    expect(win.getSelection()!.toString()).toContain(title.textContent);
+    detail.focus();
+    key(detail, "a", { ctrlKey: true });
+    expect(detail.contains(win.getSelection()!.anchorNode)).toBe(true);
+    // In the filter box, Ctrl/Cmd+A is the box's own
+    const filter = root.querySelector<HTMLInputElement>(
+      ".arxiv-browser__filter",
+    )!;
+    const selectAll = new win.KeyboardEvent("keydown", {
+      key: "a",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    filter.dispatchEvent(selectAll);
+    expect(selectAll.defaultPrevented).toBe(false);
   });
 });
 

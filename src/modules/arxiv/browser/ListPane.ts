@@ -769,7 +769,8 @@ export class ListPane {
     this.setFocus(entry.id, false);
   };
 
-  private entryOf(target: Element | null): BrowserEntry | undefined {
+  /** The paper of the row an element is in */
+  entryOf(target: Element | null): BrowserEntry | undefined {
     const key = target?.closest<HTMLElement>(".zinspire-ref-entry")?.dataset
       .entryId;
     return key
