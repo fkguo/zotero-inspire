@@ -119,14 +119,40 @@ function extractIdentifierFromItem(
 // INSPIRE Metadata Fetching
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * What INSPIRE said about an item: its record; that it has none (no
+ * identifier to ask with, 404, or a search without exactly one hit); or
+ * nothing usable, because the request failed (cancelled, no network, server
+ * error, an answer that broke off) or the record could not be read.
+ */
+export type InspireMetaLookup =
+  | { kind: "found"; meta: jsobject }
+  | { kind: "notFound" }
+  | { kind: "failed"; aborted: boolean };
+
+const NOT_FOUND: InspireMetaLookup = { kind: "notFound" };
+
+/**
+ * INSPIRE metadata of an item, or -1 when there is none or the request
+ * failed. Use lookupInspireMeta to tell the two apart.
+ */
 export async function getInspireMeta(
   item: Zotero.Item,
   operation: string,
   signal?: AbortSignal,
 ): Promise<jsobject | -1> {
+  const lookup = await lookupInspireMeta(item, operation, signal);
+  return lookup.kind === "found" ? lookup.meta : -1;
+}
+
+export async function lookupInspireMeta(
+  item: Zotero.Item,
+  operation: string,
+  signal?: AbortSignal,
+): Promise<InspireMetaLookup> {
   const identifier = extractIdentifierFromItem(item);
   if (!identifier) {
-    return -1;
+    return NOT_FOUND;
   }
 
   const { idtype, value: doi, searchOrNot } = identifier;
@@ -155,44 +181,62 @@ export async function getInspireMeta(
     const citekeyMatch = extra.match(/^.*Citation\sKey:\s*(.+)$/m);
     const citekey = citekeyMatch?.[1]?.trim();
     if (!citekey) {
-      return -1;
+      return NOT_FOUND;
     }
     urlInspire = `${INSPIRE_API_BASE}/literature?q=texkey%20${encodeURIComponent(citekey)}${fieldsParam}`;
   }
 
   if (!urlInspire) {
-    return -1;
+    return NOT_FOUND;
   }
 
-  let status: number | null = null;
-  const response = (await inspireFetch(urlInspire, { signal })
-    .then((response) => {
-      if (response.status !== 404) {
-        status = 1;
-        return response.json();
-      }
-    })
-    .catch((_err) => null)) as any;
-
-  if (status === null) {
-    return -1;
+  let response: any;
+  try {
+    const answer = await inspireFetch(urlInspire, { signal });
+    if (answer.status === 404) {
+      return NOT_FOUND;
+    }
+    // Overloaded or failing server: no statement about the record
+    if (
+      answer.status === 408 ||
+      answer.status === 429 ||
+      answer.status >= 500
+    ) {
+      Zotero.debug(
+        `[${config.addonName}] INSPIRE answered ${answer.status} for ${urlInspire}`,
+      );
+      return { kind: "failed", aborted: false };
+    }
+    response = await answer.json();
+  } catch (err) {
+    const aborted = (err as { name?: unknown } | null)?.name === "AbortError";
+    if (!aborted) {
+      Zotero.debug(
+        `[${config.addonName}] INSPIRE request failed for ${urlInspire}: ${err}`,
+      );
+    }
+    return { kind: "failed", aborted };
   }
 
   const t1 = performance.now();
   Zotero.debug(`Fetching INSPIRE meta took ${t1 - t0} milliseconds.`);
 
+  let meta: any;
   try {
-    const meta = (() => {
-      if (searchOrNot === 0) {
-        return response["metadata"];
-      } else {
-        const hits = response["hits"].hits;
-        if (hits.length === 1) return hits[0].metadata;
-      }
-    })();
-    if (!meta) {
-      return -1;
+    if (searchOrNot === 0) {
+      meta = response["metadata"];
+    } else {
+      const hits = response["hits"].hits;
+      if (hits.length === 1) meta = hits[0].metadata;
     }
+  } catch (err) {
+    return NOT_FOUND;
+  }
+  if (!meta) {
+    return NOT_FOUND;
+  }
+
+  try {
     const assignStart = performance.now();
     const metaInspire = buildMetaFromMetadata(meta, operation);
     if (operation !== "citations") {
@@ -201,9 +245,13 @@ export async function getInspireMeta(
         `Assigning meta took ${assignEnd - assignStart} milliseconds.`,
       );
     }
-    return metaInspire;
+    return { kind: "found", meta: metaInspire };
   } catch (err) {
-    return -1;
+    // INSPIRE has the record; it could not be read here
+    Zotero.debug(
+      `[${config.addonName}] Could not read the INSPIRE record from ${urlInspire}: ${err}`,
+    );
+    return { kind: "failed", aborted: false };
   }
 }
 

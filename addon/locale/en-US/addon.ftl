@@ -313,6 +313,11 @@ references-panel-button-open-pdf = Open PDF
 
 update-cancelled = Update cancelled by user
 update-cancelled-stats = Processed { $completed }/{ $total } items, { $updated } of them updated
+update-request-failed =
+  { $count ->
+    [one] No usable answer from INSPIRE for 1 item (network, server or record problem); it was left unchanged
+   *[other] No usable answer from INSPIRE for { $count } items (network, server or record problem); they were left unchanged
+  }
 
 zoteroinspire-refresh-button =
     .tooltiptext = Refresh INSPIRE data

@@ -309,6 +309,11 @@ references-panel-button-open-pdf = 打开 PDF
 
 update-cancelled = 用户取消更新
 update-cancelled-stats = 已处理 { $completed }/{ $total } 条，其中 { $updated } 条已更新
+update-request-failed =
+  { $count ->
+    [one] 1 条未得到 INSPIRE 的可用应答（网络、服务器或记录问题），未作改动
+   *[other] { $count } 条未得到 INSPIRE 的可用应答（网络、服务器或记录问题），未作改动
+  }
 
 zoteroinspire-refresh-button =
     .tooltiptext = 刷新 INSPIRE 数据

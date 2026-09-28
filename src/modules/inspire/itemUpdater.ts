@@ -27,7 +27,7 @@ import type {
   FavoritePaper,
 } from "./types";
 import {
-  getInspireMeta,
+  lookupInspireMeta,
   getCrossrefCount,
   fetchBibTeX,
 } from "./metadataService";
@@ -147,13 +147,26 @@ interface CancellableRun {
  */
 interface UpdateRun extends CancellableRun {
   total: number;
+  /** Aborts the run's INSPIRE requests when the run is cancelled */
+  controller: AbortController | null;
   /** Items taken off the queue and finished */
   completed: number;
   /** Items saved with INSPIRE data */
   counter: number;
   crossRefCounter: number;
   noRecidCount: number;
+  /** Items whose request got no answer: failed, or aborted by the cancel */
+  unanswered: number;
+  /** Items whose request failed (no network, server error) */
+  failed: number;
 }
+
+/**
+ * How the INSPIRE request for one item ended: answered (record or no record),
+ * failed (no network, server error) or aborted (update cancelled). An item
+ * whose request got no answer is left as it is.
+ */
+type ItemRequestOutcome = "answered" | "failed" | "aborted";
 
 export class ZInspire {
   private closedProgressWindows = new WeakSet<ProgressWindowHelper>();
@@ -235,8 +248,6 @@ export class ZInspire {
 
   /** Cancel every run that is going */
   cancelUpdate() {
-    // Requests of metadata updates in flight are left to finish: an aborted
-    // request would count as "no INSPIRE record" and tag the item
     for (const run of this.activeRuns) {
       if (!run.cancelled) {
         run.cancelled = true;
@@ -647,14 +658,19 @@ export class ZInspire {
     });
     progressWindow.show();
 
+    const controller = createAbortController() ?? null;
     const run = this.startRun<UpdateRun>({
       cancelled: false,
       cancelByEscape,
+      onCancel: () => controller?.abort(),
       total,
+      controller,
       completed: 0,
       counter: 0,
       crossRefCounter: 0,
       noRecidCount: 0,
+      unanswered: 0,
+      failed: 0,
     });
 
     // Create a queue of pending items
@@ -672,7 +688,11 @@ export class ZInspire {
         }
 
         try {
-          await this.updateItemInternal(item, operation, run);
+          const outcome = await this.updateItemInternal(item, operation, run);
+          if (outcome !== "answered") {
+            run.unanswered++;
+            if (outcome === "failed") run.failed++;
+          }
         } catch (err) {
           Zotero.debug(
             `[${config.addonName}] updateItemsConcurrent: error updating item ${item.id}: ${err}`,
@@ -720,13 +740,20 @@ export class ZInspire {
         this.closeActiveProgressWindow(progressWindow);
         // Every run shows its own notice, also when runs overlap
         this.showFinalNotice(operation, run);
+        if (run.failed > 0) {
+          this.showRequestFailedNotice(run.failed);
+        }
         Zotero.debug(
-          `[${config.addonName}] updateItemsConcurrent: done, counter=${run.counter}`,
+          `[${config.addonName}] updateItemsConcurrent: done, counter=${run.counter}, failed=${run.failed}`,
         );
       } else {
         // Cancelled - show stats
         this.closeActiveProgressWindow(progressWindow);
         this.showCancelledStats(run);
+        // Requests that failed before the cancel
+        if (run.failed > 0) {
+          this.showRequestFailedNotice(run.failed);
+        }
       }
     } catch (err) {
       Zotero.debug(
@@ -739,9 +766,25 @@ export class ZInspire {
   }
 
   /**
+   * The notice that INSPIRE gave no answer for some items, which were left as
+   * they were (not tagged as having no INSPIRE record)
+   */
+  private showRequestFailedNotice(count: number) {
+    const notice = new ztoolkit.ProgressWindow(config.addonName, {
+      closeOnClick: true,
+    });
+    notice.createLine({
+      icon: "chrome://zotero/skin/cross.png",
+      text: getString("update-request-failed", { args: { count } }),
+    });
+    notice.show();
+    notice.startCloseTimer(5000);
+  }
+
+  /**
    * Show statistics when update was cancelled: the items processed (whatever
-   * INSPIRE answered; also the ones in progress at the cancel, which finish
-   * after it) and, of those, the items updated
+   * INSPIRE answered; not the ones whose request the cancel aborted or that
+   * got no answer) and, of those, the items updated
    */
   private showCancelledStats(run: UpdateRun) {
     const statsWindow = new ztoolkit.ProgressWindow(config.addonName, {
@@ -752,7 +795,7 @@ export class ZInspire {
       icon: PLUGIN_ICON,
       text: getString("update-cancelled-stats", {
         args: {
-          completed: run.completed.toString(),
+          completed: (run.completed - run.unanswered).toString(),
           total: run.total.toString(),
           // CrossRef counts only items without an INSPIRE record
           updated: (run.counter + run.crossRefCounter).toString(),
@@ -925,7 +968,7 @@ export class ZInspire {
     item: Zotero.Item,
     operation: string,
     run: UpdateRun,
-  ) {
+  ): Promise<ItemRequestOutcome> {
     Zotero.debug(
       `[${config.addonName}] updateItemInternal: starting, item=${item.id}, operation=${operation}`,
     );
@@ -935,11 +978,23 @@ export class ZInspire {
       operation === "citations"
     ) {
       Zotero.debug(
-        `[${config.addonName}] updateItemInternal: calling getInspireMeta`,
+        `[${config.addonName}] updateItemInternal: calling lookupInspireMeta`,
       );
-      const metaInspire = await getInspireMeta(item, operation);
+      const lookup = await lookupInspireMeta(
+        item,
+        operation,
+        run.controller?.signal,
+      );
+      // No answer from INSPIRE says nothing about the record: leave the item
+      if (lookup.kind === "failed") {
+        Zotero.debug(
+          `[${config.addonName}] updateItemInternal: no answer for item ${item.id} (${lookup.aborted ? "cancelled" : "request failed"}), left unchanged`,
+        );
+        return lookup.aborted ? "aborted" : "failed";
+      }
+      const metaInspire = lookup.kind === "found" ? lookup.meta : -1;
       Zotero.debug(
-        `[${config.addonName}] updateItemInternal: getInspireMeta returned, recid=${metaInspire !== -1 ? (metaInspire as jsobject).recid : "N/A"}`,
+        `[${config.addonName}] updateItemInternal: lookupInspireMeta returned, recid=${metaInspire !== -1 ? (metaInspire as jsobject).recid : "N/A"}`,
       );
       if (metaInspire !== -1 && (metaInspire as jsobject).recid !== undefined) {
         if (item.hasTag(getPref("tag_norecid") as string)) {
@@ -986,7 +1041,7 @@ export class ZInspire {
                 Zotero.debug(
                   `[${config.addonName}] Smart update: user cancelled preview`,
                 );
-                return;
+                return "answered";
               }
               // Filter to only user-selected fields
               allowedChanges = allowedChanges.filter((c) =>
@@ -996,7 +1051,7 @@ export class ZInspire {
                 Zotero.debug(
                   `[${config.addonName}] Smart update: no fields selected by user`,
                 );
-                return;
+                return "answered";
               }
             }
           }
@@ -1054,6 +1109,7 @@ export class ZInspire {
         }
       }
     }
+    return "answered";
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

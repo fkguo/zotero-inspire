@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JSDOM } from "jsdom";
 
 const mocks = vi.hoisted(() => ({
-  getInspireMeta: vi.fn(),
+  lookupInspireMeta: vi.fn(),
   getCrossrefCount: vi.fn(),
   fetchReferencesEntries: vi.fn(),
   cacheSet: vi.fn(),
@@ -74,7 +74,7 @@ vi.mock("../src/modules/inspire/metadataService", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("../src/modules/inspire/metadataService")
   >()),
-  getInspireMeta: mocks.getInspireMeta,
+  lookupInspireMeta: mocks.lookupInspireMeta,
   getCrossrefCount: mocks.getCrossrefCount,
 }));
 vi.mock("../src/modules/inspire/localCache", () => ({
@@ -130,7 +130,7 @@ const runWindows = () => FakeProgressWindow.all.filter((w) => w.options.run);
 const notices = () =>
   FakeProgressWindow.all.filter((w) => !w.options.run).map((w) => w.text);
 
-/** A regular item without an INSPIRE record (getInspireMeta answers -1) */
+/** A regular item without an INSPIRE record (INSPIRE answers "not found") */
 function paper(id: number) {
   return {
     id,
@@ -148,8 +148,37 @@ function papers(from: number, to: number) {
   return Array.from({ length: to - from + 1 }, (_, i) => paper(from + i));
 }
 
-/** Answers of getInspireMeta, held until released */
+/**
+ * Answers of lookupInspireMeta, held until released; a request aborted
+ * before ends at once as cancelled, as fetch does
+ */
 let held: Array<() => void>;
+function heldAnswer(
+  _item: unknown,
+  _operation: unknown,
+  signal?: AbortSignal,
+) {
+  return new Promise((resolve) => {
+    held.push(() => resolve({ kind: "notFound" }));
+    signal?.addEventListener("abort", () =>
+      resolve({ kind: "failed", aborted: true }),
+    );
+  });
+}
+
+/**
+ * The next requests get answers that are already arriving (the item is
+ * being saved): a cancel no longer stops them
+ */
+function answersAlreadyArriving() {
+  mocks.lookupInspireMeta.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        held.push(() => resolve({ kind: "notFound" }));
+      }),
+  );
+}
+
 async function releaseAll() {
   while (held.length) {
     for (const release of held.splice(0)) release();
@@ -179,7 +208,7 @@ const cachedRecids = () => mocks.cacheSet.mock.calls.map(([, recid]) => recid);
 
 /** IDs of the items INSPIRE was asked about, in order */
 const askedIDs = () =>
-  mocks.getInspireMeta.mock.calls.map(([item]) => (item as Zotero.Item).id);
+  mocks.lookupInspireMeta.mock.calls.map(([item]) => (item as Zotero.Item).id);
 
 let selectedItems: Zotero.Item[];
 let mainDom: JSDOM;
@@ -253,12 +282,7 @@ beforeEach(() => {
       },
     },
   });
-  mocks.getInspireMeta.mockReset().mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        held.push(() => resolve(-1));
-      }),
-  );
+  mocks.lookupInspireMeta.mockReset().mockImplementation(heldAnswer);
 });
 
 afterEach(() => {
@@ -292,17 +316,20 @@ describe("a cancelled metadata update", () => {
     // Items 4 to 6 of the cancelled run are never updated
     expect(askedIDs()).toEqual([1, 2, 3, 7]);
     expect(runWindows().every((w) => w.closed)).toBe(true);
-    // Each run reports its own numbers: the cancelled one 3 of 6, the new
-    // one its single item, which has no INSPIRE record
+    // Each run reports its own numbers: the cancelled one none of 6 (its
+    // three requests were aborted), the new one its single item, which has
+    // no INSPIRE record
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"0","total":"6","updated":"0"}',
       "No INSPIRE recid was found for 1 item.",
     ]);
   });
 
   it("does not show a finished notice when it ends after the next run", async () => {
     const inspire = new ZInspire();
+    answersAlreadyArriving();
     await startMenuUpdate(inspire, papers(1, 4));
+    mocks.lookupInspireMeta.mockImplementation(heldAnswer);
     await pressEscapeInMainWindow();
     // The first three requests of the cancelled run are still waiting
     const cancelledRequests = held.splice(0);
@@ -322,7 +349,9 @@ describe("a cancelled metadata update", () => {
 
   it("does not take the next run's Escape handling with it when it ends", async () => {
     const inspire = new ZInspire();
+    answersAlreadyArriving();
     await startMenuUpdate(inspire, papers(1, 4));
+    mocks.lookupInspireMeta.mockImplementation(heldAnswer);
     await pressEscapeInMainWindow();
     const cancelledRequests = held.splice(0);
     await startMenuUpdate(inspire, papers(11, 16));
@@ -338,7 +367,7 @@ describe("a cancelled metadata update", () => {
     expect(askedIDs()).toEqual([1, 2, 3, 11, 12, 13]);
     expect(notices()).toEqual([
       'zoteroinspire-update-cancelled-stats {"completed":"3","total":"4","updated":"0"}',
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"0","total":"6","updated":"0"}',
     ]);
   });
 });
@@ -355,7 +384,7 @@ describe("cancelling", () => {
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"0","total":"6","updated":"0"}',
     ]);
   });
 
@@ -366,7 +395,7 @@ describe("cancelling", () => {
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"0","total":"6","updated":"0"}',
     ]);
   });
 
@@ -377,13 +406,17 @@ describe("cancelling", () => {
     selectedItems = papers(1, 6);
     inspire.updateSelectedItems("citations");
     await settle();
+    // INSPIRE answers for the first paper before the cancel
+    held.shift()!();
+    await settle();
     inspire.cancelUpdate();
     await releaseAll();
 
-    expect(askedIDs()).toEqual([1, 2, 3]);
-    expect(mocks.getCrossrefCount).toHaveBeenCalledTimes(3);
+    // The cancel aborts the requests for papers 2 to 4
+    expect(askedIDs()).toEqual([1, 2, 3, 4]);
+    expect(mocks.getCrossrefCount).toHaveBeenCalledTimes(1);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"3"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"1","total":"6","updated":"1"}',
     ]);
   });
 
@@ -394,7 +427,7 @@ describe("cancelling", () => {
     await releaseAll();
     expect(askedIDs()).toEqual([1, 2, 3]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"6","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"0","total":"6","updated":"0"}',
     ]);
   });
 
@@ -412,8 +445,8 @@ describe("cancelling", () => {
 
     expect(askedIDs()).toEqual([1, 2, 3, 11, 12, 13]);
     expect(notices()).toEqual([
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"5","updated":"0"}',
-      'zoteroinspire-update-cancelled-stats {"completed":"3","total":"5","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"0","total":"5","updated":"0"}',
+      'zoteroinspire-update-cancelled-stats {"completed":"0","total":"5","updated":"0"}',
     ]);
   });
 });
@@ -427,7 +460,7 @@ describe("two updates that nobody cancels", () => {
     await settle();
 
     // The first run's requests are not given up when the second starts
-    for (const call of mocks.getInspireMeta.mock.calls) {
+    for (const call of mocks.lookupInspireMeta.mock.calls) {
       const signal = call[2] as AbortSignal | undefined;
       expect(signal?.aborted ?? false).toBe(false);
     }

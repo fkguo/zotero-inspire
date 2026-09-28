@@ -12,14 +12,14 @@ import { JSDOM } from "jsdom";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 
 const mocks = vi.hoisted(() => ({
-  getInspireMeta: vi.fn(),
+  lookupInspireMeta: vi.fn(),
   prefs: new Map<string, unknown>(),
 }));
 vi.mock("../src/modules/inspire/metadataService", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("../src/modules/inspire/metadataService")
   >()),
-  getInspireMeta: mocks.getInspireMeta,
+  lookupInspireMeta: mocks.lookupInspireMeta,
 }));
 vi.mock("../src/modules/inspire/localCache", () => ({
   localCache: { getCacheDir: async () => "/cache" },
@@ -144,7 +144,7 @@ function fakeMainWindow(): Window {
   return main;
 }
 
-/** A regular item without an INSPIRE record (getInspireMeta answers -1) */
+/** A regular item without an INSPIRE record (INSPIRE answers "not found") */
 function paper(id: number) {
   return {
     id,
@@ -156,7 +156,10 @@ function paper(id: number) {
   } as unknown as Zotero.Item;
 }
 
-/** Answers of getInspireMeta, held until released */
+/**
+ * Answers of lookupInspireMeta, held until released; a request aborted
+ * before ends at once as cancelled, as fetch does
+ */
 let held: Array<() => void>;
 function releaseAll() {
   for (const release of held.splice(0)) release();
@@ -199,10 +202,13 @@ beforeEach(() => {
       },
     },
   });
-  mocks.getInspireMeta.mockReset().mockImplementation(
-    () =>
+  mocks.lookupInspireMeta.mockReset().mockImplementation(
+    (_item: unknown, _operation: unknown, signal?: AbortSignal) =>
       new Promise((resolve) => {
-        held.push(() => resolve(-1));
+        held.push(() => resolve({ kind: "notFound" }));
+        signal?.addEventListener("abort", () =>
+          resolve({ kind: "failed", aborted: true }),
+        );
       }),
   );
 });
@@ -250,7 +256,7 @@ describe("progress popup of a metadata update", () => {
       releaseAll();
       await settle();
     }
-    expect(mocks.getInspireMeta).toHaveBeenCalledTimes(5);
+    expect(mocks.lookupInspireMeta).toHaveBeenCalledTimes(5);
     expect(runWindow().closed).toBe(true);
     expect(debugLines().some((line) => line.includes("fatal error"))).toBe(
       false,
@@ -267,17 +273,16 @@ describe("progress popup of a metadata update", () => {
         bubbles: true,
       }),
     );
-    // Their requests are not aborted: an aborted request would count as
-    // "no INSPIRE record" and tag the item
-    for (const call of mocks.getInspireMeta.mock.calls) {
+    // The requests of the three items in progress are aborted (the items
+    // are left as they are); no further item is started
+    for (const call of mocks.lookupInspireMeta.mock.calls) {
       const signal = call[2] as AbortSignal | undefined;
-      expect(signal?.aborted ?? false).toBe(false);
+      expect(signal?.aborted).toBe(true);
     }
     releaseAll();
     await settle();
 
-    // The three items in progress finish; no further item is started
-    expect(mocks.getInspireMeta).toHaveBeenCalledTimes(3);
+    expect(mocks.lookupInspireMeta).toHaveBeenCalledTimes(3);
     expect(held).toHaveLength(0);
     expect(runWindow().closed).toBe(true);
     const stats = FakeZoteroProgressWindow.all.at(-1)!;
@@ -293,7 +298,7 @@ describe("progress popup of a metadata update", () => {
       await settle();
     }
 
-    expect(mocks.getInspireMeta).toHaveBeenCalledTimes(5);
+    expect(mocks.lookupInspireMeta).toHaveBeenCalledTimes(5);
     expect(debugLines().some((line) => line.includes("fatal error"))).toBe(
       false,
     );
@@ -349,15 +354,15 @@ describe("a run started after a cancelled one", () => {
     releaseAll();
     await settle();
     expect(runWindow().closed).toBe(true);
-    mocks.getInspireMeta.mockClear();
+    mocks.lookupInspireMeta.mockClear();
 
     // The next update does not ask INSPIRE with the aborted signal
     selectedItems = [paper(6)];
     inspire.updateSelectedItems("full");
     await settle();
 
-    expect(mocks.getInspireMeta).toHaveBeenCalledTimes(1);
-    const signal = mocks.getInspireMeta.mock.calls[0][2] as
+    expect(mocks.lookupInspireMeta).toHaveBeenCalledTimes(1);
+    const signal = mocks.lookupInspireMeta.mock.calls[0][2] as
       | AbortSignal
       | undefined;
     expect(signal?.aborted ?? false).toBe(false);

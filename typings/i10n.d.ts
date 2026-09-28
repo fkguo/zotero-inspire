@@ -655,5 +655,6 @@ export type FluentMessageId =
   | 'startup-finish'
   | 'update-cancelled'
   | 'update-cancelled-stats'
+  | 'update-request-failed'
   | 'zoteroinspire-copy-all-button'
   | 'zoteroinspire-refresh-button';
