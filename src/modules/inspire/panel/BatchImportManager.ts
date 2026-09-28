@@ -8,13 +8,12 @@ import { getString } from "../../../utils/locale";
 import {
   type InspireReferenceEntry,
   buildDisplayText,
-  findItemsByRecids,
-  findItemsByArxivs,
-  findItemsByDOIs,
   createAbortController,
   createMockSignal,
 } from "../index";
 import type { SaveTargetSelection } from "../../pickerUI";
+import { LibraryIndexError } from "../library/arxivIndex";
+import { findDuplicates, type DuplicateInfo } from "../library/localStatus";
 import type { Reporter } from "./reporter";
 
 // XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
@@ -25,12 +24,9 @@ const XHTML_NS = "http://www.w3.org/1999/xhtml";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Duplicate detection result for an entry.
+ * Duplicate detection result for an entry (library/localStatus.ts).
  */
-export interface DuplicateInfo {
-  localItemID: number;
-  matchType: "recid" | "arxiv" | "doi";
-}
+export type { DuplicateInfo };
 
 /**
  * Result of batch import operation.
@@ -300,6 +296,17 @@ export class BatchImportManager {
           this.detectDuplicates(selectedEntries).then(resolve, reject);
         },
       );
+    } catch (err) {
+      // Without the check, papers already in the library would be added
+      // again: import nothing, and say so
+      if (!(err instanceof LibraryIndexError)) throw err;
+      Zotero.debug(`[${config.addonName}] handleBatchImport: ${err}`);
+      if (!this.disposed) {
+        this.options.reporter.notify(
+          getString("references-panel-batch-duplicate-check-failed"),
+        );
+      }
+      return null;
     } finally {
       this.cancelDuplicateSearch = undefined;
     }
@@ -358,101 +365,13 @@ export class BatchImportManager {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Detect duplicates for selected entries.
+   * Papers of the selection already in the library (localStatus.ts). Rejects
+   * with LibraryIndexError when the library cannot be read.
    */
-  private async detectDuplicates(
+  private detectDuplicates(
     entries: InspireReferenceEntry[],
   ): Promise<Map<string, DuplicateInfo>> {
-    const duplicates = new Map<string, DuplicateInfo>();
-
-    // Skip entries that already have localItemID
-    const entriesToCheck = entries.filter((e) => !e.localItemID);
-    if (entriesToCheck.length === 0) {
-      // All entries already have localItemID
-      for (const entry of entries) {
-        if (entry.localItemID) {
-          duplicates.set(entry.id, {
-            localItemID: entry.localItemID,
-            matchType: "recid",
-          });
-        }
-      }
-      return duplicates;
-    }
-
-    // Collect identifiers for batch queries
-    const recids: string[] = [];
-    const arxivIds: string[] = [];
-    const dois: string[] = [];
-    const entryByRecid = new Map<string, InspireReferenceEntry>();
-    const entryByArxiv = new Map<string, InspireReferenceEntry>();
-    const entryByDOI = new Map<string, InspireReferenceEntry>();
-
-    for (const entry of entriesToCheck) {
-      if (entry.recid) {
-        recids.push(entry.recid);
-        entryByRecid.set(entry.recid, entry);
-      }
-      const arxivId =
-        typeof entry.arxivDetails === "object"
-          ? entry.arxivDetails?.id
-          : undefined;
-      if (arxivId) {
-        arxivIds.push(arxivId);
-        entryByArxiv.set(arxivId, entry);
-      }
-      if (entry.doi) {
-        dois.push(entry.doi);
-        entryByDOI.set(entry.doi, entry);
-      }
-    }
-
-    // Batch query for each identifier type (priority: recid > arXiv > DOI)
-    const [recidMatches, arxivMatches, doiMatches] = await Promise.all([
-      recids.length > 0
-        ? findItemsByRecids(recids)
-        : Promise.resolve(new Map<string, number>()),
-      arxivIds.length > 0
-        ? findItemsByArxivs(arxivIds)
-        : Promise.resolve(new Map<string, number>()),
-      dois.length > 0
-        ? findItemsByDOIs(dois)
-        : Promise.resolve(new Map<string, number>()),
-    ]);
-
-    // Add already-local entries
-    for (const entry of entries) {
-      if (entry.localItemID) {
-        duplicates.set(entry.id, {
-          localItemID: entry.localItemID,
-          matchType: "recid",
-        });
-      }
-    }
-
-    // Process matches in priority order
-    for (const [recid, localItemID] of recidMatches) {
-      const entry = entryByRecid.get(recid);
-      if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "recid" });
-      }
-    }
-
-    for (const [arxivId, localItemID] of arxivMatches) {
-      const entry = entryByArxiv.get(arxivId);
-      if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "arxiv" });
-      }
-    }
-
-    for (const [doi, localItemID] of doiMatches) {
-      const entry = entryByDOI.get(doi);
-      if (entry && !duplicates.has(entry.id)) {
-        duplicates.set(entry.id, { localItemID, matchType: "doi" });
-      }
-    }
-
-    return duplicates;
+    return findDuplicates(entries);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

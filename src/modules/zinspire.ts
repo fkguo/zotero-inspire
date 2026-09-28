@@ -23,7 +23,6 @@ import {
   SaveTargetSelection,
   applyRefEntryTextContainerStyle,
   applyRefEntryMarkerStyle,
-  applyRefEntryMarkerColor,
   applyRefEntryLinkButtonStyle,
   applyRefEntryContentStyle,
   applyAuthorLinkStyle,
@@ -102,7 +101,6 @@ import {
   CHART_MAX_BAR_WIDTH,
   RENDER_PAGE_SIZE_FILTERED,
   METADATA_BATCH_SIZE,
-  LOCAL_STATUS_BATCH_SIZE,
   SMALL_AUTHOR_GROUP_THRESHOLD,
   AUTHOR_NAME_MAX_LENGTH,
   CLIPBOARD_WARN_SIZE_BYTES,
@@ -267,6 +265,9 @@ import {
   BatchImportManager,
   type BatchImportManagerOptions,
 } from "./inspire";
+import { onLibraryIndexChange } from "./inspire/library/arxivIndex";
+import { loadedItem, refreshLocalState } from "./inspire/library/localStatus";
+import { applyLocalMarker } from "./inspire/panel/localMarker";
 
 // Re-export for external use
 export { ZInsUtils, ZInsMenu, ZInspire };
@@ -1638,6 +1639,11 @@ export class InspireReferencePanelController {
   private citationGraphButton?: HTMLButtonElement;
   private currentItemID?: number;
   private currentRecid?: string;
+  /**
+   * The item shown was edited after currentRecid was assigned: a recid found
+   * on INSPIRE by the item's identifiers is not reused for it
+   */
+  private currentRecidOutdated = false;
   /** Invalidates an older same-item recid lookup when fresher state arrives. */
   private recidStateRevision = 0;
   private entryCitedSource?: EntryCitedSource;
@@ -1689,6 +1695,8 @@ export class InspireReferencePanelController {
   /** The newest visible load owns refresh-spinner cleanup. */
   private refreshSpinnerOwner?: object;
   private notifierID?: string;
+  /** Stops redrawing the marks when the library index changes */
+  private stopFollowingLibrary?: () => void;
   private pendingScrollRestore?: ScrollState & { itemID: number };
   private currentTabType: "library" | "reader" = "library";
   private currentReaderTabID?: string;
@@ -2486,6 +2494,7 @@ export class InspireReferencePanelController {
     this.renderChartImmediate();
     this.renderMessage(getString("references-panel-status-empty"));
     this.registerNotifier();
+    this.followLibrary();
     InspireReferencePanelController.instances.add(this);
     InspireReferencePanelController.syncBackButtonStates();
 
@@ -3729,6 +3738,7 @@ export class InspireReferencePanelController {
   ): void {
     const changed = this.currentRecid !== recid;
     this.currentRecid = recid;
+    this.currentRecidOutdated = false;
     if (changed || forceRevision) {
       this.recidStateRevision = this.getRecidStateRevision() + 1;
     }
@@ -4366,42 +4376,8 @@ export class InspireReferencePanelController {
     // FTR-HOVER-PREVIEW-PERF: Enrich localItemID for matched entries from cache
     // This enables instant abstract loading from local library instead of API fetch
     if (this.currentItemID !== event.parentItemID) {
-      // Entries came from cache - need to populate localItemID
-      const recidsToCheck = matchedEntries
-        .map((e) => e.recid)
-        .filter((r): r is string => !!r);
-      if (recidsToCheck.length > 0) {
-        const fieldID = Zotero.ItemFields.getID("archiveLocation");
-        if (fieldID) {
-          const placeholders = recidsToCheck.map(() => "?").join(",");
-          const sql = `SELECT itemID, value FROM itemData JOIN itemDataValues USING(valueID) WHERE fieldID = ? AND value IN (${placeholders})`;
-          try {
-            const rows = await Zotero.DB.queryAsync(sql, [
-              fieldID,
-              ...recidsToCheck,
-            ]);
-            if (rows) {
-              const recidMap = new Map<string, number>();
-              for (const row of rows) {
-                recidMap.set(row.value, Number(row.itemID));
-              }
-              // Apply localItemID to matched entries
-              for (const entry of matchedEntries) {
-                if (entry.recid && recidMap.has(entry.recid)) {
-                  entry.localItemID = recidMap.get(entry.recid);
-                  Zotero.debug(
-                    `[${config.addonName}] [HOVER-PREVIEW] Set localItemID=${entry.localItemID} for entry ${entry.recid}`,
-                  );
-                }
-              }
-            }
-          } catch (e) {
-            Zotero.debug(
-              `[${config.addonName}] [HOVER-PREVIEW] Error enriching localItemID: ${e}`,
-            );
-          }
-        }
-      }
+      // Entries came from another item's cache: their marks may be old
+      await refreshLocalState(matchedEntries);
     }
 
     Zotero.debug(
@@ -5266,7 +5242,7 @@ export class InspireReferencePanelController {
     // Use handleLinkAction for toggling link/unlink status
     await this.handleLinkAction(entry, this.body);
     Zotero.debug(
-      `[${config.addonName}] [KEYBOARD-NAV] Toggled association via Space key, isRelated=${entry.isRelated}`,
+      `[${config.addonName}] [KEYBOARD-NAV] Toggled association via Space key, isRelated=${this.isEntryRelated(entry)}`,
     );
   }
 
@@ -6192,8 +6168,9 @@ export class InspireReferencePanelController {
     // Use the shared predicates from inspire/filters.ts so every filter type
     // behaves the same here as there; the panel supplies its own citation
     // value (self-citation toggle).
-    const context = createDefaultFilterContext((entry) =>
-      this.getCitationValue(entry),
+    const context = createDefaultFilterContext(
+      (entry) => this.getCitationValue(entry),
+      (entry) => this.isEntryRelated(entry),
     );
     return entries.filter((entry) =>
       entryPassesQuickFilters(entry, this.quickFilters, context),
@@ -8277,6 +8254,8 @@ export class InspireReferencePanelController {
 
   destroy() {
     this.unregisterNotifier();
+    this.stopFollowingLibrary?.();
+    this.stopFollowingLibrary = undefined;
     this.cancelActiveRequest();
     this.asyncRenderLoad = undefined;
     this.visibleItemLoad = undefined;
@@ -8520,14 +8499,22 @@ export class InspireReferencePanelController {
         }
         if (event === "add") {
           await this.handleItemAdded(ids as number[]);
-        } else if (event === "delete") {
-          await this.handleItemDeleted(ids as number[]);
         } else if (event === "modify") {
           this.handleItemModified(ids as number[]);
         }
       },
     };
     this.notifierID = Zotero.Notifier.registerObserver(callback, ["item"]);
+  }
+
+  /**
+   * Keep the marks of the list shown in step with the library: items added,
+   * edited, moved to or from the trash, deleted (the library index tells)
+   */
+  private followLibrary() {
+    this.stopFollowingLibrary ??= onLibraryIndexChange(() => {
+      void this.enrichLocalStatus(this.allEntries);
+    });
   }
 
   private unregisterNotifier() {
@@ -8538,26 +8525,14 @@ export class InspireReferencePanelController {
   }
 
   private async handleItemAdded(itemIDs: number[]) {
-    // Check if any newly added items match any reference entries
     for (const itemID of itemIDs) {
       const item = Zotero.Items.get(itemID);
       if (!item) {
         continue;
       }
 
-      // Regular item added: update local status markers (●/⊕) in the current list.
+      // Regular items reach the marks (●/⊕) through the library index
       if (item.isRegularItem?.()) {
-        const recid = deriveRecidFromItem(item);
-        if (!recid) {
-          continue;
-        }
-        for (const entry of this.allEntries) {
-          if (entry.recid === recid && !entry.localItemID) {
-            entry.localItemID = itemID;
-            entry.isRelated = this.isCurrentItemRelated(item);
-            this.updateRowStatus(entry);
-          }
-        }
         continue;
       }
 
@@ -8584,25 +8559,20 @@ export class InspireReferencePanelController {
     }
   }
 
-  private async handleItemDeleted(itemIDs: number[]) {
-    // Check if any deleted items match any reference entries
-    const deletedIDs = new Set(itemIDs);
-    for (const entry of this.allEntries) {
-      if (entry.localItemID && deletedIDs.has(entry.localItemID)) {
-        // Clear the localItemID and isRelated status
-        entry.localItemID = undefined;
-        entry.isRelated = false;
-        this.updateRowStatus(entry);
-      }
-    }
-  }
-
   /**
-   * Handle item modifications - clear auto-check notification if the tracked item was modified
-   * This ensures the notification disappears when the item is updated from any source
-   * (e.g., popup dialog, right-click menu, etc.)
+   * Handle item modifications. The recid of the item shown is resolved again
+   * at its next render (its identifiers may have changed). The auto-check
+   * notification is cleared if the tracked item was modified, so it
+   * disappears when the item is updated from any source (e.g., popup dialog,
+   * right-click menu, etc.)
    */
   private handleItemModified(itemIDs: number[]) {
+    if (
+      this.currentItemID !== undefined &&
+      itemIDs.includes(this.currentItemID)
+    ) {
+      this.currentRecidOutdated = true;
+    }
     if (!this.autoCheckPendingDiff) return;
 
     // Check if the modified item is the one we're tracking
@@ -9618,6 +9588,14 @@ export class InspireReferencePanelController {
   ): Promise<void> {
     const icon = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
 
+    // What is imported depends on which papers are in the library: look them
+    // up now, and import nothing when the library cannot be read
+    await refreshLocalState(entries);
+    if (entries.some((e) => e.localStatusUnknown)) {
+      this.showToast(getString("references-panel-library-lookup-failed-add"));
+      return;
+    }
+
     // Separate entries with and without localItemID
     const entriesWithLocalItem = entries.filter(
       (e) => typeof e.localItemID === "number" && e.localItemID > 0,
@@ -9928,7 +9906,9 @@ export class InspireReferencePanelController {
         }
       }
 
-      let recid = localRecid ?? this.currentRecid;
+      let recid =
+        localRecid ??
+        (this.currentRecidOutdated ? undefined : this.currentRecid);
       if (!recid) {
         const recidRevision = this.getRecidStateRevision();
         const resolvedRecid = await this.fetchRecidForItem(item);
@@ -10723,6 +10703,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.updateCacheSourceDisplay();
         this.renderChart(); // Use deferred render (same as original implementation)
         this.renderReferenceList({ preserveScroll: !shouldReset });
+        // The marks were computed when the list was last shown; the library
+        // may have changed since
+        void this.enrichLocalStatus(entriesForDisplay);
         if (mode === "entryCited" && this.entryCitedSource?.authorSearchInfo) {
           this.updateAuthorStats(this.getEntriesForAuthorStats());
           this.updateAuthorProfileCard();
@@ -10853,6 +10836,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
               Zotero.debug(
                 `[${config.addonName}] Author papers cache expired (${localResult.ageHours}h), triggering background refresh`,
               );
+              // The list shown keeps its entries meanwhile: mark them now
+              void this.enrichLocalStatus(localResult.data);
               // Background refresh - don't await, don't block UI
               this.refreshAuthorPapersInBackground(
                 recid,
@@ -11758,79 +11743,35 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   /**
-   * Enrich local status for entries by checking if they exist in the local library.
-   * Uses batch SQL queries to minimize database interactions.
-   *
-   * Optimization: Increased chunk size from 100 to 500 to reduce query count.
-   * - 500 entries: 1 query instead of 5
-   * - 1000 entries: 2 queries instead of 10
+   * Recompute the "in library" marks of entries from the library index
+   * (localStatus.ts) and redraw the rows whose marks changed. Whether each
+   * paper's item is related to the item shown is worked out when the rows
+   * are drawn (isEntryRelated).
    */
   private async enrichLocalStatus(
     entries: InspireReferenceEntry[],
     signal?: AbortSignal,
   ) {
-    if (signal?.aborted) {
+    if (signal?.aborted || !entries.length) {
       return;
     }
-    const recids = entries.map((e) => e.recid).filter((r): r is string => !!r);
-    if (!recids.length) {
+    const changed = await refreshLocalState(entries);
+    if (!changed.length) {
       return;
     }
-    const fieldID = Zotero.ItemFields.getID("archiveLocation");
-    if (!fieldID) {
+    // The "local items", "online items" and "related only" filters depend on
+    // the marks: a paper added or moved to the trash enters or leaves the
+    // list shown
+    if (
+      this.quickFilters?.has("localItems") ||
+      this.quickFilters?.has("onlineItems") ||
+      this.quickFilters?.has("relatedOnly")
+    ) {
+      this.renderReferenceList({ preserveScroll: true });
       return;
     }
-
-    // Increased chunk size for fewer SQL queries (was 100, now 500)
-    // SQLite handles IN clauses with 500+ parameters efficiently
-    const CHUNK_SIZE = LOCAL_STATUS_BATCH_SIZE;
-    const recidMap = new Map<string, number>();
-
-    for (let i = 0; i < recids.length; i += CHUNK_SIZE) {
-      if (signal?.aborted) {
-        return;
-      }
-      const chunk = recids.slice(i, i + CHUNK_SIZE);
-      const placeholders = chunk.map(() => "?").join(",");
-      const sql = `SELECT itemID, value FROM itemData JOIN itemDataValues USING(valueID) WHERE fieldID = ? AND value IN (${placeholders})`;
-      try {
-        const rows = await Zotero.DB.queryAsync(sql, [fieldID, ...chunk]);
-        if (rows) {
-          for (const row of rows) {
-            recidMap.set(row.value, Number(row.itemID));
-          }
-        }
-      } catch (e) {
-        Zotero.debug(`[${config.addonName}] Error querying local items: ${e}`);
-      }
-    }
-
-    if (signal?.aborted) {
-      return;
-    }
-
-    // Check signal periodically during iteration to allow early abort
-    const CHECK_INTERVAL = 200;
-    let checkCounter = 0;
-    for (const entry of entries) {
-      // Periodic signal check to allow early abort on large datasets
-      if (++checkCounter >= CHECK_INTERVAL) {
-        checkCounter = 0;
-        if (signal?.aborted) {
-          return;
-        }
-      }
-      if (entry.recid && recidMap.has(entry.recid)) {
-        const itemID = recidMap.get(entry.recid)!;
-        if (entry.localItemID !== itemID) {
-          entry.localItemID = itemID;
-          const item = Zotero.Items.get(itemID);
-          if (item) {
-            entry.isRelated = this.isCurrentItemRelated(item);
-          }
-          this.updateRowStatus(entry);
-        }
-      }
+    for (const entry of changed) {
+      this.updateRowStatus(entry);
     }
   }
 
@@ -11897,24 +11838,23 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
     const marker = row.querySelector(".zinspire-ref-entry__dot") as HTMLElement;
     if (marker) {
-      // Use filled circle for local items, circled plus for missing (click to add)
-      marker.textContent = entry.localItemID ? "●" : "⊕";
-      marker.dataset.state = entry.localItemID ? "local" : "missing";
+      // ● (or the number of items) for papers in the library, ⊕ for missing
+      // (click to add), ? when the library could not be read
+      applyLocalMarker(marker, entry, isDarkMode(marker.ownerDocument));
       marker.classList.add("is-clickable");
       marker.style.cursor = "pointer";
-      applyRefEntryMarkerColor(marker, Boolean(entry.localItemID));
-      marker.setAttribute("title", entry.localItemID ? s.dotLocal : s.dotAdd);
     }
 
     const linkButton = row.querySelector(
       ".zinspire-ref-entry__link",
     ) as HTMLButtonElement;
     if (linkButton) {
+      const related = this.isEntryRelated(entry);
       linkButton.setAttribute(
         "title",
-        entry.isRelated ? s.linkExisting : s.linkMissing,
+        related ? s.linkExisting : s.linkMissing,
       );
-      this.renderLinkButton(linkButton, Boolean(entry.isRelated));
+      this.renderLinkButton(linkButton, related);
     }
 
     // FIX: Also update PDF button when local status changes
@@ -14575,6 +14515,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         if (!entry.localItemID) return false;
         return this.getFirstPdfAttachmentID(entry.localItemID) !== null;
       },
+      isRelated: (entry) => this.isEntryRelated(entry),
     };
   }
 
@@ -14590,22 +14531,27 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.updateRowStatus(entry);
       },
       onLink: async (entry) => {
-        const wasRelated = entry.isRelated;
         await this.handleLinkAction(entry, undefined, { skipRerender: true });
         // Use targeted row update instead of full list re-render
         const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
         if (row) {
-          this.entryRenderer?.updateLinkState(row, entry.isRelated ?? false);
+          this.entryRenderer?.updateLinkState(row, this.isEntryRelated(entry));
         }
       },
       onUnlink: async (entry) => {
         if (entry.localItemID) {
-          await this.unlinkReference(this.currentItemID, entry.localItemID);
-          entry.isRelated = false;
+          const itemID = this.currentItemID;
+          await this.unlinkReference(
+            itemID,
+            this.relatedItemsOf(entry, itemID),
+          );
           // Use targeted row update instead of full list re-render
           const row = this.rowCache.get(entry.id) as HTMLDivElement | undefined;
           if (row) {
-            this.entryRenderer?.updateLinkState(row, false);
+            this.entryRenderer?.updateLinkState(
+              row,
+              this.isEntryRelated(entry),
+            );
           }
         }
       },
@@ -14677,6 +14623,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       onToggleFavorite: async (entry) => {
         this.togglePaperFavorite(entry);
       },
+      isRelated: (entry) => this.isEntryRelated(entry),
     };
   }
 
@@ -15193,16 +15140,15 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       await this.handleAddAndLinkAction(entry, target, itemID);
       return;
     }
-    if (entry.isRelated) {
-      await this.unlinkReference(itemID, entry.localItemID);
-      entry.isRelated = false;
+    const related = this.relatedItemsOf(entry, itemID);
+    if (related.length) {
+      await this.unlinkReference(itemID, related);
       if (!options?.skipRerender) {
         this.renderReferenceList();
       }
       return;
     }
     await this.linkExistingReference(itemID, entry.localItemID);
-    entry.isRelated = true;
     if (!options?.skipRerender) {
       this.renderReferenceList();
     }
@@ -15228,6 +15174,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     // An item already in the trash at the click is related as before; one
     // erased or moved to the trash during the import is not (checked below)
     const trashedAtClick = Boolean(Zotero.Items.get(itemID)?.deleted);
+    if (!(await this.confirmNotInLibrary(entry))) {
+      return;
+    }
     const selection = await this.promptForSaveTarget(anchor);
     if (!selection) {
       return;
@@ -15243,7 +15192,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       const item = Zotero.Items.get(itemID);
       if (item && (!item.deleted || trashedAtClick)) {
         await this.linkExistingReference(itemID, newItem.id);
-        entry.isRelated = true;
       } else {
         this.showToast(getString("references-panel-toast-link-target-gone"));
       }
@@ -15260,12 +15208,44 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
   }
 
+  /**
+   * Look a paper up in the library before adding it: true when it is not
+   * there. If it is (its mark had not caught up), its row shows it instead.
+   * If the library cannot be read, nothing is added and the user is told.
+   */
+  private async confirmNotInLibrary(
+    entry: InspireReferenceEntry,
+  ): Promise<boolean> {
+    const changed = await refreshLocalState([entry]);
+    if (changed.length) {
+      this.updateRowStatus(entry);
+    }
+    if (entry.localStatusUnknown) {
+      this.showToast(getString("references-panel-library-lookup-failed-add"));
+      return false;
+    }
+    if (entry.localItemID) {
+      this.showToast(getString("references-panel-dot-local"));
+      return false;
+    }
+    return true;
+  }
+
   private async handleMarkerClick(
     entry: InspireReferenceEntry,
     anchor?: HTMLElement,
   ) {
     // Clear timer reference since we're executing now
     this.markerClickTimer = undefined;
+
+    // "?": the library could not be read; try again
+    if (entry.localStatusUnknown) {
+      await this.enrichLocalStatus(this.allEntries);
+      if (entry.localStatusUnknown) {
+        this.showToast(getString("references-panel-library-lookup-failed"));
+      }
+      return;
+    }
 
     if (entry.localItemID) {
       const pane: any =
@@ -15303,7 +15283,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    * Returns the attachment ID if found, null otherwise.
    */
   private getFirstPdfAttachmentID(parentItemID: number): number | null {
-    const parentItem = Zotero.Items.get(parentItemID);
+    // An item of a library whose items are not loaded yet shows no PDF
+    const parentItem = loadedItem(parentItemID);
     if (!parentItem) {
       return null;
     }
@@ -17241,19 +17222,44 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     return row;
   }
 
-  private isCurrentItemRelated(localItem: Zotero.Item) {
-    if (!this.currentItemID) {
-      return false;
+  /**
+   * Whether an item of the paper is related to the item shown (or to
+   * `itemID`). Asked when rows and cards are drawn: lists are shared between
+   * items, so this is not kept on their entries.
+   */
+  private isEntryRelated(
+    entry: InspireReferenceEntry,
+    itemID = this.currentItemID,
+  ): boolean {
+    return this.relatedItemsOf(entry, itemID).length > 0;
+  }
+
+  /**
+   * The paper's items (it can have several) that are related to the item
+   * shown (or to `itemID`)
+   */
+  private relatedItemsOf(
+    entry: InspireReferenceEntry,
+    itemID = this.currentItemID,
+  ): number[] {
+    if (!entry.localItemID || !itemID) {
+      return [];
     }
-    const currentItem = Zotero.Items.get(this.currentItemID);
-    if (!currentItem) {
-      return false;
+    const item = loadedItem(itemID);
+    if (!item) {
+      return [];
     }
-    const relatedKeys = currentItem.relatedItems || [];
-    const compositeKey = `${localItem.libraryID}/${localItem.key}`;
-    return (
-      relatedKeys.includes(localItem.key) || relatedKeys.includes(compositeKey)
-    );
+    const relatedKeys = item.relatedItems || [];
+    return (entry.localItemIDs ?? [entry.localItemID]).filter((id) => {
+      // An item of a library not loaded yet is in another library than the
+      // item shown, and items of two libraries are never related
+      const localItem = loadedItem(id);
+      return (
+        localItem !== null &&
+        (relatedKeys.includes(localItem.key) ||
+          relatedKeys.includes(`${localItem.libraryID}/${localItem.key}`))
+      );
+    });
   }
 
   /**
@@ -17283,22 +17289,31 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
   }
 
-  /** Remove the relation between `localItemID` and the item `itemID`. */
+  /**
+   * Remove the relations between the item `itemID` and `localItemIDs` (the
+   * items of a paper), with one notice for all
+   */
   private async unlinkReference(
     itemID: number | undefined,
-    localItemID: number,
+    localItemIDs: number[],
   ) {
-    if (!itemID || localItemID === itemID) {
+    const item = itemID ? Zotero.Items.get(itemID) : undefined;
+    if (!item) {
       return;
     }
-    const item = Zotero.Items.get(itemID);
-    const targetItem = Zotero.Items.get(localItemID);
-    if (!item || !targetItem) {
-      return;
-    }
-    const updated = await item.removeRelatedItem(targetItem);
-    if (await targetItem.removeRelatedItem(item)) {
-      await targetItem.saveTx();
+    let updated = false;
+    for (const localItemID of localItemIDs) {
+      const targetItem =
+        localItemID !== itemID ? Zotero.Items.get(localItemID) : undefined;
+      if (!targetItem) {
+        continue;
+      }
+      if (await item.removeRelatedItem(targetItem)) {
+        updated = true;
+      }
+      if (await targetItem.removeRelatedItem(item)) {
+        await targetItem.saveTx();
+      }
     }
     if (updated) {
       await item.saveTx();
@@ -17319,6 +17334,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       this.showToast(getString("references-panel-toast-missing"));
       return;
     }
+    if (!(await this.confirmNotInLibrary(entry))) {
+      return;
+    }
     const selection = await this.promptForSaveTarget(anchor);
     if (!selection) {
       return;
@@ -17329,7 +17347,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       entry.displayText = buildDisplayText(entry);
       // Invalidate searchText so it will be recalculated on next filter
       entry.searchText = "";
-      entry.isRelated = false;
 
       // Update the clicked row immediately (marker + link + PDF button) without a full re-render.
       // A full render can reset pagination/scroll and delay visual updates for the active row.

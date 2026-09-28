@@ -130,8 +130,6 @@ export const CHART_MAX_BAR_WIDTH = 50;
 export const RENDER_PAGE_SIZE_FILTERED = 500;
 /** Batch size for metadata enrichment */
 export const METADATA_BATCH_SIZE = 50;
-/** Batch size for local status SQL queries */
-export const LOCAL_STATUS_BATCH_SIZE = 500;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Filter Thresholds

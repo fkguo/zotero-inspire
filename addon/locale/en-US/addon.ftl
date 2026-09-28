@@ -220,6 +220,8 @@ references-panel-filter-count-author =
   { $visible } / { $total } papers by { $label }
 references-panel-dot-local = Item exists in your library
 references-panel-dot-add = Add this reference to your library
+references-panel-dot-local-several = { $count } items in your library have this paper's INSPIRE ID; a click selects the first:
+references-panel-dot-unknown = Could not read your library, so it is not known whether this paper is in it. Click to try again.
 references-panel-related-badge-tooltip = Shares { $count } references with the current paper
 references-panel-link-existing = Click to unlink the related item
 references-panel-link-missing = Link as related item
@@ -227,6 +229,8 @@ references-panel-toast-linked = Related item linked successfully
 references-panel-toast-link-target-gone = Not linked: the item it was to be linked to has been deleted or moved to the trash
 references-panel-toast-added = Reference added to your library
 references-panel-toast-missing = Article not found in INSPIRE-HEP
+references-panel-library-lookup-failed = Could not read your library. Please try again.
+references-panel-library-lookup-failed-add = Could not check whether this paper is already in your library, so it was not added. Please try again.
 references-panel-toast-no-pdf = This item has no PDF attachment
 references-panel-toast-selected = Item selected in library
 references-panel-toast-bibtex-success = BibTeX copied to clipboard
@@ -305,6 +309,8 @@ references-panel-abstract-latex-copied = LaTeX source copied to clipboard
 # Preview Card Action Buttons (FTR-HOVER-PREVIEW)
 references-panel-status-local = In Library
 references-panel-status-online = Online
+references-panel-status-local-several = In Library ({ $count })
+references-panel-status-unknown = Library unknown
 references-panel-button-add = Add to Library
 references-panel-button-link = Link
 references-panel-button-unlink = Unlink
@@ -456,6 +462,7 @@ references-panel-batch-duplicate-skip-all = Skip all duplicates
 references-panel-batch-duplicate-import-all = Import all anyway
 references-panel-batch-duplicate-confirm = Confirm selection
 references-panel-batch-duplicate-cancel = Cancel
+references-panel-batch-duplicate-check-failed = Could not check your library for these papers, so nothing was imported. Please try again.
 
 # PDF Citation Lookup (FTR-PDF-ANNOTATE)
 pdf-annotate-lookup-button = Look up in References

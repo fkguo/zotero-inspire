@@ -111,8 +111,15 @@ export interface InspireReferenceEntry {
   authorText: string;
   displayText: string;
   searchText: string;
+  /**
+   * In-library marks, recomputed from the library index (localStatus.ts):
+   * the first item with the paper's recid, all of them, or the library could
+   * not be read. Whether the item is related to the item shown is worked out
+   * when the list is drawn, as it depends on the item shown.
+   */
   localItemID?: number;
-  isRelated?: boolean;
+  localItemIDs?: number[];
+  localStatusUnknown?: boolean;
   /** FTR-RELATED-PAPERS: bibliographic coupling signal (how many shared references) */
   relatedSharedRefCount?: number;
   /** FTR-RELATED-PAPERS: up to a few shared reference titles for tooltip explanation */
@@ -199,7 +206,10 @@ export interface CitationGraphNode {
   authorLabel?: string; // "Author et al. (Year)" format
   year?: string;
   citationCount?: number;
+  /** In-library marks, as on InspireReferenceEntry */
   localItemID?: number;
+  localItemIDs?: number[];
+  localStatusUnknown?: boolean;
   isSeed: boolean;
 }
 

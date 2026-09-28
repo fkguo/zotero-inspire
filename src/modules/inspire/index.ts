@@ -56,14 +56,18 @@ export {
   buildFallbackUrlFromMetadata,
   extractArxivFromReference,
   extractArxivFromMetadata,
-  findItemByRecid,
   copyToClipboard,
   recidLookupCache,
-  // Batch query functions for duplicate detection (FTR-BATCH-IMPORT)
+} from "./apiUtils";
+
+// Re-export the library lookups (duplicate detection, FTR-BATCH-IMPORT)
+export {
+  findItemByRecid,
   findItemsByRecids,
   findItemsByArxivs,
   findItemsByDOIs,
-} from "./apiUtils";
+  type LibraryHit,
+} from "./library/arxivIndex";
 
 // Re-export author utilities
 export {
@@ -127,6 +131,7 @@ export {
 export {
   getInspireMeta,
   fetchRecidFromInspire,
+  forgetRecidLookup,
   fetchInspireMetaByRecid,
   fetchInspireAbstract,
   fetchBibTeX,

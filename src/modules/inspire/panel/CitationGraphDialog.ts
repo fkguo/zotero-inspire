@@ -33,12 +33,15 @@ import {
   buildFieldsParam,
 } from "../constants";
 import { createAbortControllerWithSignal, ReaderTabHelper } from "../utils";
-import {
-  copyToClipboard,
-  deriveRecidFromItem,
-  findItemByRecid,
-} from "../apiUtils";
+import { copyToClipboard, deriveRecidFromItem } from "../apiUtils";
 import { fetchReferencesEntries } from "../referencesService";
+import {
+  findItemByRecid,
+  LibraryIndexError,
+  onLibraryIndexChange,
+} from "../library/arxivIndex";
+import { refreshLocalState, type LocalPaper } from "../library/localStatus";
+import { localCountMark, localMarkState } from "./localMarker";
 import type {
   CitationGraphEdgeData,
   CitationGraphNodeData,
@@ -103,6 +106,8 @@ export class CitationGraphDialog {
 
   private readonly doc: Document;
   private readonly onDispose?: () => void;
+  /** Stops redrawing the in-library marks when the library index changes */
+  private stopFollowingLibrary?: () => void;
 
   private backdropEl?: HTMLDivElement;
   private dialogEl?: HTMLDivElement;
@@ -214,8 +219,34 @@ export class CitationGraphDialog {
     this.seeds = this.normalizeSeeds(seeds);
     this.current = this.seeds[0] ?? { recid: "" };
     this.buildUI();
+    this.followLibrary();
     if (this.academicAuthor) this.switchGraphMode?.(true);
     else void this.loadSeeds(this.seeds);
+  }
+
+  /** Keep the in-library marks of the graph shown in step with the library */
+  private followLibrary(): void {
+    this.stopFollowingLibrary ??= onLibraryIndexChange(() => {
+      void this.refreshLocalMarks();
+    });
+  }
+
+  /**
+   * Recompute the in-library marks of the graph shown from the library index
+   * (localStatus.ts), and draw the graph again if one changed.
+   */
+  private async refreshLocalMarks(): Promise<void> {
+    const graph = this.graphResult;
+    if (!graph || this.disposed) return;
+    const changed = await refreshLocalState([
+      ...graph.seeds,
+      ...graph.references,
+      ...graph.citedBy,
+    ]);
+    if (!changed.length || this.disposed || this.graphResult !== graph) return;
+    this.updateHeader(graph);
+    this.academicTreeView?.refreshAppearance();
+    this.renderGraph(graph);
   }
 
   dispose(): void {
@@ -223,6 +254,8 @@ export class CitationGraphDialog {
       return;
     }
     this.disposed = true;
+    this.stopFollowingLibrary?.();
+    this.stopFollowingLibrary = undefined;
     this.academicTreeView?.dispose();
     this.academicTreeView = undefined;
     this.switchGraphMode = undefined;
@@ -1026,7 +1059,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
                 }) || `Connections: ${this.allConnectionEdges.length}`
               }`
           : "";
-        this.statusEl.textContent = `Refs ${result.shown.references}/${result.totals.references} · Cited-by ${result.shown.citedBy}/${result.totals.citedBy}${connectionsHint} · ${hint}`;
+        // Papers are shown as not in the library when the library could not
+        // be read: say so
+        const unreadable = [
+          ...result.seeds,
+          ...result.references,
+          ...result.citedBy,
+        ].some((paper) => paper.localStatusUnknown)
+          ? ` · ${getString("references-panel-library-lookup-failed")}`
+          : "";
+        this.statusEl.textContent = `Refs ${result.shown.references}/${result.totals.references} · Cited-by ${result.shown.citedBy}/${result.totals.citedBy}${connectionsHint}${unreadable} · ${hint}`;
       }
     }
 
@@ -1736,7 +1778,15 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       return;
     }
 
-    const existing = await findItemByRecid(recid).catch(() => null);
+    let existing: Zotero.Item | null;
+    try {
+      existing = await findItemByRecid(recid);
+    } catch (err) {
+      // Without the check the paper could be added twice: add nothing
+      if (!(err instanceof LibraryIndexError)) throw err;
+      this.showToast(getString("references-panel-library-lookup-failed-add"));
+      return;
+    }
     if (existing?.id) {
       entry.localItemID = existing.id;
       this.applyLocalItemId(recid, existing.id);
@@ -2733,6 +2783,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     this.updateHeader(graph);
     this.renderSeedsPanel(graph);
     this.renderGraph(graph);
+    // The file has the marks of the library it was saved from
+    void this.refreshLocalMarks();
   }
 
   private async loadFromFilePicker(): Promise<void> {
@@ -3963,7 +4015,14 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
 
     // Try to find the item in Zotero
-    const item = await findItemByRecid(recid);
+    let item: Zotero.Item | null;
+    try {
+      item = await findItemByRecid(recid);
+    } catch (err) {
+      if (!(err instanceof LibraryIndexError)) throw err;
+      this.showToast(getString("references-panel-library-lookup-failed"));
+      return;
+    }
 
     if (item) {
       // Item exists in Zotero - jump to it
@@ -5239,6 +5298,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     textFill: string,
     textSecondary: string,
     nodePositions?: Array<{ x: number; y: number; r: number }>,
+    libraryUnknown = false,
   ): void {
     if (!this.svgGroupEl) return;
 
@@ -5247,6 +5307,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     const onlineColor = dark ? "#6b7280" : "#9ca3af";
 
     const legendLabels = ["In library", "Online", "Ref", "Cited-by", "Seed"];
+    // Papers whose library state is unknown (the library could not be read)
+    if (libraryUnknown) legendLabels.push("Library unknown");
     const fontSize = 9;
     const charWidth = fontSize * 0.6;
     const maxLabelWidth = Math.max(
@@ -5400,6 +5462,27 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     seedLabel.setAttribute("fill", textFill);
     seedLabel.setAttribute("font-size", String(fontSize));
     this.svgGroupEl.appendChild(seedLabel);
+
+    if (libraryUnknown) {
+      // Library unknown (dashed outline)
+      const unknownCircle = this.doc.createElementNS(SVG_NS, "circle");
+      unknownCircle.setAttribute("cx", String(iconX));
+      unknownCircle.setAttribute("cy", String(rowY(5)));
+      unknownCircle.setAttribute("r", String(iconR));
+      unknownCircle.setAttribute("fill", "none");
+      unknownCircle.setAttribute("stroke", onlineColor);
+      unknownCircle.setAttribute("stroke-width", "1.2");
+      unknownCircle.setAttribute("stroke-dasharray", "2 2");
+      this.svgGroupEl.appendChild(unknownCircle);
+
+      const unknownLabel = this.doc.createElementNS(SVG_NS, "text");
+      unknownLabel.textContent = "Library unknown";
+      unknownLabel.setAttribute("x", String(labelX));
+      unknownLabel.setAttribute("y", String(labelBaselineY(5)));
+      unknownLabel.setAttribute("fill", textFill);
+      unknownLabel.setAttribute("font-size", String(fontSize));
+      this.svgGroupEl.appendChild(unknownLabel);
+    }
   }
 
   private renderGraph(result: MultiSeedGraphResult): void {
@@ -5723,7 +5806,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       labelX: number;
       labelY: number;
       isSeed?: boolean;
-      localItemID?: number;
+      /** In-library marks of the paper (localStatus.ts) */
+      marks?: LocalPaper;
       year?: string;
       kind: "seed" | "reference" | "citedBy";
     }) => {
@@ -5734,14 +5818,24 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       // Determine fill color based on Zotero status
       // Green for in library, gray for online (consistent with References panel marker concept)
       const seedLabelColor = dark ? "#a78bfa" : "#6d28d9";
-      const inLibrary = typeof opts.localItemID === "number";
+      const state = localMarkState(opts.marks ?? {});
       const localColor = dark ? "#22c55e" : "#1a8f4d"; // Green
       const onlineColor = dark ? "#6b7280" : "#9ca3af"; // Gray
+      // The library could not be read: an outline only, not "online"
+      const unknown = !opts.isSeed && state === "unknown";
       const fillColor = opts.isSeed
         ? seedFill
-        : inLibrary
+        : state === "local"
           ? localColor
-          : onlineColor;
+          : unknown
+            ? "none"
+            : onlineColor;
+      const markUnknown = (shape: Element) => {
+        if (!unknown) return;
+        shape.setAttribute("stroke", onlineColor);
+        shape.setAttribute("stroke-width", "1.2");
+        shape.setAttribute("stroke-dasharray", "2 2");
+      };
 
       // Use circle for references/seeds, pentagon for cited-by
       if (opts.kind === "citedBy" && !opts.isSeed) {
@@ -5751,6 +5845,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         pentagon.setAttribute("points", points);
         pentagon.setAttribute("fill", fillColor);
         pentagon.setAttribute("fill-opacity", "0.75");
+        markUnknown(pentagon);
         group.appendChild(pentagon);
       } else {
         // Circle for references and seed
@@ -5765,12 +5860,17 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
           circle.setAttribute("stroke-width", "1.5");
           circle.setAttribute("stroke-opacity", "0.9");
         }
+        markUnknown(circle);
         group.appendChild(circle);
       }
 
-      // Show "Author et al. (Year)" label only
+      // Show "Author et al. (Year)" label only, with the number of items
+      // when the paper is in the library several times
       const label = this.doc.createElementNS(SVG_NS, "text");
-      label.textContent = opts.authorLabel;
+      const countMark = localCountMark(opts.marks ?? {});
+      label.textContent = countMark
+        ? `${opts.authorLabel} ${countMark}`
+        : opts.authorLabel;
       label.setAttribute("x", String(opts.labelX));
       label.setAttribute("y", String(opts.labelY));
       label.setAttribute("fill", opts.isSeed ? seedLabelColor : textFill);
@@ -6051,7 +6151,8 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         displayText: "",
         searchText: "",
         localItemID: seed.localItemID,
-        isRelated: false,
+        localItemIDs: seed.localItemIDs,
+        localStatusUnknown: seed.localStatusUnknown,
         citationCount: seed.citationCount,
         citationCountWithoutSelf: seed.citationCount,
         publicationInfo: seed.year ? { year: seed.year } : undefined,
@@ -6507,7 +6608,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         labelX,
         labelY,
         isSeed: n.kind === "seed",
-        localItemID: n.localItemID,
+        marks: n.entry ?? { localItemID: n.localItemID },
         year: n.year,
         kind: n.kind,
       });
@@ -6516,7 +6617,16 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
 
     // Render legend after nodes (to find best position)
-    this.renderLegend(width, padX, textFill, textSecondary, nodePositions);
+    this.renderLegend(
+      width,
+      padX,
+      textFill,
+      textSecondary,
+      nodePositions,
+      allNodes.some(
+        (n) => n.kind !== "seed" && n.entry?.localStatusUnknown === true,
+      ),
+    );
 
     this.applyViewTransform();
   }

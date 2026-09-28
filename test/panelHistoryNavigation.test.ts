@@ -48,7 +48,11 @@ describe("References panel back/forward history", () => {
       id,
       isRegularItem: () => true,
       getField: (field: string) =>
-        field === "archiveLocation" ? String(100 + id) : "",
+        field === "archiveLocation"
+          ? String(100 + id)
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
       getAttachments: () => [id + 10],
     });
     items.set(id + 10, { id: id + 10, isPDFAttachment: () => true });

@@ -104,11 +104,16 @@ function part(row: Element, name: string) {
 describe("References panel row", () => {
   it("shows a paper of the library with its PDF", () => {
     const renderer = new EntryListRenderer({ document: main.document });
-    const entry = paper({ localItemID: 55, isRelated: true });
+    const entry = paper({ localItemID: 55 });
 
     const row = renderer.createRow(
       entry,
-      context({ selectedEntryIDs: new Set([entry.id]), hasPdf: () => true }),
+      context({
+        selectedEntryIDs: new Set([entry.id]),
+        hasPdf: () => true,
+        // The paper's item is related to the item shown
+        isRelated: (e) => e.localItemID === 55,
+      }),
     );
 
     expect(row.dataset.entryId).toBe("3-2001");
@@ -384,8 +389,12 @@ describe("rows without the row pool", () => {
   });
 
   it("draws the same row as the pooled renderer", () => {
-    const entry = paper({ localItemID: 55, isRelated: true });
-    const ctx = context({ hasPdf: () => true, focusedEntryID: entry.id });
+    const entry = paper({ localItemID: 55 });
+    const ctx = context({
+      hasPdf: () => true,
+      focusedEntryID: entry.id,
+      isRelated: () => true,
+    });
 
     const pooled = new EntryListRenderer({ document: main.document });
     const unpooled = new EntryListRenderer({

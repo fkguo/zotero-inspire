@@ -471,7 +471,9 @@ const ROWS: Row[] = [
     changed: {
       preprintWatch: "2301.12345",
       column: "20230112345\t2301.12345",
-      reason: "every reader reads Archive Location marked as arXiv",
+      lookup: null,
+      reason:
+        "every reader reads Archive Location marked as arXiv; it is not a recid (Archive is not INSPIRE)",
     },
   },
   {

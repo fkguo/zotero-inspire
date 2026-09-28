@@ -762,7 +762,7 @@ describe("in a window of its own", () => {
     expect(marker.style.color).toBe(css(second, "#d93025"));
     expect(row.style.boxShadow).toBe("inset 3px 0 0 #0060df");
 
-    renderer.updateLocalState(row, true);
+    renderer.updateLocalState(row, { localItemID: 1 });
     expect(marker.style.color).toBe(css(second, "#1a8f4d"));
     renderer.updatePdfState(row, "disabled");
     const icon = row.querySelector(".zinspire-ref-entry__pdf svg path");

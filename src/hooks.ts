@@ -11,6 +11,7 @@ import {
   stopBackgroundCheck,
   onRenderModeChange,
   deriveRecidFromItem,
+  forgetRecidLookup,
   clearFundingCache,
   registerInspireItemTreeColumns,
   unregisterInspireItemTreeColumns,
@@ -41,6 +42,7 @@ import {
   registerZInspireBibtexEndpoint,
   unregisterZInspireBibtexEndpoint,
 } from "./modules/connectorInspireBibtexApi";
+import { stopLibraryIndex } from "./modules/inspire/library/arxivIndex";
 
 // Track background timers for cleanup on shutdown (PERF-FIX-1)
 let purgeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -187,6 +189,7 @@ function onShutdown(): void {
     preprintCheckTimer = undefined;
   }
   stopBackgroundCheck();
+  stopLibraryIndex();
 
   // PERF-FIX-2: Stop MemoryMonitor interval if running
   MemoryMonitor.getInstance().stop();
@@ -262,6 +265,16 @@ async function onNotify(
         break;
       default:
         break;
+    }
+  }
+
+  // A recid found on INSPIRE for an item without one was found by the item's
+  // identifiers; once the item changes, it is looked up again
+  if (event === "modify" || event === "delete") {
+    for (const id of ids) {
+      if (typeof id === "number") {
+        forgetRecidLookup(id);
+      }
     }
   }
 
