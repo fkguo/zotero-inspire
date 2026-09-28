@@ -81,12 +81,23 @@ import { copyFundingInfo } from "./funding";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * One metadata update run. Each run has its own cancelled flag, so a new run
- * cannot resume one the user cancelled, and its own counts, so items of a
- * cancelled run that finish late are not reported by the next run.
+ * A run the user can cancel: a metadata update, a reference-cache download
+ * or a preprint check. Each run has its own cancelled flag, so starting a
+ * run never resumes one the user cancelled.
  */
-interface UpdateRun {
+interface CancellableRun {
   cancelled: boolean;
+  /** Escape in the main window cancels it (runs started from a menu) */
+  cancelByEscape: boolean;
+  /** Called once, when the run is cancelled */
+  onCancel?: () => void;
+}
+
+/**
+ * One metadata update run. It has its own counts, so items of a cancelled
+ * run that finish late are not reported by the next run.
+ */
+interface UpdateRun extends CancellableRun {
   total: number;
   counter: number;
   crossRefCounter: number;
@@ -106,10 +117,8 @@ export class ZInspire {
   final_count_shown: boolean;
   progressWindow?: ProgressWindowHelper;
   private closedProgressWindows = new WeakSet<ProgressWindowHelper>();
-  /** Metadata update runs whose workers have not ended yet */
-  private activeRuns = new Set<UpdateRun>();
-  /** Cancellation of the reference-cache download and the preprint check */
-  private isCancelled: boolean = false;
+  /** Runs that have started and not ended yet */
+  private activeRuns = new Set<CancellableRun>();
   private escapeHandler?: (e: KeyboardEvent) => void;
 
   constructor(
@@ -227,12 +236,36 @@ export class ZInspire {
     }
   }
 
+  /** Cancel every run that is going */
   cancelUpdate() {
-    this.isCancelled = true;
-    // Requests in flight are left to finish: an aborted request would count
-    // as "no INSPIRE record" and tag the item
+    // Requests of metadata updates in flight are left to finish: an aborted
+    // request would count as "no INSPIRE record" and tag the item
     for (const run of this.activeRuns) {
-      run.cancelled = true;
+      if (!run.cancelled) {
+        run.cancelled = true;
+        run.onCancel?.();
+      }
+    }
+    this.removeEscapeListener();
+  }
+
+  private startRun<T extends CancellableRun>(run: T): T {
+    this.activeRuns.add(run);
+    if (run.cancelByEscape) {
+      this.setupEscapeListener();
+    }
+    return run;
+  }
+
+  /** Ends a run; Escape stays with the runs still going */
+  private endRun(run: CancellableRun) {
+    if (!this.activeRuns.delete(run)) {
+      return;
+    }
+    for (const other of this.activeRuns) {
+      if (other.cancelByEscape && !other.cancelled) {
+        return;
+      }
     }
     this.removeEscapeListener();
   }
@@ -274,25 +307,21 @@ export class ZInspire {
 
   updateSelectedItems(operation: string) {
     this.resetState("initial");
-    this.setupEscapeListener();
     const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
     this.toUpdate = items.length;
     this.itemsToUpdate = items;
-    this.updateItemsConcurrent(operation);
+    this.updateItemsConcurrent(operation, true);
   }
 
   updateSelectedCollection(operation: string) {
     this.resetState("initial");
-    this.setupEscapeListener();
     const collection = getPrimarySelectedCollection(
       Zotero.getActiveZoteroPane(),
     );
     if (collection) {
       this.itemsToUpdate = collection.getChildItems();
       this.toUpdate = this.itemsToUpdate.length;
-      this.updateItemsConcurrent(operation);
-    } else if (this.activeRuns.size === 0) {
-      this.removeEscapeListener();
+      this.updateItemsConcurrent(operation, true);
     }
   }
 
@@ -500,9 +529,6 @@ export class ZInspire {
         );
         return;
       }
-      // Reset cancel state and setup Escape listener
-      this.isCancelled = false;
-      this.setupEscapeListener();
       Zotero.debug(
         `[${config.addonName}] downloadReferencesCacheForSelection: calling prefetch for ${regularItems.length} items`,
       );
@@ -511,8 +537,6 @@ export class ZInspire {
       Zotero.debug(
         `[${config.addonName}] downloadReferencesCacheForSelection: error: ${err}`,
       );
-    } finally {
-      this.removeEscapeListener();
     }
   }
 
@@ -548,9 +572,6 @@ export class ZInspire {
         );
         return;
       }
-      // Reset cancel state and setup Escape listener
-      this.isCancelled = false;
-      this.setupEscapeListener();
       Zotero.debug(
         `[${config.addonName}] downloadReferencesCacheForCollection: calling prefetch for ${items.length} items`,
       );
@@ -559,8 +580,6 @@ export class ZInspire {
       Zotero.debug(
         `[${config.addonName}] downloadReferencesCacheForCollection: error: ${err}`,
       );
-    } finally {
-      this.removeEscapeListener();
     }
   }
 
@@ -570,13 +589,18 @@ export class ZInspire {
     const filteredItems = items.filter((item) => item.isRegularItem());
     this.itemsToUpdate = filteredItems;
     this.toUpdate = filteredItems.length;
-    this.updateItemsConcurrent(operation);
+    // Updates of newly added papers run in the background: Escape in the
+    // main window is left to Zotero
+    this.updateItemsConcurrent(operation, false);
   }
 
   /**
    * Concurrent item processor with controlled parallelism
    */
-  private async updateItemsConcurrent(operation: string) {
+  private async updateItemsConcurrent(
+    operation: string,
+    cancelByEscape: boolean,
+  ) {
     const CONCURRENCY = 3;
     let completed = 0;
     const total = this.itemsToUpdate.length;
@@ -600,14 +624,14 @@ export class ZInspire {
     });
     progressWindow.show();
 
-    const run: UpdateRun = {
+    const run = this.startRun<UpdateRun>({
       cancelled: false,
+      cancelByEscape,
       total,
       counter: 0,
       crossRefCounter: 0,
       noRecidCount: 0,
-    };
-    this.activeRuns.add(run);
+    });
 
     // Create a queue of pending items
     const queue = [...this.itemsToUpdate];
@@ -695,11 +719,7 @@ export class ZInspire {
       this.closeActiveProgressWindow(progressWindow);
       this.numberOfUpdatedItems = this.toUpdate;
     } finally {
-      this.activeRuns.delete(run);
-      // Escape stays with any run still going
-      if (this.activeRuns.size === 0) {
-        this.removeEscapeListener();
-      }
+      this.endRun(run);
     }
   }
 
@@ -742,98 +762,106 @@ export class ZInspire {
     }
 
     const total = recidSet.size;
-    Zotero.debug(
-      `[${config.addonName}] prefetchReferencesCache: creating progress window`,
-    );
-    const progressWindow = openRunProgressWindow(
-      getString("download-cache-progress-title"),
-      { onEscape: () => this.cancelUpdate() },
-    );
-    progressWindow.win.changeHeadline(
-      getString("download-cache-progress-title"),
-      PLUGIN_ICON,
-    );
-    progressWindow.createLine({
-      icon: PLUGIN_ICON,
-      text: getString("download-cache-start", { args: { total } }),
-      progress: 0,
+    const run = this.startRun<CancellableRun>({
+      cancelled: false,
+      cancelByEscape: true,
     });
-    progressWindow.show(-1); // Disable auto-close timer during download
-    Zotero.debug(
-      `[${config.addonName}] prefetchReferencesCache: progress window shown`,
-    );
-
-    let processed = 0;
-    let success = 0;
-    let failed = 0;
-
-    for (const recid of recidSet) {
-      // Check cancellation at start of each iteration
-      if (this.isCancelled) {
-        progressWindow.close();
-        this.showCacheCancelledStats(success, total);
-        return;
-      }
-
-      processed++;
-      progressWindow.changeLine({
-        icon: PLUGIN_ICON,
-        text: getString("download-cache-progress", {
-          args: { done: processed, total },
-        }),
-        progress: Math.round((processed / total) * 100),
-      });
-
-      try {
-        const entries = await fetchReferencesEntries(recid);
-        // Check again after async operation
-        if (this.isCancelled) {
-          progressWindow.close();
-          this.showCacheCancelledStats(success, total);
-          return;
-        }
-        // Enrich entries with complete metadata (title, authors, citation count)
-        // This ensures cached data is complete and usable offline
-        const enrichmentResult = await enrichReferencesEntries(entries);
-        if (!enrichmentResult.complete) {
-          throw new Error(
-            `Metadata enrichment failed for ${enrichmentResult.failedRecids.length} linked references`,
-          );
-        }
-        if (this.isCancelled) {
-          progressWindow.close();
-          this.showCacheCancelledStats(success, total);
-          return;
-        }
-        // Store without sort parameter (client-side sorting for references)
-        // Pass total = entries.length since references data is always complete
-        await localCache.set("refs", recid, entries, undefined, entries.length);
-        success++;
-      } catch (err) {
-        failed++;
-        Zotero.debug(
-          `[${config.addonName}] Failed to cache references for ${recid}: ${err}`,
-        );
-      }
-    }
-
-    progressWindow.win.changeHeadline(
-      getString("download-cache-progress-title"),
-      PLUGIN_ICON,
-    );
-    progressWindow.createLine({
-      icon: PLUGIN_ICON,
-      text: getString("download-cache-success", { args: { success } }),
-      type: "success",
-    });
-    if (failed > 0) {
+    try {
+      Zotero.debug(
+        `[${config.addonName}] prefetchReferencesCache: creating progress window`,
+      );
+      const progressWindow = openRunProgressWindow(
+        getString("download-cache-progress-title"),
+        { onEscape: () => this.cancelUpdate() },
+      );
+      progressWindow.win.changeHeadline(
+        getString("download-cache-progress-title"),
+        PLUGIN_ICON,
+      );
       progressWindow.createLine({
         icon: PLUGIN_ICON,
-        text: getString("download-cache-failed", { args: { failed } }),
-        type: "error",
+        text: getString("download-cache-start", { args: { total } }),
+        progress: 0,
       });
+      progressWindow.show(-1); // Disable auto-close timer during download
+      Zotero.debug(
+        `[${config.addonName}] prefetchReferencesCache: progress window shown`,
+      );
+
+      let processed = 0;
+      let success = 0;
+      let failed = 0;
+
+      for (const recid of recidSet) {
+        // Check cancellation at start of each iteration
+        if (run.cancelled) {
+          progressWindow.close();
+          this.showCacheCancelledStats(success, total);
+          return;
+        }
+
+        processed++;
+        progressWindow.changeLine({
+          icon: PLUGIN_ICON,
+          text: getString("download-cache-progress", {
+            args: { done: processed, total },
+          }),
+          progress: Math.round((processed / total) * 100),
+        });
+
+        try {
+          const entries = await fetchReferencesEntries(recid);
+          // Check again after async operation
+          if (run.cancelled) {
+            progressWindow.close();
+            this.showCacheCancelledStats(success, total);
+            return;
+          }
+          // Enrich entries with complete metadata (title, authors, citation count)
+          // This ensures cached data is complete and usable offline
+          const enrichmentResult = await enrichReferencesEntries(entries);
+          if (!enrichmentResult.complete) {
+            throw new Error(
+              `Metadata enrichment failed for ${enrichmentResult.failedRecids.length} linked references`,
+            );
+          }
+          if (run.cancelled) {
+            progressWindow.close();
+            this.showCacheCancelledStats(success, total);
+            return;
+          }
+          // Store without sort parameter (client-side sorting for references)
+          // Pass total = entries.length since references data is always complete
+          await localCache.set("refs", recid, entries, undefined, entries.length);
+          success++;
+        } catch (err) {
+          failed++;
+          Zotero.debug(
+            `[${config.addonName}] Failed to cache references for ${recid}: ${err}`,
+          );
+        }
+      }
+
+      progressWindow.win.changeHeadline(
+        getString("download-cache-progress-title"),
+        PLUGIN_ICON,
+      );
+      progressWindow.createLine({
+        icon: PLUGIN_ICON,
+        text: getString("download-cache-success", { args: { success } }),
+        type: "success",
+      });
+      if (failed > 0) {
+        progressWindow.createLine({
+          icon: PLUGIN_ICON,
+          text: getString("download-cache-failed", { args: { failed } }),
+          type: "error",
+        });
+      }
+      progressWindow.startCloseTimer(4000);
+    } finally {
+      this.endRun(run);
     }
-    progressWindow.startCloseTimer(4000);
   }
 
   /**
@@ -1738,16 +1766,13 @@ export class ZInspire {
     );
 
     const abortController = createAbortController() ?? null;
-
-    this.isCancelled = false;
-    this.setupEscapeListener();
-
-    // Override cancel handler to also abort the controller
-    const originalCancelUpdate = this.cancelUpdate.bind(this);
-    this.cancelUpdate = () => {
-      abortController?.abort();
-      originalCancelUpdate();
-    };
+    // Cancellable until the check ends; the results dialog and the updates
+    // after it are not
+    const run = this.startRun<CancellableRun>({
+      cancelled: false,
+      cancelByEscape: true,
+      onCancel: () => abortController?.abort(),
+    });
 
     const progressWindow = openRunProgressWindow(config.addonName, {
       onEscape: () => this.cancelUpdate(),
@@ -1771,8 +1796,8 @@ export class ZInspire {
       const results = await batchCheckPublicationStatus(preprints, {
         signal: abortController?.signal,
         onProgress: (current, total) => {
-          // Also check isCancelled flag for environments without AbortController
-          if (this.isCancelled) return;
+          // Also check the flag for environments without AbortController
+          if (run.cancelled) return;
           progressWindow.changeLine({
             icon: PLUGIN_ICON,
             text: getString("preprint-check-progress", {
@@ -1788,9 +1813,9 @@ export class ZInspire {
         `[${config.addonName}] checkPreprintsWithProgressAndDialog: check completed, closing progress`,
       );
       progressWindow.close();
-      this.removeEscapeListener();
+      this.endRun(run);
 
-      if (this.isCancelled) {
+      if (run.cancelled) {
         this.showPreprintNotification(
           getString("preprint-check-cancelled"),
           "fail",
@@ -1821,7 +1846,7 @@ export class ZInspire {
       );
     } catch (err: any) {
       progressWindow.close();
-      this.removeEscapeListener();
+      this.endRun(run);
       if (err.name === "AbortError") {
         this.showPreprintNotification(
           getString("preprint-check-cancelled"),
@@ -1833,6 +1858,7 @@ export class ZInspire {
         );
       }
     } finally {
+      this.endRun(run);
       endManualCheck();
     }
   }
