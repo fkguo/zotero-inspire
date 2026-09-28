@@ -28,6 +28,7 @@ import {
   type DayListing,
   type ListingAuthor,
   type ListingSection,
+  type ListingStream,
 } from "../listingTypes";
 import { archivesListing } from "./subscriptions";
 
@@ -161,6 +162,11 @@ export interface ListOptions {
   filter: readonly string[][];
   /** The subscription's listing pages (categories, archives) in its order */
   specs: readonly string[];
+  /**
+   * Pages chosen with the subscription's category chips: only the papers
+   * they list are shown, each where they list it; empty or absent for all
+   */
+  categories?: ReadonlySet<string>;
 }
 
 /** Papers under one header within a day */
@@ -182,10 +188,19 @@ export interface ListDay {
   count: number;
   /** Papers of the shown sections, before the text filter */
   inSections: number;
+  /** Papers the chosen category pages list (all when none is chosen) */
+  onChosenPages: number;
+  /**
+   * Every page the day's papers are taken from (the chosen category pages,
+   * or all of the subscription's) was fetched completely
+   */
+  pagesFetched: boolean;
 }
 
 export interface ArrangedList {
   days: ListDay[];
+  /** The section each paper shown stands in (where the chosen pages list it) */
+  sectionOf: ReadonlyMap<BrowserEntry, ListingSection>;
   /** Every paper shown, in order */
   entries: BrowserEntry[];
 }
@@ -198,16 +213,16 @@ const SECTION_RANK: Record<ListingSection, number> = {
 
 /**
  * Where a paper stands in announcement order within its day: its first place
- * in the section it is shown in (a section displaySection chose from its
+ * in the section it is shown in (a section displaySection chose from these
  * streams, so it has one there)
  */
 function announcementKey(
-  listing: ArxivListingEntry,
+  streams: readonly ListingStream[],
   section: ListingSection,
   specs: readonly string[],
 ): [number, number, number] {
   let best: [number, number, number] | null = null;
-  for (const stream of listing.streams) {
+  for (const stream of streams) {
     if (stream.section !== section) continue;
     const spec = specs.indexOf(stream.category);
     const key: [number, number, number] = [
@@ -257,18 +272,26 @@ function arrangeDay(
   listing: DayListing,
   entries: readonly BrowserEntry[],
   options: ListOptions,
+  sectionOf: Map<BrowserEntry, ListingSection>,
 ): ListDay {
   const placed: Placed[] = [];
   let inSections = 0;
+  const chosen = options.categories;
+  let onChosenPages = 0;
   for (const entry of entries) {
-    const section = displaySection(entry.listing.streams, options.sections);
+    // With pages chosen, a paper stands where those pages list it
+    const streams = chosen?.size
+      ? entry.listing.streams.filter((stream) => chosen.has(stream.category))
+      : entry.listing.streams;
+    if (streams.length) onChosenPages++;
+    const section = displaySection(streams, options.sections);
     if (!section) continue;
     inSections++;
     if (!passes(entry, options.filter)) continue;
     placed.push({
       entry,
       section,
-      key: announcementKey(entry.listing, section, options.specs),
+      key: announcementKey(streams, section, options.specs),
     });
   }
   const byAnnouncement = (a: Placed, b: Placed) =>
@@ -311,7 +334,20 @@ function arrangeDay(
     ];
   }
   groups = groups.filter((group) => group.entries.length > 0);
-  return { listing, groups, count: placed.length, inSections };
+  for (const item of placed) sectionOf.set(item.entry, item.section);
+  const pagesFetched = listing.specs.every(
+    ({ spec, state }) =>
+      state.state === "complete" ||
+      (Boolean(chosen?.size) && !chosen!.has(spec)),
+  );
+  return {
+    listing,
+    groups,
+    count: placed.length,
+    inSections,
+    onChosenPages,
+    pagesFetched,
+  };
 }
 
 /**
@@ -323,9 +359,13 @@ export function arrangeList(
   entriesOf: (day: DayListing) => readonly BrowserEntry[],
   options: ListOptions,
 ): ArrangedList {
-  const arranged = days.map((day) => arrangeDay(day, entriesOf(day), options));
+  const sectionOf = new Map<BrowserEntry, ListingSection>();
+  const arranged = days.map((day) =>
+    arrangeDay(day, entriesOf(day), options, sectionOf),
+  );
   return {
     days: arranged,
+    sectionOf,
     entries: arranged.flatMap((day) =>
       day.groups.flatMap((group) => group.entries),
     ),

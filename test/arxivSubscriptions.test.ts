@@ -491,8 +491,9 @@ describe("subscription bar", () => {
     expect(onChange).toHaveBeenCalledWith(instance.current);
     const chips = instance.element.querySelectorAll(".arxiv-browser__chip");
     expect([...chips].map((chip) => chip.textContent)).toEqual(["hep-ph"]);
+    // The category's name, and what a click on the chip does
     expect((chips[0] as HTMLElement).title).toBe(
-      "hep-ph: High Energy Physics - Phenomenology",
+      `hep-ph: High Energy Physics - Phenomenology\n${msg("arxiv-browser-chip-hint")}`,
     );
   });
 

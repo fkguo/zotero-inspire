@@ -114,6 +114,7 @@
   min-width: 0;
 }
 
+/* A click keeps only the chosen categories' papers (as the calendar picks days) */
 .arxiv-browser__chip {
   padding: 0 6px;
   border-radius: 8px;
@@ -122,6 +123,12 @@
   font-size: 11px;
   line-height: 18px;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.arxiv-browser__chip--chosen {
+  background: var(--accent-blue, #2563eb);
+  color: #fff;
 }
 
 .arxiv-browser__check {

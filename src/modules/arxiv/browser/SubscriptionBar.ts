@@ -15,6 +15,7 @@ import {
   saveSubscriptions,
   type ArxivSubscription,
 } from "./subscriptions";
+import { applyClickSelection } from "../../../utils/clickSelection";
 
 export interface SubscriptionBarOptions {
   /** Where the editor panel is shown (the window's content) */
@@ -23,6 +24,11 @@ export interface SubscriptionBarOptions {
   onChange(subscription: ArxivSubscription | undefined): void;
   /** Asks the user a yes/no question (the window's confirm) */
   confirm(message: string): boolean;
+  /**
+   * The categories chosen with the chips changed: only their papers are to
+   * be shown (none chosen: all)
+   */
+  onCategories?(chosen: ReadonlySet<string>): void;
 }
 
 /** Full names of a subscription's categories, for tooltips */
@@ -43,6 +49,11 @@ export class SubscriptionBar {
   private subscriptions: ArxivSubscription[];
   private currentId: string | undefined;
   private editor: SubscriptionEditor | null = null;
+  /** Categories chosen with the chips, and the chip clicked last */
+  private chosen = new Set<string>();
+  private lastClicked: string | undefined;
+  /** The subscription and categories the choice belongs to */
+  private chosenFor = "";
 
   constructor(private readonly options: SubscriptionBarOptions) {
     this.doc = options.host.ownerDocument;
@@ -117,6 +128,11 @@ export class SubscriptionBar {
     }
   }
 
+  /** The categories chosen with the chips (none: all) */
+  get chosenCategories(): ReadonlySet<string> {
+    return new Set(this.chosen);
+  }
+
   /** Change the chosen subscription's shown sections (the list's toggles) */
   updateCurrent(change: Partial<Pick<ArxivSubscription, "sections">>): void {
     const current = this.current;
@@ -169,9 +185,42 @@ export class SubscriptionBar {
     this.editButton.disabled = !current;
     this.deleteButton.disabled = !current;
     this.summary.replaceChildren();
-    for (const name of current?.categories ?? []) {
+    // The choice stays while the subscription and its categories do (its
+    // sections toggled, say); another subscription or other categories
+    // start again with all
+    const categories = current?.categories ?? [];
+    const chosenFor = current ? `${current.id} ${categories.join(" ")}` : "";
+    if (chosenFor !== this.chosenFor) {
+      this.chosen = new Set();
+      this.lastClicked = undefined;
+      this.chosenFor = chosenFor;
+    }
+    for (const name of categories) {
       const chip = html(doc, "span", "arxiv-browser__chip", name);
-      chip.title = categoryTitle(name);
+      chip.classList.toggle(
+        "arxiv-browser__chip--chosen",
+        this.chosen.has(name),
+      );
+      chip.dataset.category = name;
+      chip.title = `${categoryTitle(name)}\n${getString("arxiv-browser-chip-hint")}`;
+      chip.addEventListener("click", (event) => {
+        applyClickSelection(
+          this.chosen,
+          name,
+          categories,
+          this.lastClicked,
+          event,
+        );
+        this.lastClicked = name;
+        for (const other of this.summary.children) {
+          const category = (other as HTMLElement).dataset.category;
+          other.classList.toggle(
+            "arxiv-browser__chip--chosen",
+            category !== undefined && this.chosen.has(category),
+          );
+        }
+        this.options.onCategories?.(new Set(this.chosen));
+      });
       this.summary.append(chip);
     }
   }

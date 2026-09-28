@@ -230,6 +230,117 @@ describe("order within a day", () => {
     ]);
   });
 
+  it("shows only the papers the chosen category pages list, each where those pages list it", () => {
+    // hep-ph: new A, B; cross X.  hep-lat: new L1, X, L2.
+    const date = "2026-09-25";
+    const entries = [
+      paper("2609.00001", date, [["hep-ph", "new", 0]]),
+      paper("2609.00002", date, [["hep-ph", "new", 1]]),
+      paper("2609.00009", date, [
+        ["hep-ph", "cross", 2],
+        ["hep-lat", "new", 1],
+      ]),
+      paper("2609.00005", date, [["hep-lat", "new", 0]]),
+      paper("2609.00003", date, [["hep-lat", "new", 2]]),
+    ];
+    const specs = ["hep-ph", "hep-lat"];
+
+    // hep-ph alone: X is a cross-list there
+    const hepPh = arrange([day(date, entries)], {
+      specs,
+      categories: new Set(["hep-ph"]),
+    });
+    expect(
+      hepPh.days[0].groups.map((group) => [group.key, ids(group.entries)]),
+    ).toEqual([
+      ["new", ["2609.00001", "2609.00002"]],
+      ["cross", ["2609.00009"]],
+    ]);
+    expect(hepPh.days[0]).toMatchObject({
+      count: 3,
+      inSections: 3,
+      onChosenPages: 3,
+    });
+    // Each paper stands in the section of the chosen page: X is a cross-list
+    // on hep-ph, new on hep-lat and, with nothing chosen, new
+    const x = (list: ArrangedList) =>
+      list.sectionOf.get(
+        list.entries.find((entry) => entry.listing.id === "2609.00009")!,
+      );
+    expect(x(hepPh)).toBe("cross");
+
+    // A category without papers that day
+    const hepEx = arrange([day(date, entries)], {
+      specs,
+      categories: new Set(["hep-ex"]),
+    });
+    expect(hepEx.days[0]).toMatchObject({
+      count: 0,
+      inSections: 0,
+      onChosenPages: 0,
+    });
+
+    // hep-lat alone: X is new there, in hep-lat's order
+    const hepLat = arrange([day(date, entries)], {
+      specs,
+      categories: new Set(["hep-lat"]),
+    });
+    expect(x(hepLat)).toBe("new");
+    expect(ids(hepLat.entries)).toEqual([
+      "2609.00005",
+      "2609.00009",
+      "2609.00003",
+    ]);
+
+    // Both chosen, or none: the whole subscription
+    const both = arrange([day(date, entries)], {
+      specs,
+      categories: new Set(["hep-ph", "hep-lat"]),
+    });
+    const none = arrange([day(date, entries)], {
+      specs,
+      categories: new Set(),
+    });
+    expect(ids(both.entries)).toEqual(ids(none.entries));
+    expect(x(none)).toBe("new");
+    expect(ids(none.entries)).toEqual([
+      "2609.00001",
+      "2609.00002",
+      "2609.00005",
+      "2609.00009",
+      "2609.00003",
+    ]);
+  });
+
+  it("tells whether the pages a day's papers are taken from were fetched completely", () => {
+    const date = "2026-09-25";
+    const listing: DayListing = {
+      ...day(date, [paper("2609.00001", date, [["hep-ph", "new", 0]])]),
+      status: "incomplete",
+      specs: [
+        {
+          spec: "hep-ph",
+          state: { state: "complete", count: 1, fromCache: false },
+        },
+        {
+          spec: "hep-lat",
+          state: { state: "failed", reason: "http", message: "HTTP 500" },
+        },
+      ],
+    };
+    const specs = ["hep-ph", "hep-lat"];
+    const choose = (categories: string[]) =>
+      arrange([listing], { specs, categories: new Set(categories) }).days[0];
+    expect(choose(["hep-lat"])).toMatchObject({
+      count: 0,
+      onChosenPages: 0,
+      pagesFetched: false,
+    });
+    expect(choose(["hep-ph"])).toMatchObject({ count: 1, pagesFetched: true });
+    // None chosen: all of the subscription's pages count
+    expect(choose([])).toMatchObject({ count: 1, pagesFetched: false });
+  });
+
   it("sorts by arXiv identifier, old-style identifiers by their date", () => {
     const date = "2026-09-25";
     const entries = [

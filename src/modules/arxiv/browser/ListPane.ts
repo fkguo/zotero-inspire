@@ -85,7 +85,11 @@ export class ListPane {
   readonly list: HTMLElement;
   private readonly doc: Document;
   private readonly renderer: EntryListRenderer;
-  private arranged: ArrangedList = { days: [], entries: [] };
+  private arranged: ArrangedList = {
+    days: [],
+    entries: [],
+    sectionOf: new Map(),
+  };
   private sort: ListSort = "announcement";
   private page = 0;
   private pageSize: number;
@@ -163,7 +167,7 @@ export class ListPane {
   /** Show a message instead of the list (no subscription, nothing loaded) */
   showMessage(text: string, extra?: HTMLElement): void {
     this.message = text;
-    this.arranged = { days: [], entries: [] };
+    this.arranged = { days: [], entries: [], sectionOf: new Map() };
     this.page = 0;
     this.setFocus(null, false);
     this.observer?.disconnect();
@@ -474,11 +478,16 @@ export class ListPane {
         getString(
           day.listing.status === "failed"
             ? "arxiv-browser-day-failed"
-            : day.inSections > 0
-              ? "arxiv-browser-day-no-match"
-              : day.listing.entries.length > 0
-                ? "arxiv-browser-day-none-shown"
-                : "arxiv-browser-day-empty",
+            : // Pages not fetched may hold papers: no "none" then
+              !day.pagesFetched
+              ? "arxiv-browser-day-incomplete"
+              : day.inSections > 0
+                ? "arxiv-browser-day-no-match"
+                : day.listing.entries.length === 0
+                  ? "arxiv-browser-day-empty"
+                  : day.onChosenPages === 0
+                    ? "arxiv-browser-day-none-chosen"
+                    : "arxiv-browser-day-none-shown",
         ),
       );
     } else if (day.listing.status !== "complete") {
@@ -624,7 +633,9 @@ export class ListPane {
     const { listing } = entry;
     const parts = [listing.primaryCategory];
     if (this.sort !== "announcement") {
-      const tag = SECTION_TAGS[listing.section];
+      // Where the list stands it (the chosen pages' section, if any chosen)
+      const section = this.arranged.sectionOf.get(entry) ?? listing.section;
+      const tag = SECTION_TAGS[section];
       if (tag) parts.push(getString(tag));
     }
     if (listing.version && listing.version > 1)

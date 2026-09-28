@@ -428,6 +428,169 @@ describe("arXiv browser: the list", () => {
     return { ...env, view };
   }
 
+  it("keeps only the chosen categories' papers with the chips, each where that category lists it", async () => {
+    const env = environment();
+    subscribe(["hep-ph", "hep-lat", "hep-ex"]);
+    env.site.html(
+      LIST_URL("hep-ph"),
+      readArxivFixture("list-hep-ph-new-2026-09-25.html"),
+    );
+    // hep-ex: no paper that day
+    env.site.html(LIST_URL("hep-ex"), newPageHtml("hep-ex", "2026-09-25", []));
+    // hep-lat: one new paper, and hep-ph's first new paper as a cross-list
+    env.site.html(
+      LIST_URL("hep-lat"),
+      newPageHtml("hep-lat", "2026-09-25", [
+        { id: "2609.90001", section: "new", primary: "hep-lat" },
+        {
+          id: "2609.28538",
+          section: "cross",
+          primary: "hep-ph",
+          cross: ["hep-lat"],
+        },
+      ]),
+    );
+    prefs[`${PREFIX}.arxiv_browser_page_size`] = 500;
+    env.open();
+    await env.settle();
+    const chips = () => [
+      ...env.root.querySelectorAll<HTMLElement>(".arxiv-browser__chip"),
+    ];
+    const chosen = () =>
+      chips()
+        .filter((chip) =>
+          chip.classList.contains("arxiv-browser__chip--chosen"),
+        )
+        .map((chip) => chip.textContent);
+    const click = (name: string, init: MouseEventInit = {}) =>
+      chips()
+        .find((chip) => chip.textContent === name)!
+        .dispatchEvent(new win.MouseEvent("click", { bubbles: true, ...init }));
+    const shown = () =>
+      rows(env.root).map((row) => row.dataset.entryId!.split("-")[1]);
+    const all = shown();
+    expect(all).toHaveLength(73);
+
+    click("hep-lat");
+    expect(chosen()).toEqual(["hep-lat"]);
+    expect(shown()).toEqual(["2609.90001", "2609.28538"]);
+    expect(headers(env.root)).toEqual([
+      "# 2026-09-25",
+      `## ${msg("arxiv-browser-section-new")} · 1`,
+      `## ${msg("arxiv-browser-section-cross")} · 1`,
+    ]);
+
+    // Hiding the cross-lists keeps the choice: hep-lat's new paper only
+    const crossBox = env.root.querySelectorAll<HTMLInputElement>(
+      ".arxiv-browser__check input",
+    )[1];
+    crossBox.click();
+    expect(chosen()).toEqual(["hep-lat"]);
+    expect(shown()).toEqual(["2609.90001"]);
+    crossBox.click();
+    expect(shown()).toEqual(["2609.90001", "2609.28538"]);
+
+    // Sorted by identifier, a row tells the section of the chosen page:
+    // hep-ph's new paper is a cross-list on hep-lat
+    const sort = select(env.root, "sort");
+    sort.value = "id-asc";
+    sort.dispatchEvent(new win.Event("change", { bubbles: true }));
+    const rowOf = (id: string) =>
+      rows(env.root).find((row) => row.dataset.entryId!.includes(id))!;
+    expect(rowOf("2609.28538").textContent).toContain(
+      msg("arxiv-browser-section-tag-cross"),
+    );
+    expect(rowOf("2609.90001").textContent).not.toContain(
+      msg("arxiv-browser-section-tag-cross"),
+    );
+    sort.value = "announcement";
+    sort.dispatchEvent(new win.Event("change", { bubbles: true }));
+
+    // A category without papers that day says so
+    click("hep-ex");
+    expect(shown()).toEqual([]);
+    expect(
+      env.root.querySelector(".arxiv-browser__day-notes")?.textContent,
+    ).toContain(msg("arxiv-browser-day-none-chosen"));
+    click("hep-lat");
+
+    // Ctrl/Cmd+click adds hep-ph: all papers again
+    click("hep-ph", { ctrlKey: true });
+    expect(chosen()).toEqual(["hep-ph", "hep-lat"]);
+    expect(shown()).toEqual(all);
+
+    // A click keeps hep-ph alone; clicked again, it shows all
+    click("hep-ph");
+    expect(chosen()).toEqual(["hep-ph"]);
+    expect(shown()).toHaveLength(72);
+    expect(shown()).not.toContain("2609.90001");
+    click("hep-ph");
+    expect(chosen()).toEqual([]);
+    expect(shown()).toEqual(all);
+  });
+
+  it("does not call a chosen category empty when its page was not fetched", async () => {
+    const env = environment();
+    subscribe(["hep-ph", "hep-lat"]);
+    env.site.html(
+      LIST_URL("hep-ph"),
+      readArxivFixture("list-hep-ph-new-2026-09-25.html"),
+    );
+    env.site.page(LIST_URL("hep-lat"), { status: 500 });
+    env.open();
+    await env.settle();
+    [...env.root.querySelectorAll<HTMLElement>(".arxiv-browser__chip")]
+      .find((chip) => chip.textContent === "hep-lat")!
+      .dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    expect(rows(env.root)).toHaveLength(0);
+    const notes =
+      env.root.querySelector(".arxiv-browser__day-notes")?.textContent ?? "";
+    expect(notes).toContain(msg("arxiv-browser-day-incomplete"));
+    expect(notes).not.toContain(msg("arxiv-browser-day-none-chosen"));
+  });
+
+  it("does not call a day empty when a page that was not fetched may hold its papers", async () => {
+    const env = environment();
+    subscribe(["hep-ph", "hep-lat"]);
+    // hep-ph has no paper that day, hep-lat's page fails
+    env.site.html(LIST_URL("hep-ph"), newPageHtml("hep-ph", "2026-09-25", []));
+    env.site.page(LIST_URL("hep-lat"), { status: 500 });
+    env.open();
+    await env.settle();
+    const notes = () =>
+      env.root.querySelector(".arxiv-browser__day-notes")?.textContent ?? "";
+    expect(notes()).toContain(msg("arxiv-browser-day-incomplete"));
+    expect(notes()).not.toContain(msg("arxiv-browser-day-empty"));
+    // Also with hep-lat chosen
+    [...env.root.querySelectorAll<HTMLElement>(".arxiv-browser__chip")]
+      .find((chip) => chip.textContent === "hep-lat")!
+      .dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    expect(notes()).toContain(msg("arxiv-browser-day-incomplete"));
+    expect(notes()).not.toContain(msg("arxiv-browser-day-empty"));
+  });
+
+  it("does not say that none matches the filter when a page of the day was not fetched", async () => {
+    const env = environment();
+    subscribe(["hep-ph", "hep-lat"]);
+    env.site.html(
+      LIST_URL("hep-ph"),
+      readArxivFixture("list-hep-ph-new-2026-09-25.html"),
+    );
+    env.site.page(LIST_URL("hep-lat"), { status: 500 });
+    env.open();
+    await env.settle();
+    const filter = env.root.querySelector<HTMLInputElement>(
+      ".arxiv-browser__filter",
+    )!;
+    filter.value = "nosuchwordanywhere";
+    filter.dispatchEvent(new win.Event("input", { bubbles: true }));
+    await vi.waitFor(() => expect(rows(env.root)).toHaveLength(0));
+    const notes =
+      env.root.querySelector(".arxiv-browser__day-notes")?.textContent ?? "";
+    expect(notes).toContain(msg("arxiv-browser-day-incomplete"));
+    expect(notes).not.toContain(msg("arxiv-browser-day-no-match"));
+  });
+
   it("repeats the headers on a page that begins inside a day and a section", async () => {
     const { root, view } = await loaded();
     // 72 + 4 × 30 papers

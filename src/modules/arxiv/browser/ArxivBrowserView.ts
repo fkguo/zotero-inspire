@@ -158,6 +158,8 @@ export class ArxivBrowserView {
   private loadedCategories: string | null = null;
   private sort: ListSort = "announcement";
   private filterText = "";
+  /** Categories chosen with the subscription's chips (none: all) */
+  private categories: ReadonlySet<string> = new Set();
   private filterTimer: number | undefined;
   private schedulerStatus: ArxivSchedulerStatus | null = null;
   private countdown: number | undefined;
@@ -201,6 +203,10 @@ export class ArxivBrowserView {
         options.confirm ??
         ((message) => doc.defaultView?.confirm(message) ?? false),
       onChange: (subscription) => this.onSubscriptionChange(subscription),
+      onCategories: (chosen) => {
+        this.categories = chosen;
+        this.arrange("focus");
+      },
     });
 
     // Days (the calendar), reload / cancel, status
@@ -441,6 +447,8 @@ export class ArxivBrowserView {
     subscription: ArxivSubscription | undefined,
   ): void {
     this.subscription = subscription;
+    // The bar keeps the chips' choice while the subscription stays
+    this.categories = this.subscriptions.chosenCategories;
     for (const [section, box] of this.sectionBoxes) {
       box.checked = subscription?.sections[section] ?? true;
       box.disabled = !subscription;
@@ -515,6 +523,7 @@ export class ArxivBrowserView {
       sections: openSections(subscription),
       filter: filterGroups(this.filterText),
       specs: subscription.categories,
+      categories: this.categories,
     });
     this.listPane.setList(list, this.sort, update);
     // A day loaded again (a retry, Continue) brings new objects for its
