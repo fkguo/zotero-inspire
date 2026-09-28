@@ -63,6 +63,11 @@ export interface PreviewActionCallbacks {
   onHide?: () => void;
   /** Check if entry is favorited */
   isFavorite?: (entry: InspireReferenceEntry) => boolean;
+  /**
+   * Whether the paper's item is related to the item shown (default: it is
+   * not); asked each time the card is drawn
+   */
+  isRelated?: (entry: InspireReferenceEntry) => boolean;
   /** Toggle favorite status */
   onToggleFavorite?: (entry: InspireReferenceEntry) => void | Promise<void>;
 }
@@ -536,6 +541,7 @@ export class HoverPreviewController {
       isFavorite: this.callbacks.isFavorite
         ? this.callbacks.isFavorite(entry)
         : undefined,
+      isRelated: this.callbacks.isRelated?.(entry) ?? false,
       onAdd: this.callbacks.onAdd
         ? async (e, anchor) => {
             if (this.addActionInFlight) {
@@ -587,8 +593,7 @@ export class HoverPreviewController {
             const savedLatexSource = oldAbstractEl?.dataset.latexSource;
 
             await this.callbacks.onLink!(e);
-            // Update state and refresh card
-            e.isRelated = true;
+            // Refresh card (asks isRelated again)
             this.buildContent(card, e);
 
             // Restore abstract content if unchanged (skip expensive re-render)
@@ -621,8 +626,7 @@ export class HoverPreviewController {
             const savedLatexSource = oldAbstractEl?.dataset.latexSource;
 
             await this.callbacks.onUnlink!(e);
-            // Update state and refresh card
-            e.isRelated = false;
+            // Refresh card (asks isRelated again)
             this.buildContent(card, e);
 
             // Restore abstract content if unchanged (skip expensive re-render)

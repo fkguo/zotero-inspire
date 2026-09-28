@@ -122,34 +122,58 @@ describe("citation graph: in-library state of a cached graph", () => {
     ]);
   });
 
-  it("counts an item in the trash, and keeps a paper's earlier mark", async () => {
+  // Intentional change: before, an item in the trash counted, and a mark
+  // the cached graph had was kept (77, an item since deleted)
+  it("leaves out items in the trash and recomputes earlier marks", async () => {
     const refs = [entry("100"), entry("200", { localItemID: 77 })];
     const seed = cachedGraph(refs);
-    const trashed = lib.put({ fields: pluginFields("100"), deleted: true });
+    lib.put({ fields: pluginFields("100"), deleted: true });
     const graph = await getCachedCitationGraphOneHop(seed);
     expect(graph?.references.map((e) => e.localItemID)).toEqual([
-      trashed.id,
-      77,
+      undefined,
+      undefined,
     ]);
   });
 
-  it("marks by a number in Archive Location whatever the Archive", async () => {
-    const refs = [entry("100")];
+  // Intentional change: before, a number in Archive Location counted under
+  // any Archive, and an INSPIRE URL did not count
+  it("marks by the recid resolveItemRecid reads", async () => {
+    const refs = [entry("100"), entry("200")];
     const seed = cachedGraph(refs);
-    const item = lib.put({
-      fields: { archive: "Shelf", archiveLocation: "100" },
+    lib.put({ fields: { archive: "Shelf", archiveLocation: "100" } });
+    const byURL = lib.put({
+      fields: { url: "https://inspirehep.net/literature/200" },
     });
     const graph = await getCachedCitationGraphOneHop(seed);
-    expect(graph?.references[0].localItemID).toBe(item.id);
+    expect(graph?.references.map((e) => e.localItemID)).toEqual([
+      undefined,
+      byURL.id,
+    ]);
   });
 
-  it("shows papers as not in the library when the lookup fails", async () => {
+  it("lists every item with a paper's recid", async () => {
+    const refs = [entry("100")];
+    const seed = cachedGraph(refs);
+    const a = lib.put({ fields: pluginFields("100") });
+    const b = lib.put({ fields: pluginFields("100") });
+    const graph = await getCachedCitationGraphOneHop(seed);
+    expect(graph?.references[0]).toMatchObject({
+      localItemID: a.id,
+      localItemIDs: [a.id, b.id],
+    });
+  });
+
+  // Intentional change: before, a failed lookup left the papers shown as not
+  // in the library
+  it("marks the papers unknown when the library cannot be read", async () => {
     const refs = [entry("100")];
     const seed = cachedGraph(refs);
     lib.put({ fields: pluginFields("100") });
     lib.queryError = new Error("database is locked");
     const graph = await getCachedCitationGraphOneHop(seed);
     expect(graph?.references[0].localItemID).toBeUndefined();
+    expect(graph?.references[0].localStatusUnknown).toBe(true);
+    expect(graph?.center.localStatusUnknown).toBe(true);
   });
 });
 
@@ -253,6 +277,93 @@ describe("citation graph: adding a paper and clicking a node", () => {
   });
 });
 
+describe("citation graph dialog: following the library", () => {
+  function graphShown(references: InspireReferenceEntry[]) {
+    const dialog = graphDialog();
+    const graph = {
+      seeds: [{ recid: "1", title: "Seed", inspireUrl: "", isSeed: true }],
+      seedEdges: [],
+      references,
+      citedBy: [],
+      totals: { references: references.length, citedBy: 0 },
+      shown: { references: references.length, citedBy: 0 },
+      sort: "mostrecent",
+    };
+    Object.assign(dialog, {
+      graphResult: graph,
+      updateHeader: vi.fn(),
+      renderGraph: vi.fn(),
+    });
+    dialog.followLibrary();
+    return { dialog, graph };
+  }
+
+  // Intentional change: before, the graph's marks were read once, when it
+  // was built
+  it("draws the graph again when a paper's item goes to the trash or is added", async () => {
+    const item = lib.put({ fields: pluginFields("100") });
+    const refs = [entry("100"), entry("200")];
+    const { dialog, graph } = graphShown(refs);
+    await dialog.refreshLocalMarks();
+    expect(refs[0].localItemID).toBe(item.id);
+    expect(dialog.renderGraph).toHaveBeenCalledTimes(1);
+
+    await lib.trash(item);
+    await vi.waitFor(() => expect(dialog.renderGraph).toHaveBeenCalledTimes(2));
+    expect(refs[0].localItemID).toBeUndefined();
+    expect(dialog.renderGraph).toHaveBeenLastCalledWith(graph);
+
+    const added = await lib.add({ fields: pluginFields("200") });
+    await vi.waitFor(() => expect(dialog.renderGraph).toHaveBeenCalledTimes(3));
+    expect(refs[1].localItemID).toBe(added.id);
+
+    // A change that no mark depends on draws nothing
+    await lib.edit(added, { title: "New title" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(dialog.renderGraph).toHaveBeenCalledTimes(3);
+    dialog.stopFollowingLibrary();
+  });
+
+  it("marks every node again once a click on a node reads the library", async () => {
+    const a = lib.put({ fields: pluginFields("100") });
+    const b = lib.put({ fields: pluginFields("100") });
+    const refs = [entry("100"), entry("200")];
+    const { dialog } = graphShown(refs);
+    lib.queryError = new Error("database is locked");
+    await dialog.refreshLocalMarks();
+    expect(refs.map((e) => e.localStatusUnknown)).toEqual([true, true]);
+    expect(dialog.renderGraph).toHaveBeenCalledTimes(1);
+
+    lib.queryError = undefined;
+    await dialog.handleNodeClick("200", { ctrlKey: false, metaKey: false });
+    await vi.waitFor(() => expect(dialog.renderGraph).toHaveBeenCalledTimes(2));
+    expect(refs[0]).toEqual(
+      entry("100", { localItemID: a.id, localItemIDs: [a.id, b.id] }),
+    );
+    expect(refs[1]).toEqual(entry("200"));
+    dialog.stopFollowingLibrary();
+  });
+
+  it("gives a paper found when it is added every item, once the library can be read", async () => {
+    const a = lib.put({ fields: pluginFields("100") });
+    const b = lib.put({ fields: pluginFields("100") });
+    const refs = [entry("100")];
+    const { dialog } = graphShown(refs);
+    lib.queryError = new Error("database is locked");
+    await dialog.refreshLocalMarks();
+    expect(refs[0].localStatusUnknown).toBe(true);
+
+    lib.queryError = undefined;
+    await dialog.importEntryToLibrary(refs[0]);
+    expect(dialog.promptForSaveTarget).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(refs[0].localStatusUnknown).toBeUndefined());
+    expect(refs[0]).toEqual(
+      entry("100", { localItemID: a.id, localItemIDs: [a.id, b.id] }),
+    );
+    dialog.stopFollowingLibrary();
+  });
+});
+
 describe("batch import: duplicate check against the library", () => {
   function manager() {
     return new BatchImportManager({
@@ -290,17 +401,17 @@ describe("batch import: duplicate check against the library", () => {
   // Intentional changes: items in the trash are no duplicates, and every
   // field that holds an arXiv ID is read
   it.each([
-    ["an item in the trash", { ...pluginFields("100") }, true, "recid", null],
+    ["an item in the trash", "recid", null, { ...pluginFields("100") }, true],
     [
       "an arXiv ID only in the URL",
-      { url: "https://arxiv.org/abs/2301.12345" },
-      false,
       null,
       "arxiv",
+      { url: "https://arxiv.org/abs/2301.12345" },
+      false,
     ],
   ])(
-    "with %s: duplicate %s before -> %s after",
-    async (_name, fields: Record<string, string>, deleted, _before, after) => {
+    "with %s: duplicate by %s before -> %s after",
+    async (_name, _before, after, fields: Record<string, string>, deleted) => {
       const item = lib.put({ fields, deleted });
       const m = manager();
       const duplicates = await (m as any).detectDuplicates([

@@ -36,7 +36,6 @@ import {
   applyRefEntryRowStyle,
   applyRefEntryTextContainerStyle,
   applyRefEntryMarkerStyle,
-  applyRefEntryMarkerColor,
   applyRefEntryLinkButtonStyle,
   applyRefEntryContentStyle,
   applyAuthorLinkStyle,
@@ -52,6 +51,8 @@ import {
   createEntryRowTemplate,
   type EntryRowStyles,
 } from "./RowPoolManager";
+import { applyLocalMarker } from "./localMarker";
+import type { LocalPaper } from "../library/localStatus";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -74,6 +75,11 @@ export interface EntryRenderContext {
   getCitationValue: (entry: InspireReferenceEntry) => number;
   /** Callback to check if entry has PDF attachment (for PDF button state) */
   hasPdf?: (entry: InspireReferenceEntry) => boolean;
+  /**
+   * Whether the paper's item is related to the item shown, for the link
+   * button (default: no paper is)
+   */
+  isRelated?: (entry: InspireReferenceEntry) => boolean;
   /** Cached dark mode value (computed once per render batch for performance) */
   darkMode?: boolean;
 }
@@ -298,20 +304,14 @@ export class EntryListRenderer {
   }
 
   /**
-   * Update only the local status marker (● for local, ⊕ for missing).
+   * Update only the paper's "in library" mark (localMarker.ts).
    */
-  updateLocalState(row: HTMLDivElement, hasLocalItem: boolean): void {
+  updateLocalState(row: HTMLDivElement, paper: LocalPaper): void {
     const marker = row.querySelector(
       ".zinspire-ref-entry__dot",
     ) as HTMLElement | null;
     if (marker) {
-      marker.textContent = hasLocalItem ? "●" : "⊕";
-      marker.dataset.state = hasLocalItem ? "local" : "missing";
-      applyRefEntryMarkerColor(marker, hasLocalItem, isDarkMode(this.doc));
-      marker.setAttribute(
-        "title",
-        hasLocalItem ? this.strings.dotLocal : this.strings.dotAdd,
-      );
+      applyLocalMarker(marker, paper, isDarkMode(this.doc));
     }
   }
 
@@ -424,13 +424,7 @@ export class EntryListRenderer {
       ".zinspire-ref-entry__dot",
     ) as HTMLElement | null;
     if (marker) {
-      marker.textContent = entry.localItemID ? "●" : "⊕";
-      marker.dataset.state = entry.localItemID ? "local" : "missing";
-      applyRefEntryMarkerColor(marker, Boolean(entry.localItemID), dark);
-      marker.setAttribute(
-        "title",
-        entry.localItemID ? this.strings.dotLocal : this.strings.dotAdd,
-      );
+      applyLocalMarker(marker, entry, dark);
     }
 
     // Update link button
@@ -438,11 +432,12 @@ export class EntryListRenderer {
       ".zinspire-ref-entry__link",
     ) as HTMLButtonElement | null;
     if (linkButton) {
+      const related = ctx.isRelated?.(entry) ?? false;
       linkButton.setAttribute(
         "title",
-        entry.isRelated ? this.strings.linkExisting : this.strings.linkMissing,
+        related ? this.strings.linkExisting : this.strings.linkMissing,
       );
-      this.renderLinkButton(linkButton, Boolean(entry.isRelated));
+      this.renderLinkButton(linkButton, related);
     }
 
     // Update BibTeX button

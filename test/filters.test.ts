@@ -284,20 +284,24 @@ describe("matchesNonReviewOnly", () => {
   });
 });
 
+// Whether a paper's item is related to the item shown depends on the item
+// shown, so the panel answers it (the filter context), not the entry
 describe("matchesRelatedOnly", () => {
+  const related = createEntry({ id: "related", localItemID: 3 });
+  const other = createEntry({ id: "other", localItemID: 4 });
+  const context = { isRelated: (e: InspireReferenceEntry) => e === related };
+
   it("returns true for related papers", () => {
-    const entry = createEntry({ isRelated: true });
-    expect(matchesRelatedOnly(entry)).toBe(true);
+    expect(matchesRelatedOnly(related, context)).toBe(true);
   });
 
   it("returns false for non-related papers", () => {
-    const entry = createEntry({ isRelated: false });
-    expect(matchesRelatedOnly(entry)).toBe(false);
+    expect(matchesRelatedOnly(other, context)).toBe(false);
   });
 
-  it("returns false for undefined isRelated", () => {
-    const entry = createEntry({ isRelated: undefined });
-    expect(matchesRelatedOnly(entry)).toBe(false);
+  it("returns false when nothing says what is related", () => {
+    expect(matchesRelatedOnly(related)).toBe(false);
+    expect(matchesRelatedOnly(related, {})).toBe(false);
   });
 });
 
@@ -332,6 +336,13 @@ describe("matchesOnlineItems", () => {
   it("returns true for undefined localItemID", () => {
     const entry = createEntry({ localItemID: undefined });
     expect(matchesOnlineItems(entry)).toBe(true);
+  });
+
+  // Intentional change: the library could not be read, so the paper is not
+  // known to be missing from it (before, it was taken for missing)
+  it("returns false when the library could not be read", () => {
+    const entry = createEntry({ localStatusUnknown: true });
+    expect(matchesOnlineItems(entry)).toBe(false);
   });
 });
 

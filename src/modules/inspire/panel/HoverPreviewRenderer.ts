@@ -40,6 +40,7 @@ import {
   applyRefEntryMarkerColor,
   applyRefEntryMarkerStyle,
 } from "../../pickerUI";
+import { localItemCount, localItemsList } from "./localMarker";
 
 // XHTML namespace for proper element creation in Zotero (FIX-NAMESPACE-WARNING)
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -67,6 +68,11 @@ export interface PreviewRenderContext {
   hasPdf?: boolean;
   /** Whether entry is a favorite (for showing star button) */
   isFavorite?: boolean;
+  /**
+   * Whether the paper's item is related to the item shown, for the link
+   * button (default: it is not)
+   */
+  isRelated?: boolean;
 
   // Action callbacks (async to support state refresh after completion)
   onAdd?: (
@@ -391,6 +397,8 @@ export class HoverPreviewRenderer {
     const { entry } = ctx;
     const s = this.strings;
     const isLocal = Boolean(entry.localItemID);
+    // The library could not be read: neither "add" nor the local actions
+    const unknown = !isLocal && Boolean(entry.localStatusUnknown);
 
     const actionRow = this.doc.createElement("div");
     actionRow.classList.add("zinspire-preview-card__actions");
@@ -404,7 +412,9 @@ export class HoverPreviewRenderer {
     });
 
     // Action buttons (left side)
-    if (!isLocal) {
+    if (unknown) {
+      // Nothing to offer until the library can be read
+    } else if (!isLocal) {
       // Not in library - show Add button
       if (entry.recid && ctx.onAdd) {
         const addButton = this.createActionButton(
@@ -435,15 +445,16 @@ export class HoverPreviewRenderer {
 
       // Link/Unlink button
       if (ctx.onLink) {
+        const related = ctx.isRelated === true;
         const linkButton = this.createActionButton(
-          entry.isRelated
+          related
             ? getString("references-panel-button-unlink")
             : getString("references-panel-button-link"),
-          entry.isRelated ? "unlink" : "link",
+          related ? "unlink" : "link",
         );
         linkButton.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (entry.isRelated && ctx.onUnlink) {
+          if (related && ctx.onUnlink) {
             ctx.onUnlink(entry);
           } else {
             ctx.onLink!(entry);
@@ -481,7 +492,7 @@ export class HoverPreviewRenderer {
     actionRow.appendChild(spacer);
 
     // Import marker (right side) for online entries, consistent with list marker (⊕)
-    if (!isLocal && entry.recid && ctx.onAdd) {
+    if (!isLocal && !unknown && entry.recid && ctx.onAdd) {
       const importBtn = this.doc.createElementNS(
         XHTML_NS,
         "button",
@@ -529,14 +540,21 @@ export class HoverPreviewRenderer {
     });
 
     const statusIcon = this.doc.createElement("span");
-    statusIcon.textContent = isLocal ? "●" : "○";
+    statusIcon.textContent = isLocal ? "●" : unknown ? "?" : "○";
     statusIcon.style.fontSize = "10px";
     statusEl.appendChild(statusIcon);
 
+    const localCount = localItemCount(entry);
     const statusText = this.doc.createElement("span");
-    statusText.textContent = isLocal
-      ? getString("references-panel-status-local")
-      : getString("references-panel-status-online");
+    statusText.textContent = unknown
+      ? getString("references-panel-status-unknown")
+      : localCount >= 2
+        ? getString("references-panel-status-local-several", {
+            args: { count: localCount },
+          })
+        : isLocal
+          ? getString("references-panel-status-local")
+          : getString("references-panel-status-online");
     statusEl.appendChild(statusText);
 
     const resolveOnlineUrl = (): string | null => {
@@ -558,12 +576,19 @@ export class HoverPreviewRenderer {
     };
 
     const canSelect = isLocal && typeof ctx.onSelectInLibrary === "function";
-    const onlineUrl = !isLocal ? resolveOnlineUrl() : null;
+    const onlineUrl = !isLocal && !unknown ? resolveOnlineUrl() : null;
     const canOpenOnline = !isLocal && Boolean(onlineUrl);
 
-    statusEl.title = isLocal
-      ? getString("references-panel-button-select") || ""
-      : getString("references-panel-open-link") || "";
+    statusEl.title = unknown
+      ? getString("references-panel-dot-unknown") || ""
+      : isLocal
+        ? [
+            getString("references-panel-button-select") || "",
+            localItemsList(entry),
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : getString("references-panel-open-link") || "";
     statusEl.disabled = !(canSelect || canOpenOnline);
     if (statusEl.disabled) {
       statusEl.style.opacity = "0.55";

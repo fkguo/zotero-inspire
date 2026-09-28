@@ -278,7 +278,6 @@ export function buildEntryFromSearchHit(
     fallbackUrl,
     searchText: "",
     localItemID: undefined,
-    isRelated: false,
     publicationInfo,
     publicationInfoErrata: errata,
     arxivDetails,

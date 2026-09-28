@@ -28,6 +28,7 @@ import type {
 } from "./types";
 import { isPdgOrReviewArticleEntry } from "./reviewUtils";
 import { LRUCache } from "./utils";
+import { refreshLocalState } from "./library/localStatus";
 
 export type { CitationGraphNode, CitationGraphSortMode } from "./types";
 
@@ -248,75 +249,23 @@ export async function getCachedCitationGraphOneHop(
     cached.center.title = cleanMathTitle(seedTitleOverride) || seedTitleOverride;
   }
 
-  cached.center.localItemID = await getLocalItemIDForRecid(seedRecid);
-  await enrichWithLocalItems(cached.references);
-  await enrichWithLocalItems(cached.citedBy);
+  await refreshGraphLocalState(cached);
 
   return sliceCitationGraphResult(cached, maxReferences, maxCitedBy);
 }
 
 /**
- * Enrich entries with localItemID by batch querying Zotero database.
- * Reuses the same SQL query pattern as References panel for consistency.
+ * Recompute the "in library" marks of the seed and the papers from the
+ * library index, the same marks as the References panel's (localStatus.ts)
  */
-async function enrichWithLocalItems(entries: InspireReferenceEntry[]): Promise<void> {
-  // Extract all recids
-  const recids = entries.map(e => e.recid).filter((r): r is string => Boolean(r));
-  if (recids.length === 0) {
-    return;
-  }
-
-  // Query archiveLocation field directly (same as References panel)
-  const fieldID = Zotero.ItemFields.getID("archiveLocation");
-  if (!fieldID) {
-    return;
-  }
-
-  const recidMap = new Map<string, number>();
-  const CHUNK_SIZE = 500;
-
-  for (let i = 0; i < recids.length; i += CHUNK_SIZE) {
-    const chunk = recids.slice(i, i + CHUNK_SIZE);
-    const placeholders = chunk.map(() => "?").join(",");
-    const sql = `SELECT itemID, value FROM itemData JOIN itemDataValues USING(valueID) WHERE fieldID = ? AND value IN (${placeholders})`;
-    try {
-      const rows = await Zotero.DB.queryAsync(sql, [fieldID, ...chunk]);
-      if (rows) {
-        for (const row of rows) {
-          recidMap.set(row.value as string, Number(row.itemID));
-        }
-      }
-    } catch (e) {
-      // Silently ignore errors
-    }
-  }
-
-  // Update entries with localItemID
-  let foundCount = 0;
-  for (const entry of entries) {
-    if (entry.recid && recidMap.has(entry.recid)) {
-      entry.localItemID = recidMap.get(entry.recid);
-      foundCount++;
-    }
-  }
-}
-
-async function getLocalItemIDForRecid(recid: string): Promise<number | undefined> {
-  const fieldID = Zotero.ItemFields.getID("archiveLocation");
-  if (!fieldID) {
-    return undefined;
-  }
-  try {
-    const sql =
-      "SELECT itemID FROM itemData JOIN itemDataValues USING(valueID) WHERE fieldID = ? AND value = ? LIMIT 1";
-    const rows = await Zotero.DB.queryAsync(sql, [fieldID, recid]);
-    const row = Array.isArray(rows) ? rows[0] : undefined;
-    const itemID = row?.itemID;
-    const parsed = typeof itemID === "number" ? itemID : Number(itemID);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
+async function refreshGraphLocalState(
+  result: CitationGraphOneHopResult,
+): Promise<void> {
+  await refreshLocalState([
+    result.center,
+    ...result.references,
+    ...result.citedBy,
+  ]);
 }
 
 function buildEntryFromSearchHit(
@@ -396,7 +345,6 @@ function buildEntryFromSearchHit(
     fallbackUrl,
     searchText: "",
     localItemID: undefined,
-    isRelated: false,
     publicationInfo,
     publicationInfoErrata: errata,
     arxivDetails,
@@ -484,11 +432,6 @@ export async function fetchCitationGraphOneHop(
       result.center.title = cleanMathTitle(seedTitleOverride) || seedTitleOverride;
     }
   };
-  const refreshLocalStatus = async (result: CitationGraphOneHopResult) => {
-    result.center.localItemID = await getLocalItemIDForRecid(seedRecid);
-    await enrichWithLocalItems(result.references);
-    await enrichWithLocalItems(result.citedBy);
-  };
 
   const cachedFallback = await loadCachedCitationGraphOneHopBase(
     seedRecid,
@@ -498,7 +441,7 @@ export async function fetchCitationGraphOneHop(
 
   if (cachedFallback && !forceRefresh) {
     applySeedTitleOverride(cachedFallback);
-    await refreshLocalStatus(cachedFallback);
+    await refreshGraphLocalState(cachedFallback);
     const refsEnough = cachedFallback.references.length >= maxReferences;
     const citedEnough = cachedFallback.citedBy.length >= maxCitedBy;
     if (refsEnough && citedEnough) {
@@ -569,7 +512,6 @@ export async function fetchCitationGraphOneHop(
     // Ignore errors fetching seed metadata
   }
 
-  const seedLocalItemID = await getLocalItemIDForRecid(seedRecid);
   const resolvedSeedTitle =
     cleanMathTitle(seedTitleOverride || seedTitleFromApi || seedRecid) ||
     seedRecid;
@@ -581,7 +523,6 @@ export async function fetchCitationGraphOneHop(
     authorLabel: seedAuthorLabel,
     year: seedYear,
     citationCount: seedCitationCountWithoutSelf ?? seedCitationCount,
-    localItemID: seedLocalItemID,
     isSeed: true,
   };
 
@@ -637,10 +578,6 @@ export async function fetchCitationGraphOneHop(
     .map((e) => e.recid)
     .filter((r): r is string => typeof r === "string" && r.trim().length > 0);
 
-  // Enrich entries with localItemID (batch query for performance)
-  await enrichWithLocalItems(references);
-  await enrichWithLocalItems(citedBy);
-
   const resultBase: CitationGraphOneHopResult = {
     center,
     references,
@@ -652,10 +589,11 @@ export async function fetchCitationGraphOneHop(
     referencesFilteredRecids,
     citedByRecids,
   };
+  await refreshGraphLocalState(resultBase);
   if ((!refsOk || !citedOk) && cachedFallback) {
     // Prefer cached data over partially failed fetches to avoid sticky empty sides.
     applySeedTitleOverride(cachedFallback);
-    await refreshLocalStatus(cachedFallback);
+    await refreshGraphLocalState(cachedFallback);
     return sliceCitationGraphResult(cachedFallback, maxReferences, maxCitedBy);
   }
   if (!refsOk || !citedOk) {

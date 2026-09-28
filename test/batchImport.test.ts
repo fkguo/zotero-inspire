@@ -19,32 +19,23 @@ import { InspireReferencePanelController } from "../src/modules/zinspire";
 // INSPIRE requests, clipboard and progress windows are replaced by fakes; the
 // panel's list, rows, toolbar and duplicate dialog are real DOM (jsdom).
 
-// Each fake gives the item ID found for each identifier; the lookups give a
-// list of hits, which asHits makes of it
+// The library: the item it has for each recid, arXiv ID and DOI, looked up
+// through the library index (libraryLookup)
 const library = vi.hoisted(() => ({
-  findItemsByRecids: vi.fn(),
-  findItemsByArxivs: vi.fn(),
-  findItemsByDOIs: vi.fn(),
+  recids: new Map<string, number>(),
+  arxivIds: new Map<string, number>(),
+  dois: new Map<string, number>(),
+  libraryLookup: vi.fn(),
 }));
-vi.mock("../src/modules/inspire/library/arxivIndex", async (importOriginal) => {
-  const asHits =
-    (find: (...args: any[]) => Promise<Map<string, number>>) =>
-    async (...args: any[]) =>
-      new Map(
-        [...(await find(...args))].map(([key, itemID]) => [
-          key,
-          [{ itemID, libraryID: 1, hasRecid: true }],
-        ]),
-      );
-  return {
+vi.mock(
+  "../src/modules/inspire/library/arxivIndex",
+  async (importOriginal) => ({
     ...(await importOriginal<
       typeof import("../src/modules/inspire/library/arxivIndex")
     >()),
-    findItemsByRecids: asHits(library.findItemsByRecids),
-    findItemsByArxivs: asHits(library.findItemsByArxivs),
-    findItemsByDOIs: asHits(library.findItemsByDOIs),
-  };
-});
+    libraryLookup: library.libraryLookup,
+  }),
+);
 const clipboard = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
 vi.mock("../src/modules/inspire/apiUtils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/modules/inspire/apiUtils")>()),
@@ -98,11 +89,23 @@ function msg(key: string, args?: Record<string, unknown>): string {
   return args ? `${id} ${JSON.stringify(args)}` : id;
 }
 
+/** Lookups in the library as it is when they run */
+function lookupNow() {
+  const hits = (itemID: number | undefined) =>
+    itemID === undefined ? [] : [{ itemID, libraryID: 1, hasRecid: true }];
+  return {
+    byRecid: vi.fn((recid: string) => hits(library.recids.get(recid))),
+    byArxiv: vi.fn((id: string) => hits(library.arxivIds.get(id))),
+    byDOI: vi.fn((doi: string) => hits(library.dois.get(doi))),
+  };
+}
+
 beforeEach(() => {
   progressWindows.length = 0;
-  for (const find of Object.values(library)) {
-    find.mockReset().mockResolvedValue(new Map());
-  }
+  library.recids.clear();
+  library.arxivIds.clear();
+  library.dois.clear();
+  library.libraryLookup.mockReset().mockImplementation(async () => lookupNow());
   clipboard.copyToClipboard.mockReset().mockResolvedValue(true);
   network.inspireFetch.mockReset();
   vi.stubGlobal("Zotero", {
@@ -166,6 +169,19 @@ function entry(
     searchText: "",
     ...fields,
   };
+}
+
+/**
+ * An entry whose paper the library has as item `itemID`, and which the list
+ * marks so
+ */
+function localEntry(
+  id: string,
+  itemID: number,
+  fields: Partial<InspireReferenceEntry> = {},
+): InspireReferenceEntry {
+  library.recids.set(`rec-${id}`, itemID);
+  return entry(id, { localItemID: itemID, ...fields });
 }
 
 const TARGET: SaveTargetSelection = {
@@ -430,9 +446,8 @@ describe("batch selection", () => {
 });
 
 describe("duplicate detection", () => {
-  it("takes entries already linked to local items, then recid, arXiv and DOI matches", async () => {
+  it("takes recid, then arXiv, then DOI matches", async () => {
     const entries = [
-      entry("local", { localItemID: 11, arxivDetails: { id: "2401.00001" } }),
       entry("byRecid", { recid: "2" }),
       entry("byArxiv", {
         recid: "3",
@@ -447,58 +462,28 @@ describe("duplicate detection", () => {
         doi: "10.1/f",
       }),
     ];
-    library.findItemsByRecids.mockResolvedValue(
-      new Map([
-        ["2", 21],
-        ["5", 25],
-      ]),
-    );
-    library.findItemsByArxivs.mockResolvedValue(
-      new Map([
-        ["2403.00003", 23],
-        ["2405.00005", 26],
-      ]),
-    );
-    library.findItemsByDOIs.mockResolvedValue(
-      new Map([
-        ["10.1/c", 24],
-        ["10.1/d", 27],
-      ]),
-    );
+    library.recids.set("2", 21).set("5", 25);
+    library.arxivIds.set("2403.00003", 23).set("2405.00005", 26);
+    library.dois.set("10.1/c", 24).set("10.1/d", 27);
     const { manager } = setUpManager(entries);
 
     const duplicates = await (manager as any).detectDuplicates(entries);
 
     expect(Object.fromEntries(duplicates)).toEqual({
-      local: { localItemID: 11, matchType: "recid" },
       byRecid: { localItemID: 21, matchType: "recid" },
       byArxiv: { localItemID: 23, matchType: "arxiv" },
       byDoi: { localItemID: 27, matchType: "doi" },
       recidFirst: { localItemID: 25, matchType: "recid" },
     });
-    // Entries already linked to a local item are not looked up again
-    expect(library.findItemsByRecids).toHaveBeenCalledWith([
-      "2",
-      "3",
-      "4",
-      "5",
-      "6",
-    ]);
-    expect(library.findItemsByArxivs).toHaveBeenCalledWith([
-      "2403.00003",
-      "2405.00005",
-      "2406.00006",
-    ]);
-    expect(library.findItemsByDOIs).toHaveBeenCalledWith([
-      "10.1/c",
-      "10.1/d",
-      "10.1/f",
-    ]);
   });
 
-  it("does not search the library when every entry is already local", async () => {
+  // Intentional change: an entry marked as in the library is looked up like
+  // the others (before, its mark was taken as it was, without a lookup, so a
+  // mark left from an item since moved to the trash blocked the import)
+  it("looks up entries the list marks as in the library too", async () => {
     const entries = [
-      entry("a", { localItemID: 1 }),
+      localEntry("a", 1),
+      // Marked, but its item is no longer in the library
       entry("b", { localItemID: 2 }),
     ];
     const { manager } = setUpManager(entries);
@@ -507,11 +492,8 @@ describe("duplicate detection", () => {
 
     expect(Object.fromEntries(duplicates)).toEqual({
       a: { localItemID: 1, matchType: "recid" },
-      b: { localItemID: 2, matchType: "recid" },
     });
-    expect(library.findItemsByRecids).not.toHaveBeenCalled();
-    expect(library.findItemsByArxivs).not.toHaveBeenCalled();
-    expect(library.findItemsByDOIs).not.toHaveBeenCalled();
+    expect(library.libraryLookup).toHaveBeenCalledOnce();
   });
 });
 
@@ -540,11 +522,11 @@ describe("duplicate dialog", () => {
   it("lists the duplicates unticked in the panel's dialog style and imports the ticked ones with the rest", async () => {
     const entries = [
       entry("a"),
-      entry("b", { localItemID: 12 }),
+      localEntry("b", 12),
       entry("c", { doi: "10.1/c" }),
       entry("d"),
     ];
-    library.findItemsByDOIs.mockResolvedValue(new Map([["10.1/c", 13]]));
+    library.dois.set("10.1/c", 13);
     const panel = setUpManager(entries);
     panel.options.importReference.mockResolvedValue({ id: 100 } as any);
     panel.manager.selectAll();
@@ -594,10 +576,7 @@ describe("duplicate dialog", () => {
   });
 
   it("ticks or unticks every duplicate at once", async () => {
-    const entries = [
-      entry("a", { localItemID: 1 }),
-      entry("b", { localItemID: 2 }),
-    ];
+    const entries = [localEntry("a", 1), localEntry("b", 2)];
     const panel = setUpManager(entries);
     panel.options.importReference.mockResolvedValue({ id: 100 } as any);
     panel.manager.selectAll();
@@ -621,7 +600,7 @@ describe("duplicate dialog", () => {
     ["a click beside the dialog", "backdrop"],
     ["its panel going away", "dispose"],
   ])("closes without importing on %s", async (_label, how) => {
-    const entries = [entry("a", { localItemID: 1 }), entry("b")];
+    const entries = [localEntry("a", 1), entry("b")];
     const panel = setUpManager(entries);
     panel.manager.selectAll();
 
@@ -652,7 +631,7 @@ describe("duplicate dialog", () => {
     ["a click beside the dialog", "backdrop"],
     ["its panel going away", "dispose"],
   ])("stops listening for Escape once closed with %s", async (_label, how) => {
-    const panel = setUpManager([entry("a", { localItemID: 1 }), entry("b")]);
+    const panel = setUpManager([localEntry("a", 1), entry("b")]);
     panel.options.promptForSaveTarget.mockResolvedValue(null);
     panel.manager.selectAll();
     const added = vi.spyOn(panel.doc, "addEventListener");
@@ -680,19 +659,20 @@ describe("duplicate dialog", () => {
     async (_label, found) => {
       const panel = setUpManager([entry("a")]);
       let finishSearch = () => {};
-      library.findItemsByRecids.mockImplementationOnce(
+      library.libraryLookup.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
-            finishSearch = () => resolve(new Map(found ? [["rec-a", 1]] : []));
+            finishSearch = () => {
+              if (found) library.recids.set("rec-a", 1);
+              resolve(lookupNow());
+            };
           }),
       );
       const added = vi.spyOn(panel.doc, "addEventListener");
       panel.manager.selectAll();
 
       const run = panel.manager.handleBatchImport(panel.anchor);
-      await vi.waitFor(() =>
-        expect(library.findItemsByRecids).toHaveBeenCalled(),
-      );
+      await vi.waitFor(() => expect(library.libraryLookup).toHaveBeenCalled());
       panel.manager.dispose();
       // The import ends without waiting for the search, whose late result
       // then changes nothing
@@ -728,7 +708,7 @@ describe("duplicate dialog", () => {
   });
 
   it("has nothing to import when every duplicate is skipped", async () => {
-    const panel = setUpManager([entry("a", { localItemID: 1 })]);
+    const panel = setUpManager([localEntry("a", 1)]);
     panel.manager.selectAll();
 
     const run = panel.manager.handleBatchImport(panel.anchor);
@@ -758,7 +738,7 @@ describe("batch import", () => {
     expect(panel.options.showToast).toHaveBeenLastCalledWith(
       msg("references-panel-batch-no-selection"),
     );
-    expect(library.findItemsByRecids).not.toHaveBeenCalled();
+    expect(library.libraryLookup).not.toHaveBeenCalled();
     expect(panel.options.promptForSaveTarget).not.toHaveBeenCalled();
   });
 
@@ -892,7 +872,7 @@ describe("batch import", () => {
   });
 
   it("ignores Import while the duplicate dialog or the save-target prompt is open", async () => {
-    const panel = setUpManager([entry("a", { localItemID: 1 }), entry("b")]);
+    const panel = setUpManager([localEntry("a", 1), entry("b")]);
     let answer: (target: SaveTargetSelection | null) => void = () => {};
     panel.options.promptForSaveTarget.mockImplementation(
       () => new Promise((resolve) => (answer = resolve)),
@@ -927,13 +907,13 @@ describe("batch import", () => {
     ["the save-target prompt fails", "prompt"],
   ])("allows the next import after %s", async (_label, how) => {
     const panel = setUpManager([
-      entry("a", { localItemID: how === "dialog" ? 1 : undefined }),
+      how === "dialog" ? localEntry("a", 1) : entry("a"),
     ]);
     panel.manager.selectAll();
     if (how === "target") {
       panel.options.promptForSaveTarget.mockResolvedValueOnce(null);
     } else if (how === "lookup") {
-      library.findItemsByRecids.mockRejectedValueOnce(new Error("locked"));
+      library.libraryLookup.mockRejectedValueOnce(new Error("locked"));
     } else if (how === "prompt") {
       panel.options.promptForSaveTarget.mockRejectedValueOnce(
         new Error("locked"),
@@ -1003,7 +983,7 @@ describe("batch import", () => {
     "lets the other panels import again after a panel closes %s",
     async (_label, phase) => {
       const first = setUpManager([
-        entry("a", { localItemID: phase === "dialog" ? 1 : undefined }),
+        phase === "dialog" ? localEntry("a", 1) : entry("a"),
       ]);
       const second = setUpManager([entry("b")]);
       second.options.importReference.mockResolvedValue({ id: 100 } as any);
@@ -1011,10 +991,13 @@ describe("batch import", () => {
       second.manager.selectAll();
       let finishSearch = () => {};
       if (phase === "search") {
-        library.findItemsByRecids.mockImplementationOnce(
+        library.libraryLookup.mockImplementationOnce(
           () =>
             new Promise((resolve) => {
-              finishSearch = () => resolve(new Map([["rec-a", 1]]));
+              finishSearch = () => {
+                library.recids.set("rec-a", 1);
+                resolve(lookupNow());
+              };
             }),
         );
       }
@@ -1435,7 +1418,7 @@ describe("References panel batch toolbar and selection", () => {
   });
 
   it("cancels the import when the panel is closed with the duplicate dialog open", async () => {
-    const panel = setUpPanel([entry("a", { localItemID: 1 }), entry("b")]);
+    const panel = setUpPanel([localEntry("a", 1), entry("b")]);
     const { controller } = panel;
     allowDestroy(controller);
     controller.promptForSaveTarget = vi.fn();

@@ -14,6 +14,7 @@ import { config } from "../package.json";
 import { EntryListRenderer } from "../src/modules/inspire/panel/EntryListRenderer";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 import { InspireReferencePanelController } from "../src/modules/zinspire";
+import { stopLibraryIndex } from "../src/modules/inspire/library/arxivIndex";
 
 // The References panel reuses row elements: when it draws a new list, the rows
 // of the old one go back to a pool and are handed to the papers of the new
@@ -30,6 +31,10 @@ beforeEach(() => {
       unregisterObserver: vi.fn(),
     },
     Items: { get: () => null },
+    // An empty library: a paper is looked up there before it is added
+    ItemFields: { getID: () => 1 },
+    ItemTypes: { getID: () => 2 },
+    DB: { queryAsync: async () => [] },
   });
   vi.stubGlobal("addon", {
     data: {
@@ -44,7 +49,10 @@ beforeEach(() => {
     },
   });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  stopLibraryIndex();
+  vi.unstubAllGlobals();
+});
 
 /** The part of zotero-plugin-toolkit's UI.appendElement the panel uses. */
 function buildElement(doc: Document, spec: any): Element {
@@ -183,7 +191,6 @@ describe("References panel rows reused for another list", () => {
   function lateUpdates(controller: any, entry: InspireReferenceEntry) {
     // Library lookup (enrichLocalStatus): the paper turns out to be local
     entry.localItemID = 900;
-    entry.isRelated = true;
     controller.updateRowStatus(entry);
     // INSPIRE details (enrichReferencesEntries / runMetadataWorker)
     entry.title = `Late title of ${entry.recid}`;

@@ -26,6 +26,11 @@ export interface FilterContext {
   currentYear: number;
   /** Function to get citation value (handles self-citation exclusion) */
   getCitationValue: (entry: InspireReferenceEntry) => number;
+  /**
+   * Whether the paper's item is related to the item shown (default: no
+   * paper is). It depends on the item shown, so it is not kept on entries.
+   */
+  isRelated?: (entry: InspireReferenceEntry) => boolean;
 }
 
 /**
@@ -33,10 +38,12 @@ export interface FilterContext {
  */
 export function createDefaultFilterContext(
   getCitationValue?: (entry: InspireReferenceEntry) => number,
+  isRelated?: (entry: InspireReferenceEntry) => boolean,
 ): FilterContext {
   return {
     currentYear: new Date().getFullYear(),
     getCitationValue: getCitationValue ?? ((entry) => entry.citationCount ?? 0),
+    isRelated,
   };
 }
 
@@ -138,10 +145,13 @@ export function matchesNonReviewOnly(entry: InspireReferenceEntry): boolean {
 }
 
 /**
- * Related only filter: papers marked as related.
+ * Related only filter: papers whose item is related to the item shown.
  */
-export function matchesRelatedOnly(entry: InspireReferenceEntry): boolean {
-  return entry.isRelated === true;
+export function matchesRelatedOnly(
+  entry: InspireReferenceEntry,
+  context?: Pick<FilterContext, "isRelated">,
+): boolean {
+  return context?.isRelated?.(entry) === true;
 }
 
 /**
@@ -152,10 +162,14 @@ export function matchesLocalItems(entry: InspireReferenceEntry): boolean {
 }
 
 /**
- * Online items filter: papers not in local library.
+ * Online items filter: papers not in local library. A paper whose library
+ * state is unknown (the library could not be read) is not taken for one.
  */
 export function matchesOnlineItems(entry: InspireReferenceEntry): boolean {
-  return typeof entry.localItemID !== "number" || entry.localItemID <= 0;
+  return (
+    (typeof entry.localItemID !== "number" || entry.localItemID <= 0) &&
+    !entry.localStatusUnknown
+  );
 }
 
 /**

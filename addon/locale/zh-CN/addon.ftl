@@ -220,6 +220,8 @@ references-panel-filter-count-author =
   { $label } 的 { $visible } / { $total } 篇论文
 references-panel-dot-local = 条目已存在于文库中
 references-panel-dot-add = 添加此引用到文库
+references-panel-dot-local-several = 文库中有 { $count } 个条目带有这篇论文的 INSPIRE 编号，点击选中第一个：
+references-panel-dot-unknown = 无法读取文库，不知道这篇论文是否在库中。点击重试。
 references-panel-related-badge-tooltip = 与当前论文共享 { $count } 条参考文献
 references-panel-link-existing = 点击取消关联条目
 references-panel-link-missing = 关联为相关条目
@@ -303,6 +305,8 @@ references-panel-abstract-latex-copied = LaTeX 源码已复制到剪贴板
 # 预览卡片操作按钮 (FTR-HOVER-PREVIEW)
 references-panel-status-local = 本地库中
 references-panel-status-online = 在线
+references-panel-status-local-several = 本地库中（{ $count }）
+references-panel-status-unknown = 文库状态未知
 references-panel-button-add = 添加到库
 references-panel-button-link = 关联
 references-panel-button-unlink = 取消关联

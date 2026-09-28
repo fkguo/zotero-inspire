@@ -220,6 +220,8 @@ references-panel-filter-count-author =
   { $visible } / { $total } papers by { $label }
 references-panel-dot-local = Item exists in your library
 references-panel-dot-add = Add this reference to your library
+references-panel-dot-local-several = { $count } items in your library have this paper's INSPIRE ID; a click selects the first:
+references-panel-dot-unknown = Could not read your library, so it is not known whether this paper is in it. Click to try again.
 references-panel-related-badge-tooltip = Shares { $count } references with the current paper
 references-panel-link-existing = Click to unlink the related item
 references-panel-link-missing = Link as related item
@@ -307,6 +309,8 @@ references-panel-abstract-latex-copied = LaTeX source copied to clipboard
 # Preview Card Action Buttons (FTR-HOVER-PREVIEW)
 references-panel-status-local = In Library
 references-panel-status-online = Online
+references-panel-status-local-several = In Library ({ $count })
+references-panel-status-unknown = Library unknown
 references-panel-button-add = Add to Library
 references-panel-button-link = Link
 references-panel-button-unlink = Unlink

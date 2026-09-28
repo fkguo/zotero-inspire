@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "../package.json";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 import { InspireReferencePanelController } from "../src/modules/zinspire";
+import { stopLibraryIndex } from "../src/modules/inspire/library/arxivIndex";
 
 // The link button of the References panel relates a paper to the item whose
 // list the user is looking at; for a paper not yet in the library it first
@@ -18,6 +19,10 @@ beforeEach(() => {
       unregisterObserver: vi.fn(),
     },
     Items: { get: () => null },
+    // An empty library: a paper is looked up there before it is added
+    ItemFields: { getID: () => 1 },
+    ItemTypes: { getID: () => 2 },
+    DB: { queryAsync: async () => [] },
   });
   vi.stubGlobal("addon", {
     data: {
@@ -32,7 +37,10 @@ beforeEach(() => {
     },
   });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  stopLibraryIndex();
+  vi.unstubAllGlobals();
+});
 
 /** The part of zotero-plugin-toolkit's UI.appendElement the panel uses. */
 function buildElement(doc: Document, spec: any): Element {
@@ -256,7 +264,10 @@ describe("Link button on a paper not in the library", () => {
     expect(itemA.relatedItems).toEqual([added.key]);
     expect(added.relatedItems).toEqual([itemA.key]);
     expect(itemB.relatedItems).toEqual([]);
-    expect(entries[2]).toMatchObject({ localItemID: 901, isRelated: true });
+    expect(entries[2].localItemID).toBe(901);
+    // Related to the item it was clicked for, not to the item shown now
+    expect(panel.controller.isEntryRelated(entries[2], 42)).toBe(true);
+    expect(panel.controller.isEntryRelated(entries[2])).toBe(false);
   });
 
   it("leaves the list of the item selected meanwhile as it is", async () => {
@@ -292,7 +303,8 @@ describe("Link button on a paper not in the library", () => {
 
     expect(itemA.relatedItems).toEqual([added.key]);
     expect(added.relatedItems).toEqual([itemA.key]);
-    expect(entries[2]).toMatchObject({ localItemID: 901, isRelated: true });
+    expect(entries[2].localItemID).toBe(901);
+    expect(panel.controller.isEntryRelated(entries[2])).toBe(true);
     expect(notices).toHaveBeenCalledWith(
       notice("references-panel-toast-linked"),
     );
@@ -322,7 +334,7 @@ describe("Link button on a paper not in the library", () => {
     );
     // The paper was added all the same, but is not linked
     expect(entries[2].localItemID).toBe(901);
-    expect(entries[2].isRelated).toBeFalsy();
+    expect(panel.controller.isEntryRelated(entries[2], 42)).toBe(false);
   });
 
   it("does not relate the paper, and says so, when the item was moved to the trash during the import", async () => {
@@ -343,7 +355,7 @@ describe("Link button on a paper not in the library", () => {
       notice("references-panel-toast-link-target-gone"),
     );
     expect(entries[2].localItemID).toBe(901);
-    expect(entries[2].isRelated).toBeFalsy();
+    expect(panel.controller.isEntryRelated(entries[2], 42)).toBe(false);
   });
 
   it("relates the paper as before when the item was already in the trash at the click", async () => {
@@ -390,7 +402,7 @@ describe("Link button on a paper already in the library", () => {
     await link.mock.results[0].value;
     expect(itemA.relatedItems).toEqual([inLibrary.key]);
     expect(inLibrary.relatedItems).toEqual([itemA.key]);
-    expect(entries[2].isRelated).toBe(true);
+    expect(controller.isEntryRelated(entries[2])).toBe(true);
     expect(linkState(rows()[2])).toBe("linked");
 
     (
@@ -399,7 +411,7 @@ describe("Link button on a paper already in the library", () => {
     await link.mock.results[1].value;
     expect(itemA.relatedItems).toEqual([]);
     expect(inLibrary.relatedItems).toEqual([]);
-    expect(entries[2].isRelated).toBe(false);
+    expect(controller.isEntryRelated(entries[2])).toBe(false);
     expect(linkState(rows()[2])).toBe("unlinked");
   });
 });
