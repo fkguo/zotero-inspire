@@ -80,6 +80,19 @@ import { copyFundingInfo } from "./funding";
 // ZInspire Class - Batch Update Controller
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * One metadata update run. Each run has its own cancelled flag, so a new run
+ * cannot resume one the user cancelled, and its own counts, so items of a
+ * cancelled run that finish late are not reported by the next run.
+ */
+interface UpdateRun {
+  cancelled: boolean;
+  total: number;
+  counter: number;
+  crossRefCounter: number;
+  noRecidCount: number;
+}
+
 export class ZInspire {
   current: number;
   toUpdate: number;
@@ -93,7 +106,9 @@ export class ZInspire {
   final_count_shown: boolean;
   progressWindow?: ProgressWindowHelper;
   private closedProgressWindows = new WeakSet<ProgressWindowHelper>();
-  private updateController: AbortController | null = null;
+  /** Metadata update runs whose workers have not ended yet */
+  private activeRuns = new Set<UpdateRun>();
+  /** Cancellation of the reference-cache download and the preprint check */
   private isCancelled: boolean = false;
   private escapeHandler?: (e: KeyboardEvent) => void;
 
@@ -214,7 +229,11 @@ export class ZInspire {
 
   cancelUpdate() {
     this.isCancelled = true;
-    this.updateController?.abort();
+    // Requests in flight are left to finish: an aborted request would count
+    // as "no INSPIRE record" and tag the item
+    for (const run of this.activeRuns) {
+      run.cancelled = true;
+    }
     this.removeEscapeListener();
   }
 
@@ -255,11 +274,6 @@ export class ZInspire {
 
   updateSelectedItems(operation: string) {
     this.resetState("initial");
-    this.isCancelled = false;
-    // A cancelled run leaves its signal aborted; do not start with it
-    if (this.updateController?.signal.aborted) {
-      this.updateController = null;
-    }
     this.setupEscapeListener();
     const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
     this.toUpdate = items.length;
@@ -269,11 +283,6 @@ export class ZInspire {
 
   updateSelectedCollection(operation: string) {
     this.resetState("initial");
-    this.isCancelled = false;
-    // A cancelled run leaves its signal aborted; do not start with it
-    if (this.updateController?.signal.aborted) {
-      this.updateController = null;
-    }
     this.setupEscapeListener();
     const collection = getPrimarySelectedCollection(
       Zotero.getActiveZoteroPane(),
@@ -282,7 +291,7 @@ export class ZInspire {
       this.itemsToUpdate = collection.getChildItems();
       this.toUpdate = this.itemsToUpdate.length;
       this.updateItemsConcurrent(operation);
-    } else {
+    } else if (this.activeRuns.size === 0) {
       this.removeEscapeListener();
     }
   }
@@ -557,10 +566,6 @@ export class ZInspire {
 
   async updateItems(items: Zotero.Item[], operation: string) {
     this.resetState("initial");
-    this.isCancelled = false;
-    // Abort any previous update run
-    this.updateController?.abort();
-    this.updateController = createAbortController() ?? null;
 
     const filteredItems = items.filter((item) => item.isRegularItem());
     this.itemsToUpdate = filteredItems;
@@ -595,12 +600,21 @@ export class ZInspire {
     });
     progressWindow.show();
 
+    const run: UpdateRun = {
+      cancelled: false,
+      total,
+      counter: 0,
+      crossRefCounter: 0,
+      noRecidCount: 0,
+    };
+    this.activeRuns.add(run);
+
     // Create a queue of pending items
     const queue = [...this.itemsToUpdate];
     let index = 0;
 
     const worker = async () => {
-      while (index < queue.length && !this.isCancelled) {
+      while (index < queue.length && !run.cancelled) {
         const currentIndex = index++;
         const item = queue[currentIndex];
 
@@ -610,11 +624,7 @@ export class ZInspire {
         }
 
         try {
-          await this.updateItemInternal(
-            item,
-            operation,
-            this.updateController?.signal,
-          );
+          await this.updateItemInternal(item, operation, run);
         } catch (err) {
           Zotero.debug(
             `[${config.addonName}] updateItemsConcurrent: error updating item ${item.id}: ${err}`,
@@ -624,7 +634,7 @@ export class ZInspire {
         completed++;
 
         // Update progress; a failure here must not end the run
-        if (!this.isCancelled) {
+        if (!run.cancelled) {
           const percent = Math.round((completed / total) * 100);
           try {
             progressWindow.changeLine({
@@ -658,10 +668,15 @@ export class ZInspire {
       );
 
       // Finish
-      if (!this.isCancelled) {
+      if (!run.cancelled) {
         this.closeActiveProgressWindow(progressWindow);
         this.numberOfUpdatedItems = total;
         this.current = total - 1;
+        // The final notice reports this run's counts
+        this.counter = run.counter;
+        this.CrossRefcounter = run.crossRefCounter;
+        this.noRecidCount = run.noRecidCount;
+        this.error_norecid = run.noRecidCount > 0;
         this.resetState(operation);
         Zotero.debug(
           `[${config.addonName}] updateItemsConcurrent: done, counter=${this.counter}`,
@@ -680,7 +695,11 @@ export class ZInspire {
       this.closeActiveProgressWindow(progressWindow);
       this.numberOfUpdatedItems = this.toUpdate;
     } finally {
-      this.removeEscapeListener();
+      this.activeRuns.delete(run);
+      // Escape stays with any run still going
+      if (this.activeRuns.size === 0) {
+        this.removeEscapeListener();
+      }
     }
   }
 
@@ -888,7 +907,7 @@ export class ZInspire {
   private async updateItemInternal(
     item: Zotero.Item,
     operation: string,
-    signal?: AbortSignal,
+    run: UpdateRun,
   ) {
     Zotero.debug(
       `[${config.addonName}] updateItemInternal: starting, item=${item.id}, operation=${operation}`,
@@ -901,7 +920,7 @@ export class ZInspire {
       Zotero.debug(
         `[${config.addonName}] updateItemInternal: calling getInspireMeta`,
       );
-      const metaInspire = await getInspireMeta(item, operation, signal);
+      const metaInspire = await getInspireMeta(item, operation);
       Zotero.debug(
         `[${config.addonName}] updateItemInternal: getInspireMeta returned, recid=${metaInspire !== -1 ? (metaInspire as jsobject).recid : "N/A"}`,
       );
@@ -940,7 +959,7 @@ export class ZInspire {
             if (
               allowedChanges.length > 0 &&
               shouldShowPreview() &&
-              this.toUpdate === 1
+              run.total === 1
             ) {
               const result = await showSmartUpdatePreviewDialog(
                 diff,
@@ -975,12 +994,12 @@ export class ZInspire {
               allowedChanges,
             );
             await saveItemWithPendingInspireNote(item);
-            this.counter++;
+            run.counter++;
           } else if (targetType) {
             // No field changes, but the item type still has to change
             applyItemType(item, targetType);
             await item.saveTx();
-            this.counter++;
+            run.counter++;
           } else {
             Zotero.debug(
               `[${config.addonName}] Smart update: no changes to apply`,
@@ -991,7 +1010,7 @@ export class ZInspire {
           applyItemType(item, targetType);
           await setInspireMeta(item, metaInspire as jsobject, operation);
           await saveItemWithPendingInspireNote(item);
-          this.counter++;
+          run.counter++;
         }
       } else {
         if (
@@ -1008,13 +1027,12 @@ export class ZInspire {
           item.removeTag(getPref("tag_norecid") as string);
           await item.saveTx();
         }
-        this.error_norecid = true;
-        this.noRecidCount++;
+        run.noRecidCount++;
         if (operation === "citations") {
           const crossref_count = await setCrossRefCitations(item);
           await item.saveTx();
           if (crossref_count >= 0) {
-            this.CrossRefcounter++;
+            run.crossRefCounter++;
           }
         }
       }

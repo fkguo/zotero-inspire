@@ -149,10 +149,15 @@ export class InspireRateLimiter {
           `[${config.addonName}] 429 received. Retry ${retryCount + 1}/${MAX_RETRY_ATTEMPTS} after ${Math.round(delay)}ms`,
         );
 
-        await this.sleep(delay);
+        await this.sleep(delay, fetchOptions.signal);
 
         this.activeRetries--;
         this.notifyStatusChange();
+
+        // Aborted while waiting: end now, as the request itself would
+        if (fetchOptions.signal?.aborted) {
+          throw createAbortError();
+        }
 
         return this.executeWithRetry(url, options, retryCount + 1);
       }
@@ -173,9 +178,32 @@ export class InspireRateLimiter {
     }
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  /** Wait `ms`, or less if the signal aborts first */
+  private sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+    return new Promise((resolve) => {
+      if (signal?.aborted) {
+        resolve();
+        return;
+      }
+      const done = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      signal?.addEventListener("abort", done);
+    });
   }
+}
+
+/**
+ * An error named "AbortError", as fetch() rejects with when aborted (made by
+ * hand: DOMException may not be available in Zotero's sandbox)
+ */
+function createAbortError(): Error {
+  const err = new Error("The operation was aborted.");
+  err.name = "AbortError";
+  return err;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
