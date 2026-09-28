@@ -144,7 +144,12 @@ function report(title: string, rows: [string, string | number][]) {
   );
 }
 
-describe("20-category subscription on a simulated network", () => {
+// The time checked is the simulated clock's; the real-time limit only catches
+// a hang. Building and reading the pages of 20 categories takes up to a few
+// seconds, more on a busy machine, hence 30 s instead of the default 5 s.
+const hangLimit = { timeout: 30_000 };
+
+describe("20-category subscription on a simulated network", hangLimit, () => {
   it("recent, first load: 1 + 5 x 20 = 101 requests, about 25 minutes, one day every ~5 minutes", async () => {
     const { clock, site, service } = setup();
     const shownAt: [string, number][] = [];
