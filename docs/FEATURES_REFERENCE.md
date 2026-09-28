@@ -572,6 +572,8 @@ The three menu entries ask INSPIRE about every preprint they find. The backgroun
 
 ### 8.3 Update Process
 
+Each preprint gets one of four outcomes: published, unpublished (INSPIRE has a record without a journal publication), not in INSPIRE (no record), or failed (the request failed or was stopped). The results dialog shows the number of each; when no preprint is published, a notification shows these numbers instead.
+
 When publications are found:
 
 1. Shows dialog listing published items with checkboxes

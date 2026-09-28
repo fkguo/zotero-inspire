@@ -13,6 +13,9 @@ import {
 // Plugin icon for progress windows (PNG format required for ProgressWindow headline)
 const PLUGIN_ICON = `chrome://${config.addonRef}/content/icons/inspire-icon.png`;
 
+// How long the counts of a preprint check stay on screen (five numbers to read)
+const PREPRINT_SUMMARY_DISPLAY_MS = 10000;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RegExp Constants (hoisted to module level for performance)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1818,11 +1821,20 @@ export class ZInspire {
         (r) => r.status === "published" && r.publicationInfo,
       );
 
-      // If no published items found, show simple notification
+      // If no published items found, show how many preprints had each outcome
       if (publishedResults.length === 0) {
         this.showPreprintNotification(
-          getString("preprint-all-current"),
-          "default",
+          getString("preprint-check-summary", {
+            args: {
+              total: summary.total,
+              published: summary.published,
+              unpublished: summary.unpublished,
+              notInInspire: summary.notInInspire,
+              errors: summary.errors,
+            },
+          }),
+          summary.errors > 0 ? "fail" : "default",
+          PREPRINT_SUMMARY_DISPLAY_MS,
         );
         resolve({ selectedItemIDs: [], cancelled: false });
         return;
@@ -1874,9 +1886,16 @@ export class ZInspire {
       publishedSpan.textContent = `${getString("preprint-results-published")}: ${summary.published}`;
       const unpublishedSpan = doc.createElement("span");
       unpublishedSpan.textContent = `${getString("preprint-results-unpublished")}: ${summary.unpublished}`;
+      const notInInspireSpan = doc.createElement("span");
+      notInInspireSpan.textContent = `${getString("preprint-results-not-in-inspire")}: ${summary.notInInspire}`;
       const errorsSpan = doc.createElement("span");
       errorsSpan.textContent = `${getString("preprint-results-errors")}: ${summary.errors}`;
-      summaryBar.append(publishedSpan, unpublishedSpan, errorsSpan);
+      summaryBar.append(
+        publishedSpan,
+        unpublishedSpan,
+        notInInspireSpan,
+        errorsSpan,
+      );
       panel.appendChild(summaryBar);
 
       // List container
@@ -2072,6 +2091,7 @@ export class ZInspire {
   private showPreprintNotification(
     text: string,
     type: "success" | "fail" | "default",
+    closeDelayMs = 2500,
   ): void {
     Zotero.debug(
       `[${config.addonName}] showPreprintNotification: "${text}", type=${type}`,
@@ -2085,7 +2105,7 @@ export class ZInspire {
       type: type === "default" ? "success" : type,
     });
     progressWindow.show();
-    progressWindow.startCloseTimer(2500);
+    progressWindow.startCloseTimer(closeDelayMs);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

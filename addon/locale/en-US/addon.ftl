@@ -523,7 +523,11 @@ preprint-found-published =
     [one] 1 preprint has been published!
    *[other] { $count } preprints have been published!
   }
-preprint-all-current = All preprints are still unpublished.
+preprint-check-summary =
+  Checked { $total ->
+    [one] 1 preprint
+   *[other] { $total } preprints
+  }: { $published } published, { $unpublished } unpublished, { $notInInspire } not in INSPIRE, { $errors } failed
 preprint-no-preprints = No unpublished preprints found.
 preprint-update-success =
   { $count ->
@@ -536,6 +540,7 @@ preprint-cancel = Cancel
 preprint-doi-updated = DOI updated: { $oldDoi } → { $newDoi }
 preprint-results-published = Published
 preprint-results-unpublished = Unpublished
+preprint-results-not-in-inspire = Not in INSPIRE
 preprint-results-errors = Errors
 
 # Collaboration Tags feature (FTR-COLLAB-TAGS)

@@ -518,7 +518,7 @@ preprint-found-published =
     [one] 发现 1 篇预印本已正式发表！
    *[other] 发现 { $count } 篇预印本已正式发表！
   }
-preprint-all-current = 所有预印本均未正式发表。
+preprint-check-summary = 已检查 { $total } 篇预印本：已发表 { $published }，未发表 { $unpublished }，INSPIRE 未覆盖 { $notInInspire }，查询出错 { $errors }
 preprint-no-preprints = 未找到未发表的预印本。
 preprint-update-success =
   { $count ->
@@ -531,7 +531,8 @@ preprint-cancel = 取消
 preprint-doi-updated = DOI 已更新: { $oldDoi } → { $newDoi }
 preprint-results-published = 已发表
 preprint-results-unpublished = 未发表
-preprint-results-errors = 错误
+preprint-results-not-in-inspire = INSPIRE 未覆盖
+preprint-results-errors = 查询出错
 
 # Collaboration Tags feature (FTR-COLLAB-TAGS)
 collab-tag-menu-add = 添加合作组标签

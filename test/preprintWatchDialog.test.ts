@@ -278,7 +278,7 @@ describe("checking the selected items", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The scope of the collection and "all" entries
+// Counts per outcome, and the scope of the collection and "all" entries
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Texts of the lines of the check's progress window */
@@ -288,6 +288,91 @@ function progressTexts(): string[] {
   );
   return window ? window.lines.map((line) => line.text) : [];
 }
+
+describe("the result of a check", () => {
+  it("shows how many preprints had each outcome when none is published", async () => {
+    zotero.selectedItems = [
+      preprint("2410.00001"),
+      preprint("2410.00002"),
+      preprint("2410.00003"),
+      preprint("2410.00004"),
+      preprint("2410.00005"),
+    ];
+    answers.set("2410.00001", [unpublishedRecord("2410.00001", 1)]);
+    answers.set("2410.00002", [unpublishedRecord("2410.00002", 2)]);
+    answers.set("2410.00003", []);
+    answers.set("2410.00004", 502);
+    answers.set("2410.00005", new TypeError("NetworkError"));
+
+    await new ZInspire().checkSelectedItemsPreprints();
+
+    expect(overlay()).toBeNull();
+    expect(notifications()).toEqual([
+      expect.objectContaining({
+        text: msg("preprint-check-summary", {
+          total: 5,
+          published: 0,
+          unpublished: 2,
+          notInInspire: 1,
+          errors: 2,
+        }),
+        type: "fail",
+      }),
+    ]);
+    expect(
+      progressWindows.find((w) => w.closeTimer !== undefined)?.closeTimer,
+    ).toBe(10000);
+  });
+
+  it("shows the counts without the failure mark when every request was answered", async () => {
+    zotero.selectedItems = [preprint("2410.00006"), preprint("2410.00007")];
+    answers.set("2410.00006", [unpublishedRecord("2410.00006", 6)]);
+    answers.set("2410.00007", []);
+
+    await new ZInspire().checkSelectedItemsPreprints();
+
+    expect(notifications()).toEqual([
+      expect.objectContaining({
+        text: msg("preprint-check-summary", {
+          total: 2,
+          published: 0,
+          unpublished: 1,
+          notInInspire: 1,
+          errors: 0,
+        }),
+        type: "success",
+      }),
+    ]);
+  });
+
+  it("shows the counts of all four outcomes above the published preprints", async () => {
+    zotero.selectedItems = [
+      preprint("2410.00008"),
+      preprint("2410.00009"),
+      preprint("2410.00010"),
+      preprint("2410.00011"),
+    ];
+    answers.set("2410.00008", [publishedRecord("2410.00008", 8)]);
+    answers.set("2410.00009", [unpublishedRecord("2410.00009", 9)]);
+    answers.set("2410.00010", []);
+    answers.set("2410.00011", 503);
+
+    const run = new ZInspire().checkSelectedItemsPreprints();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    const counts = [...overlay()!.querySelectorAll("span")].map(
+      (span) => span.textContent,
+    );
+    button("preprint-cancel").click();
+    await run;
+
+    expect(counts).toEqual([
+      `${msg("preprint-results-published")}: 1`,
+      `${msg("preprint-results-unpublished")}: 1`,
+      `${msg("preprint-results-not-in-inspire")}: 1`,
+      `${msg("preprint-results-errors")}: 1`,
+    ]);
+  });
+});
 
 describe("checking all preprints", () => {
   it("checks the preprints of every editable library with INSPIRE, whatever the cache holds", async () => {
