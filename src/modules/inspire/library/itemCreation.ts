@@ -41,13 +41,9 @@ export function takeCreatedByPluginMark(item: Zotero.Item): boolean {
   return marked;
 }
 
-/**
- * Put a new, unsaved item in `target`: library, collections and tags. Its
- * Extra starts empty.
- */
+/** Put a new, unsaved item in `target`: library, collections and tags */
 export function placeNewItem(item: Zotero.Item, target: NewItemTarget): void {
   item.libraryID = target.libraryID;
-  item.setField("extra", "");
   item.setCollections(
     Array.from(new Set(target.collectionIDs)).filter(
       (id): id is number => typeof id === "number",
@@ -86,6 +82,7 @@ export async function createItemFromInspireMeta(
     resolveNewItemType(meta as any, getItemTypePolicy()),
   );
   placeNewItem(item, target);
+  item.setField("extra", "");
   await setInspireMeta(item, meta, "full");
   await saveNewItem(item, target);
   return item;

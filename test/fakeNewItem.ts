@@ -67,6 +67,18 @@ export class FakeNewItem {
   hasTag(tag: string) {
     return this.tags.includes(tag);
   }
+  /** Item data in Zotero's JSON form (Zotero.Item#fromJSON, simplified) */
+  fromJSON(json: Record<string, any>) {
+    this.itemType = json.itemType;
+    for (const [key, value] of Object.entries(json)) {
+      if (key === "itemType") continue;
+      if (key === "creators") this.creators = value;
+      else if (key === "tags") this.tagData = value;
+      else this.setField(key, value);
+    }
+  }
+  /** Tags given to fromJSON, with their types */
+  tagData: { tag: string; type?: number }[] = [];
   setNote(text: string) {
     this.noteText = text;
   }
