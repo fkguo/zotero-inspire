@@ -410,7 +410,7 @@ describe("new", () => {
     expect(summary(result.days)).toEqual(["2026-09-28 complete 8"]);
   });
 
-  it("reuses /new for 10 minutes unless an announcement was scheduled since", async () => {
+  it("reuses /new unless an announcement was scheduled since", async () => {
     // 19:50 in New York on Sunday: the announcement is due at 20:00
     const { clock, site, service } = setup("2026-09-27T23:50:00Z");
     site.html(
@@ -458,8 +458,30 @@ describe("new", () => {
     expect(retried.previousIssue).toBe(false);
   });
 
-  it("fetches again after 10 minutes", async () => {
+  it("reuses /new that shows the listing the schedule expects until the next announcement", async () => {
+    // Sunday 13:00 in New York: Friday's listing is the newest
     const { clock, site, service } = setup();
+    site.html(
+      LIST_URL("hep-ph"),
+      newPageHtml("hep-ph", "2026-09-25", smallDay("hep-ph")),
+    );
+    await clock.run(service.loadNew(["hep-ph"]));
+    // 19:59, almost seven hours later
+    await clock.advanceTo(Date.parse("2026-09-27T23:59:00Z"));
+    const cached = await clock.run(service.loadNew(["hep-ph"]));
+    expect(site.sent).toHaveLength(1);
+    expect(stateOf(cached.days[0], "hep-ph")).toMatchObject({
+      fromCache: true,
+    });
+    // 20:01: Monday's listing is due
+    await clock.advanceTo(Date.parse("2026-09-28T00:01:00Z"));
+    await clock.run(service.loadNew(["hep-ph"]));
+    expect(site.sent).toHaveLength(2);
+  });
+
+  it("asks again after 10 minutes while /new still shows the previous listing", async () => {
+    // 20:02 in New York: the announcement is due, arXiv still shows Friday
+    const { clock, site, service } = setup("2026-09-28T00:02:00Z");
     site.html(
       LIST_URL("hep-ph"),
       newPageHtml("hep-ph", "2026-09-25", smallDay("hep-ph")),
@@ -480,7 +502,8 @@ describe("new", () => {
       newPageHtml("hep-ph", "2026-09-25", smallDay("hep-ph")),
     );
     await clock.run(service.loadNew(["hep-ph"]));
-    await clock.advanceBy(60 * 60 * 1000);
+    // Sunday 20:30 in New York: Monday's listing is due, /new is asked again
+    await clock.advanceTo(Date.parse("2026-09-28T00:30:00Z"));
     site.page(LIST_URL("hep-ph"), {
       error: new ArxivFetchError("offline", "Zotero is offline"),
     });
@@ -505,7 +528,8 @@ describe("new", () => {
       newPageHtml("hep-th", "2026-09-25", smallDay("hep-th")),
     );
     await clock.run(service.loadNew(["hep-ph", "hep-th"]));
-    await clock.advanceBy(60 * 60 * 1000);
+    // Sunday 20:30 in New York: Monday's listing is due, /new is asked again
+    await clock.advanceTo(Date.parse("2026-09-28T00:30:00Z"));
     site.page(LIST_URL("hep-ph"), { status: 403 });
     const before = site.sent.length;
     const result = await clock.run(service.loadNew(["hep-ph", "hep-th"]));

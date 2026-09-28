@@ -68,8 +68,8 @@ const ARXIV = "https://arxiv.org";
 const NEW_PAGE_SIZE = 2000;
 
 /**
- * A /new page or recent index fetched this recently is used again, unless a
- * scheduled announcement time has passed since
+ * A /new page or recent index that does not show the listing the schedule
+ * expects yet (arXiv announcing late) is fetched again after this long
  */
 export const NEW_PAGE_REUSE_MS = 10 * 60 * 1000;
 
@@ -365,7 +365,7 @@ export class ListingService {
         latest,
         (marker) =>
           !run.refresh &&
-          this.isFresh(marker.fetchedAt) &&
+          this.isFresh(marker.fetchedAt, marker.date) &&
           marker.date >= startDay,
       );
       if (batch.date) latest = batch.date;
@@ -605,7 +605,7 @@ export class ListingService {
     specs: readonly string[],
     knownLatest: IsoDate | null,
     reuse: (marker: NewPageMarker) => boolean = (marker) =>
-      !run.refresh && this.isFresh(marker.fetchedAt),
+      !run.refresh && this.isFresh(marker.fetchedAt, marker.date),
   ): Promise<LatestBatch> {
     const results = new Map<string, SpecResult>();
     for (const spec of specs) {
@@ -917,12 +917,20 @@ export class ListingService {
     return result;
   }
 
-  private isFresh(fetchedAt: number): boolean {
+  /**
+   * Whether a cached /new page or recent index, fetched at `fetchedAt` and
+   * showing the listing of `date` as its newest, will do: not once a
+   * scheduled announcement time has passed since; until then always when it
+   * shows the listing the schedule expects (it cannot change before the next
+   * announcement), otherwise for NEW_PAGE_REUSE_MS
+   */
+  private isFresh(fetchedAt: number, date: IsoDate | undefined): boolean {
     const now = this.clock.now();
-    return (
-      now - fetchedAt < NEW_PAGE_REUSE_MS &&
-      !scheduledAnnouncementBetween(fetchedAt, now)
-    );
+    if (scheduledAnnouncementBetween(fetchedAt, now)) return false;
+    if (date !== undefined && date >= latestScheduledListingDate(now)) {
+      return true;
+    }
+    return now - fetchedAt < NEW_PAGE_REUSE_MS;
   }
 
   /**
@@ -1106,7 +1114,11 @@ export class ListingService {
     run: Run,
   ): Promise<{ ok: true; dates: IsoDate[] } | SpecFailure> {
     const cached = await this.store.getRecentIndex(INDEX_ARCHIVE);
-    if (cached && !run.refresh && this.isFresh(cached.fetchedAt)) {
+    if (
+      cached &&
+      !run.refresh &&
+      this.isFresh(cached.fetchedAt, cached.dates[0])
+    ) {
       return { ok: true, dates: cached.dates };
     }
     const fetchedAt = this.clock.now();

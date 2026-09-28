@@ -183,23 +183,23 @@ describe("20-category subscription on a simulated network", hangLimit, () => {
     ]);
   });
 
-  it("recent again: past days from the cache; the index and /new again after 10 minutes or an announcement", async () => {
+  it("recent again: everything from the cache until the next announcement, then the index and /new", async () => {
     const { clock, site, service } = setup();
     await clock.run(service.loadRecent(SPECS));
     const first = site.sent.length;
 
-    // The first load took 26 minutes, so its index and /new pages are older
-    // than 10 minutes: those 21 are fetched again, the past days are not
+    // The first load took 26 minutes. Its index and /new pages show the
+    // listing the schedule expects, so they stand until the next
+    // announcement, like the past days: nothing is fetched
     await clock.advanceBy(5 * 60 * 1000);
     const again = await clock.run(service.loadRecent(SPECS));
-    expect(site.sent.length - first).toBe(21);
+    expect(site.sent.length - first).toBe(0);
     expect(again.days).toHaveLength(5);
-    const second = site.sent.length;
 
-    // Within 10 minutes of those: nothing is fetched
-    await clock.advanceBy(60 * 1000);
+    // Still nothing a minute before the announcement (19:59 in New York)
+    await clock.advanceTo(Date.parse("2026-09-27T23:59:00Z"));
     const cached = await clock.run(service.loadRecent(SPECS));
-    expect(site.sent.length - second).toBe(0);
+    expect(site.sent.length - first).toBe(0);
     expect(cached.days.map((day) => day.status)).toEqual(
       Array(5).fill("complete"),
     );

@@ -409,7 +409,9 @@ describe("arXiv browser loading", () => {
   });
 
   it("keeps the days listed when a continuation stops before its days were known, and goes on with the same days", async () => {
-    const { clock, site, loader } = setup();
+    // Sunday 20:30 in New York: the index still ends Friday, so it is fetched
+    // again after 10 minutes
+    const { clock, site, loader } = setup("2026-09-28T00:30:00Z");
     const running = loader.load(hepPh, {
       kind: "days",
       dates: ["2026-09-24", "2026-09-23", "2026-09-22"],
