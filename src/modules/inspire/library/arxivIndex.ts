@@ -102,8 +102,10 @@ async function readItems(itemIDs?: number[]): Promise<IndexedItem[]> {
   const nonRegular = NON_REGULAR_TYPES.map((name) =>
     Zotero.ItemTypes.getID(name),
   ).filter((id): id is number => typeof id === "number");
-  const base = `
-    SELECT itemID, libraryID, fieldID, value
+  // Zotero.DB.queryAsync returns the rows only when the text starts with the
+  // word SELECT: it takes the first word with /^[^a-z]*[^ ]+/i, so with a line
+  // break before it the query returns nothing (db.js, queryAsync)
+  const base = `SELECT itemID, libraryID, fieldID, value
     FROM items
       JOIN itemData USING (itemID)
       JOIN itemDataValues USING (valueID)
@@ -113,8 +115,10 @@ async function readItems(itemIDs?: number[]): Promise<IndexedItem[]> {
       AND libraryID NOT IN (SELECT libraryID FROM libraries WHERE type = 'feed')`;
 
   const found = new Map<number, { libraryID: number; fields: ArxivIdFields }>();
-  const addRows = (rows: any[] | undefined) => {
-    for (const row of rows ?? []) {
+  const addRows = (rows: unknown) => {
+    // Without rows the index would take the library for empty
+    if (!Array.isArray(rows)) throw new Error("The library query gave no rows");
+    for (const row of rows) {
       const itemID = Number(row.itemID);
       let item = found.get(itemID);
       if (!item) {

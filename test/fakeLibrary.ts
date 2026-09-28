@@ -92,6 +92,11 @@ export class FakeLibrary {
   /** Error thrown by every query while set (Zotero.DB failing) */
   queryError?: Error;
   /**
+   * Every queryAsync gives no rows while set, as Zotero answers a query
+   * whose text does not start with SELECT
+   */
+  answerWithoutRows = false;
+  /**
    * Libraries whose items Zotero has not loaded yet (not shown or synced
    * since startup): Zotero.Items.get throws for their items until
    * Zotero.Items.getAsync loads them
@@ -144,7 +149,16 @@ export class FakeLibrary {
       ItemFields: { getID: (name: string) => this.fieldIDs.get(name) ?? false },
       ItemTypes: { getID: (name: string) => this.typeIDs.get(name) ?? false },
       DB: {
-        queryAsync: async (sql: string, params?: unknown[]) => run(sql, params),
+        // Zotero returns the rows only when the text starts with the word
+        // SELECT or PRAGMA: it takes the first word with /^[^a-z]*[^ ]+/i, so
+        // with anything before it (a line break, a space) the query runs and
+        // returns nothing (db.js, queryAsync)
+        queryAsync: async (sql: string, params?: unknown[]) => {
+          const rows = run(sql, params);
+          const op = sql.match(/^[^a-z]*[^ ]+/i)?.[0].toLowerCase();
+          if (this.answerWithoutRows) return undefined;
+          return op === "select" || op === "pragma" ? rows : undefined;
+        },
         valueQueryAsync: async (sql: string, params?: unknown[]) => {
           const row = run(sql, params)[0];
           return row ? Object.values(row)[0] : false;

@@ -414,6 +414,14 @@ describe("findItemsByArxivs", () => {
       LibraryIndexError,
     );
   });
+
+  it("rejects when the library query gives no rows, rather than finding nothing", async () => {
+    lib.put({ fields: { extra: "arXiv:2301.12345" } });
+    lib.answerWithoutRows = true;
+    await expect(findItemsByArxivs(["2301.12345"])).rejects.toThrow(
+      LibraryIndexError,
+    );
+  });
 });
 
 describe("findItemsByDOIs", () => {
