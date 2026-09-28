@@ -11,6 +11,7 @@ import {
   stopBackgroundCheck,
   onRenderModeChange,
   deriveRecidFromItem,
+  forgetRecidLookup,
   clearFundingCache,
   registerInspireItemTreeColumns,
   unregisterInspireItemTreeColumns,
@@ -262,6 +263,16 @@ async function onNotify(
         break;
       default:
         break;
+    }
+  }
+
+  // A recid found on INSPIRE for an item without one was found by the item's
+  // identifiers; once the item changes, it is looked up again
+  if (event === "modify" || event === "delete") {
+    for (const id of ids) {
+      if (typeof id === "number") {
+        forgetRecidLookup(id);
+      }
     }
   }
 

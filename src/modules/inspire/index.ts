@@ -127,6 +127,7 @@ export {
 export {
   getInspireMeta,
   fetchRecidFromInspire,
+  forgetRecidLookup,
   fetchInspireMetaByRecid,
   fetchInspireAbstract,
   fetchBibTeX,

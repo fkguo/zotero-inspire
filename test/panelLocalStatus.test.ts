@@ -227,7 +227,7 @@ describe("References panel: in-library marks", () => {
 });
 
 describe("References panel: recid found on INSPIRE for the item shown", () => {
-  it("is used again after the item changes", async () => {
+  it("is looked up again after the item changes", async () => {
     const fetchRecidForItem = vi.fn(async () => "new-recid");
     const loadEntries = vi.fn().mockResolvedValue(undefined);
     const controller = Object.create(
@@ -254,6 +254,37 @@ describe("References panel: recid found on INSPIRE for the item shown", () => {
 
     // The item is edited (its DOI, say), then shown again
     controller.handleItemModified([42]);
+    await controller.handleItemChange({ tabType: "library", item } as any, {
+      loadData: true,
+    });
+
+    // Intentional change: before, "remote-recid" was used again without a
+    // lookup
+    expect(fetchRecidForItem).toHaveBeenCalledOnce();
+    expect(controller.currentRecid).toBe("new-recid");
+  });
+
+  it("is kept through notifications about other items", async () => {
+    const fetchRecidForItem = vi.fn(async () => "new-recid");
+    const controller = Object.create(
+      InspireReferencePanelController.prototype,
+    ) as any;
+    Object.assign(controller, {
+      viewMode: "references",
+      currentItemID: 42,
+      currentRecid: "remote-recid",
+      recidStateRevision: 0,
+      lastAsyncRenderKey: "42:remote-recid:references",
+      allEntries: [],
+      lastRenderedEntries: [],
+      fetchRecidForItem,
+      restoreScrollPositionIfNeeded: vi.fn(),
+      updateSortSelector: vi.fn(),
+      loadEntries: vi.fn().mockResolvedValue(undefined),
+    });
+    const item = { id: 42, isRegularItem: () => true, getField: () => "" };
+
+    controller.handleItemModified([7]);
     await controller.handleItemChange({ tabType: "library", item } as any, {
       loadData: true,
     });

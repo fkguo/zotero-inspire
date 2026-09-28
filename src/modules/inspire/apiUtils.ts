@@ -7,31 +7,19 @@ import {
 import type { InspireArxivDetails } from "./types";
 import { formatArxivDetails } from "./formatters";
 import { LRUCache } from "./utils";
+import {
+  recidFromInspireLink,
+  recidFromLinkText,
+  resolveItemRecid,
+} from "./library/itemRecid";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INSPIRE recid extraction functions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** The INSPIRE recid of a Zotero item (resolveItemRecid), or null */
 export function deriveRecidFromItem(item: Zotero.Item): string | null {
-  const archiveLocation = (
-    item.getField("archiveLocation") as string | undefined
-  )?.trim();
-  if (archiveLocation && /^\d+$/.test(archiveLocation)) {
-    return archiveLocation;
-  }
-  const url = item.getField("url") as string | undefined;
-  const recidFromUrl = extractRecidFromUrl(url);
-  if (recidFromUrl) {
-    return recidFromUrl;
-  }
-  const extra = item.getField("extra") as string | undefined;
-  if (extra) {
-    const match = extra.match(/inspirehep\.net\/(?:record|literature)\/(\d+)/i);
-    if (match) {
-      return match[1];
-    }
-  }
-  return null;
+  return resolveItemRecid(item);
 }
 
 export function extractRecidFromRecordRef(ref?: string): string | null {
@@ -41,7 +29,7 @@ export function extractRecidFromRecordRef(ref?: string): string | null {
   // A $ref is INSPIRE's own link to the cited record, so a relative one is
   // resolved against INSPIRE. It can point to another collection (e.g. data),
   // whose numbers are not literature recids.
-  return recidFromInspireLiteratureLink(ref.trim(), "https://inspirehep.net/");
+  return recidFromInspireLink(ref.trim(), "https://inspirehep.net/");
 }
 
 export function extractRecidFromUrls(
@@ -59,53 +47,13 @@ export function extractRecidFromUrls(
   return null;
 }
 
-const INSPIRE_HOSTS = new Set(["inspirehep.net", "www.inspirehep.net"]);
-
-/** /literature/<recid>, /api/literature/<recid> or legacy /record/<recid> */
-const INSPIRE_LITERATURE_PATH_REGEX =
-  /^\/(?:(?:api\/)?literature|record)\/(\d+)(?:\/|$)/;
-
-/**
- * Recid from a link to an INSPIRE literature record; the host must be
- * inspirehep.net (optionally www.). Record URLs of other repositories
- * (cds.cern.ch/record/<n>, ...) and other INSPIRE collections number their own
- * records. A link with whitespace or a backslash is rejected: the URL parser
- * would drop or rewrite those characters, changing where the digits end.
- */
-function recidFromInspireLiteratureLink(
-  link: string,
-  base?: string,
-): string | null {
-  if (!link || /[\s\\]/.test(link)) {
-    return null;
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(link, base);
-  } catch {
-    return null;
-  }
-  if (!INSPIRE_HOSTS.has(parsed.hostname)) {
-    return null;
-  }
-  const match = parsed.pathname.match(INSPIRE_LITERATURE_PATH_REGEX);
-  return match ? match[1] : null;
-}
-
 /**
  * Recid from a single INSPIRE literature link. A link without a host (a
  * relative path, or a host name without a scheme) cannot be attributed to
  * INSPIRE and gives none.
  */
 export function extractRecidFromUrl(url?: string | null): string | null {
-  if (typeof url !== "string") {
-    return null;
-  }
-  const link = url.trim();
-  // A scheme-relative link ("//host/path") still names its host
-  return recidFromInspireLiteratureLink(
-    link.startsWith("//") ? `https:${link}` : link,
-  );
+  return recidFromLinkText(url);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

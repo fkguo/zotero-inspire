@@ -1638,6 +1638,11 @@ export class InspireReferencePanelController {
   private citationGraphButton?: HTMLButtonElement;
   private currentItemID?: number;
   private currentRecid?: string;
+  /**
+   * The item shown was edited after currentRecid was assigned: a recid found
+   * on INSPIRE by the item's identifiers is not reused for it
+   */
+  private currentRecidOutdated = false;
   /** Invalidates an older same-item recid lookup when fresher state arrives. */
   private recidStateRevision = 0;
   private entryCitedSource?: EntryCitedSource;
@@ -3729,6 +3734,7 @@ export class InspireReferencePanelController {
   ): void {
     const changed = this.currentRecid !== recid;
     this.currentRecid = recid;
+    this.currentRecidOutdated = false;
     if (changed || forceRevision) {
       this.recidStateRevision = this.getRecidStateRevision() + 1;
     }
@@ -8598,11 +8604,19 @@ export class InspireReferencePanelController {
   }
 
   /**
-   * Handle item modifications - clear auto-check notification if the tracked item was modified
-   * This ensures the notification disappears when the item is updated from any source
-   * (e.g., popup dialog, right-click menu, etc.)
+   * Handle item modifications. The recid of the item shown is resolved again
+   * at its next render (its identifiers may have changed). The auto-check
+   * notification is cleared if the tracked item was modified, so it
+   * disappears when the item is updated from any source (e.g., popup dialog,
+   * right-click menu, etc.)
    */
   private handleItemModified(itemIDs: number[]) {
+    if (
+      this.currentItemID !== undefined &&
+      itemIDs.includes(this.currentItemID)
+    ) {
+      this.currentRecidOutdated = true;
+    }
     if (!this.autoCheckPendingDiff) return;
 
     // Check if the modified item is the one we're tracking
@@ -9928,7 +9942,9 @@ export class InspireReferencePanelController {
         }
       }
 
-      let recid = localRecid ?? this.currentRecid;
+      let recid =
+        localRecid ??
+        (this.currentRecidOutdated ? undefined : this.currentRecid);
       if (!recid) {
         const recidRevision = this.getRecidStateRevision();
         const resolvedRecid = await this.fetchRecidForItem(item);

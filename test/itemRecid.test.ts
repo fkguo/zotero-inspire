@@ -14,8 +14,15 @@ vi.mock("../src/modules/inspire/rateLimiter", () => ({
 }));
 
 import { inspireFetch } from "../src/modules/inspire/rateLimiter";
-import { deriveRecidFromItem } from "../src/modules/inspire/apiUtils";
-import { getInspireMeta } from "../src/modules/inspire/metadataService";
+import {
+  deriveRecidFromItem,
+  recidLookupCache,
+} from "../src/modules/inspire/apiUtils";
+import {
+  fetchRecidFromInspire,
+  getInspireMeta,
+} from "../src/modules/inspire/metadataService";
+import hooks from "../src/hooks";
 
 type Fields = Record<string, string>;
 
@@ -82,30 +89,55 @@ const ROWS: Row[] = [
     fields: { archive: "INSPIRE", archiveLocation: " 1234567 " },
     recid: "1234567",
     lookup: null,
+    changed: {
+      lookup: "literature/1234567",
+      reason:
+        "the lookup reads Archive Location by the recid rule, which ignores spaces around it",
+    },
   },
   {
     name: "number in Archive Location, Archive empty",
     fields: { archiveLocation: "1234567" },
     recid: "1234567",
     lookup: "literature/1234567",
+    changed: {
+      recid: null,
+      lookup: null,
+      reason:
+        "a number in Archive Location is a recid only under Archive INSPIRE",
+    },
   },
   {
     name: "number in Archive Location, Archive a shelf name",
     fields: { archive: "Institute library", archiveLocation: "1234567" },
     recid: "1234567",
     lookup: "literature/1234567",
+    changed: {
+      recid: null,
+      lookup: null,
+      reason:
+        "a number in Archive Location is a recid only under Archive INSPIRE",
+    },
   },
   {
     name: "arXiv ID in Archive Location with Archive arXiv",
     fields: { archive: "arXiv", archiveLocation: "2301.12345" },
     recid: null,
     lookup: "literature/2301.12345",
+    changed: {
+      lookup: null,
+      reason: "an arXiv ID is not a recid (INSPIRE has no record 2301.12345)",
+    },
   },
   {
     name: "call number starting with digits in Archive Location",
     fields: { archiveLocation: "530.1 GUO" },
     recid: null,
     lookup: "literature/530.1%20GUO",
+    changed: {
+      lookup: null,
+      reason: "only a whole number under Archive INSPIRE is a recid",
+    },
   },
   // ── URL ─────────────────────────────────────────────────────────────────
   {
@@ -121,6 +153,10 @@ const ROWS: Row[] = [
     },
     recid: "1234567",
     lookup: "literature/1234567%3Fui-citation-summary%3Dtrue",
+    changed: {
+      lookup: "literature/1234567",
+      reason: "the URL is read as a link: its query is not part of the recid",
+    },
   },
   {
     name: "INSPIRE API URL",
@@ -133,12 +169,21 @@ const ROWS: Row[] = [
     fields: { url: "http://inspirehep.net/record/1234567" },
     recid: "1234567",
     lookup: null,
+    changed: {
+      lookup: "literature/1234567",
+      reason:
+        "the lookup reads the URL's recid by the shared rule, which takes legacy /record/ links",
+    },
   },
   {
     name: "literature URL of another site",
     fields: { url: "https://example.org/literature/1234567" },
     recid: null,
     lookup: "literature/1234567",
+    changed: {
+      lookup: null,
+      reason: "only links to inspirehep.net give a recid",
+    },
   },
   {
     name: "CDS record URL",
@@ -170,18 +215,31 @@ const ROWS: Row[] = [
     fields: { extra: "https://inspirehep.net/api/literature/1234567" },
     recid: null,
     lookup: null,
+    changed: {
+      recid: "1234567",
+      reason: "links in Extra are read like the URL, which accepts API links",
+    },
   },
   {
     name: "INSPIRE address without scheme in Extra",
     fields: { extra: "inspirehep.net/literature/1234567" },
     recid: "1234567",
     lookup: null,
+    changed: {
+      recid: null,
+      reason:
+        "text in Extra is read as a link only when it starts with http://, https:// or //",
+    },
   },
   {
     name: "link to a lookalike host in Extra",
     fields: { extra: "https://notinspirehep.net/literature/1234567" },
     recid: "1234567",
     lookup: null,
+    changed: {
+      recid: null,
+      reason: "only links to inspirehep.net give a recid",
+    },
   },
   {
     name: "INSPIRE link inside another link in Extra",
@@ -191,6 +249,10 @@ const ROWS: Row[] = [
     },
     recid: "1234567",
     lookup: null,
+    changed: {
+      recid: null,
+      reason: "the link's host is example.org, not INSPIRE",
+    },
   },
   // ── Several sources ─────────────────────────────────────────────────────
   {
@@ -211,6 +273,11 @@ const ROWS: Row[] = [
     },
     recid: "1234567",
     lookup: "literature/7654321",
+    changed: {
+      recid: "7654321",
+      reason:
+        "the number is not a recid (Archive is not INSPIRE), so the URL's recid is taken",
+    },
   },
   {
     name: "journal DOI and recid (the lookup asks by DOI)",
@@ -264,12 +331,7 @@ describe("recid of an item", () => {
 });
 
 describe("recid found on INSPIRE for an item without one", () => {
-  it("is asked for again only after the item changes", async () => {
-    const { default: hooks } = await import("../src/hooks");
-    const { fetchRecidFromInspire } =
-      await import("../src/modules/inspire/metadataService");
-    const { recidLookupCache } =
-      await import("../src/modules/inspire/apiUtils");
+  it("is asked for again after the item changes", async () => {
     recidLookupCache.clear();
     vi.mocked(inspireFetch).mockResolvedValue({
       status: 200,
@@ -281,9 +343,45 @@ describe("recid found on INSPIRE for an item without one", () => {
     expect(await fetchRecidFromInspire(item)).toBe("1234567");
     expect(inspireFetch).toHaveBeenCalledTimes(1);
 
-    // An edit of the item (its arXiv ID, say) reaches the plugin's observer
+    // An edit of the item (its arXiv ID, say) reaches the plugin's observer.
+    // Intentional change: before, the recid found first was kept (1 request).
     await hooks.onNotify("modify", "item", [31], {});
     await fetchRecidFromInspire(item);
-    expect(inspireFetch).toHaveBeenCalledTimes(1);
+    expect(inspireFetch).toHaveBeenCalledTimes(2);
+  });
+
+  // Intentional change: before, the answer to the old identifiers was
+  // returned and kept for the item
+  it("is asked for again when the item changes while INSPIRE answers", async () => {
+    recidLookupCache.clear();
+    const fields: Fields = { extra: "arXiv:2301.12345" };
+    const item = { ...fakeItem(fields), id: 32 };
+    const answers: Array<(recid: number) => void> = [];
+    vi.mocked(inspireFetch).mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          answers.push((recid) =>
+            resolve({
+              status: 200,
+              json: async () => ({ metadata: { control_number: recid } }),
+            } as any),
+          ),
+        ),
+    );
+
+    const lookup = fetchRecidFromInspire(item);
+    await vi.waitFor(() => expect(answers).toHaveLength(1));
+    // The user corrects the arXiv ID before INSPIRE answers
+    fields.extra = "arXiv:2302.54321";
+    await hooks.onNotify("modify", "item", [32], {});
+    answers[0](1111111);
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    expect(String(vi.mocked(inspireFetch).mock.calls[1][0])).toContain(
+      "arxiv/2302.54321",
+    );
+    answers[1](2222222);
+
+    expect(await lookup).toBe("2222222");
+    expect(recidLookupCache.get(32)).toBe("2222222");
   });
 });

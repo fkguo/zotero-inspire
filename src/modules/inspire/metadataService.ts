@@ -21,15 +21,18 @@ import { crossrefFetch } from "./crossrefService";
 import { LRUCache } from "./utils";
 import { localCache } from "./localCache";
 import { arxivIdsFromFields } from "../arxiv/arxivId";
+import {
+  recidFromArchiveLocation,
+  recidFromLinkText,
+} from "./library/itemRecid";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RegExp Constants (hoisted to module level for performance)
 // ─────────────────────────────────────────────────────────────────────────────
 const ARXIV_REGEX = /arxiv/i;
-const RECID_FROM_URL_REGEX = /[^/]*$/;
 const DOI_IN_EXTRA_REGEX = /DOI:(.+)/i;
 const DOI_ORG_IN_EXTRA_REGEX = /doi\.org\/(.+)/i;
-const URL_IDENTIFIER_REGEX = /(doi|arxiv|\/literature\/)/i;
+const URL_IDENTIFIER_REGEX = /(doi|arxiv|\/literature\/|\/record\/)/i;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Identifier Extraction (FTR-REFACTOR: Extracted for clarity)
@@ -43,7 +46,8 @@ interface ExtractedIdentifier {
 
 /**
  * Extract identifier (DOI, arXiv, or recid) from a Zotero item.
- * Checks multiple fields: DOI, URL, Extra, archiveLocation.
+ * Checks multiple fields: DOI, URL, Extra, archiveLocation. The recid is read
+ * by the rules of resolveItemRecid (library/itemRecid.ts) from each field.
  *
  * @param item - Zotero item to extract identifier from
  * @returns Extracted identifier info, or null if not found
@@ -81,12 +85,10 @@ function extractIdentifierFromItem(
       return { idtype: "doi", value: cleanDoi, searchOrNot: 0 };
     }
 
-    // Literature recid from URL
-    if (url.includes("/literature/")) {
-      const recidMatch = RECID_FROM_URL_REGEX.exec(url);
-      if (recidMatch?.[0]?.match(/^\d+/)) {
-        return { idtype: "literature", value: recidMatch[0], searchOrNot: 0 };
-      }
+    // Literature recid from an INSPIRE URL
+    const urlRecid = recidFromLinkText(url);
+    if (urlRecid) {
+      return { idtype: "literature", value: urlRecid, searchOrNot: 0 };
     }
   }
 
@@ -101,9 +103,12 @@ function extractIdentifierFromItem(
     return { idtype: "doi", value: doiOrgInExtra[1], searchOrNot: 0 };
   }
 
-  // Recid from archiveLocation
-  const recid = item.getField("archiveLocation") as string;
-  if (recid?.match(/^\d+/)) {
+  // Recid from Archive Location (with Archive INSPIRE)
+  const recid = recidFromArchiveLocation(
+    item.getField("archiveLocation") as string,
+    item.getField("archive") as string,
+  );
+  if (recid) {
     return { idtype: "literature", value: recid, searchOrNot: 0 };
   }
 
@@ -207,6 +212,25 @@ export async function getInspireMeta(
   }
 }
 
+/**
+ * Items whose recid is being asked for on INSPIRE: how many lookups are
+ * under way, and how often the item changed since the first began
+ */
+const lookupsUnderWay = new Map<number, { count: number; changes: number }>();
+
+/**
+ * The item changed (its identifiers may have): forget the recid found on
+ * INSPIRE for it, and do not keep one that a lookup under way finds with
+ * the item's old identifiers
+ */
+export function forgetRecidLookup(itemID: number): void {
+  recidLookupCache.delete(itemID);
+  const underWay = lookupsUnderWay.get(itemID);
+  if (underWay) {
+    underWay.changes++;
+  }
+}
+
 export async function fetchRecidFromInspire(
   item: Zotero.Item,
   signal?: AbortSignal,
@@ -233,18 +257,38 @@ export async function fetchRecidFromInspire(
     return cached;
   }
 
-  const meta = (await getInspireMeta(item, "literatureLookup", signal)) as
-    | jsobject
-    | -1;
-  if (meta === -1 || typeof meta !== "object") {
-    return null;
+  let underWay = lookupsUnderWay.get(item.id);
+  if (!underWay) {
+    underWay = { count: 0, changes: 0 };
+    lookupsUnderWay.set(item.id, underWay);
   }
-  // FIX: INSPIRE API returns recid as number, convert to string
-  const recid = meta.recid != null ? String(meta.recid) : null;
-  if (recid) {
-    recidLookupCache.set(item.id, recid);
+  underWay.count++;
+  try {
+    // An item edited while INSPIRE answers is asked for again, by its new
+    // identifiers
+    for (;;) {
+      const changes = underWay.changes;
+      const meta = (await getInspireMeta(item, "literatureLookup", signal)) as
+        | jsobject
+        | -1;
+      if (underWay.changes !== changes && !signal?.aborted) {
+        continue;
+      }
+      if (meta === -1 || typeof meta !== "object") {
+        return null;
+      }
+      // FIX: INSPIRE API returns recid as number, convert to string
+      const recid = meta.recid != null ? String(meta.recid) : null;
+      if (recid) {
+        recidLookupCache.set(item.id, recid);
+      }
+      return recid;
+    }
+  } finally {
+    if (--underWay.count === 0) {
+      lookupsUnderWay.delete(item.id);
+    }
   }
-  return recid;
 }
 
 export async function fetchInspireMetaByRecid(

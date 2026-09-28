@@ -79,7 +79,11 @@ describe("Zotero item-pane lifecycle", () => {
       id: 42,
       isRegularItem: () => true,
       getField: (field: string) =>
-        field === "archiveLocation" ? "123456" : "",
+        field === "archiveLocation"
+          ? "123456"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
     const fulltextCache = vi.fn();
     const readCacheFile = vi.fn();
@@ -452,7 +456,11 @@ describe("Zotero item-pane lifecycle", () => {
       id: 42,
       isRegularItem: () => true,
       getField: (field: string) =>
-        field === "archiveLocation" ? "123456" : "",
+        field === "archiveLocation"
+          ? "123456"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
 
     await controller.handleItemChange({ tabType: "library", item } as any, {
@@ -764,7 +772,12 @@ describe("Zotero item-pane lifecycle", () => {
     const item = {
       id: 42,
       isRegularItem: () => true,
-      getField: (field: string) => (field === "archiveLocation" ? "123" : ""),
+      getField: (field: string) =>
+        field === "archiveLocation"
+          ? "123"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
     const args = { tabType: "library", item } as any;
 
@@ -789,7 +802,11 @@ describe("Zotero item-pane lifecycle", () => {
 
     const localRecid = {
       getField: vi.fn((field: string) =>
-        field === "archiveLocation" ? "123456" : "",
+        field === "archiveLocation"
+          ? "123456"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
       ),
     } as any;
     remote.mockClear();
@@ -986,7 +1003,12 @@ describe("Zotero item-pane lifecycle", () => {
     const item = {
       id: 42,
       isRegularItem: () => true,
-      getField: (field: string) => (field === "archiveLocation" ? "123" : ""),
+      getField: (field: string) =>
+        field === "archiveLocation"
+          ? "123"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
     const args = { tabType: "library", item } as any;
 
@@ -1038,12 +1060,22 @@ describe("Zotero item-pane lifecycle", () => {
     const item42 = {
       id: 42,
       isRegularItem: () => true,
-      getField: (field: string) => (field === "archiveLocation" ? "4200" : ""),
+      getField: (field: string) =>
+        field === "archiveLocation"
+          ? "4200"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
     const item43 = {
       id: 43,
       isRegularItem: () => true,
-      getField: (field: string) => (field === "archiveLocation" ? "4300" : ""),
+      getField: (field: string) =>
+        field === "archiveLocation"
+          ? "4300"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
 
     const oldFlight = controller.handleVisibleItemChange({
@@ -1119,12 +1151,22 @@ describe("Zotero item-pane lifecycle", () => {
     const oldItem = {
       id: 42,
       isRegularItem: () => true,
-      getField: (field: string) => (field === "archiveLocation" ? "4200" : ""),
+      getField: (field: string) =>
+        field === "archiveLocation"
+          ? "4200"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
     const nextItem = {
       id: 43,
       isRegularItem: () => true,
-      getField: (field: string) => (field === "archiveLocation" ? "4300" : ""),
+      getField: (field: string) =>
+        field === "archiveLocation"
+          ? "4300"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
 
     const oldVisibleLoad = controller.handleItemChange(
@@ -1462,7 +1504,12 @@ describe("Zotero item-pane lifecycle", () => {
     const item = {
       id: 42,
       isRegularItem: () => true,
-      getField: (field: string) => (field === "archiveLocation" ? "123" : ""),
+      getField: (field: string) =>
+        field === "archiveLocation"
+          ? "123"
+          : field === "archive"
+            ? "INSPIRE"
+            : "",
     };
 
     await controller.handleItemChange({ tabType: "library", item } as any, {
@@ -2213,7 +2260,11 @@ describe("Zotero item-pane lifecycle", () => {
           id: 42,
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -2297,7 +2348,11 @@ describe("Zotero item-pane lifecycle", () => {
           id: 42,
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -2381,7 +2436,11 @@ describe("Zotero item-pane lifecycle", () => {
           id: 42,
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -2756,7 +2815,11 @@ describe("Zotero item-pane lifecycle", () => {
           itemType: "journalArticle",
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -2829,7 +2892,11 @@ describe("Zotero item-pane lifecycle", () => {
           itemType: "journalArticle",
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -2905,7 +2972,11 @@ describe("Zotero item-pane lifecycle", () => {
           itemType: "journalArticle",
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -2976,7 +3047,11 @@ describe("Zotero item-pane lifecycle", () => {
           itemType: "journalArticle",
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -3051,7 +3126,11 @@ describe("Zotero item-pane lifecycle", () => {
           itemType: "journalArticle",
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -3137,7 +3216,11 @@ describe("Zotero item-pane lifecycle", () => {
           itemType: "journalArticle",
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
@@ -3238,7 +3321,11 @@ describe("Zotero item-pane lifecycle", () => {
           itemType: "journalArticle",
           isRegularItem: () => true,
           getField: (field: string) =>
-            field === "archiveLocation" ? "123" : "",
+            field === "archiveLocation"
+              ? "123"
+              : field === "archive"
+                ? "INSPIRE"
+                : "",
         })),
       },
     });
