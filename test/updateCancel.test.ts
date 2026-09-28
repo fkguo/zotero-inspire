@@ -420,6 +420,49 @@ describe("two updates that nobody cancels", () => {
   });
 });
 
+describe("updates that overlap", () => {
+  it("each keep their progress popup and show their own final notice", async () => {
+    const inspire = new ZInspire();
+    // Papers saved one batch after the other are updated at once
+    inspire.updateItems(papers(1, 5), "full");
+    await settle();
+    inspire.updateItems(papers(11, 14), "full");
+    await settle();
+
+    expect(runWindows().map((w) => w.closed)).toEqual([false, false]);
+
+    await releaseAll();
+
+    expect(runWindows().map((w) => w.closed)).toEqual([true, true]);
+    expect([...notices()].sort()).toEqual([
+      "No INSPIRE recid was found for 4 items.",
+      "No INSPIRE recid was found for 5 items.",
+    ]);
+  });
+
+  it("do not close each other's popup when one ends", async () => {
+    const inspire = new ZInspire();
+    inspire.updateItems([paper(1)], "full");
+    await settle();
+    inspire.updateItems(papers(11, 13), "full");
+    await settle();
+    expect(askedIDs()).toEqual([1, 11, 12, 13]);
+
+    // The first run gets its answer and ends
+    held.shift()!();
+    await settle();
+
+    expect(notices()).toEqual(["No INSPIRE recid was found for 1 item."]);
+    expect(runWindows().map((w) => w.closed)).toEqual([true, false]);
+
+    await releaseAll();
+    expect(notices()).toEqual([
+      "No INSPIRE recid was found for 1 item.",
+      "No INSPIRE recid was found for 3 items.",
+    ]);
+  });
+});
+
 describe("runs of different kinds", () => {
   it("a cancelled cache download stays cancelled when another starts", async () => {
     const inspire = new ZInspire();

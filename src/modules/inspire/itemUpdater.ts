@@ -178,61 +178,81 @@ export class ZInspire {
       this.error_norecid_shown = false;
       this.final_count_shown = false;
     } else {
+      const counts = {
+        counter: this.counter,
+        crossRefCounter: this.CrossRefcounter,
+        noRecidCount: this.noRecidCount,
+      };
       if (this.error_norecid) {
         this.closeActiveProgressWindow();
-        const icon = "chrome://zotero/skin/cross.png";
-        if (this.error_norecid && !this.error_norecid_shown) {
-          const progressWindowNoRecid = new ztoolkit.ProgressWindow(
-            config.addonName,
-            { closeOnClick: true },
-          );
-          progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
-          const itemWord = this.noRecidCount === 1 ? "item" : "items";
-          if (getPref("tag_enable") && getPref("tag_norecid") !== "") {
-            progressWindowNoRecid.createLine({
-              icon: icon,
-              text: `No INSPIRE recid was found for ${this.noRecidCount} ${itemWord}. Tagged with '${getPref("tag_norecid")}'.`,
-            });
-          } else {
-            progressWindowNoRecid.createLine({
-              icon: icon,
-              text: `No INSPIRE recid was found for ${this.noRecidCount} ${itemWord}.`,
-            });
-          }
-          progressWindowNoRecid.show();
-          progressWindowNoRecid.startCloseTimer(3000);
+        if (!this.error_norecid_shown) {
+          this.showFinalNotice(operation, counts);
           this.error_norecid_shown = true;
         }
       } else {
         if (!this.final_count_shown) {
-          const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-            closeOnClick: true,
-          });
-          progressWindow.win.changeHeadline("Finished", PLUGIN_ICON);
-          if (operation === "full" || operation === "noabstract") {
-            progressWindow.createLine({
-              icon: PLUGIN_ICON,
-              text: "INSPIRE metadata updated for " + this.counter + " items.",
-              progress: 100,
-            });
-          } else if (operation === "citations") {
-            progressWindow.createLine({
-              icon: PLUGIN_ICON,
-              text:
-                "INSPIRE citations updated for " +
-                this.counter +
-                " items;\n" +
-                "CrossRef citations updated for " +
-                this.CrossRefcounter +
-                " items.",
-              progress: 100,
-            });
-          }
-          progressWindow.show();
-          progressWindow.startCloseTimer(3000);
+          this.showFinalNotice(operation, counts);
           this.final_count_shown = true;
         }
       }
+    }
+  }
+
+  /**
+   * The notice at the end of an update: the items without an INSPIRE record
+   * if there were any, else how many items were updated
+   */
+  private showFinalNotice(
+    operation: string,
+    counts: Pick<UpdateRun, "counter" | "crossRefCounter" | "noRecidCount">,
+  ) {
+    if (counts.noRecidCount > 0) {
+      const icon = "chrome://zotero/skin/cross.png";
+      const progressWindowNoRecid = new ztoolkit.ProgressWindow(
+        config.addonName,
+        { closeOnClick: true },
+      );
+      progressWindowNoRecid.changeHeadline("INSPIRE recid not found");
+      const itemWord = counts.noRecidCount === 1 ? "item" : "items";
+      if (getPref("tag_enable") && getPref("tag_norecid") !== "") {
+        progressWindowNoRecid.createLine({
+          icon: icon,
+          text: `No INSPIRE recid was found for ${counts.noRecidCount} ${itemWord}. Tagged with '${getPref("tag_norecid")}'.`,
+        });
+      } else {
+        progressWindowNoRecid.createLine({
+          icon: icon,
+          text: `No INSPIRE recid was found for ${counts.noRecidCount} ${itemWord}.`,
+        });
+      }
+      progressWindowNoRecid.show();
+      progressWindowNoRecid.startCloseTimer(3000);
+    } else {
+      const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
+        closeOnClick: true,
+      });
+      progressWindow.win.changeHeadline("Finished", PLUGIN_ICON);
+      if (operation === "full" || operation === "noabstract") {
+        progressWindow.createLine({
+          icon: PLUGIN_ICON,
+          text: "INSPIRE metadata updated for " + counts.counter + " items.",
+          progress: 100,
+        });
+      } else if (operation === "citations") {
+        progressWindow.createLine({
+          icon: PLUGIN_ICON,
+          text:
+            "INSPIRE citations updated for " +
+            counts.counter +
+            " items;\n" +
+            "CrossRef citations updated for " +
+            counts.crossRefCounter +
+            " items.",
+          progress: 100,
+        });
+      }
+      progressWindow.show();
+      progressWindow.startCloseTimer(3000);
     }
   }
 
@@ -614,7 +634,7 @@ export class ZInspire {
     const progressWindow = openRunProgressWindow(config.addonName, {
       onEscape: () => this.cancelUpdate(),
     });
-    this.progressWindow = progressWindow;
+    // Not this.progressWindow: a run started meanwhile would close it
     // Note: Zotero 7 ProgressWindow headline does not display icons
     // Use icon in createLine instead to show plugin logo
     progressWindow.createLine({
@@ -696,14 +716,10 @@ export class ZInspire {
         this.closeActiveProgressWindow(progressWindow);
         this.numberOfUpdatedItems = total;
         this.current = total - 1;
-        // The final notice reports this run's counts
-        this.counter = run.counter;
-        this.CrossRefcounter = run.crossRefCounter;
-        this.noRecidCount = run.noRecidCount;
-        this.error_norecid = run.noRecidCount > 0;
-        this.resetState(operation);
+        // Every run shows its own notice, also when runs overlap
+        this.showFinalNotice(operation, run);
         Zotero.debug(
-          `[${config.addonName}] updateItemsConcurrent: done, counter=${this.counter}`,
+          `[${config.addonName}] updateItemsConcurrent: done, counter=${run.counter}`,
         );
       } else {
         // Cancelled - show stats
