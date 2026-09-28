@@ -103,6 +103,9 @@ pref-reader-auto-reopen-desc = When enabled, if the reader tab was closed, it wi
 pref-auto-find-fulltext =
     .label = Auto "Find Full Text" after adding to library
 pref-auto-find-fulltext-desc = When you add a reference to your library from the panel, automatically run Zotero's Find Full Text on the new item to fetch its PDF (single-item adds only, not batch import).
+pref-arxiv-pdf-skip-journal =
+    .label = No arXiv PDF for journal articles added from the arXiv browser
+pref-arxiv-pdf-skip-journal-desc = With the option above on, a paper the arXiv browser adds as a journal article (from INSPIRE or by its DOI) gets no arXiv preprint PDF; use Zotero's Find Available PDF for the journal version. Preprints still get theirs.
 
 pref-nofound-enable =
     .label = Add tag to items without INSPIRE record

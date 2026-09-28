@@ -45,14 +45,18 @@ export class ArxivFetchError extends Error {
 
 export interface ArxivResponse {
   status: number;
-  /** Response body as text ("" when there is none) */
+  /** Response body as text ("" when there is none, or asked for as bytes) */
   text: string;
+  /** Response body as bytes, when asked for with responseType "arraybuffer" */
+  body?: ArrayBuffer;
   header(name: string): string | null;
 }
 
 export interface ArxivTransportOptions {
   timeoutMs: number;
   headers: Record<string, string>;
+  /** "arraybuffer": the body as bytes (a PDF) */
+  responseType?: "arraybuffer";
   /** Receives the function that aborts the request while it is in flight */
   cancelReceiver: (cancel: () => void) => void;
 }
@@ -104,11 +108,14 @@ export interface ArxivSchedulerOptions {
 export interface ArxivRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** "arraybuffer": the body as bytes (a PDF) */
+  responseType?: "arraybuffer";
 }
 
 interface Job {
   url: string;
   timeoutMs: number;
+  responseType?: "arraybuffer";
   signal?: AbortSignal;
   retried: boolean;
   settled: boolean;
@@ -175,6 +182,7 @@ export class ArxivScheduler {
       const job: Job = {
         url,
         timeoutMs: options.timeoutMs ?? this.timeoutMs,
+        responseType: options.responseType,
         signal,
         retried: false,
         settled: false,
@@ -266,6 +274,7 @@ export class ArxivScheduler {
       response = await this.transport(job.url, {
         timeoutMs: job.timeoutMs,
         headers: { "User-Agent": ARXIV_USER_AGENT },
+        responseType: job.responseType,
         cancelReceiver: (cancel) => {
           job.cancel = cancel;
         },
@@ -421,13 +430,22 @@ export const zoteroTransport: ArxivTransport = async (url, options) => {
     timeout: options.timeoutMs,
     headers: options.headers,
     cancellerReceiver: options.cancelReceiver,
+    ...(options.responseType ? { responseType: options.responseType } : {}),
   };
   try {
     const xhr = await Zotero.HTTP.request("GET", url, requestOptions);
+    const bytes = options.responseType === "arraybuffer";
     return {
       status: xhr.status,
       // An unfollowed redirect resolves with a stand-in object without text
-      text: typeof xhr.responseText === "string" ? xhr.responseText : "",
+      text:
+        !bytes && typeof xhr.responseText === "string" ? xhr.responseText : "",
+      // Not instanceof: the ArrayBuffer comes from Zotero's global, not the
+      // plugin's
+      body:
+        bytes && typeof xhr.response?.byteLength === "number"
+          ? (xhr.response as ArrayBuffer)
+          : undefined,
       header: (name) => xhr.getResponseHeader(name),
     };
   } catch (error) {

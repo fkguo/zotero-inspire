@@ -11,6 +11,7 @@ pref("__prefsPrefix__.arxiv_tag_enable", false);
 pref("__prefsPrefix__.max_authors", 3);
 pref("__prefsPrefix__.reader_auto_reopen", false);
 pref("__prefsPrefix__.auto_find_fulltext_on_import", false); // ISSUE-110: after adding a reference to the library, auto-run Zotero Find Full Text on the new item
+pref("__prefsPrefix__.arxiv_pdf_skip_journal_items", false); // arXiv browser: attach no arXiv PDF to journal items added from INSPIRE or by DOI
 pref("__prefsPrefix__.chart_enable", true);
 pref("__prefsPrefix__.chart_default_collapsed", true);
 pref("__prefsPrefix__.related_papers_enable", true); // FTR-RELATED-PAPERS: enable Related tab

@@ -835,3 +835,4 @@ arxiv-browser-menu-copy-abs-link = 复制 arXiv 页面链接
 arxiv-browser-copied-text = 已复制
 arxiv-browser-open-abstract-page = arXiv 页面
 arxiv-browser-open-pdf-button = PDF
+arxiv-pdf-attachment-title = arXiv 预印本 PDF v{ $version }

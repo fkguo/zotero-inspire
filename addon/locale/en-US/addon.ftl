@@ -871,3 +871,4 @@ arxiv-browser-menu-copy-abs-link = Copy Link to the arXiv Page
 arxiv-browser-copied-text = Copied
 arxiv-browser-open-abstract-page = arXiv page
 arxiv-browser-open-pdf-button = PDF
+arxiv-pdf-attachment-title = arXiv preprint PDF v{ $version }
