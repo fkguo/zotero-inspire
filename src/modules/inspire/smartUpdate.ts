@@ -26,6 +26,11 @@ export interface FieldChange {
   localValue: string | number | null;
   inspireValue: string | number | null;
   isSignificant: boolean; // True if this is a meaningful change (not just formatting)
+  /**
+   * "authorsLost": INSPIRE's author list lacks authors the item has; only
+   * written when the user ticks it in the preview
+   */
+  conflict?: "authorsLost";
 }
 
 /**
@@ -374,6 +379,176 @@ export function findProtectedCreatorNames(
   return found;
 }
 
+type AnyCreator = _ZoteroTypes.Item.Creator & {
+  name?: string;
+  creatorType?: string;
+  creatorTypeID?: number;
+};
+
+/**
+ * A family name without case, spaces or punctuation, its accents dropped
+ * ("Muller"), spelled out ("Mueller"), and spelled out with ae/oe/ue then
+ * shortened, so that "Mueller" and "Muller" meet too: INSPIRE and other
+ * sources write such names each of these ways
+ */
+function familyKeys(creator: AnyCreator): [string, string, string] {
+  const name = creator.lastName || creator.name || "";
+  const letters = (text: string) =>
+    text
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "");
+  const spelled = letters(normalizeDiacritics(name));
+  return [
+    letters(stripDiacritics(name)),
+    spelled,
+    spelled.replace(/([aou])e/g, "$1"),
+  ];
+}
+
+/** The given names as parts ("J. R." -> [j, r]; "Hua-Xing" -> [hua, xing]) */
+function givenParts(creator: AnyCreator): string[] {
+  return stripDiacritics(creator.firstName || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .filter(Boolean);
+}
+
+/**
+ * Given names that can be the same person's: part by part, equal, or one
+ * an initial of the other ("J. R." and "John Robert"); "Jun" and "Jing" are
+ * not. A missing given name fits any.
+ */
+function sameGivenNames(a: AnyCreator, b: AnyCreator): boolean {
+  const pa = givenParts(a);
+  const pb = givenParts(b);
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    const x = pa[i];
+    const y = pb[i];
+    if (x === y) continue;
+    if ((x.length === 1 || y.length === 1) && x[0] === y[0]) continue;
+    return false;
+  }
+  return true;
+}
+
+function roleOf(creator: AnyCreator): string {
+  if (creator.creatorType) return creator.creatorType;
+  if (creator.creatorTypeID !== undefined) {
+    try {
+      return Zotero.CreatorTypes.getName(creator.creatorTypeID) || "author";
+    } catch {
+      return "author";
+    }
+  }
+  return "author";
+}
+
+/** The "others" entry that stands for authors left out */
+function isOthers(creator: AnyCreator): boolean {
+  return (
+    !creator.firstName &&
+    (creator.lastName || creator.name || "").trim().toLowerCase() === "others"
+  );
+}
+
+function samePerson(a: AnyCreator, b: AnyCreator): boolean {
+  const keysA = familyKeys(a);
+  const keysB = familyKeys(b);
+  if (!keysA.some((key, i) => key === keysB[i])) return false;
+  if (roleOf(a) !== roleOf(b)) return false;
+  return sameGivenNames(a, b);
+}
+
+/**
+ * The author of `local` each author of `incoming` stands for (its index, or
+ * -1), each local author paired with a different incoming one as far as
+ * possible (a bipartite matching: two authors of the same name need two);
+ * and whether every local author has one. "others" takes no part.
+ */
+function pairAuthors(
+  local: readonly AnyCreator[],
+  incoming: readonly AnyCreator[],
+): { localOf: number[]; allPaired: boolean } {
+  const localOf = new Array<number>(incoming.length).fill(-1);
+  // Tried first: the same given name, then the nearest place
+  const given = (c: AnyCreator) =>
+    stripDiacritics(c.firstName || "")
+      .toLowerCase()
+      .trim();
+  const candidates = local.map((a, i) =>
+    isOthers(a)
+      ? []
+      : incoming
+          .flatMap((b, j) => (!isOthers(b) && samePerson(a, b) ? [j] : []))
+          .sort(
+            (j, k) =>
+              Number(given(incoming[j]) !== given(a)) -
+                Number(given(incoming[k]) !== given(a)) ||
+              Math.abs(j - i) - Math.abs(k - i),
+          ),
+  );
+  const assign = (i: number, seen: Set<number>): boolean => {
+    for (const j of candidates[i]) {
+      if (seen.has(j)) continue;
+      seen.add(j);
+      if (localOf[j] < 0 || assign(localOf[j], seen)) {
+        localOf[j] = i;
+        return true;
+      }
+    }
+    return false;
+  };
+  let allPaired = true;
+  local.forEach((a, i) => {
+    if (!isOthers(a) && !assign(i, new Set())) allPaired = false;
+  });
+  return { localOf, allPaired };
+}
+
+/**
+ * Whether writing `incoming` in place of `local` would drop an author: each
+ * author of `local` must correspond to a different author of `incoming`
+ * (same family name, compatible initials, same role; "others" not counted).
+ * INSPIRE keeps the first 3 of more than 10 authors, so its list can be
+ * shorter than one the item got from elsewhere; a list of the same length
+ * can also name other people.
+ */
+export function authorsWouldBeLost(
+  local: readonly AnyCreator[],
+  incoming: readonly AnyCreator[],
+): boolean {
+  const mine = local.filter((c) => !isOthers(c)).length;
+  const theirs = incoming.filter((c) => !isOthers(c)).length;
+  // Fewer names can never keep everyone (INSPIRE's first 3 of many)
+  if (mine > theirs) return true;
+  return !pairAuthors(local, incoming).allPaired;
+}
+
+/**
+ * The creators an update from INSPIRE writes when no one is asked: the
+ * item's own list when INSPIRE's would drop an author, else INSPIRE's with
+ * protected names and local diacritics kept
+ */
+export function creatorsForUpdate(
+  local: _ZoteroTypes.Item.Creator[],
+  incoming: _ZoteroTypes.Item.Creator[],
+  protectedNames: string[],
+): _ZoteroTypes.Item.Creator[] {
+  if (authorsWouldBeLost(local, incoming)) {
+    Zotero.debug(
+      `[zotero-inspire] Keeping the item's ${local.length} authors: INSPIRE's list of ${incoming.length} lacks some of them`,
+    );
+    return local;
+  }
+  return (
+    mergeCreatorsWithProtectedNames(local, incoming, protectedNames) ?? incoming
+  );
+}
+
 /**
  * Merge creators: use INSPIRE data but preserve local names in these cases:
  * 1. Name is in the protected names list
@@ -390,24 +565,19 @@ export function mergeCreatorsWithProtectedNames(
     return null; // No local creators, use INSPIRE as-is
   }
 
-  // Build a map of local creators by normalized (diacritic-free) lastName for matching
-  const localByNormalized = new Map<string, _ZoteroTypes.Item.Creator>();
-  for (const creator of localCreators) {
-    const lastName = creator.lastName || "";
-    if (lastName) {
-      const normalizedKey = normalizeDiacritics(lastName).toLowerCase();
-      localByNormalized.set(normalizedKey, creator);
-    }
-  }
+  // Each INSPIRE author meets the local author it stands for, found one to
+  // one (keying local authors by family name would let two authors of the
+  // same name overwrite each other)
+  const { localOf } = pairAuthors(localCreators, inspireCreators);
 
   let hasPreservations = false;
   const merged: _ZoteroTypes.Item.Creator[] = [];
 
-  for (const inspireCreator of inspireCreators) {
+  inspireCreators.forEach((inspireCreator, index) => {
     const inspireLastName = inspireCreator.lastName || "";
     const inspireFirstName = inspireCreator.firstName || "";
-    const normalizedKey = normalizeDiacritics(inspireLastName).toLowerCase();
-    const localCreator = localByNormalized.get(normalizedKey);
+    const localCreator =
+      localOf[index] >= 0 ? localCreators[localOf[index]] : undefined;
 
     let shouldPreserveLocal = false;
     let reason = "";
@@ -447,7 +617,7 @@ export function mergeCreatorsWithProtectedNames(
     } else {
       merged.push(inspireCreator);
     }
-  }
+  });
 
   return hasPreservations ? merged : null;
 }
@@ -920,6 +1090,9 @@ export function compareItemWithInspire(
         localValue: formatCreatorsForDisplay(localCreators),
         inspireValue: formatCreatorsForDisplay(metaInspire.creators),
         isSignificant: true,
+        ...(authorsWouldBeLost(localCreators, metaInspire.creators)
+          ? { conflict: "authorsLost" as const }
+          : {}),
       });
     }
   }
@@ -1105,8 +1278,11 @@ export async function showSmartUpdatePreviewDialog(
       existingOverlay.remove();
     }
 
-    // Track selected fields (all selected by default)
-    const selectedFields = new Set<string>(allowedChanges.map((c) => c.field));
+    // Track selected fields (all selected by default, except a change that
+    // would drop authors)
+    const selectedFields = new Set<string>(
+      allowedChanges.filter((c) => !c.conflict).map((c) => c.field),
+    );
 
     // Create overlay
     const overlay = doc.createElement("div");
@@ -1276,7 +1452,7 @@ function createChangeRowHTML(
   // Checkbox
   const checkbox = doc.createElement("input");
   checkbox.type = "checkbox";
-  checkbox.checked = true;
+  checkbox.checked = selectedFields.has(change.field);
   checkbox.style.marginRight = "10px";
   checkbox.style.marginTop = "3px";
   checkbox.style.cursor = "pointer";
@@ -1301,6 +1477,15 @@ function createChangeRowHTML(
   fieldName.style.color = "var(--fill-primary, #333)";
   fieldName.textContent = getFieldDisplayName(change.field);
   content.appendChild(fieldName);
+
+  if (change.conflict === "authorsLost") {
+    const warning = doc.createElement("div");
+    warning.style.fontSize = "12px";
+    warning.style.marginBottom = "4px";
+    warning.style.color = "#b45309";
+    warning.textContent = getString("smart-update-authors-lost");
+    content.appendChild(warning);
+  }
 
   // Values container
   const valuesBox = doc.createElement("div");

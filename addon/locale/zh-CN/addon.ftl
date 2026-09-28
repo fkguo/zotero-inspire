@@ -493,6 +493,7 @@ smart-update-field-citations-wo-self = 引用次数（不含自引）
 smart-update-field-citekey = 引用键
 smart-update-field-collaboration = 合作组
 smart-update-field-authors = 作者
+smart-update-authors-lost = INSPIRE 的作者名单缺少本条目中的部分作者；勾选则仍然替换。
 
 # 智能更新预览对话框
 smart-update-preview-title = 智能更新预览

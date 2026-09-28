@@ -772,6 +772,7 @@ export type FluentMessageId =
   | 'references-panel-toast-unlinked'
   | 'references-panel-unknown-author'
   | 'references-panel-year-unknown'
+  | 'smart-update-authors-lost'
   | 'smart-update-auto-check-available'
   | 'smart-update-auto-check-changes'
   | 'smart-update-auto-check-dismiss'

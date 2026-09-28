@@ -53,6 +53,7 @@ import {
   getFieldProtectionConfig,
   showSmartUpdatePreviewDialog,
   mergeCreatorsWithProtectedNames,
+  creatorsForUpdate,
   type FieldChange,
 } from "./smartUpdate";
 import {
@@ -1028,11 +1029,16 @@ export class ZInspire {
             }
 
             // Show preview dialog only for single-item updates (not batch)
-            if (
+            const preview =
               allowedChanges.length > 0 &&
               shouldShowPreview() &&
-              run.total === 1
-            ) {
+              run.total === 1;
+            // Without a preview, an author list lacking authors of the item
+            // is not written; in the preview it is offered unticked
+            if (!preview) {
+              allowedChanges = allowedChanges.filter((c) => !c.conflict);
+            }
+            if (preview) {
               const result = await showSmartUpdatePreviewDialog(
                 diff,
                 allowedChanges,
@@ -2524,14 +2530,14 @@ export async function setInspireMeta(
       }
       if (metaInspire.creators) {
         // Check for protected author names
-        const protectionConfig = getFieldProtectionConfig();
-        const localCreators = item.getCreators() as _ZoteroTypes.Item.Creator[];
-        const mergedCreators = mergeCreatorsWithProtectedNames(
-          localCreators,
-          metaInspire.creators,
-          protectionConfig.protectedNames,
+        // No one is asked here: an author INSPIRE's list lacks is not dropped
+        item.setCreators(
+          creatorsForUpdate(
+            item.getCreators() as _ZoteroTypes.Item.Creator[],
+            metaInspire.creators,
+            getFieldProtectionConfig().protectedNames,
+          ),
         );
-        item.setCreators(mergedCreators ?? metaInspire.creators);
       }
 
       if (metaInspire.arxiv) {

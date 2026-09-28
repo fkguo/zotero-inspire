@@ -24,6 +24,7 @@ import {
 import { inspireFetch } from "./rateLimiter";
 import { localCache } from "./localCache";
 import { fetchInspireMetaByRecid } from "./metadataService";
+import { creatorsForUpdate, getFieldProtectionConfig } from "./smartUpdate";
 import { createAbortControllerWithSignal } from "./utils";
 import { arxivIdFromItem } from "../arxiv/arxivId";
 import type { jsobject } from "./types";
@@ -928,9 +929,15 @@ async function updatePreprintWithFullMetadata(
     }
   }
 
-  // Creators
+  // Creators; an author INSPIRE's list lacks is not dropped
   if (meta.creators) {
-    item.setCreators(meta.creators);
+    item.setCreators(
+      creatorsForUpdate(
+        item.getCreators() as _ZoteroTypes.Item.Creator[],
+        meta.creators,
+        getFieldProtectionConfig().protectedNames,
+      ),
+    );
   }
 
   // Abstract
