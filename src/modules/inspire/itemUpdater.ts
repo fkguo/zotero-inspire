@@ -72,6 +72,7 @@ import {
   batchAddCollabTags,
 } from "./collabTagService";
 import { createAbortController } from "./utils";
+import { openRunProgressWindow } from "./runProgressWindow";
 import { copyFundingInfo } from "./funding";
 // NOTE: CitationGraphDialog is imported lazily to avoid circular dependencies.
 
@@ -255,6 +256,10 @@ export class ZInspire {
   updateSelectedItems(operation: string) {
     this.resetState("initial");
     this.isCancelled = false;
+    // A cancelled run leaves its signal aborted; do not start with it
+    if (this.updateController?.signal.aborted) {
+      this.updateController = null;
+    }
     this.setupEscapeListener();
     const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
     this.toUpdate = items.length;
@@ -265,6 +270,10 @@ export class ZInspire {
   updateSelectedCollection(operation: string) {
     this.resetState("initial");
     this.isCancelled = false;
+    // A cancelled run leaves its signal aborted; do not start with it
+    if (this.updateController?.signal.aborted) {
+      this.updateController = null;
+    }
     this.setupEscapeListener();
     const collection = getPrimarySelectedCollection(
       Zotero.getActiveZoteroPane(),
@@ -573,9 +582,8 @@ export class ZInspire {
     }
 
     // Show initial progress
-    const progressWindow = new ztoolkit.ProgressWindow(config.addonName, {
-      closeOnClick: true,
-      closeTime: -1,
+    const progressWindow = openRunProgressWindow(config.addonName, {
+      onEscape: () => this.cancelUpdate(),
     });
     this.progressWindow = progressWindow;
     // Note: Zotero 7 ProgressWindow headline does not display icons
@@ -615,14 +623,20 @@ export class ZInspire {
 
         completed++;
 
-        // Update progress
+        // Update progress; a failure here must not end the run
         if (!this.isCancelled) {
           const percent = Math.round((completed / total) * 100);
-          progressWindow.changeLine({
-            icon: PLUGIN_ICON,
-            text: `Processing ${completed} of ${total} items...`,
-            progress: percent,
-          });
+          try {
+            progressWindow.changeLine({
+              icon: PLUGIN_ICON,
+              text: `Processing ${completed} of ${total} items...`,
+              progress: percent,
+            });
+          } catch (err) {
+            Zotero.debug(
+              `[${config.addonName}] updateItemsConcurrent: progress update failed: ${err}`,
+            );
+          }
         }
       }
     };
@@ -712,8 +726,9 @@ export class ZInspire {
     Zotero.debug(
       `[${config.addonName}] prefetchReferencesCache: creating progress window`,
     );
-    const progressWindow = new ProgressWindowHelper(
+    const progressWindow = openRunProgressWindow(
       getString("download-cache-progress-title"),
+      { onEscape: () => this.cancelUpdate() },
     );
     progressWindow.win.changeHeadline(
       getString("download-cache-progress-title"),
@@ -1716,7 +1731,9 @@ export class ZInspire {
       originalCancelUpdate();
     };
 
-    const progressWindow = new ProgressWindowHelper(config.addonName);
+    const progressWindow = openRunProgressWindow(config.addonName, {
+      onEscape: () => this.cancelUpdate(),
+    });
     progressWindow.createLine({
       icon: PLUGIN_ICON,
       text: getString("preprint-check-progress", {
