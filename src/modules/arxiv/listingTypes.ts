@@ -111,6 +111,11 @@ export interface SpecDayListing {
 export interface ListingStream {
   category: string;
   section: ListingSection;
+  /**
+   * Where the paper stands in that category's listing of the day: 0 for its
+   * first entry, in page order (sorting in arXiv's order uses it)
+   */
+  position: number;
 }
 
 /**
@@ -135,7 +140,10 @@ export interface ArxivListingEntry {
    * `displaySection` gives it for other choices
    */
   section: ListingSection;
-  /** Every (category, section) the paper appears in, in page order */
+  /**
+   * Every (category, section) the paper appears in, in the subscription's
+   * order of the categories
+   */
   streams: ListingStream[];
   announceDate: IsoDate;
 }

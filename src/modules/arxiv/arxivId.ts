@@ -105,6 +105,24 @@ function oldStyleId(value: string): string | null {
   return valid ? `${archive}/${yy}${mm}${number}` : null;
 }
 
+/** Digits of the sequence number in a sort key */
+const SORT_KEY_SEQUENCE_DIGITS = 5;
+
+/**
+ * Sort key of a canonical arXiv ID (parseArxivId): year, month and the
+ * zero-padded sequence number, so that old-style (1991-2007) and new-style
+ * identifiers sort together by date. "" for anything else.
+ */
+export function arxivSortKey(arxivId: string): string {
+  const newStyle = arxivId.match(/^(\d\d)(\d\d)\.(\d{4,5})$/);
+  const match = newStyle ?? arxivId.match(/^[a-z-]+\/(\d\d)(\d\d)(\d{3})$/);
+  if (!match) return "";
+  const [, yy, mm, seq] = match;
+  // Old-style years 91-99 are 1991-1999, all other years 20YY
+  const year = (!newStyle && Number(yy) >= 91 ? 1900 : 2000) + Number(yy);
+  return `${year}${mm}${seq.padStart(SORT_KEY_SEQUENCE_DIGITS, "0")}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Candidates in the fields of a Zotero item
 // ─────────────────────────────────────────────────────────────────────────────

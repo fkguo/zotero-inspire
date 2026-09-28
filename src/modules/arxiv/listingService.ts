@@ -638,8 +638,8 @@ export class ListingService {
       if (result.fetchFailed) complete.fetchFailed = result.fetchFailed;
       specStates.push({ spec, state: complete });
 
-      for (const pageEntry of result.listing.entries) {
-        const stream = { category: spec, section: pageEntry.section };
+      for (const [position, pageEntry] of result.listing.entries.entries()) {
+        const stream = { category: spec, section: pageEntry.section, position };
         const entry = entries.get(pageEntry.id);
         if (!entry) {
           const { section, ...fields } = pageEntry;

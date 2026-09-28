@@ -180,7 +180,8 @@ describe("new", () => {
     const cross = day.entries.find((entry) => entry.id === "2609.22470")!;
     expect(cross).toMatchObject({
       section: "cross",
-      streams: [{ category: "hep-ph", section: "cross" }],
+      // The first of the 15 cross-lists, after the 27 new submissions
+      streams: [{ category: "hep-ph", section: "cross", position: 27 }],
       matchedCategories: ["hep-ph"],
       announceDate: "2026-09-25",
       primaryCategory: "astro-ph.CO",
@@ -196,7 +197,26 @@ describe("new", () => {
     expect(replacedElsewhere).toHaveLength(12);
     for (const entry of replacedElsewhere) {
       expect(entry.streams).toEqual([
-        { category: "hep-ph", section: "replace" },
+        {
+          category: "hep-ph",
+          section: "replace",
+          position: day.entries.indexOf(entry),
+        },
+      ]);
+    }
+  });
+
+  it("records each paper's place on its category's page (real hep-ph listing)", async () => {
+    const { clock, site, service } = setup();
+    const html = readArxivFixture("list-hep-ph-new-2026-09-25.html");
+    site.html(LIST_URL("hep-ph"), html);
+    const [day] = (await clock.run(service.loadNew(["hep-ph"]))).days;
+    const page = parseNewPage(htmlDocument(html));
+    expect(day.entries).toHaveLength(page.entries.length);
+    for (const entry of day.entries) {
+      const position = page.entries.findIndex((item) => item.id === entry.id);
+      expect(entry.streams).toEqual([
+        { category: "hep-ph", section: entry.section, position },
       ]);
     }
   });
@@ -217,6 +237,27 @@ describe("new", () => {
     const sections = { new: 0, cross: 0, replace: 0 };
     for (const entry of result.days[0].entries) sections[entry.section]++;
     expect(sections).toEqual({ new: 119, cross: 111, replace: 101 });
+    // Places run on across the four pages
+    const pages = [0, 100, 200, 300].flatMap(
+      (skip) =>
+        parseNewPage(
+          htmlDocument(
+            readArxivFixture(
+              `list-cs.LG-new-show100-skip${skip}-2026-09-25.html`,
+            ),
+          ),
+        ).entries,
+    );
+    expect(
+      result.days[0].entries.map((entry) => entry.streams[0].position),
+    ).toEqual(
+      result.days[0].entries.map((entry) =>
+        pages.findIndex((item) => item.id === entry.id),
+      ),
+    );
+    expect(
+      result.days[0].entries.map((entry) => entry.streams[0].position),
+    ).toEqual(pages.map((_, index) => index));
   });
 
   it("fetches an alias from its canonical category's page", async () => {
@@ -277,9 +318,10 @@ describe("new", () => {
     const day = result.days[0];
     expect(day.entries).toHaveLength(4);
     const merged = day.entries.find((entry) => entry.id === shared.id)!;
+    // With the paper's place on each page (hep-th lists its new paper first)
     expect(merged.streams).toEqual([
-      { category: "hep-ph", section: "new" },
-      { category: "hep-th", section: "cross" },
+      { category: "hep-ph", section: "new", position: 0 },
+      { category: "hep-th", section: "cross", position: 1 },
     ]);
     expect(merged.matchedCategories).toEqual(["hep-ph", "hep-th"]);
     expect(merged.section).toBe("new");

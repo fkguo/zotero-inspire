@@ -1,5 +1,9 @@
 import { config } from "../../../package.json";
-import { arxivIdFieldsOfItem, arxivIdsFromFields } from "../arxiv/arxivId";
+import {
+  arxivIdFieldsOfItem,
+  arxivIdsFromFields,
+  arxivSortKey,
+} from "../arxiv/arxivId";
 import { LRUCache } from "./utils";
 import { getPref } from "../../utils/prefs";
 
@@ -15,7 +19,6 @@ const ARXIV_COLUMN_KEY = "zinspireArxiv";
 const ITEM_TREE_COLUMNS_PLUGIN_ID = "";
 
 const CITES_SORT_PAD = 10;
-const ARXIV_SORT_PAD = 5;
 const SORT_DISPLAY_SEPARATOR = "\t";
 
 type CachedValue = { signature: string; value: string };
@@ -183,21 +186,6 @@ function encodeSortDisplayValue(sortKey: string, display: string): string {
   return `${sortKey || display}${SORT_DISPLAY_SEPARATOR}${display}`;
 }
 
-/**
- * Sort key of a canonical arXiv ID (parseArxivId): year, month and the
- * zero-padded sequence number, so that old-style (1991-2007) and new-style
- * identifiers sort together by date.
- */
-function buildArxivSortKey(arxivId: string): string {
-  const newStyle = arxivId.match(/^(\d\d)(\d\d)\.(\d{4,5})$/);
-  const match = newStyle ?? arxivId.match(/^[a-z-]+\/(\d\d)(\d\d)(\d{3})$/);
-  if (!match) return "";
-  const [, yy, mm, seq] = match;
-  // Old-style years 91-99 are 1991-1999, all other years 20YY
-  const year = (!newStyle && Number(yy) >= 91 ? 1900 : 2000) + Number(yy);
-  return `${year}${mm}${seq.padStart(ARXIV_SORT_PAD, "0")}`;
-}
-
 function getArxivCellData(item: Zotero.Item): string {
   const key = getItemCacheKey(item);
   const fields = arxivIdFieldsOfItem(item);
@@ -209,7 +197,7 @@ function getArxivCellData(item: Zotero.Item): string {
   }
 
   const arxivId = arxivIdsFromFields(fields)[0] ?? "";
-  const sortKey = arxivId ? buildArxivSortKey(arxivId) : "";
+  const sortKey = arxivId ? arxivSortKey(arxivId) : "";
   const encoded = encodeSortDisplayValue(sortKey, arxivId);
   arxivValueCache.set(key, { signature, value: encoded });
   return encoded;
