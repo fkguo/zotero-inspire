@@ -62,6 +62,8 @@ export interface ListPaneOptions {
   onFocus?(entry: BrowserEntry | null): void;
   /** Show a paper that is in the library there (its item ID) */
   showInLibrary?(itemID: number): void;
+  /** The library could not be read and a mark was clicked: try again */
+  onLibraryRetry?(): void;
   /** The pointer is on the name of a paper's author (its index) */
   onAuthorHover?(entry: BrowserEntry, index: number, anchor: HTMLElement): void;
   onAuthorLeave?(): void;
@@ -296,11 +298,11 @@ export class ListPane {
     if (this.focusedKey) this.toggleAbstract(this.focusedKey);
   }
 
-  /** The in-library mark of papers shown changed */
-  refreshLibraryMarks(): void {
-    for (const [key, row] of this.rows) {
-      const entry = this.arranged.entries.find((item) => item.id === key);
-      if (entry) this.renderer.updateLocalState(row, entry);
+  /** The in-library marks of these papers changed: redraw their rows shown */
+  refreshLibraryMarks(entries: Iterable<BrowserEntry>): void {
+    for (const entry of entries) {
+      const row = this.rows.get(entry.id);
+      if (row) this.renderer.updateLocalState(row, entry);
     }
   }
 
@@ -707,7 +709,10 @@ export class ListPane {
     } else if (target.closest(".zinspire-ref-entry__author-link")) {
       event.preventDefault();
     } else if (target.closest(".zinspire-ref-entry__dot")) {
-      if (entry.localItemID) this.options.showInLibrary?.(entry.localItemID);
+      if (entry.localStatusUnknown) this.options.onLibraryRetry?.();
+      else if (entry.localItemID) {
+        this.options.showInLibrary?.(entry.localItemID);
+      }
     } else if (target.closest("a, button, input")) {
       return;
     }

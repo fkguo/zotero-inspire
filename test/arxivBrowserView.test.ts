@@ -773,7 +773,9 @@ describe("arXiv browser: read-only actions and keys", () => {
     const showInLibrary = vi.fn();
     const { root } = await loaded({
       inLibrary: async (ids: readonly string[]) =>
-        new Map(ids.filter((id) => id === "2609.28544").map((id) => [id, 77])),
+        new Map(
+          ids.filter((id) => id === "2609.28544").map((id) => [id, [77]]),
+        ),
       showInLibrary,
     });
     await flushPromises();

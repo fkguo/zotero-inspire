@@ -20,12 +20,17 @@ export interface LocalPaper {
   /** The first of localItemIDs: the item a click selects */
   localItemID?: number;
   /**
-   * The items with the paper's recid, those with a recid first, then by item
-   * ID; set when there is one at least
+   * The items with the paper's recid (or arXiv identifier, see localFoundBy),
+   * those with a recid first, then by item ID; set when there is one at least
    */
   localItemIDs?: number[];
   /** The library could not be read: whether the paper is in it is unknown */
   localStatusUnknown?: boolean;
+  /**
+   * The items were found by the paper's arXiv identifier, not its recid (the
+   * arXiv browser's lists)
+   */
+  localFoundBy?: "arxiv";
 }
 
 /**
@@ -107,18 +112,21 @@ export async function refreshLocalState<T extends LocalPaper>(
 }
 
 /** Give `paper` the marks `next`; true if they differ from its old ones */
-function writeMarks(paper: LocalPaper, next: LocalPaper): boolean {
+export function writeMarks(paper: LocalPaper, next: LocalPaper): boolean {
   const same =
     paper.localItemID === next.localItemID &&
     Boolean(paper.localStatusUnknown) === Boolean(next.localStatusUnknown) &&
     (paper.localItemIDs ?? []).join(" ") ===
-      (next.localItemIDs ?? []).join(" ");
+      (next.localItemIDs ?? []).join(" ") &&
+    paper.localFoundBy === next.localFoundBy;
   if (next.localItemID === undefined) delete paper.localItemID;
   else paper.localItemID = next.localItemID;
   if (next.localItemIDs === undefined) delete paper.localItemIDs;
   else paper.localItemIDs = next.localItemIDs;
   if (next.localStatusUnknown) paper.localStatusUnknown = true;
   else delete paper.localStatusUnknown;
+  if (next.localFoundBy) paper.localFoundBy = next.localFoundBy;
+  else delete paper.localFoundBy;
   return !same;
 }
 

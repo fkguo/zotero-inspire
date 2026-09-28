@@ -19,6 +19,28 @@ import {
   removeArxivBrowserButton,
   unregisterArxivBrowserMenu,
 } from "../src/modules/arxiv/browser/browserEntryPoints";
+import type { ArxivBrowserViewOptions } from "../src/modules/arxiv/browser/ArxivBrowserView";
+import { itemsWithArxivIds } from "../src/modules/arxiv/browser/browserLibrary";
+import { onLibraryIndexChange } from "../src/modules/inspire/library/arxivIndex";
+
+// The options the window gives the content it builds
+const views = vi.hoisted(() => ({ options: [] as ArxivBrowserViewOptions[] }));
+vi.mock(
+  "../src/modules/arxiv/browser/ArxivBrowserView",
+  async (importOriginal) => {
+    const real =
+      await importOriginal<
+        typeof import("../src/modules/arxiv/browser/ArxivBrowserView")
+      >();
+    class RecordedView extends real.ArxivBrowserView {
+      constructor(root: HTMLElement, options: ArxivBrowserViewOptions = {}) {
+        super(root, options);
+        views.options.push(options);
+      }
+    }
+    return { ...real, ArxivBrowserView: RecordedView };
+  },
+);
 
 // The arXiv browser window: one at a time, opened from the View menu or the
 // toolbar button of the main window, its content built on load, and its
@@ -39,6 +61,7 @@ function newWindow(html: string): DOMWindow {
 }
 
 beforeEach(() => {
+  views.options.length = 0;
   main = newWindow(`<!DOCTYPE html><html><head></head><body>
     <div id="zotero-tabs-toolbar">
       <button id="zotero-tb-tabs-menu"></button>
@@ -166,6 +189,14 @@ describe("arXiv browser window", () => {
     );
     makeNew.dispatchEvent(new browser.MouseEvent("click"));
     expect(root.querySelector(".arxiv-browser__editor")).not.toBeNull();
+  });
+
+  it("gives its content the library index, for the marks of papers in the library", () => {
+    onArxivBrowserLoad(browser as unknown as Window);
+
+    expect(views.options).toHaveLength(1);
+    expect(views.options[0].inLibrary).toBe(itemsWithArxivIds);
+    expect(views.options[0].followLibrary).toBe(onLibraryIndexChange);
   });
 
   it("closed by hand, stops its content and cancels the queued requests", () => {

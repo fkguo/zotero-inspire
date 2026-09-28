@@ -1,8 +1,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // The "in library" mark of a paper in a list row and in the hover card: ● for
-// one item with the paper's recid, a circled number for several (the tooltip
-// lists them), ⊕ for none (a click adds the paper), ? when the library could
-// not be read (a click tries again).
+// one item with the paper's recid (in the arXiv browser, its arXiv
+// identifier), a circled number for several (the tooltip lists them), ⊕ for
+// none (a click adds the paper), ? when the library could not be read (a
+// click tries again).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getString } from "../../../utils/locale";
@@ -20,7 +21,7 @@ export function localMarkState(paper: LocalPaper): LocalMarkState {
   return paper.localItemID ? "local" : "missing";
 }
 
-/** Number of items with the paper's recid (0 when it is not in the library) */
+/** Number of items found for the paper (0 when it is not in the library) */
 export function localItemCount(paper: LocalPaper): number {
   if (!paper.localItemID) return 0;
   return Math.max(1, paper.localItemIDs?.length ?? 1);
@@ -54,7 +55,12 @@ export function localItemsList(paper: LocalPaper): string {
     return `• ${parts.join(" — ") || `#${itemID}`}`;
   });
   return [
-    getString("references-panel-dot-local-several", { args: { count } }),
+    getString(
+      paper.localFoundBy === "arxiv"
+        ? "references-panel-dot-local-several-arxiv"
+        : "references-panel-dot-local-several",
+      { args: { count } },
+    ),
     ...lines,
   ].join("\n");
 }

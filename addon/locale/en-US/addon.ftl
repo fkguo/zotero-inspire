@@ -221,6 +221,7 @@ references-panel-filter-count-author =
 references-panel-dot-local = Item exists in your library
 references-panel-dot-add = Add this reference to your library
 references-panel-dot-local-several = { $count } items in your library have this paper's INSPIRE ID; a click selects the first:
+references-panel-dot-local-several-arxiv = { $count } items in your library have this paper's arXiv ID; a click selects the first:
 references-panel-dot-unknown = Could not read your library, so it is not known whether this paper is in it. Click to try again.
 references-panel-related-badge-tooltip = Shares { $count } references with the current paper
 references-panel-link-existing = Click to unlink the related item

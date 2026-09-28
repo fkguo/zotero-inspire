@@ -51,6 +51,7 @@ import {
 import { ListPane, type ListUpdate } from "./ListPane";
 import { AuthorPreviewController } from "../../inspire/panel/AuthorPreviewController";
 import { HoverPreviewController } from "../../inspire/panel/HoverPreviewController";
+import { writeMarks, type LocalPaper } from "../../inspire/library/localStatus";
 import { countAuthorPapers } from "./authorCount";
 import { DetailPane } from "./DetailPane";
 import { PaneDivider } from "./PaneDivider";
@@ -86,10 +87,19 @@ export interface ArxivBrowserViewOptions {
   /** Copies text (default: the plugin's clipboard helper) */
   copy?: (text: string) => Promise<boolean>;
   /**
-   * Which of these arXiv identifiers are papers in the library, with their
-   * item IDs (the "in library" mark; wired to the library index)
+   * The items with each of these arXiv identifiers, the one a click selects
+   * first, for the "in library" marks (wired to the library index); null
+   * when the library cannot be read
    */
-  inLibrary?: (ids: readonly string[]) => Promise<ReadonlyMap<string, number>>;
+  inLibrary?: (
+    ids: readonly string[],
+  ) => Promise<ReadonlyMap<string, readonly number[]> | null>;
+  /**
+   * Follow the library: `listener` is called when items' identifiers change,
+   * and the marks of the days listed are looked up again. Returns the
+   * function that stops following.
+   */
+  followLibrary?: (listener: () => void) => () => void;
   /** Show an item in the main window's library */
   showInLibrary?: (itemID: number) => void;
 }
@@ -143,8 +153,11 @@ export class ArxivBrowserView {
   private countdown: number | undefined;
   private readonly stopFollowing: () => void;
   private readonly entriesOfDay = new WeakMap<DayListing, BrowserEntry[]>();
-  /** Days whose papers were looked up in the library */
-  private readonly checkedDays = new WeakSet<DayListing>();
+  /** Days whose papers were looked up in the library since it last changed */
+  private checkedDays = new WeakSet<DayListing>();
+  /** Counts the library's changes: a lookup older than one is not written */
+  private libraryChanges = 0;
+  private readonly stopFollowingLibrary: (() => void) | undefined;
   private disposed = false;
 
   constructor(
@@ -306,6 +319,9 @@ export class ArxivBrowserView {
           const id = (entry as BrowserEntry).listing?.id;
           if (id) await this.actions.copyBibtex(id);
         },
+        onSelectInLibrary: (entry) => {
+          if (entry.localItemID) showInLibrary(entry.localItemID);
+        },
       },
       entryOptions: {
         canAdd: () => false,
@@ -329,6 +345,7 @@ export class ArxivBrowserView {
       onRetryDay: (date) => void this.loader.retryDay(date),
       onFocus: (entry) => this.detail.show(entry),
       showInLibrary,
+      onLibraryRetry: () => this.recheckLibrary(),
       onAuthorHover: (entry, index, anchor) =>
         this.showAuthorCard(entry.authors[index], anchor),
       onAuthorLeave: () => this.authorCard.scheduleHide(),
@@ -342,6 +359,9 @@ export class ArxivBrowserView {
       this.renderStatus();
     });
     doc.addEventListener("keydown", this.onKeyDown);
+    this.stopFollowingLibrary = options.followLibrary?.(() =>
+      this.recheckLibrary(),
+    );
 
     this.onSubscriptionChange(this.subscriptions.current);
   }
@@ -356,6 +376,7 @@ export class ArxivBrowserView {
     this.disposed = true;
     this.doc.removeEventListener("keydown", this.onKeyDown);
     this.stopFollowing();
+    this.stopFollowingLibrary?.();
     this.stopCountdown();
     const win = this.doc.defaultView;
     if (this.filterTimer !== undefined) win?.clearTimeout(this.filterTimer);
@@ -494,36 +515,57 @@ export class ArxivBrowserView {
     }, FILTER_DELAY_MS);
   }
 
-  /** Mark the papers of newly loaded days that are in the library */
+  /**
+   * Mark the papers of the days not looked up yet that are in the library:
+   * one lookup for all of them, and only the rows whose marks changed redrawn
+   */
   private async markLibraryPapers(): Promise<void> {
     const lookup = this.options.inLibrary;
-    if (!lookup) return;
-    for (const day of this.loader.days) {
-      if (this.checkedDays.has(day)) continue;
-      this.checkedDays.add(day);
-      const entries = this.entriesOf(day);
-      try {
-        const found = await lookup(entries.map((entry) => entry.listing.id));
-        const marked = new Set<BrowserEntry>();
-        for (const entry of entries) {
-          const itemID = found.get(entry.listing.id);
-          if (itemID && entry.localItemID !== itemID) {
-            entry.localItemID = itemID;
-            marked.add(entry);
-          }
-        }
-        if (marked.size && !this.disposed) {
-          this.listPane.refreshLibraryMarks();
-          // The paper in the detail pane may have been chosen before
-          const shown = this.detail.entry;
-          if (shown && marked.has(shown)) this.detail.show(shown);
-        }
-      } catch (error) {
-        Zotero.debug(
-          `[${config.addonName}] arXiv browser library marks: ${error}`,
-        );
-      }
+    if (!lookup || this.disposed) return;
+    const days = this.loader.days.filter((day) => !this.checkedDays.has(day));
+    if (!days.length) return;
+    for (const day of days) this.checkedDays.add(day);
+    const entries = days.flatMap((day) => this.entriesOf(day));
+    const changes = this.libraryChanges;
+    let found: ReadonlyMap<string, readonly number[]> | null;
+    try {
+      found = await lookup(entries.map((entry) => entry.listing.id));
+    } catch (error) {
+      Zotero.debug(
+        `[${config.addonName}] arXiv browser library marks: ${error}`,
+      );
+      return;
     }
+    // The library changed meanwhile: the lookup after the change marks them
+    if (this.disposed || changes !== this.libraryChanges) return;
+    const changed = new Set<BrowserEntry>();
+    for (const entry of entries) {
+      const items = found?.get(entry.listing.id);
+      const marks: LocalPaper =
+        found === null
+          ? { localStatusUnknown: true }
+          : items?.length
+            ? {
+                localItemID: items[0],
+                localItemIDs: [...items],
+                localFoundBy: "arxiv",
+              }
+            : {};
+      if (writeMarks(entry, marks)) changed.add(entry);
+    }
+    if (!changed.size) return;
+    this.listPane.refreshLibraryMarks(changed);
+    // The paper in the detail pane may have been chosen before
+    const shown = this.detail.entry;
+    if (shown && changed.has(shown)) this.detail.show(shown);
+  }
+
+  /** The library changed, or a mark asked again: look up every day again */
+  private recheckLibrary(): void {
+    if (this.disposed) return;
+    this.libraryChanges++;
+    this.checkedDays = new WeakSet();
+    void this.markLibraryPapers();
   }
 
   // ───────────────────────────────────────────────────────────────────────────

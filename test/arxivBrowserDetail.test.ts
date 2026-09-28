@@ -255,7 +255,9 @@ describe("detail pane", () => {
   });
 
   it("follows the focused paper when its day is fetched again, and shows a mark that comes later", async () => {
-    const lookups: Array<(found: ReadonlyMap<string, number>) => void> = [];
+    const lookups: Array<
+      (found: ReadonlyMap<string, readonly number[]> | null) => void
+    > = [];
     const { root, view, clock } = await loaded(
       { inLibrary: () => new Promise((resolve) => lookups.push(resolve)) },
       {
@@ -289,7 +291,7 @@ describe("detail pane", () => {
     expect(after.id).toBe(before.id);
     expect(view.detail.entry).toBe(after);
     // The library answers for the day fetched again
-    lookups.shift()!(new Map([[after.listing.id, 42]]));
+    lookups.shift()!(new Map([[after.listing.id, [42]]]));
     await flushPromises();
     expect(detail.textContent).toContain(
       msg("arxiv-browser-detail-in-library"),
@@ -335,7 +337,7 @@ describe("detail pane", () => {
   });
 
   it("says when the paper is in the library, also when that is known after it was chosen", async () => {
-    let answer!: (found: ReadonlyMap<string, number>) => void;
+    let answer!: (found: ReadonlyMap<string, readonly number[]> | null) => void;
     const showInLibrary = vi.fn();
     const { root } = await loaded({
       inLibrary: () => new Promise((resolve) => (answer = resolve)),
@@ -347,7 +349,7 @@ describe("detail pane", () => {
     expect(detail.textContent).not.toContain(
       msg("arxiv-browser-detail-in-library"),
     );
-    answer(new Map([["2609.28538", 42]]));
+    answer(new Map([["2609.28538", [42]]]));
     await flushPromises();
     expect(detail.textContent).toContain(
       msg("arxiv-browser-detail-in-library"),

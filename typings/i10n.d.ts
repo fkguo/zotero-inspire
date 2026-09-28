@@ -599,6 +599,7 @@ export type FluentMessageId =
   | 'references-panel-dot-add'
   | 'references-panel-dot-local'
   | 'references-panel-dot-local-several'
+  | 'references-panel-dot-local-several-arxiv'
   | 'references-panel-dot-unknown'
   | 'references-panel-empty-cited'
   | 'references-panel-empty-list'
