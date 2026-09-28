@@ -105,96 +105,22 @@ interface UpdateRun extends CancellableRun {
 }
 
 export class ZInspire {
-  current: number;
-  toUpdate: number;
-  itemsToUpdate: Zotero.Item[];
-  numberOfUpdatedItems: number;
-  counter: number;
-  CrossRefcounter: number;
-  noRecidCount: number;
-  error_norecid: boolean;
-  error_norecid_shown: boolean;
-  final_count_shown: boolean;
-  progressWindow?: ProgressWindowHelper;
   private closedProgressWindows = new WeakSet<ProgressWindowHelper>();
   /** Runs that have started and not ended yet */
   private activeRuns = new Set<CancellableRun>();
   private escapeHandler?: (e: KeyboardEvent) => void;
 
-  constructor(
-    current: number = -1,
-    toUpdate: number = 0,
-    itemsToUpdate: Zotero.Item[] = [],
-    numberOfUpdatedItems: number = 0,
-    counter: number = 0,
-    CrossRefcounter: number = 0,
-    noRecidCount: number = 0,
-    error_norecid: boolean = false,
-    error_norecid_shown: boolean = false,
-    final_count_shown: boolean = false,
-  ) {
-    this.current = current;
-    this.toUpdate = toUpdate;
-    this.itemsToUpdate = itemsToUpdate;
-    this.numberOfUpdatedItems = numberOfUpdatedItems;
-    this.counter = counter;
-    this.CrossRefcounter = CrossRefcounter;
-    this.noRecidCount = noRecidCount;
-    this.error_norecid = error_norecid;
-    this.error_norecid_shown = error_norecid_shown;
-    this.final_count_shown = final_count_shown;
-  }
-
-  private closeActiveProgressWindow(
-    progressWindow: ProgressWindowHelper | undefined = this.progressWindow,
-  ): void {
-    if (!progressWindow || this.closedProgressWindows.has(progressWindow)) {
+  private closeActiveProgressWindow(progressWindow: ProgressWindowHelper) {
+    if (this.closedProgressWindows.has(progressWindow)) {
       return;
     }
     this.closedProgressWindows.add(progressWindow);
-    if (this.progressWindow === progressWindow) {
-      this.progressWindow = undefined;
-    }
     try {
       progressWindow.close();
     } catch (error) {
       Zotero.debug(
         `[${config.addonName}] Failed to close progress window: ${error}`,
       );
-    }
-  }
-
-  resetState(operation: string) {
-    if (operation === "initial") {
-      this.closeActiveProgressWindow();
-      this.current = -1;
-      this.toUpdate = 0;
-      this.itemsToUpdate = [];
-      this.numberOfUpdatedItems = 0;
-      this.counter = 0;
-      this.CrossRefcounter = 0;
-      this.noRecidCount = 0;
-      this.error_norecid = false;
-      this.error_norecid_shown = false;
-      this.final_count_shown = false;
-    } else {
-      const counts = {
-        counter: this.counter,
-        crossRefCounter: this.CrossRefcounter,
-        noRecidCount: this.noRecidCount,
-      };
-      if (this.error_norecid) {
-        this.closeActiveProgressWindow();
-        if (!this.error_norecid_shown) {
-          this.showFinalNotice(operation, counts);
-          this.error_norecid_shown = true;
-        }
-      } else {
-        if (!this.final_count_shown) {
-          this.showFinalNotice(operation, counts);
-          this.final_count_shown = true;
-        }
-      }
     }
   }
 
@@ -326,22 +252,16 @@ export class ZInspire {
   }
 
   updateSelectedItems(operation: string) {
-    this.resetState("initial");
     const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
-    this.toUpdate = items.length;
-    this.itemsToUpdate = items;
-    this.updateItemsConcurrent(operation, true);
+    this.updateItemsConcurrent(items, operation, true);
   }
 
   updateSelectedCollection(operation: string) {
-    this.resetState("initial");
     const collection = getPrimarySelectedCollection(
       Zotero.getActiveZoteroPane(),
     );
     if (collection) {
-      this.itemsToUpdate = collection.getChildItems();
-      this.toUpdate = this.itemsToUpdate.length;
-      this.updateItemsConcurrent(operation, true);
+      this.updateItemsConcurrent(collection.getChildItems(), operation, true);
     }
   }
 
@@ -604,29 +524,33 @@ export class ZInspire {
   }
 
   async updateItems(items: Zotero.Item[], operation: string) {
-    this.resetState("initial");
-
-    const filteredItems = items.filter((item) => item.isRegularItem());
-    this.itemsToUpdate = filteredItems;
-    this.toUpdate = filteredItems.length;
     // Updates of newly added papers run in the background: Escape in the
     // main window is left to Zotero
-    this.updateItemsConcurrent(operation, false);
+    this.updateItemsConcurrent(
+      items.filter((item) => item.isRegularItem()),
+      operation,
+      false,
+    );
   }
 
   /**
    * Concurrent item processor with controlled parallelism
    */
   private async updateItemsConcurrent(
+    items: Zotero.Item[],
     operation: string,
     cancelByEscape: boolean,
   ) {
     const CONCURRENCY = 3;
     let completed = 0;
-    const total = this.itemsToUpdate.length;
+    const total = items.length;
 
     if (!total) {
-      this.resetState(operation);
+      this.showFinalNotice(operation, {
+        counter: 0,
+        crossRefCounter: 0,
+        noRecidCount: 0,
+      });
       return;
     }
 
@@ -634,7 +558,6 @@ export class ZInspire {
     const progressWindow = openRunProgressWindow(config.addonName, {
       onEscape: () => this.cancelUpdate(),
     });
-    // Not this.progressWindow: a run started meanwhile would close it
     // Note: Zotero 7 ProgressWindow headline does not display icons
     // Use icon in createLine instead to show plugin logo
     progressWindow.createLine({
@@ -654,7 +577,7 @@ export class ZInspire {
     });
 
     // Create a queue of pending items
-    const queue = [...this.itemsToUpdate];
+    const queue = [...items];
     let index = 0;
 
     const worker = async () => {
@@ -714,8 +637,6 @@ export class ZInspire {
       // Finish
       if (!run.cancelled) {
         this.closeActiveProgressWindow(progressWindow);
-        this.numberOfUpdatedItems = total;
-        this.current = total - 1;
         // Every run shows its own notice, also when runs overlap
         this.showFinalNotice(operation, run);
         Zotero.debug(
@@ -724,8 +645,6 @@ export class ZInspire {
       } else {
         // Cancelled - show stats
         this.closeActiveProgressWindow(progressWindow);
-        this.numberOfUpdatedItems = total;
-        this.current = total - 1;
         this.showCancelledStats(completed, total);
       }
     } catch (err) {
@@ -733,7 +652,6 @@ export class ZInspire {
         `[${config.addonName}] updateItemsConcurrent: fatal error: ${err}`,
       );
       this.closeActiveProgressWindow(progressWindow);
-      this.numberOfUpdatedItems = this.toUpdate;
     } finally {
       this.endRun(run);
     }
@@ -912,39 +830,6 @@ export class ZInspire {
     window.startCloseTimer(3000);
   }
 
-  // Legacy serial method (kept for reference)
-  updateNextItem(operation: string) {
-    this.numberOfUpdatedItems++;
-
-    if (this.current === this.toUpdate - 1) {
-      this.closeActiveProgressWindow();
-      this.resetState(operation);
-      return;
-    }
-
-    const progressWindow = this.progressWindow;
-    if (!progressWindow) {
-      Zotero.debug(
-        `[${config.addonName}] updateNextItem called without an active progress window`,
-      );
-      return;
-    }
-
-    this.current++;
-
-    const percent = Math.round(
-      (this.numberOfUpdatedItems / this.toUpdate) * 100,
-    );
-    progressWindow.changeLine({ icon: PLUGIN_ICON, progress: percent });
-    progressWindow.changeLine({
-      icon: PLUGIN_ICON,
-      text: "Item " + this.current + " of " + this.toUpdate,
-    });
-    progressWindow.show();
-
-    this.updateItem(this.itemsToUpdate[this.current], operation);
-  }
-
   /**
    * Internal method to update a single item (used by concurrent processor)
    */
@@ -1080,56 +965,6 @@ export class ZInspire {
           }
         }
       }
-    }
-  }
-
-  async updateItem(item: Zotero.Item, operation: string) {
-    if (
-      operation === "full" ||
-      operation === "noabstract" ||
-      operation === "citations"
-    ) {
-      const metaInspire = await getInspireMeta(item, operation);
-      if (metaInspire !== -1 && (metaInspire as jsobject).recid !== undefined) {
-        if (item.hasTag(getPref("tag_norecid") as string)) {
-          item.removeTag(getPref("tag_norecid") as string);
-          item.saveTx();
-        }
-        applyItemType(
-          item,
-          resolveTargetItemType(item, metaInspire as jsobject, operation),
-        );
-        await setInspireMeta(item, metaInspire as jsobject, operation);
-        await saveItemWithPendingInspireNote(item);
-        this.counter++;
-      } else {
-        if (
-          getPref("tag_enable") &&
-          getPref("tag_norecid") !== "" &&
-          !item.hasTag(getPref("tag_norecid") as string)
-        ) {
-          item.addTag(getPref("tag_norecid") as string, 1);
-          item.saveTx();
-        } else if (
-          !getPref("tag_enable") &&
-          item.hasTag(getPref("tag_norecid") as string)
-        ) {
-          item.removeTag(getPref("tag_norecid") as string);
-          item.saveTx();
-        }
-        this.error_norecid = true;
-        this.noRecidCount++;
-        if (operation == "citations") {
-          const crossref_count = await setCrossRefCitations(item);
-          item.saveTx();
-          if (crossref_count >= 0) {
-            this.CrossRefcounter++;
-          }
-        }
-      }
-      this.updateNextItem(operation);
-    } else {
-      this.updateNextItem(operation);
     }
   }
 

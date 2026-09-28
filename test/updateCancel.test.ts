@@ -560,5 +560,7 @@ describe("runs of different kinds", () => {
     mainDom.window.dispatchEvent(escape);
 
     expect(escape.defaultPrevented).toBe(false);
+    expect(runWindows()).toEqual([]);
+    expect(notices()).toEqual(["INSPIRE metadata updated for 0 items."]);
   });
 });
