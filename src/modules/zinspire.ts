@@ -11,6 +11,7 @@ import { getJournalAbbreviations } from "../utils/journalAbbreviations";
 import { getLocaleID, getString } from "../utils/locale";
 import type { FluentMessageId } from "../../typings/i10n";
 import { getPref, setPref } from "../utils/prefs";
+import { applyClickSelection } from "../utils/clickSelection";
 import {
   getPrimarySelectedCollection,
   getPrimarySelectedLibraryID,
@@ -8004,88 +8005,18 @@ export class InspireReferencePanelController {
       this.chartSelectionMode = binMode;
     }
 
-    const isRangeSelect = event.shiftKey;
-    const isMultiSelect = event.ctrlKey || event.metaKey;
-    const handledRange =
-      isRangeSelect && this.applyShiftChartSelection(key, isMultiSelect, stats);
-
-    if (!handledRange) {
-      if (isMultiSelect) {
-        // Toggle the clicked bin
-        if (this.chartSelectedBins.has(key)) {
-          this.chartSelectedBins.delete(key);
-        } else {
-          this.chartSelectedBins.add(key);
-        }
-      } else {
-        // Single select: toggle if same, replace if different
-        if (
-          this.chartSelectedBins.size === 1 &&
-          this.chartSelectedBins.has(key)
-        ) {
-          this.chartSelectedBins.clear();
-        } else {
-          this.chartSelectedBins.clear();
-          this.chartSelectedBins.add(key);
-        }
-      }
-    }
-
+    // `stats` are the bins of the chart that was clicked, so a range always
+    // matches the bars on screen, even before a pending redraw
+    applyClickSelection(
+      this.chartSelectedBins,
+      key,
+      stats.map((bin) => bin.key),
+      this.lastChartClickedKey,
+      event,
+    );
     this.lastChartClickedKey = key;
     this.renderChart();
     this.renderReferenceList();
-  }
-
-  // `stats` are the bins of the chart that was clicked, so a range always
-  // matches the bars on screen, even before a pending redraw.
-  private applyShiftChartSelection(
-    key: string,
-    additive: boolean,
-    stats: ChartBin[],
-  ): boolean {
-    // Extend from the last clicked bar only while some bar is still selected:
-    // view switches and new data clear the selection but not that bar
-    const rangeKeys = this.getChartRangeKeys(
-      this.chartSelectedBins.size ? this.lastChartClickedKey : undefined,
-      key,
-      stats,
-    );
-    if (!rangeKeys.length) {
-      // If no valid anchor, fall back to single key selection
-      if (!additive && !this.chartSelectedBins.has(key)) {
-        this.chartSelectedBins.clear();
-        this.chartSelectedBins.add(key);
-        return true;
-      }
-      return false;
-    }
-
-    if (!additive) {
-      this.chartSelectedBins.clear();
-    }
-    for (const rangeKey of rangeKeys) {
-      this.chartSelectedBins.add(rangeKey);
-    }
-    return true;
-  }
-
-  private getChartRangeKeys(
-    anchorKey: string | undefined,
-    targetKey: string,
-    stats: ChartBin[],
-  ): string[] {
-    const targetIndex = stats.findIndex((bin) => bin.key === targetKey);
-    if (targetIndex === -1) {
-      return [];
-    }
-
-    const anchorIndex = anchorKey
-      ? stats.findIndex((bin) => bin.key === anchorKey)
-      : -1;
-    const startIndex = anchorIndex === -1 ? targetIndex : anchorIndex;
-    const lower = Math.min(startIndex, targetIndex);
-    const upper = Math.max(startIndex, targetIndex);
-    return stats.slice(lower, upper + 1).map((bin) => bin.key);
   }
 
   private updateChartClearButton() {

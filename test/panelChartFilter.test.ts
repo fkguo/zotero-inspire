@@ -157,6 +157,79 @@ describe("References panel chart filter", () => {
     expect(listedIDs(controller)).toEqual(["uncited", "few", "some"]);
   });
 
+  describe("selecting bars by mouse", () => {
+    const setup = () => {
+      const controller = createController([
+        entry("uncited"),
+        entry("few", { citationCount: 3 }),
+        entry("some", { citationCount: 30 }),
+        entry("many", { citationCount: 120 }),
+      ]);
+      controller.renderChartImmediate();
+      return controller;
+    };
+    const selected = (controller: any) =>
+      Array.from(controller.chartSelectedBins as Set<string>).sort();
+
+    it("selects only the clicked bar, and clears it when clicked again", () => {
+      const controller = setup();
+      clickBar(controller, "1-9");
+      clickBar(controller, "10-49");
+      expect(selected(controller)).toEqual(["10-49"]);
+      clickBar(controller, "10-49");
+      expect(selected(controller)).toEqual([]);
+    });
+
+    it("adds and removes bars with Ctrl+click and Cmd+click", () => {
+      const controller = setup();
+      clickBar(controller, "0");
+      clickBar(controller, "10-49", { ctrlKey: true });
+      clickBar(controller, "100-249", { metaKey: true });
+      expect(selected(controller)).toEqual(["0", "10-49", "100-249"]);
+      clickBar(controller, "0", { metaKey: true });
+      clickBar(controller, "100-249", { ctrlKey: true });
+      expect(selected(controller)).toEqual(["10-49"]);
+    });
+
+    it("selects the bars from the last clicked one with Shift+click, in either direction", () => {
+      const controller = setup();
+      clickBar(controller, "50-99");
+      clickBar(controller, "1-9", { shiftKey: true });
+      expect(selected(controller)).toEqual(["1-9", "10-49", "50-99"]);
+      // The range replaces the selection: the bars outside it go
+      clickBar(controller, "500+", { ctrlKey: true });
+      clickBar(controller, "100-249", { shiftKey: true });
+      expect(selected(controller)).toEqual(["100-249", "250-499", "500+"]);
+      clickBar(controller, "500+");
+      clickBar(controller, "250-499", { shiftKey: true });
+      expect(selected(controller)).toEqual(["250-499", "500+"]);
+    });
+
+    it("adds the range to the selection with Shift+Ctrl/Cmd+click", () => {
+      const controller = setup();
+      clickBar(controller, "0");
+      clickBar(controller, "50-99", { metaKey: true });
+      clickBar(controller, "250-499", { shiftKey: true, metaKey: true });
+      expect(selected(controller)).toEqual([
+        "0",
+        "100-249",
+        "250-499",
+        "50-99",
+      ]);
+      clickBar(controller, "500+", { ctrlKey: true });
+      clickBar(controller, "1-9", { shiftKey: true, ctrlKey: true });
+      expect(selected(controller).length).toBe(CITATION_KEYS.length);
+    });
+
+    it("selects only the clicked bar with Shift+click when nothing is selected", () => {
+      const controller = setup();
+      clickBar(controller, "10-49");
+      clickBar(controller, "10-49");
+      clickBar(controller, "250-499", { shiftKey: true });
+      expect(selected(controller)).toEqual(["250-499"]);
+    });
+  });
+
   it("keeps the citation bar and shift-click ranges working right after a quick filter change", () => {
     const controller = createController([
       entry("uncited"),
