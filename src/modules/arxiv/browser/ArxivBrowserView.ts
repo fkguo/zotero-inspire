@@ -49,6 +49,11 @@ import {
   type OpeningSelection,
 } from "./ListingLoader";
 import { ListPane, type ListUpdate } from "./ListPane";
+import { AuthorPreviewController } from "../../inspire/panel/AuthorPreviewController";
+import { HoverPreviewController } from "../../inspire/panel/HoverPreviewController";
+import { countAuthorPapers } from "./authorCount";
+import { DetailPane } from "./DetailPane";
+import { PaneDivider } from "./PaneDivider";
 import { SubscriptionBar } from "./SubscriptionBar";
 import { SECTION_LABELS } from "./SubscriptionEditor";
 import { openSections, type ArxivSubscription } from "./subscriptions";
@@ -110,7 +115,12 @@ export class ArxivBrowserView {
   readonly subscriptions: SubscriptionBar;
   readonly listPane: ListPane;
   /** The detail pane of the focused paper */
-  readonly detail: HTMLElement;
+  readonly detail: DetailPane;
+  private readonly divider: PaneDivider;
+  private readonly authorCard: AuthorPreviewController;
+  private readonly paperCard: HoverPreviewController;
+  /** Papers of authors in the library, by name, counted once per window */
+  private readonly authorCounts = new Map<string, Promise<number>>();
   readonly loader: ListingLoader;
   readonly actions: BrowserActions;
   private readonly clock: Clock;
@@ -268,28 +278,62 @@ export class ArxivBrowserView {
     );
     this.toolbar.append(this.subscriptions.element, daysBar, listBar);
 
-    // List and detail
+    // List and detail, with a divider that sets their widths
     const main = html(doc, "div", "arxiv-browser__main");
     const listContainer = html(doc, "div", "arxiv-browser__list-pane");
     listContainer.append(html(doc, "div", "arxiv-browser__list"));
-    this.detail = html(doc, "div", "arxiv-browser__detail");
-    this.detail.append(
-      html(
-        doc,
-        "div",
-        "arxiv-browser__empty",
-        getString("arxiv-browser-detail-empty"),
-      ),
+    const detailContainer = html(doc, "div", "arxiv-browser__detail");
+    this.divider = new PaneDivider(
+      main,
+      listContainer,
+      html(doc, "div", "arxiv-browser__divider"),
     );
-    main.append(listContainer, this.detail);
+    main.append(listContainer, this.divider.element, detailContainer);
     root.append(this.toolbar, main, notices);
+
+    // Cards: the author's local card (no INSPIRE request), and the paper's
+    // card on its title when the row does not show the abstract
+    const showInLibrary = options.showInLibrary ?? showInMainWindow;
+    this.authorCard = new AuthorPreviewController({
+      document: doc,
+      container: root,
+    });
+    this.paperCard = new HoverPreviewController({
+      document: doc,
+      container: root,
+      callbacks: {
+        onCopyBibtex: async (entry) => {
+          const id = (entry as BrowserEntry).listing?.id;
+          if (id) await this.actions.copyBibtex(id);
+        },
+      },
+      entryOptions: {
+        canAdd: () => false,
+        canCopyBibtex: () => true,
+        canCopyTexkey: () => false,
+      },
+    });
+    this.detail = new DetailPane({
+      container: detailContainer,
+      actions: this.actions,
+      onAuthorHover: (fullName, anchor) =>
+        this.showAuthorCard(fullName, anchor),
+      onAuthorLeave: () => this.authorCard.scheduleHide(),
+      showInLibrary,
+    });
     this.listPane = new ListPane({
       container: listContainer,
       actions: this.actions,
       pageSize: size,
       abstractsShown: abstracts.input.checked,
       onRetryDay: (date) => void this.loader.retryDay(date),
-      showInLibrary: options.showInLibrary ?? showInMainWindow,
+      onFocus: (entry) => this.detail.show(entry),
+      showInLibrary,
+      onAuthorHover: (entry, index, anchor) =>
+        this.showAuthorCard(entry.authors[index], anchor),
+      onAuthorLeave: () => this.authorCard.scheduleHide(),
+      onTitleHover: (entry, row) => this.paperCard.scheduleShow(entry, row),
+      onTitleLeave: () => this.paperCard.scheduleHide(),
     });
 
     const scheduler = options.webScheduler ?? getArxivWebScheduler();
@@ -320,6 +364,22 @@ export class ArxivBrowserView {
     this.dayPicker.dispose();
     this.listPane.dispose();
     this.subscriptions.dispose();
+    this.authorCard.dispose();
+    this.paperCard.dispose();
+    this.divider.dispose();
+  }
+
+  /** The local card of an author: name, papers in the library, searches */
+  private showAuthorCard(fullName: string | undefined, anchor: Element): void {
+    if (!fullName) return;
+    this.authorCard.scheduleLocalAuthor({ fullName }, anchor, (author) => {
+      let count = this.authorCounts.get(author.fullName);
+      if (!count) {
+        count = countAuthorPapers(author.fullName);
+        this.authorCounts.set(author.fullName, count);
+      }
+      return count;
+    });
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -406,6 +466,10 @@ export class ArxivBrowserView {
       specs: subscription.categories,
     });
     this.listPane.setList(list, this.sort, update);
+    // A day loaded again (a retry, Continue) brings new objects for its
+    // papers: the detail pane follows the focused paper's
+    const focused = this.listPane.focused;
+    if (focused && focused !== this.detail.entry) this.detail.show(focused);
   }
 
   private setSection(section: ListingSection, shown: boolean): void {
@@ -440,15 +504,20 @@ export class ArxivBrowserView {
       const entries = this.entriesOf(day);
       try {
         const found = await lookup(entries.map((entry) => entry.listing.id));
-        let changed = false;
+        const marked = new Set<BrowserEntry>();
         for (const entry of entries) {
           const itemID = found.get(entry.listing.id);
           if (itemID && entry.localItemID !== itemID) {
             entry.localItemID = itemID;
-            changed = true;
+            marked.add(entry);
           }
         }
-        if (changed && !this.disposed) this.listPane.refreshLibraryMarks();
+        if (marked.size && !this.disposed) {
+          this.listPane.refreshLibraryMarks();
+          // The paper in the detail pane may have been chosen before
+          const shown = this.detail.entry;
+          if (shown && marked.has(shown)) this.detail.show(shown);
+        }
       } catch (error) {
         Zotero.debug(
           `[${config.addonName}] arXiv browser library marks: ${error}`,

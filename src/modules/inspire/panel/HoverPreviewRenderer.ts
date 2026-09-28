@@ -50,6 +50,19 @@ const XHTML_NS = "http://www.w3.org/1999/xhtml";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Which of a paper's actions the card offers, per paper. Each one left out is
+ * the References panel's choice, by the paper's INSPIRE record.
+ */
+export interface PreviewEntryOptions {
+  /** Add to the library (References panel: the paper has an INSPIRE record) */
+  canAdd?: (entry: InspireReferenceEntry) => boolean;
+  /** Copy BibTeX (References panel: the paper has an INSPIRE record) */
+  canCopyBibtex?: (entry: InspireReferenceEntry) => boolean;
+  /** Copy the TeX key (References panel: a TeX key or an INSPIRE record) */
+  canCopyTexkey?: (entry: InspireReferenceEntry) => boolean;
+}
+
+/**
  * Context for preview card rendering.
  * Contains entry data and callbacks for user interactions.
  */
@@ -73,6 +86,8 @@ export interface PreviewRenderContext {
    * button (default: it is not)
    */
   isRelated?: boolean;
+  /** Which actions the card offers for the entry */
+  entryOptions?: PreviewEntryOptions;
 
   // Action callbacks (async to support state refresh after completion)
   onAdd?: (
@@ -399,6 +414,16 @@ export class HoverPreviewRenderer {
     const isLocal = Boolean(entry.localItemID);
     // The library could not be read: neither "add" nor the local actions
     const unknown = !isLocal && Boolean(entry.localStatusUnknown);
+    const options = ctx.entryOptions ?? {};
+    const canAdd = options.canAdd
+      ? options.canAdd(entry)
+      : Boolean(entry.recid);
+    const canCopyBibtex = options.canCopyBibtex
+      ? options.canCopyBibtex(entry)
+      : Boolean(entry.recid);
+    const canCopyTexkey = options.canCopyTexkey
+      ? options.canCopyTexkey(entry)
+      : Boolean(entry.texkey || entry.recid);
 
     const actionRow = this.doc.createElement("div");
     actionRow.classList.add("zinspire-preview-card__actions");
@@ -416,7 +441,7 @@ export class HoverPreviewRenderer {
       // Nothing to offer until the library can be read
     } else if (!isLocal) {
       // Not in library - show Add button
-      if (entry.recid && ctx.onAdd) {
+      if (canAdd && ctx.onAdd) {
         const addButton = this.createActionButton(
           getString("references-panel-button-add"),
           "add",
@@ -465,7 +490,7 @@ export class HoverPreviewRenderer {
     }
 
     // Copy BibTeX button
-    if (entry.recid && ctx.onCopyBibtex) {
+    if (canCopyBibtex && ctx.onCopyBibtex) {
       const bibtexBtn = this.createActionButton(s.copyBibtex, "copy");
       bibtexBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -475,7 +500,7 @@ export class HoverPreviewRenderer {
     }
 
     // Copy texkey button
-    if ((entry.texkey || entry.recid) && ctx.onCopyTexkey) {
+    if (canCopyTexkey && ctx.onCopyTexkey) {
       const texkeyBtn = this.createActionButton(s.copyTexkey, "copy");
       texkeyBtn.textContent = "T";
       texkeyBtn.title = s.copyTexkey;
@@ -492,7 +517,7 @@ export class HoverPreviewRenderer {
     actionRow.appendChild(spacer);
 
     // Import marker (right side) for online entries, consistent with list marker (⊕)
-    if (!isLocal && !unknown && entry.recid && ctx.onAdd) {
+    if (!isLocal && !unknown && canAdd && ctx.onAdd) {
       const importBtn = this.doc.createElementNS(
         XHTML_NS,
         "button",

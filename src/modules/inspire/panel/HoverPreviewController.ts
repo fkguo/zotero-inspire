@@ -22,6 +22,7 @@ import {
 } from "../index";
 import {
   HoverPreviewRenderer,
+  type PreviewEntryOptions,
   type PreviewRenderContext,
   type PositionRect,
 } from "./HoverPreviewRenderer";
@@ -90,6 +91,8 @@ export interface HoverPreviewControllerOptions {
   hideDelay?: number;
   /** Max entries for multi-preview (default: 20) */
   maxEntries?: number;
+  /** Which actions the card offers per paper (default: the References panel's) */
+  entryOptions?: PreviewEntryOptions;
 }
 
 /**
@@ -123,6 +126,7 @@ export class HoverPreviewController {
   private readonly hideDelay: number;
   private readonly maxEntries: number;
   private readonly clickThrough: boolean;
+  private readonly entryOptions?: PreviewEntryOptions;
 
   // Preview card element
   private previewCard?: HTMLDivElement;
@@ -161,6 +165,7 @@ export class HoverPreviewController {
     this.hideDelay = options.hideDelay ?? 100;
     this.maxEntries = options.maxEntries ?? 20;
     this.clickThrough = options.clickThrough === true;
+    this.entryOptions = options.entryOptions;
 
     this.renderer = new HoverPreviewRenderer({
       document: this.doc,
@@ -542,6 +547,7 @@ export class HoverPreviewController {
         ? this.callbacks.isFavorite(entry)
         : undefined,
       isRelated: this.callbacks.isRelated?.(entry) ?? false,
+      entryOptions: this.entryOptions,
       onAdd: this.callbacks.onAdd
         ? async (e, anchor) => {
             if (this.addActionInFlight) {

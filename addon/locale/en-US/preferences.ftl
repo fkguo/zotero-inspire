@@ -203,4 +203,23 @@ pref-dev-panel-layout =
     .label = Enable panel layout debug (Citing…)
 pref-dev-panel-layout-desc = Logs [PANEL-LAYOUT] lines and shows a "Copy layout" button in the panel header (for debugging).
 
+pref-arxiv-browser = arXiv Browser
+pref-arxiv-browser-default-subscription = Opens with the subscription:
+pref-arxiv-browser-first-subscription =
+    .label = The first one
+pref-arxiv-browser-no-subscription = No subscription yet: make one in the arXiv browser (View → arXiv Browser).
+pref-arxiv-browser-open-days = Opens with:
+pref-arxiv-browser-open-newest =
+    .label = The newest day
+pref-arxiv-browser-open-recent =
+    .label = The last 5 announcement days
+pref-arxiv-browser-open-week =
+    .label = This week
+pref-arxiv-browser-abstracts =
+    .label = Show the abstracts in the list (the chosen paper's abstract is always in the detail pane)
+pref-arxiv-browser-page-size = Papers per page:
+pref-arxiv-browser-page-size-desc = From 10 to 500; the list can also change it.
+pref-arxiv-browser-open-on-startup =
+    .label = Open the arXiv browser when Zotero starts
+
 pref-help = { $name } Build { $version } { $time }

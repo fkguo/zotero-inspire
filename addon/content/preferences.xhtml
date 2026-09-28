@@ -238,6 +238,26 @@
     name="__prefsPrefix__.funding_filter_custom"
     type="string"
   />
+  <preference
+    id="pref-arxiv_browser_open_days"
+    name="__prefsPrefix__.arxiv_browser_open_days"
+    type="string"
+  />
+  <preference
+    id="pref-arxiv_browser_abstracts_expanded"
+    name="__prefsPrefix__.arxiv_browser_abstracts_expanded"
+    type="bool"
+  />
+  <preference
+    id="pref-arxiv_browser_page_size"
+    name="__prefsPrefix__.arxiv_browser_page_size"
+    type="int"
+  />
+  <preference
+    id="pref-arxiv_browser_open_on_startup"
+    name="__prefsPrefix__.arxiv_browser_open_on_startup"
+    type="bool"
+  />
 </preferences>
 <groupbox
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
@@ -1031,6 +1051,76 @@
           style="flex: 1; margin-left: 8px"
         />
       </hbox>
+    </vbox>
+  </vbox>
+
+  <!-- arXiv Browser -->
+  <vbox class="zinspire-pref-section">
+    <html:h3
+      class="zinspire-pref-title"
+      data-l10n-id="pref-arxiv-browser"
+    ></html:h3>
+    <vbox class="zinspire-pref-row">
+      <hbox align="center">
+        <label data-l10n-id="pref-arxiv-browser-default-subscription" />
+        <!-- Filled with the subscriptions when the pane opens -->
+        <menulist
+          id="zotero-prefpane-__addonRef__-arxiv_browser_default_subscription"
+          style="min-width: 200px; margin-left: 8px"
+        >
+          <menupopup />
+        </menulist>
+      </hbox>
+      <html:p
+        id="zotero-prefpane-__addonRef__-arxiv_browser_no_subscription"
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-arxiv-browser-no-subscription"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <label data-l10n-id="pref-arxiv-browser-open-days" />
+      <radiogroup
+        id="zotero-prefpane-__addonRef__-arxiv_browser_open_days"
+        preference="extensions.zotero.inspiremeta.arxiv_browser_open_days"
+        orient="vertical"
+        style="margin-left: 20px"
+      >
+        <radio data-l10n-id="pref-arxiv-browser-open-newest" value="newest" />
+        <radio data-l10n-id="pref-arxiv-browser-open-recent" value="recent" />
+        <radio data-l10n-id="pref-arxiv-browser-open-week" value="week" />
+      </radiogroup>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-arxiv_browser_abstracts_expanded"
+        preference="extensions.zotero.inspiremeta.arxiv_browser_abstracts_expanded"
+        data-l10n-id="pref-arxiv-browser-abstracts"
+      />
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <hbox align="center">
+        <label data-l10n-id="pref-arxiv-browser-page-size" />
+        <html:input
+          type="number"
+          id="zotero-prefpane-__addonRef__-arxiv_browser_page_size"
+          preference="extensions.zotero.inspiremeta.arxiv_browser_page_size"
+          min="10"
+          max="500"
+          class="zinspire-pref-input"
+          style="width: 70px; margin-left: 8px"
+        />
+      </hbox>
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-arxiv-browser-page-size-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-arxiv_browser_open_on_startup"
+        preference="extensions.zotero.inspiremeta.arxiv_browser_open_on_startup"
+        data-l10n-id="pref-arxiv-browser-open-on-startup"
+      />
     </vbox>
   </vbox>
 

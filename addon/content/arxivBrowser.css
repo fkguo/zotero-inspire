@@ -28,9 +28,27 @@
 .arxiv-browser__list-pane {
   display: flex;
   flex-direction: column;
-  flex: 3 1 0;
+  flex: 0 0 60%;
   min-width: 0;
   min-height: 0;
+}
+
+.arxiv-browser__divider {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  border-left: 1px solid var(--fill-quinary, #e5e7eb);
+}
+
+.arxiv-browser__divider:hover,
+.arxiv-browser__divider:focus-visible,
+.arxiv-browser__main--dragging .arxiv-browser__divider {
+  background: var(--fill-quinary, #e5e7eb);
+  outline: none;
+}
+
+.arxiv-browser__main--dragging {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .arxiv-browser__list {
@@ -42,11 +60,10 @@
 }
 
 .arxiv-browser__detail {
-  flex: 2 1 0;
+  flex: 1 1 0;
   min-width: 0;
   overflow-y: auto;
   padding: 12px 16px;
-  border-left: 1px solid var(--fill-quinary, #e5e7eb);
 }
 
 .arxiv-browser__empty {
@@ -526,4 +543,57 @@
   color: var(--fill-primary, #1f2937);
   border: 1px solid var(--fill-quinary, #d1d5db);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+/* Detail pane of the focused paper */
+
+.arxiv-browser__detail-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.arxiv-browser__detail-authors {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+.arxiv-browser__author {
+  cursor: default;
+  border-bottom: 1px dotted var(--fill-tertiary, #9ca3af);
+}
+
+.arxiv-browser__detail-line {
+  margin: 4px 0;
+}
+
+.arxiv-browser__detail-quiet {
+  color: var(--fill-secondary, #6b7280);
+  font-size: 12px;
+}
+
+.arxiv-browser__detail-label {
+  font-weight: 600;
+}
+
+.arxiv-browser__category {
+  white-space: nowrap;
+}
+
+.arxiv-browser__category--primary {
+  font-weight: 600;
+}
+
+.arxiv-browser__detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.arxiv-browser__detail-abstract {
+  margin-top: 8px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  user-select: text;
 }

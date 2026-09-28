@@ -203,4 +203,23 @@ pref-dev-panel-layout =
     .label = 启用面板布局调试（Citing…）
 pref-dev-panel-layout-desc = 输出 [PANEL-LAYOUT] 调试日志，并在面板状态栏显示“Copy layout”按钮（用于定位溢出/遮挡问题）。
 
+pref-arxiv-browser = arXiv 浏览器
+pref-arxiv-browser-default-subscription = 打开时的订阅：
+pref-arxiv-browser-first-subscription =
+    .label = 第一个订阅
+pref-arxiv-browser-no-subscription = 尚无订阅：请在 arXiv 浏览器中新建（查看 → arXiv 浏览器）。
+pref-arxiv-browser-open-days = 打开时显示：
+pref-arxiv-browser-open-newest =
+    .label = 最新一日
+pref-arxiv-browser-open-recent =
+    .label = 最近 5 个公告日
+pref-arxiv-browser-open-week =
+    .label = 本周
+pref-arxiv-browser-abstracts =
+    .label = 在列表中显示摘要（所选论文的摘要总在详情栏中）
+pref-arxiv-browser-page-size = 每页篇数：
+pref-arxiv-browser-page-size-desc = 10 至 500；也可在列表中更改。
+pref-arxiv-browser-open-on-startup =
+    .label = 启动 Zotero 时打开 arXiv 浏览器
+
 pref-help = { $name } 版本 { $version } { $time }

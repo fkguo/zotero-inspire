@@ -1,9 +1,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Read-only actions of the arXiv browser: copy a paper's BibTeX (arXiv's
-// own, from arxiv.org/bibtex/<id>, fetched through the plugin's arxiv.org
-// scheduler like every other request to arXiv), and open the abstract page
-// or the PDF in the system's web browser (the user's own browsing; the
-// plugin sends no request for it).
+// Read-only actions of the arXiv browser: copy a paper's arXiv identifier or
+// its BibTeX (arXiv's own, from arxiv.org/bibtex/<id>, fetched through the
+// plugin's arxiv.org scheduler like every other request to arXiv), and open
+// the abstract page or the PDF in the system's web browser (the user's own
+// browsing; the plugin sends no request for it).
 //
 // Notices go to the window's own notice area (windowReporter).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +69,14 @@ export class BrowserActions {
 
   openPdf(id: string): void {
     this.launch(pdfUrl(id));
+  }
+
+  async copyId(id: string): Promise<void> {
+    if (await this.copy(id)) {
+      this.reporter.notify(
+        getString("arxiv-browser-copied-id", { args: { id } }),
+      );
+    }
   }
 
   /** Copy arXiv's BibTeX of the paper, fetching it first if need be */

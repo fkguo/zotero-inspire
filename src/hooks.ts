@@ -55,6 +55,8 @@ import {
   removeArxivBrowserButton,
   unregisterArxivBrowserMenu,
 } from "./modules/arxiv/browser/browserEntryPoints";
+import { initArxivBrowserPrefs } from "./modules/arxiv/browser/browserPrefs";
+import { paintTimes } from "./modules/arxiv/browser/paintTimes";
 
 // Track background timers for cleanup on shutdown (PERF-FIX-1)
 let purgeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -87,6 +89,8 @@ async function onStartup() {
   }
 
   await onMainWindowLoad(Zotero.getMainWindow());
+
+  if (getPref("arxiv_browser_open_on_startup")) openArxivBrowser();
 
   // Register LRU caches for monitoring
   MemoryMonitor.getInstance().registerCache("recidLookup", recidLookupCache);
@@ -134,6 +138,8 @@ function exposeConsoleCommands(): void {
       MemoryMonitor.getInstance().start(interval);
     instance.stopMemoryMonitor = () => MemoryMonitor.getInstance().stop();
     instance.getExternalToken = () => getExternalToken();
+    // How long the arXiv browser took to show its last pages
+    instance.arxivBrowserPaintTimes = () => paintTimes();
     instance.getExternalReadToken = () => getExternalReadToken();
   }
 }
@@ -722,6 +728,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
   switch (type) {
     case "load":
       registerPrefsScripts(data.window);
+      initArxivBrowserPrefs(data.window.document);
       // Update cache stats and directory display
       if (data.window) {
         const doc = data.window.document;

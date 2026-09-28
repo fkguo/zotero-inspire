@@ -33,6 +33,7 @@ import {
   type ListSort,
 } from "./browserList";
 import { formatDay, formatShortDay, reasonText } from "./browserText";
+import { notePaint, noteFormulas, type PaintTime } from "./paintTimes";
 import { button, html } from "./dom";
 import { SECTION_LABELS } from "./SubscriptionEditor";
 
@@ -61,6 +62,15 @@ export interface ListPaneOptions {
   onFocus?(entry: BrowserEntry | null): void;
   /** Show a paper that is in the library there (its item ID) */
   showInLibrary?(itemID: number): void;
+  /** The pointer is on the name of a paper's author (its index) */
+  onAuthorHover?(entry: BrowserEntry, index: number, anchor: HTMLElement): void;
+  onAuthorLeave?(): void;
+  /**
+   * The pointer is on the title of a paper whose abstract the row does not
+   * show
+   */
+  onTitleHover?(entry: BrowserEntry, row: HTMLElement): void;
+  onTitleLeave?(): void;
 }
 
 export class ListPane {
@@ -113,6 +123,8 @@ export class ListPane {
     this.list.tabIndex = 0;
     options.container.replaceChildren(this.dayIndex, this.pager, this.list);
     this.list.addEventListener("click", this.onClick);
+    this.list.addEventListener("mouseover", this.onMouseOver);
+    this.list.addEventListener("mouseout", this.onMouseOut);
   }
 
   /** The papers shown, in order */
@@ -184,6 +196,8 @@ export class ListPane {
     this.abstractChoice.clear();
     for (const [key, row] of this.rows) this.applyAbstract(row, key);
     this.observeAbstracts();
+    // A title's card is for rows that hide the abstract
+    if (shown) this.options.onTitleLeave?.();
   }
 
   /** Retries of days are possible only while nothing else loads */
@@ -294,6 +308,8 @@ export class ListPane {
     this.observer?.disconnect();
     this.observer = null;
     this.list.removeEventListener("click", this.onClick);
+    this.list.removeEventListener("mouseover", this.onMouseOver);
+    this.list.removeEventListener("mouseout", this.onMouseOut);
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -307,6 +323,8 @@ export class ListPane {
   private render(scroll: "top" | "focus" | "keep"): void {
     if (this.message) return;
     const doc = this.doc;
+    const win = doc.defaultView;
+    const started = win?.performance.now() ?? 0;
     const scrollTop = this.list.scrollTop;
     this.observer?.disconnect();
     this.rows.clear();
@@ -342,7 +360,14 @@ export class ListPane {
     this.list.replaceChildren(fragment);
     this.renderPager();
     this.renderDayIndex();
-    this.observeAbstracts();
+    this.observeAbstracts(
+      win
+        ? {
+            time: notePaint(win, this.rows.size, this.pageSize, started),
+            started,
+          }
+        : undefined,
+    );
 
     if (scroll === "keep") {
       this.list.scrollTop = scrollTop;
@@ -503,22 +528,43 @@ export class ListPane {
     this.abstractChoice.set(key, !this.isAbstractShown(key));
     this.applyAbstract(row, key);
     this.observeAbstracts();
+    if (this.isAbstractShown(key)) this.options.onTitleLeave?.();
   }
 
   /** Render the formulas of shown abstracts once they come into view */
-  private observeAbstracts(): void {
+  /**
+   * `timing`: the page was just drawn; the formulas of the abstracts first in
+   * view complete its record (none when the page shows no abstract)
+   */
+  private observeAbstracts(timing?: {
+    time: PaintTime;
+    started: number;
+  }): void {
     const Observer = this.doc.defaultView?.IntersectionObserver;
     if (!Observer) return;
     this.observer?.disconnect();
+    let pending = timing;
     this.observer = new Observer(
       (records) => {
+        const renders: Promise<void>[] = [];
         for (const record of records) {
           if (!record.isIntersecting) continue;
           const element = record.target as HTMLElement;
           this.observer?.unobserve(element);
           if (element.dataset.formulas) continue;
           element.dataset.formulas = "rendered";
-          void renderMathContent(element.dataset.latexSource ?? "", element);
+          renders.push(
+            renderMathContent(element.dataset.latexSource ?? "", element),
+          );
+        }
+        // The first abstracts in view of a newly drawn page: time them
+        const first = pending;
+        pending = undefined;
+        const win = this.doc.defaultView;
+        if (first && win && renders.length) {
+          void Promise.all(renders).then(() =>
+            noteFormulas(win, first.time, first.started, renders.length),
+          );
         }
       },
       { root: this.list, rootMargin: "200px 0px" },
@@ -666,5 +712,43 @@ export class ListPane {
       return;
     }
     this.setFocus(entry.id, false);
+  };
+
+  private entryOf(target: Element | null): BrowserEntry | undefined {
+    const key = target?.closest<HTMLElement>(".zinspire-ref-entry")?.dataset
+      .entryId;
+    return key
+      ? this.arranged.entries.find((item) => item.id === key)
+      : undefined;
+  }
+
+  private readonly onMouseOver = (event: MouseEvent): void => {
+    const target = event.target as Element | null;
+    const entry = this.entryOf(target);
+    if (!target || !entry) return;
+    const author = target.closest<HTMLElement>(
+      ".zinspire-ref-entry__author-link",
+    );
+    if (author) {
+      const index = Number(author.dataset.authorIndex);
+      if (index >= 0) this.options.onAuthorHover?.(entry, index, author);
+      return;
+    }
+    if (
+      target.closest(".zinspire-ref-entry__title-link") &&
+      !this.isAbstractShown(entry.id)
+    ) {
+      const row = target.closest<HTMLElement>(".zinspire-ref-entry")!;
+      this.options.onTitleHover?.(entry, row);
+    }
+  };
+
+  private readonly onMouseOut = (event: MouseEvent): void => {
+    const target = event.target as Element | null;
+    if (target?.closest(".zinspire-ref-entry__author-link")) {
+      this.options.onAuthorLeave?.();
+    } else if (target?.closest(".zinspire-ref-entry__title-link")) {
+      this.options.onTitleLeave?.();
+    }
   };
 }
