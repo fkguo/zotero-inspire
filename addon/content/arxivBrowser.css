@@ -261,3 +261,269 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Loading status and list controls */
+
+.arxiv-browser__status {
+  color: var(--fill-secondary, #4b5563);
+  min-width: 0;
+}
+
+.arxiv-browser__status > button {
+  margin: 0 2px;
+}
+
+.arxiv-browser__sections {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.arxiv-browser__filter {
+  flex: 1 1 180px;
+  min-width: 120px;
+  max-width: 360px;
+}
+
+/* The date button and its calendar */
+
+.arxiv-browser__day-choice {
+  position: relative;
+  display: inline-block;
+}
+
+.arxiv-browser__daypicker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 340px;
+  padding: 10px 12px;
+  border: 1px solid var(--fill-quinary, #e5e7eb);
+  border-radius: 8px;
+  background: var(--material-background, #fff);
+  color: var(--fill-primary, #1f2937);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+}
+
+.arxiv-browser__daypicker[hidden] {
+  display: none;
+}
+
+.arxiv-browser__daypicker-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.arxiv-browser__daypicker-note,
+.arxiv-browser__daypicker-summary {
+  color: var(--fill-secondary, #6b7280);
+  font-size: 0.9em;
+}
+
+.arxiv-browser__daypicker-month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.arxiv-browser__daypicker-title {
+  font-weight: 600;
+}
+
+.arxiv-browser__daypicker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  text-align: center;
+}
+
+.arxiv-browser__daypicker-weekday {
+  color: var(--fill-secondary, #6b7280);
+  font-size: 0.85em;
+}
+
+.arxiv-browser__daypicker-day,
+.arxiv-browser__daypicker-off {
+  padding: 4px 0;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.arxiv-browser__daypicker-day {
+  border: 1px solid transparent;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.arxiv-browser__daypicker-day:hover {
+  border-color: var(--fill-quaternary, #d1d5db);
+}
+
+.arxiv-browser__daypicker-day--picked {
+  background: var(--accent-blue, #2563eb);
+  color: #fff;
+}
+
+.arxiv-browser__daypicker-off {
+  color: var(--fill-quaternary, #c0c4cc);
+}
+
+.arxiv-browser__daypicker-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.arxiv-browser__daypicker-summary {
+  flex: 1 1 auto;
+}
+
+/* Day index and pages */
+
+.arxiv-browser__days {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 6px 8px 2px;
+  flex: 0 0 auto;
+}
+
+.arxiv-browser__day-chip {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.arxiv-browser__day-chip--here {
+  font-weight: 600;
+}
+
+.arxiv-browser__day-chip--incomplete {
+  color: var(--accent-orange, #b45309);
+}
+
+.arxiv-browser__pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--fill-quinary, #e5e7eb);
+}
+
+.arxiv-browser__page {
+  min-width: 28px;
+}
+
+.arxiv-browser__page--current {
+  font-weight: 700;
+}
+
+.arxiv-browser__pager-count {
+  margin-left: auto;
+  color: var(--fill-secondary, #6b7280);
+}
+
+/* Headers within a page */
+
+.arxiv-browser__day {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 4px 6px;
+  border-bottom: 2px solid var(--fill-quinary, #d1d5db);
+  font-size: 14px;
+}
+
+.arxiv-browser__day-title {
+  font-weight: 700;
+}
+
+.arxiv-browser__day-count,
+.arxiv-browser__continued {
+  color: var(--fill-secondary, #6b7280);
+  font-size: 12px;
+}
+
+.arxiv-browser__day-notes {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--accent-orange, #b45309);
+  font-size: 12px;
+}
+
+.arxiv-browser__group {
+  margin: 8px 0 2px;
+  padding: 2px 6px;
+  font-weight: 600;
+  color: var(--fill-secondary, #4b5563);
+}
+
+.arxiv-browser__group .arxiv-browser__continued {
+  margin-left: 6px;
+  font-weight: normal;
+}
+
+/* Rows: the entry list's rows, read-only here */
+
+.arxiv-browser__row .zinspire-ref-entry__checkbox,
+.arxiv-browser__row .zinspire-ref-entry__link,
+.arxiv-browser__row .zinspire-ref-entry__texkey {
+  display: none;
+}
+
+/* The in-library mark only; papers not in the library show no mark */
+.arxiv-browser__row .zinspire-ref-entry__dot[data-state="missing"] {
+  visibility: hidden;
+}
+
+.arxiv-browser__row--collapsed .zinspire-ref-entry__abstract {
+  display: none;
+}
+
+.arxiv-browser__abstract-toggle {
+  margin: 2px 0 0;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.arxiv-browser__next-page {
+  display: block;
+  margin: 12px auto 4px;
+}
+
+/* Notices: short messages at the bottom of the window */
+
+.arxiv-browser__notices {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.arxiv-browser__notice {
+  max-width: 420px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--material-background, #fff);
+  color: var(--fill-primary, #1f2937);
+  border: 1px solid var(--fill-quinary, #d1d5db);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}

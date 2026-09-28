@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ListingService: loads the announcement days of a subscription in the three
-// modes of the arXiv browser, day by day.
+// ListingService: loads the announcement days of a subscription, day by day,
+// in three ways, and the days chosen in the arXiv browser's calendar.
 //
 //   new      /list/<x>/new of every subscribed category (or archive)
 //   recent   the last five announcement days, dated by the index of
@@ -8,6 +8,8 @@
 //            the newest day from /new, the others from /catchup
 //   catch-up from a start day along the "Continue to the next day" links of
 //            /catchup, the newest day from /new
+//   days     chosen days, newest first: the newest day from /new, the
+//            others from /catchup (loadDays)
 //
 // A category's pages belong to the day printed in their header. A day is
 // complete when every subscribed category's pages show that day and pass the
@@ -139,6 +141,13 @@ export interface ListingLoadResult {
    * with the next announcement day
    */
   noAnnouncementOn?: IsoDate;
+  /** Chosen days: those that had no announcement (holidays), not shown */
+  noAnnouncementDays?: IsoDate[];
+  /**
+   * Recent and chosen days, when the run stopped: the days it was to load and
+   * had not, newest first (loading them goes on with the run)
+   */
+  notLoaded?: IsoDate[];
 }
 
 type SpecResult =
@@ -167,6 +176,11 @@ class Run {
   newestDay?: IsoDate;
   clampedStart?: IsoDate;
   noAnnouncementOn?: IsoDate;
+  noAnnouncementDays?: IsoDate[];
+  /** The days the run is to load (recent, chosen days), newest first */
+  planned?: IsoDate[];
+  /** Chosen days found not announced yet */
+  readonly notAnnounced: IsoDate[] = [];
 
   constructor(private readonly options: ListingLoadOptions) {}
 
@@ -201,6 +215,17 @@ class Run {
     if (this.newestDay) result.newestDay = this.newestDay;
     if (this.clampedStart) result.clampedStart = this.clampedStart;
     if (this.noAnnouncementOn) result.noAnnouncementOn = this.noAnnouncementOn;
+    if (this.noAnnouncementDays) {
+      result.noAnnouncementDays = this.noAnnouncementDays;
+    }
+    if (this.stopped && this.planned) {
+      const done = new Set([
+        ...this.days.map((day) => day.date),
+        ...(this.noAnnouncementDays ?? []),
+        ...this.notAnnounced,
+      ]);
+      result.notLoaded = this.planned.filter((date) => !done.has(date));
+    }
     return result;
   }
 }
@@ -281,6 +306,12 @@ export class ListingService {
       const between = await this.daysBetween(run, specs, dates[0], latest);
       dates = [latest, ...between.reverse(), ...dates].slice(0, RECENT_DAYS);
     }
+    // The five days are settled only when /new told the newest day (a page
+    // answered) and the links between answered
+    const told = [...batch.results.values()].some(
+      (result) => result.ok && !result.fetchFailed,
+    );
+    if (told && !run.stopped) run.planned = dates;
     run.emit(this.dayFromBatch(batch, latest, specs));
     this.notePreviousIssue(run, latest);
 
@@ -403,6 +434,70 @@ export class ListingService {
     }
     // Also when no day was loaded (the start is later than the newest day)
     this.notePreviousIssue(run, latest);
+    return run.result();
+  }
+
+  /**
+   * Chosen days, newest first (the days picked in the arXiv browser's
+   * calendar): the newest announcement day from /new, the others from
+   * /catchup. A chosen day that had no announcement (a holiday) is not shown
+   * and is listed in `noAnnouncementDays`; a day not announced yet is left
+   * out (`previousIssue` tells when the newest listing is late). The days
+   * are independent: one whose pages all fail is shown as failed and the
+   * others are still loaded.
+   */
+  async loadDays(
+    subscription: readonly string[],
+    dates: readonly IsoDate[],
+    options: ListingLoadOptions & {
+      /**
+       * The newest announcement day a run before this one found (/new
+       * showed it): chosen days older than it need no /new
+       */
+      newestDay?: IsoDate;
+    } = {},
+  ): Promise<ListingLoadResult> {
+    const specs = subscriptionPageSpecs(subscription);
+    const run = new Run(options);
+    const chosen = [...new Set(dates)].sort().reverse();
+    if (!chosen.length) return run.result();
+    const index = await this.recentIndex(run);
+    if (!index.ok) {
+      run.stop(index.reason, index.message);
+      return run.result();
+    }
+    run.planned = chosen;
+    let latest = index.dates[0];
+    if (options.newestDay && options.newestDay > latest) {
+      latest = options.newestDay;
+    }
+    // /new tells whether a chosen day is the newest one (it can be newer
+    // than the index right after an announcement)
+    let batch: LatestBatch | null = null;
+    if (chosen[0] >= latest) {
+      batch = await this.latestBatch(run, specs, latest);
+      if (batch.date) latest = batch.date;
+    }
+    this.notePreviousIssue(run, latest);
+    for (const date of chosen) {
+      if (run.signal?.aborted) run.stop("cancelled", "Loading cancelled");
+      if (run.stopped) break;
+      if (date > latest) {
+        run.notAnnounced.push(date);
+        continue;
+      }
+      if (date === latest && batch) {
+        run.emit(this.dayFromBatch(batch, latest, specs));
+        continue;
+      }
+      const { day, listings } = await this.loadPastDay(run, specs, date, {
+        batch,
+      });
+      const check = await this.checkEmptyDay(run, day, listings, index.dates);
+      if (check.shown === "stop") break;
+      if (check.shown) run.emit(day);
+      else (run.noAnnouncementDays ??= []).push(date);
+    }
     return run.result();
   }
 

@@ -748,3 +748,100 @@ arxiv-browser-editor-cancel = Cancel
 arxiv-browser-duration-seconds = { $count } s
 arxiv-browser-duration-minutes = { $count } min
 arxiv-browser-duration-minutes-seconds = { $minutes } min { $seconds } s
+arxiv-browser-days = Choose the days to list
+arxiv-browser-days-newest = Newest day
+arxiv-browser-days-recent = Last 5 announcement days
+arxiv-browser-days-week = This week
+arxiv-browser-days-unread = Unread days
+arxiv-browser-days-unread-note = (needs the reading state, not yet available)
+arxiv-browser-days-range = { $first } – { $last } ({ $count } days)
+arxiv-browser-days-previous-month = Previous month
+arxiv-browser-days-next-month = Next month
+arxiv-browser-days-hint = Click a day; Ctrl/⌘+click adds or removes one; Shift+click picks a range.
+arxiv-browser-days-none = No day picked.
+arxiv-browser-days-picked = { $days ->
+        [one] 1 day picked
+       *[other] { $days } days picked
+    }; if not cached, { $requests ->
+        [one] 1 request
+       *[other] { $requests } requests
+    }, at least { $time }.
+arxiv-browser-days-estimate = If not cached: { $requests ->
+        [one] 1 request
+       *[other] { $requests } requests
+    }, at least { $time }
+arxiv-browser-days-load = Load
+arxiv-browser-reload = Reload
+arxiv-browser-reload-tooltip = Load the chosen days again, fetching the newest listing afresh when it is among them (other days come from the cache)
+arxiv-browser-cancel = Cancel
+arxiv-browser-continue = Continue
+arxiv-browser-status-waiting = Keeping arXiv’s request interval: continuing in { $seconds } s.
+arxiv-browser-status-paused = arXiv is unavailable for now; retrying at { $time }.
+arxiv-browser-status-sending = Fetching from arXiv…
+arxiv-browser-status-queued = { $count ->
+        [one] (1 more request queued)
+       *[other] ({ $count } more requests queued)
+    }
+arxiv-browser-status-loading = Loading…
+arxiv-browser-status-loaded = { $days ->
+        [one] 1 day
+       *[other] { $days } days
+    }, { $papers ->
+        [one] 1 paper
+       *[other] { $papers } papers
+    }.
+arxiv-browser-status-stopped = Loading stopped: { $reason }.
+arxiv-browser-status-cancelled = Loading cancelled.
+arxiv-browser-status-previous-issue = The newest listing is still the previous one (arXiv may have postponed the announcement); try Reload later.
+arxiv-browser-status-no-announcement = No announcement on { $dates }.
+arxiv-browser-nothing-loaded = Nothing loaded.
+arxiv-browser-reason-cancelled = cancelled
+arxiv-browser-reason-timeout = arXiv did not answer in time
+arxiv-browser-reason-offline = Zotero is offline
+arxiv-browser-reason-network = no connection to arXiv
+arxiv-browser-reason-unavailable = arXiv is unavailable for now
+arxiv-browser-reason-forbidden = arXiv refused the request
+arxiv-browser-reason-stopped = not requested after an earlier refusal
+arxiv-browser-reason-http = unexpected answer from arXiv
+arxiv-browser-reason-out-of-range = older than arXiv’s 90 days of catch-up listings
+arxiv-browser-reason-parse = the page could not be read
+arxiv-browser-reason-check = the pages of the day did not add up
+arxiv-browser-reason-mixed-dates = the pages showed different days
+arxiv-browser-day-count = { $count ->
+        [one] 1 paper
+       *[other] { $count } papers
+    }
+arxiv-browser-day-filtered = { $shown } of { $count } papers
+arxiv-browser-continued = (continued)
+arxiv-browser-day-empty = No papers in the subscribed categories on this day.
+arxiv-browser-day-none-shown = None in the shown sections.
+arxiv-browser-day-no-match = None matches the filter.
+arxiv-browser-day-failed = This day was not fetched.
+arxiv-browser-day-incomplete = This day was not fetched completely.
+arxiv-browser-day-spec-failed = { $spec }: { $reason }
+arxiv-browser-day-spec-stale = { $spec }: arXiv still shows { $date }
+arxiv-browser-day-spec-cached = { $spec }: copy from the cache (fetching failed: { $reason })
+arxiv-browser-retry = Retry
+arxiv-browser-sort = Sort
+arxiv-browser-sort-announcement = Announcement order
+arxiv-browser-sort-id-asc = arXiv ID ↑
+arxiv-browser-sort-id-desc = arXiv ID ↓
+arxiv-browser-sort-primary = Primary category
+arxiv-browser-filter = Filter: words or "phrases"
+arxiv-browser-page-size = Per page
+arxiv-browser-abstracts = Abstracts
+arxiv-browser-abstract-show = Abstract ▸
+arxiv-browser-abstract-hide = Abstract ▾
+arxiv-browser-page-previous = ‹ Previous
+arxiv-browser-page-next = Next ›
+arxiv-browser-papers = { $count ->
+        [one] 1 paper
+       *[other] { $count } papers
+    }
+arxiv-browser-section-tag-cross = cross-list
+arxiv-browser-section-tag-replace = replacement
+arxiv-browser-open-pdf = Open the PDF on arXiv (in your web browser)
+arxiv-browser-detail-empty = Choose a paper to see it here.
+arxiv-browser-bibtex-waiting = Fetching the BibTeX from arXiv (keeping its request interval)…
+arxiv-browser-bibtex-copied = Copied the BibTeX of { $id }
+arxiv-browser-bibtex-failed = Could not get the BibTeX of { $id }: { $reason }

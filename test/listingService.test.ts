@@ -686,6 +686,8 @@ describe("recent", () => {
       date: "2026-09-23",
     });
     expect(result.stopped?.message).toMatch(/day after 2026-09-23/);
+    // Its five days were not settled: none are named as left to load
+    expect(result.notLoaded).toBeUndefined();
 
     // On retry the link is found and Thursday is not left out
     const retry = await clock.run(service.loadRecent(["hep-ph"]));
@@ -1568,6 +1570,282 @@ describe("cancellation", () => {
     expect(site.sent[1].end).toBe(Date.parse(SUNDAY_AFTERNOON) + 16000);
     expect(result.days).toEqual([]);
     expect(result.stopped?.reason).toBe("cancelled");
+  });
+});
+
+describe("the days a stopped recent run had not loaded", () => {
+  it("are the rest of its five days, also when /new was ahead of the index", async () => {
+    // Sunday 20:30 in New York: /new shows Monday, the index ends Friday
+    const { clock, site, service } = setup("2026-09-28T00:30:00Z");
+    serveDays(site, ["hep-ph"], [...INDEX].reverse(), "2026-09-28");
+    const controller = new AbortController();
+    const arrived: string[] = [];
+    const loading = service.loadRecent(["hep-ph"], {
+      signal: controller.signal,
+      onDay: (day) => {
+        arrived.push(day.date);
+        if (arrived.length === 2) controller.abort();
+      },
+    });
+    const result = await clock.run(loading);
+    expect(arrived).toEqual(["2026-09-28", "2026-09-25"]);
+    expect(result.stopped?.reason).toBe("cancelled");
+    // Friday 21 Sep is not among the five days any more
+    expect(result.notLoaded).toEqual([
+      "2026-09-24",
+      "2026-09-23",
+      "2026-09-22",
+    ]);
+  });
+
+  it("are none while its five days were not settled: cancelled before /new answered", async () => {
+    const { clock, site, service } = setup("2026-09-28T00:30:00Z");
+    serveDays(site, ["hep-ph"], [...INDEX].reverse(), "2026-09-28");
+    const controller = new AbortController();
+    const loading = service.loadRecent(["hep-ph"], {
+      signal: controller.signal,
+    });
+    // The index at once; /new would go 15 s later
+    await clock.advanceBy(5000);
+    controller.abort();
+    const result = await clock.run(loading);
+    expect(result.days).toEqual([]);
+    expect(result.stopped?.reason).toBe("cancelled");
+    expect(result.notLoaded).toBeUndefined();
+  });
+
+  it("are none while its five days were not settled: /new did not answer", async () => {
+    // Sunday 20:30 in New York: /new fails, the index still ends Friday
+    const { clock, site, service } = setup("2026-09-28T00:30:00Z");
+    serveDays(site, ["hep-ph"], [...INDEX].reverse(), "2026-09-28");
+    site.page(LIST_URL("hep-ph"), { status: 500 });
+    const controller = new AbortController();
+    const arrived: string[] = [];
+    const loading = service.loadRecent(["hep-ph"], {
+      signal: controller.signal,
+      onDay: (day) => {
+        arrived.push(day.date);
+        if (arrived.length === 2) controller.abort();
+      },
+    });
+    const result = await clock.run(loading);
+    // Friday stood in for the newest day, which /new did not tell
+    expect(arrived[0]).toBe("2026-09-25");
+    expect(result.stopped?.reason).toBe("cancelled");
+    expect(result.notLoaded).toBeUndefined();
+  });
+
+  it("are none while its five days were not settled: cancelled during the search for the days between", async () => {
+    // The index ends on Wednesday, /new shows Friday: Thursday comes from
+    // Wednesday's "next day" link
+    const { clock, site, service } = setup();
+    site.html(
+      INDEX_URL,
+      recentIndexHtml("math", [
+        "2026-09-23",
+        "2026-09-22",
+        "2026-09-21",
+        "2026-09-18",
+        "2026-09-17",
+      ]),
+    );
+    site.html(
+      LIST_URL("hep-ph"),
+      newPageHtml("hep-ph", "2026-09-25", smallDay("hep-ph")),
+    );
+    site.html(
+      CATCHUP_URL("hep-ph", "2026-09-23"),
+      catchupPageHtml("hep-ph", "2026-09-23", smallDay("hep-ph"), "2026-09-24"),
+    );
+    const controller = new AbortController();
+    const loading = service.loadRecent(["hep-ph"], {
+      signal: controller.signal,
+    });
+    // Each request takes 0.8 s and the next goes 15 s after it: the index at
+    // 0 s, /new at 15.8 s, Wednesday's page at 31.6 s
+    await clock.advanceBy(31900);
+    expect(site.count(CATCHUP_URL("hep-ph", "2026-09-23"))).toBe(1);
+    controller.abort();
+    const result = await clock.run(loading);
+    expect(result.stopped?.reason).toBe("cancelled");
+    expect(result.notLoaded).toBeUndefined();
+  });
+});
+
+describe("loadDays", () => {
+  /**
+   * The real math index and hep-ph pages of 25 September (/new) and
+   * 21 September (catch-up); built catch-up pages between them
+   */
+  function serveHepPh(site: Site) {
+    site.html(
+      INDEX_URL,
+      readArxivFixture("list-math-recent-show25-2026-09-25.html"),
+    );
+    site.html(
+      LIST_URL("hep-ph"),
+      readArxivFixture("list-hep-ph-new-2026-09-25.html"),
+    );
+    site.html(
+      CATCHUP_URL("hep-ph", "2026-09-21"),
+      readArxivFixture("catchup-hep-ph-2026-09-21.html"),
+    );
+    for (const day of ["2026-09-22", "2026-09-23", "2026-09-24"]) {
+      site.html(
+        CATCHUP_URL("hep-ph", day),
+        catchupPageHtml("hep-ph", day, smallDay("hep-ph"), NEXT[day]),
+      );
+    }
+  }
+
+  it("loads the chosen days newest first: the newest from /new, the others from their catch-up pages", async () => {
+    const { clock, site, service } = setup();
+    serveHepPh(site);
+    const arrived: string[] = [];
+    const result = await clock.run(
+      service.loadDays(["hep-ph"], ["2026-09-21", "2026-09-25", "2026-09-23"], {
+        onDay: (day) => arrived.push(day.date),
+      }),
+    );
+    expect(arrived).toEqual(["2026-09-25", "2026-09-23", "2026-09-21"]);
+    expect(summary(result.days)).toEqual([
+      "2026-09-25 complete 72",
+      "2026-09-23 complete 4",
+      "2026-09-21 complete 57",
+    ]);
+    expect(site.sent.map((request) => request.url)).toEqual([
+      INDEX_URL,
+      LIST_URL("hep-ph"),
+      CATCHUP_URL("hep-ph", "2026-09-23"),
+      CATCHUP_URL("hep-ph", "2026-09-21"),
+    ]);
+    expect(result.newestDay).toBe("2026-09-25");
+    expect(result.previousIssue).toBe(false);
+    expect(result.stopped).toBeUndefined();
+    // Asked again: from the cache
+    const before = site.sent.length;
+    await clock.run(service.loadDays(["hep-ph"], ["2026-09-23", "2026-09-21"]));
+    expect(site.sent.length).toBe(before);
+  });
+
+  it("reports a chosen day that had no announcement and does not show it", async () => {
+    const { clock, site, service } = setup();
+    serveHepPh(site);
+    site.html(
+      CATCHUP_URL("hep-ph", "2026-09-08"),
+      readArxivFixture("catchup-hep-ph-2026-09-08-holiday-noabs.html"),
+    );
+    // The math archive has papers on every announcement day, not on 8 Sep
+    site.html(
+      "https://arxiv.org/catchup/math/2026-09-08?abs=False",
+      catchupPageHtml("math", "2026-09-08", [], "2026-09-09"),
+    );
+    const result = await clock.run(
+      service.loadDays(["hep-ph"], ["2026-09-08", "2026-09-22"]),
+    );
+    expect(summary(result.days)).toEqual(["2026-09-22 complete 4"]);
+    expect(result.noAnnouncementDays).toEqual(["2026-09-08"]);
+    expect(result.stopped).toBeUndefined();
+  });
+
+  it("shows a day whose pages all failed as not fully fetched, and loads the others", async () => {
+    const { clock, site, service } = setup();
+    serveHepPh(site);
+    site.page(CATCHUP_URL("hep-ph", "2026-09-23"), {
+      error: new ArxivFetchError("timeout", "Timed out"),
+    });
+    const result = await clock.run(
+      service.loadDays(["hep-ph"], ["2026-09-24", "2026-09-23", "2026-09-22"]),
+    );
+    expect(summary(result.days)).toEqual([
+      "2026-09-24 complete 4",
+      "2026-09-23 failed 0",
+      "2026-09-22 complete 4",
+    ]);
+    expect(stateOf(result.days[1], "hep-ph")).toMatchObject({
+      state: "failed",
+      reason: "timeout",
+    });
+    expect(result.stopped).toBeUndefined();
+  });
+
+  it("leaves out a chosen day not announced yet and notes the late listing", async () => {
+    // Sunday 21:00 in New York: Monday's listing is due, /new still shows Friday
+    const { clock, site, service } = setup("2026-09-28T01:00:00Z");
+    serveHepPh(site);
+    const result = await clock.run(
+      service.loadDays(["hep-ph"], ["2026-09-28", "2026-09-25"]),
+    );
+    expect(summary(result.days)).toEqual(["2026-09-25 complete 72"]);
+    expect(result.newestDay).toBe("2026-09-25");
+    expect(result.previousIssue).toBe(true);
+  });
+
+  it("stops when cancelled, keeping the days loaded", async () => {
+    const { clock, site, service } = setup();
+    serveHepPh(site);
+    const controller = new AbortController();
+    const arrived: string[] = [];
+    const loading = service.loadDays(
+      ["hep-ph"],
+      ["2026-09-24", "2026-09-23", "2026-09-22"],
+      {
+        signal: controller.signal,
+        onDay: (day) => {
+          arrived.push(day.date);
+          controller.abort();
+        },
+      },
+    );
+    const result = await clock.run(loading);
+    expect(arrived).toEqual(["2026-09-24"]);
+    expect(result.stopped?.reason).toBe("cancelled");
+    expect(site.count(CATCHUP_URL("hep-ph", "2026-09-22"))).toBe(0);
+    // The days it had yet to load
+    expect(result.notLoaded).toEqual(["2026-09-23", "2026-09-22"]);
+  });
+
+  it("counts the newest chosen day as not loaded when cancelled before /new told", async () => {
+    // Sunday 20:30 in New York: Monday's listing is due, the index ends Friday
+    const { clock, site, service } = setup("2026-09-28T00:30:00Z");
+    serveHepPh(site);
+    const controller = new AbortController();
+    const loading = service.loadDays(["hep-ph"], ["2026-09-28", "2026-09-25"], {
+      signal: controller.signal,
+    });
+    // The index at once; /new would go 15 s later
+    await clock.advanceBy(5000);
+    controller.abort();
+    const result = await clock.run(loading);
+    expect(result.days).toEqual([]);
+    expect(result.notLoaded).toEqual(["2026-09-28", "2026-09-25"]);
+  });
+
+  it("does not ask /new for days older than the newest day a run before found", async () => {
+    // Sunday 20:30 in New York: /new shows Monday, the index still ends Friday
+    const { clock, site, service } = setup("2026-09-28T00:30:00Z");
+    serveDays(site, ["hep-ph"], [...INDEX].reverse(), "2026-09-28");
+    const result = await clock.run(
+      service.loadDays(["hep-ph"], ["2026-09-25", "2026-09-24"], {
+        newestDay: "2026-09-28",
+      }),
+    );
+    expect(summary(result.days)).toEqual([
+      "2026-09-25 complete 4",
+      "2026-09-24 complete 4",
+    ]);
+    expect(site.count(LIST_URL("hep-ph"))).toBe(0);
+    expect(result.newestDay).toBe("2026-09-28");
+  });
+
+  it("reports no days not loaded when the run was not stopped", async () => {
+    const { clock, site, service } = setup();
+    serveHepPh(site);
+    const result = await clock.run(
+      service.loadDays(["hep-ph"], ["2026-09-24", "2026-09-28"]),
+    );
+    expect(result.stopped).toBeUndefined();
+    expect(result.notLoaded).toBeUndefined();
   });
 });
 

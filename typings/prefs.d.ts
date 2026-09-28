@@ -67,6 +67,9 @@ declare namespace _ZoteroTypes {
       "favorite_presentations": string;
       "arxiv_subscriptions": string;
       "arxiv_browser_default_subscription": string;
+      "arxiv_browser_open_days": string;
+      "arxiv_browser_page_size": number;
+      "arxiv_browser_abstracts_expanded": boolean;
     };
   }
 }

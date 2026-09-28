@@ -69,3 +69,6 @@ pref("__prefsPrefix__.favorite_presentations", "[]"); // JSON array of FavoriteP
 // arXiv browser (stage 3a)
 pref("__prefsPrefix__.arxiv_subscriptions", "[]"); // JSON array of the browser's subscriptions (name, categories, shown sections)
 pref("__prefsPrefix__.arxiv_browser_default_subscription", ""); // id of the subscription the window opens with (empty: the first one)
+pref("__prefsPrefix__.arxiv_browser_open_days", "newest"); // days the window opens with: "newest" | "recent" | "week"
+pref("__prefsPrefix__.arxiv_browser_page_size", 50); // papers per page (10-500)
+pref("__prefsPrefix__.arxiv_browser_abstracts_expanded", false); // abstracts shown in the list by default (else in the detail pane only)

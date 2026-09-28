@@ -127,6 +127,8 @@ export interface EntryRowAdapter {
    * which later updates of the row keep while the text stays the same.
    */
   abstract?: (entry: InspireReferenceEntry) => string | undefined;
+  /** Text after the links of the paper's second line (References panel: none) */
+  metaSuffix?: (entry: InspireReferenceEntry) => string | undefined;
 }
 
 /**
@@ -596,8 +598,15 @@ export class EntryListRenderer {
     ) as HTMLElement | null;
     if (meta) {
       const hasMeta = entry.publicationInfo || entry.arxivDetails || entry.doi;
-      if (hasMeta) {
+      const suffix = this.adapter.metaSuffix?.(entry);
+      if (hasMeta || suffix) {
         this.buildMetaContent(meta, entry, dark);
+        if (suffix) {
+          const span = this.doc.createElement("span");
+          span.classList.add("zinspire-ref-entry__meta-suffix");
+          span.textContent = suffix;
+          meta.appendChild(span);
+        }
         meta.style.display = "";
       } else {
         meta.replaceChildren();

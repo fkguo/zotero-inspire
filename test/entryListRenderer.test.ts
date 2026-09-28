@@ -298,6 +298,36 @@ describe("rows of a list with its own choices", () => {
     expect(part(row, "pdf").dataset.url).toBeUndefined();
   });
 
+  it("writes the list's text after the paper's links", () => {
+    const suffixes: Record<string, string> = {
+      "2609.28544@2026-09-28": " · hep-ph · Cross-list",
+    };
+    const renderer = new EntryListRenderer({
+      document: main.document,
+      adapter: { titleSuffix: "", metaSuffix: (entry) => suffixes[entry.id] },
+    });
+    const row = renderer.createRow(newPaper(), context());
+    expect(part(row, "meta").textContent).toBe(
+      "[arXiv:2609.28544] · hep-ph · Cross-list",
+    );
+
+    // Shown also for a paper without links, gone when the list has none
+    suffixes["2609.28544@2026-09-28"] = " · hep-ph";
+    renderer.updateRow(row, newPaper({ arxivDetails: undefined }), context());
+    expect(part(row, "meta").style.display).toBe("");
+    expect(part(row, "meta").textContent).toBe(" · hep-ph");
+    delete suffixes["2609.28544@2026-09-28"];
+    renderer.updateRow(row, newPaper(), context());
+    expect(part(row, "meta").textContent).toBe("[arXiv:2609.28544]");
+
+    // The References panel's rows have none
+    const panel = new EntryListRenderer({ document: main.document });
+    const panelRow = panel.createRow(paper(), context());
+    expect(
+      part(panelRow, "meta").querySelector(".zinspire-ref-entry__meta-suffix"),
+    ).toBeNull();
+  });
+
   it("keeps the panel's choices that the list leaves out", () => {
     const renderer = new EntryListRenderer({
       document: main.document,
