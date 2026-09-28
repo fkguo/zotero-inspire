@@ -708,7 +708,7 @@ metadataCache.maxSize = 500
 ```
 User selects item
     ↓
-deriveRecidFromItem() → Check archiveLocation, URL, extra field
+deriveRecidFromItem() → Check archiveLocation (Archive "INSPIRE"), then URL
     ↓ (if not found)
 fetchRecidFromInspire() → API lookup by DOI/arXiv/texkey
     ↓

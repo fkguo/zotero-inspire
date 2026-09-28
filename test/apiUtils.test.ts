@@ -210,7 +210,9 @@ describe("deriveRecidFromItem", () => {
     ).toBe("2815336");
   });
 
-  it("falls back to an INSPIRE link in Extra when the URL is a repository record", () => {
+  // Intentional change: before, an INSPIRE link in Extra gave the recid
+  // (1234567); Extra is not read for a recid
+  it("does not read an INSPIRE link in Extra when the URL is a repository record", () => {
     expect(
       deriveRecidFromItem(
         fakeItem({
@@ -218,6 +220,6 @@ describe("deriveRecidFromItem", () => {
           extra: "See https://inspirehep.net/literature/1234567",
         }),
       ),
-    ).toBe("1234567");
+    ).toBeNull();
   });
 });

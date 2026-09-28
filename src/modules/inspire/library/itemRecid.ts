@@ -10,7 +10,6 @@ export interface RecidFields {
   archiveLocation?: string;
   archive?: string;
   url?: string;
-  extra?: string;
 }
 
 const INSPIRE_HOSTS: ReadonlySet<string> = new Set([
@@ -79,28 +78,16 @@ export function recidFromArchiveLocation(
   return (archive ?? "").trim().toLowerCase() === "inspire" ? value : null;
 }
 
-/** Links in Extra: runs of non-space text starting with http(s):// or // */
-const LINK_IN_TEXT = /(?:https?:)?\/\/\S+/gi;
-
-/** Recid of the first INSPIRE literature link in Extra */
-export function recidFromExtra(extra: string | undefined): string | null {
-  for (const match of (extra ?? "").matchAll(LINK_IN_TEXT)) {
-    const recid = recidFromLinkText(match[0]);
-    if (recid) return recid;
-  }
-  return null;
-}
-
 /**
  * The recid of an item's fields: Archive Location (with Archive INSPIRE),
- * else the URL, else a link in Extra. INSPIRE is the only source of recids,
- * so where several fields hold one they are the same.
+ * else the URL. INSPIRE is the only source of recids, so where both hold one
+ * they are the same. Extra is not read: the plugin keeps the recid in
+ * Archive Location and writes citation counts, not links, to Extra.
  */
 export function recidFromFields(fields: RecidFields): string | null {
   return (
     recidFromArchiveLocation(fields.archiveLocation, fields.archive) ??
-    recidFromLinkText(fields.url) ??
-    recidFromExtra(fields.extra)
+    recidFromLinkText(fields.url)
   );
 }
 
@@ -115,6 +102,5 @@ export function resolveItemRecid(item: Zotero.Item): string | null {
     archiveLocation: stringField(item, "archiveLocation"),
     archive: stringField(item, "archive"),
     url: stringField(item, "url"),
-    extra: stringField(item, "extra"),
   });
 }

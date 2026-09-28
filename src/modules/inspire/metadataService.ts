@@ -46,8 +46,9 @@ interface ExtractedIdentifier {
 
 /**
  * Extract identifier (DOI, arXiv, or recid) from a Zotero item.
- * Checks multiple fields: DOI, URL, Extra, archiveLocation. The recid is read
- * by the rules of resolveItemRecid (library/itemRecid.ts) from each field.
+ * Checks the DOI field, Extra (arXiv ID, DOI, citation key), the URL (arXiv
+ * ID, DOI, recid) and Archive Location (recid). Recids are read by the rules
+ * of resolveItemRecid (library/itemRecid.ts), which does not read Extra.
  *
  * @param item - Zotero item to extract identifier from
  * @returns Extracted identifier info, or null if not found

@@ -70,6 +70,13 @@ function now<K extends keyof Results>(row: Row, key: K): Results[K] {
     : row[key];
 }
 
+/**
+ * The plugin keeps an item's recid in Archive Location and writes citation
+ * counts, not links, to Extra; no item of the owner's library has an INSPIRE
+ * link there
+ */
+const EXTRA_NOT_READ = "Extra is not read for a recid";
+
 const ROWS: Row[] = [
   // ── Archive Location ────────────────────────────────────────────────────
   {
@@ -193,53 +200,54 @@ const ROWS: Row[] = [
   },
   // ── Extra ───────────────────────────────────────────────────────────────
   {
+    name: "the plugin's INSPIRE citation counts in Extra",
+    fields: {
+      extra:
+        "12 citations (INSPIRE 2026/9/28)\n10 citations w/o self (INSPIRE 2026/9/28)",
+    },
+    recid: null,
+    lookup: null,
+  },
+  {
     name: "INSPIRE literature link in Extra",
     fields: { extra: "INSPIRE: https://inspirehep.net/literature/1234567" },
     recid: "1234567",
     lookup: null,
+    changed: { recid: null, reason: EXTRA_NOT_READ },
   },
   {
     name: "legacy record link in Extra",
     fields: { extra: "http://inspirehep.net/record/1234567" },
     recid: "1234567",
     lookup: null,
+    changed: { recid: null, reason: EXTRA_NOT_READ },
   },
   {
     name: "scheme-relative INSPIRE link in Extra",
     fields: { extra: "see //inspirehep.net/literature/1234567" },
     recid: "1234567",
     lookup: null,
+    changed: { recid: null, reason: EXTRA_NOT_READ },
   },
   {
     name: "INSPIRE API link in Extra",
     fields: { extra: "https://inspirehep.net/api/literature/1234567" },
     recid: null,
     lookup: null,
-    changed: {
-      recid: "1234567",
-      reason: "links in Extra are read like the URL, which accepts API links",
-    },
   },
   {
     name: "INSPIRE address without scheme in Extra",
     fields: { extra: "inspirehep.net/literature/1234567" },
     recid: "1234567",
     lookup: null,
-    changed: {
-      recid: null,
-      reason:
-        "text in Extra is read as a link only when it starts with http://, https:// or //",
-    },
+    changed: { recid: null, reason: EXTRA_NOT_READ },
   },
   {
     name: "link to a lookalike host in Extra",
     fields: { extra: "https://notinspirehep.net/literature/1234567" },
     recid: "1234567",
     lookup: null,
-    changed: {
-      recid: null,
-      reason: "only links to inspirehep.net give a recid",
-    },
+    changed: { recid: null, reason: EXTRA_NOT_READ },
   },
   {
     name: "INSPIRE link inside another link in Extra",
@@ -249,10 +257,7 @@ const ROWS: Row[] = [
     },
     recid: "1234567",
     lookup: null,
-    changed: {
-      recid: null,
-      reason: "the link's host is example.org, not INSPIRE",
-    },
+    changed: { recid: null, reason: EXTRA_NOT_READ },
   },
   // ── Several sources ─────────────────────────────────────────────────────
   {
