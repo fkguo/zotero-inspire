@@ -3052,7 +3052,9 @@ export class InspireReferencePanelController {
     // S7: Presentations have no reference list — no citation lookup applies.
     // Defensive: button creation is already suppressed for presentations, but
     // guard here too so any future caller of handleCitationLookup is covered.
-    const lookupParentItem = Zotero.Items.get(event.parentItemID);
+    const lookupParentItem = Zotero.Items.get(event.parentItemID) as
+      | Zotero.Item
+      | undefined;
     if (lookupParentItem?.itemType === "presentation") {
       return;
     }
@@ -10197,7 +10199,7 @@ export class InspireReferencePanelController {
       // Find the first PDF attachment
       let attachmentID: number | undefined;
       for (const id of attachmentIDs) {
-        const attachment = Zotero.Items.get(id);
+        const attachment = Zotero.Items.get(id) as Zotero.Item | undefined;
         if (attachment?.isPDFAttachment?.()) {
           attachmentID = id;
           break;
@@ -10995,7 +10997,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         this.relatedDisabledForPdg = false;
         const currentItem =
           typeof this.currentItemID === "number"
-            ? Zotero.Items.get(this.currentItemID)
+            ? (Zotero.Items.get(this.currentItemID) as Zotero.Item)
             : undefined;
         const currentTitle = currentItem?.getField("title");
         if (isPdgReviewOfParticlePhysicsTitle(currentTitle)) {
@@ -15005,7 +15007,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     // Favorite/unfavorite option
     let isPresentation = false;
     if (entry.localItemID) {
-      const item = Zotero.Items.get(entry.localItemID);
+      const item = Zotero.Items.get(entry.localItemID) as
+        | Zotero.Item
+        | undefined;
       if (item?.itemType === "presentation") {
         isPresentation = true;
       }
@@ -15173,7 +15177,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
     // An item already in the trash at the click is related as before; one
     // erased or moved to the trash during the import is not (checked below)
-    const trashedAtClick = Boolean(Zotero.Items.get(itemID)?.deleted);
+    const clicked = Zotero.Items.get(itemID);
+    const trashedAtClick = Boolean(clicked && clicked.deleted);
     if (!(await this.confirmNotInLibrary(entry))) {
       return;
     }
@@ -15291,7 +15296,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     const attachmentIDs = parentItem.getAttachments?.() || [];
     // Find the first PDF attachment
     for (const id of attachmentIDs) {
-      const attachment = Zotero.Items.get(id);
+      const attachment = Zotero.Items.get(id) as Zotero.Item | undefined;
       if (attachment?.isPDFAttachment?.()) {
         return id;
       }
@@ -16192,7 +16197,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     // Determine if this is a presentation
     let isPresentation = false;
     if (entry.localItemID) {
-      const item = Zotero.Items.get(entry.localItemID);
+      const item = Zotero.Items.get(entry.localItemID) as
+        | Zotero.Item
+        | undefined;
       if (item?.itemType === "presentation") {
         isPresentation = true;
       }
@@ -17744,7 +17751,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
     const item =
       typeof this.currentItemID === "number"
-        ? Zotero.Items.get(this.currentItemID)
+        ? (Zotero.Items.get(this.currentItemID) as Zotero.Item)
         : undefined;
     const rawTitle = item?.getField("title");
     const seedTitle = typeof rawTitle === "string" ? rawTitle : undefined;

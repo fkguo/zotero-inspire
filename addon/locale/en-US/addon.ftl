@@ -707,3 +707,9 @@ academic-tree-sort-name = Surname A–Z
 academic-tree-sort-year = Education year ↑
 academic-tree-sort-hint = Sort all students of each advisor on the same generation row, including those with co-advisors. Years match the degree on that advisor–student relationship. Unknown years come last; ties use surname. Conflicting family orders favor the advisor closest to the center.
 academic-tree-education-year = Education ended { $year } (INSPIRE)
+
+## arXiv browser window
+
+arxiv-browser-window =
+    .title = arXiv Browser
+arxiv-browser-empty = Create or choose a subscription to browse arXiv listings.

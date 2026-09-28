@@ -2983,7 +2983,7 @@ async function upsertInspireNote(
   const targetLooksLikeErratum = normalizedTarget.includes("erratum");
 
   for (const id of noteIDs) {
-    const note = Zotero.Items.get(id);
+    const note = Zotero.Items.get(id) as Zotero.Item;
     const normalizedExisting = normalizeInspireNoteContent(note.getNote());
     if (!normalizedExisting) {
       continue;

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  <!-- A page with a list of entries: the arXiv browser. Drawn in the
+       colour of the button or menu item that shows it (context-fill). -->
+  <path fill="context-fill" fill-opacity="context-fill-opacity" d="M5 2h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 1.25a.75.75 0 0 0-.75.75v12c0 .41.34.75.75.75h10c.41 0 .75-.34.75-.75V4a.75.75 0 0 0-.75-.75Z"/>
+  <path fill="context-fill" fill-opacity="context-fill-opacity" d="M6 6h1.5v1.5H6Zm3 0h5v1.5H9Zm-3 3.25h1.5v1.5H6Zm3 0h5v1.5H9ZM6 12.5h1.5V14H6Zm3 0h5V14H9Z"/>
+</svg>

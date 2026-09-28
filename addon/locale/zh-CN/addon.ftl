@@ -698,3 +698,9 @@ academic-tree-sort-name = 姓氏 A–Z
 academic-tree-sort-year = 教育年份 ↑
 academic-tree-sort-hint = 同一导师在同一代的所有学生统一排序，包括有共同导师的学生。年份按该条师生关系的学位类型读取；未知年份排末尾，同年按姓氏排序。不同师生组的顺序矛盾时，优先满足离中心最近的导师。
 academic-tree-education-year = 教育经历结束于 { $year } 年（INSPIRE）
+
+## arXiv browser window
+
+arxiv-browser-window =
+    .title = arXiv 浏览器
+arxiv-browser-empty = 新建或选择一个订阅以浏览 arXiv 列表。

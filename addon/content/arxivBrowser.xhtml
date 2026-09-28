@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/overlay.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero-platform/content/overlay.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero-platform/content/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://__addonRef__/content/arxivBrowser.css" type="text/css"?>
+<!-- The arXiv browser: the plugin builds the window's content on load -->
+<window
+  id="__addonRef__-arxiv-browser"
+  windowtype="__addonRef__:arxiv-browser"
+  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml"
+  width="1200"
+  height="820"
+  persist="screenX screenY width height sizemode"
+  data-l10n-id="arxiv-browser-window"
+  onload="Zotero.__addonInstance__.hooks.onArxivBrowserEvent('load', { window })"
+  onunload="Zotero.__addonInstance__?.hooks.onArxivBrowserEvent('unload', { window })"
+>
+  <script>
+    Services.scriptloader.loadSubScript("chrome://zotero/content/include.js", this);
+  </script>
+  <linkset>
+    <html:link rel="localization" href="__addonRef__-addon.ftl" />
+  </linkset>
+  <html:div id="arxiv-browser-root" class="arxiv-browser" />
+</window>

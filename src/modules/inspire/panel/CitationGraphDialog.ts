@@ -1913,7 +1913,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
 
     let isPresentation = false;
     if (entry.localItemID) {
-      const item = Zotero.Items.get(entry.localItemID);
+      const item = Zotero.Items.get(entry.localItemID) as
+        | Zotero.Item
+        | undefined;
       if (item?.itemType === "presentation") {
         isPresentation = true;
       }

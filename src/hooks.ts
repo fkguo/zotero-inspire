@@ -43,6 +43,18 @@ import {
   unregisterZInspireBibtexEndpoint,
 } from "./modules/connectorInspireBibtexApi";
 import { stopLibraryIndex } from "./modules/inspire/library/arxivIndex";
+import {
+  closeArxivBrowser,
+  onArxivBrowserLoad,
+  onArxivBrowserUnload,
+  openArxivBrowser,
+} from "./modules/arxiv/browser/browserWindow";
+import {
+  addArxivBrowserButton,
+  registerArxivBrowserMenu,
+  removeArxivBrowserButton,
+  unregisterArxivBrowserMenu,
+} from "./modules/arxiv/browser/browserEntryPoints";
 
 // Track background timers for cleanup on shutdown (PERF-FIX-1)
 let purgeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -59,6 +71,7 @@ async function onStartup() {
 
   ZInsUtils.registerPrefs();
   ZInsUtils.registerNotifier();
+  registerArxivBrowserMenu(openArxivBrowser);
 
   // One-time migration: the legacy china-only boolean (FTR-FUNDING-EXTRACTION)
   // is superseded by funding_filter_mode. funding_filter_mode has a default of
@@ -143,6 +156,7 @@ async function onMainWindowLoad(_win: Window): Promise<void> {
 
   ZInsMenu.registerRightClickMenuPopup();
   ZInsMenu.registerRightClickCollectionMenu();
+  addArxivBrowserButton(_win, openArxivBrowser);
 
   // FTR-PDF-ANNOTATE: Initialize Reader integration for citation detection
   getReaderIntegration().initialize();
@@ -170,11 +184,20 @@ async function onMainWindowLoad(_win: Window): Promise<void> {
 }
 
 async function onMainWindowUnload(_win: Window): Promise<void> {
+  // The browser relies on the main window (library, related items)
+  closeArxivBrowser();
+  removeArxivBrowserButton(_win);
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
 }
 
 function onShutdown(): void {
+  // Before the plugin's chrome:// files are unregistered
+  closeArxivBrowser();
+  unregisterArxivBrowserMenu();
+  for (const win of Zotero.getMainWindows()) {
+    removeArxivBrowserButton(win);
+  }
   unregisterZInspireBibtexEndpoint();
   unregisterZInspirePickSaveTargetEndpoint();
   unregisterZInspireWriteEndpoint();
@@ -962,6 +985,15 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
   }
 }
 
+/** Events of the arXiv browser window (arxivBrowser.xhtml) */
+function onArxivBrowserEvent(
+  type: "load" | "unload",
+  data: { window: Window },
+) {
+  if (type === "load") onArxivBrowserLoad(data.window);
+  else onArxivBrowserUnload(data.window);
+}
+
 export default {
   onStartup,
   onShutdown,
@@ -969,4 +1001,5 @@ export default {
   onMainWindowUnload,
   onNotify,
   onPrefsEvent,
+  onArxivBrowserEvent,
 };

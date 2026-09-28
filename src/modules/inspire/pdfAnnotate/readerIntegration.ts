@@ -427,7 +427,9 @@ export class ReaderIntegration {
       const item = Zotero.Items.get(itemID);
       if (!item) return false;
       const parentItemID = item.parentItemID || itemID;
-      const parentItem = Zotero.Items.get(parentItemID);
+      const parentItem = Zotero.Items.get(parentItemID) as
+        | Zotero.Item
+        | undefined;
       return parentItem?.itemType === "presentation";
     } catch {
       return false;
@@ -614,7 +616,9 @@ export class ReaderIntegration {
     );
 
     // Create lookup UI - single button for one label, or multiple buttons for multiple labels
-    const attachmentItem = Zotero.Items.get(attachmentItemID);
+    const attachmentItem = Zotero.Items.get(attachmentItemID) as
+      | Zotero.Item
+      | undefined;
     const uiContext: ReaderUIContext = {
       readerRef: makeReaderWeakRef(reader),
       sourceAttachmentItemID: attachmentItemID,
@@ -1491,7 +1495,7 @@ export class ReaderIntegration {
     if (!tabID) return null;
 
     if (!this.readerStates.has(tabID)) {
-      const item = Zotero.Items.get(reader.itemID);
+      const item = Zotero.Items.get(reader.itemID) as Zotero.Item | undefined;
       const parentItemID = item?.parentItemID || reader.itemID;
 
       this.readerStates.set(tabID, {

@@ -168,7 +168,7 @@ async function getPdfAttachment(
     const pdfAttachments: Zotero.Item[] = [];
 
     for (const id of attachmentIDs) {
-      const attachment = await Zotero.Items.getAsync(id);
+      const attachment = (await Zotero.Items.getAsync(id)) as Zotero.Item;
       if (attachment.isPDFAttachment()) {
         pdfAttachments.push(attachment);
       }
