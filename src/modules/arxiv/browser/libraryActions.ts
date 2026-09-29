@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Adding the arXiv browser's papers to the library and relating them to
-// items the user chooses (Zotero's Select Items dialog, relatedItemsDialog.ts).
+// Adding the arXiv browser's papers to the library, relating them to items
+// the user chooses (Zotero's Select Items dialog, relatedItemsDialog.ts) and
+// saving arXiv's HTML version of one as a snapshot (arxivHtmlSnapshot.ts).
 //
 // A paper is added where the user chooses, in the save-target picker as in
 // the References panel. Each add goes the route its data allow
@@ -8,10 +9,12 @@
 // of it is told in a notice: added (with "Show in library"), already there,
 // or why not. When INSPIRE cannot be reached the user chooses: add from
 // arXiv data now, or try later. Adding is not undoable; a relation is (one
-// step of Zotero's Edit → Undo, linkItems).
+// step of Zotero's Edit → Undo, linkItems). Relating a paper, or saving its
+// HTML version, adds a paper not in the library first.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getString } from "../../../utils/locale";
+import { openAttachment } from "../../inspire/library/localPdf";
 import { loadedItem } from "../../inspire/library/localStatus";
 import {
   linkItems,
@@ -35,6 +38,12 @@ import {
   type AddPaperOutcome,
   type AddPaperRequest,
 } from "../addToLibrary";
+import { fetchArxivApiEntries } from "../arxivApi";
+import {
+  htmlSnapshotID,
+  saveArxivHtmlSnapshot,
+  type HtmlSnapshotResult,
+} from "../arxivHtmlSnapshot";
 import type { ArxivPdfResult } from "../arxivPdf";
 import { arxivAddRequest } from "../batchAdd";
 import type { NoticeAction, WindowReporter } from "./browserActions";
@@ -57,6 +66,8 @@ interface AddChoice {
   notTheDoiItems?: boolean;
   /** Relate it, once added, to items the user chooses */
   relate?: boolean;
+  /** Save its HTML version, once added */
+  htmlSnapshot?: boolean;
 }
 
 export interface LibraryActionsOptions {
@@ -78,6 +89,10 @@ export interface LibraryActionsOptions {
   addPapers?: typeof addArxivPapers;
   /** Asks for a target (default: the save-target picker) */
   pickTarget?: (anchor: HTMLElement) => Promise<SaveTargetSelection | null>;
+  /** Saves an HTML snapshot (default: saveArxivHtmlSnapshot) */
+  saveHtmlSnapshot?: typeof saveArxivHtmlSnapshot;
+  /** Asks the arXiv API for versions (default: fetchArxivApiEntries) */
+  apiEntries?: typeof fetchArxivApiEntries;
 }
 
 /** Why a paper was not added, in words */
@@ -120,6 +135,22 @@ export function pdfFailureText(
   }
 }
 
+/** Why an HTML snapshot was not saved, in words */
+function htmlFailureText(
+  result: Extract<HtmlSnapshotResult, { status: "failed" }>,
+): string {
+  switch (result.reason) {
+    case "noHtml":
+      return getString("arxiv-browser-html-no-html");
+    case "filesNotEditable":
+      return getString("arxiv-browser-pdf-files-not-editable");
+    case "capture":
+      return getString("arxiv-browser-html-capture");
+    default:
+      return reasonText(result.reason);
+  }
+}
+
 /** The name of a library, as Zotero shows it */
 function libraryName(libraryID: number): string {
   const library = Zotero.Libraries.get(libraryID);
@@ -134,6 +165,8 @@ export class LibraryActions {
   private readonly addPapers: typeof addArxivPapers;
   /** Papers being added (arXiv IDs): a second press adds nothing */
   private readonly adding = new Set<string>();
+  /** Papers whose HTML version is being saved (arXiv IDs) */
+  private readonly savingHtml = new Set<string>();
   /** The target chosen for the batch import under way */
   batchTarget: NamedTarget | null = null;
   private disposed = false;
@@ -250,6 +283,7 @@ export class LibraryActions {
           }
         });
         if (choice.relate) await this.relateItems(entry, [outcome.item]);
+        if (choice.htmlSnapshot) await this.saveHtmlTo(entry, outcome.item);
         return;
       }
       case "inLibrary": {
@@ -280,11 +314,12 @@ export class LibraryActions {
           }),
           [this.showAction(itemIDs)],
         );
-        if (choice.relate) {
-          const items = itemIDs
-            .map((itemID) => loadedItem(itemID))
-            .filter((item): item is Zotero.Item => item !== null);
-          await this.relateItems(entry, items);
+        const items = itemIDs
+          .map((itemID) => loadedItem(itemID))
+          .filter((item): item is Zotero.Item => item !== null);
+        if (choice.relate) await this.relateItems(entry, items);
+        if (choice.htmlSnapshot && items[0]) {
+          await this.saveHtmlTo(entry, items[0]);
         }
         return;
       }
@@ -405,6 +440,111 @@ export class LibraryActions {
     for (const entry of entries) {
       await this.addTo(entry, target, { withoutInspire: true });
     }
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // HTML snapshots
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Save arXiv's HTML version of the paper as a snapshot of its (first) item;
+   * a paper not in the library is added first (the user chooses where)
+   */
+  async saveHtmlSnapshot(
+    entry: BrowserEntry,
+    anchor: HTMLElement,
+  ): Promise<void> {
+    const item = entry.localItemID ? loadedItem(entry.localItemID) : null;
+    if (item) await this.saveHtmlTo(entry, item);
+    else if (!entry.localItemID) {
+      await this.add(entry, { anchor, htmlSnapshot: true });
+    }
+  }
+
+  /**
+   * Save the paper's HTML version, at the listing's version (else the arXiv
+   * API's), to `item`, unless that version is there already
+   */
+  private async saveHtmlTo(
+    entry: BrowserEntry,
+    item: Zotero.Item,
+  ): Promise<void> {
+    const id = entry.listing.id;
+    if (this.savingHtml.has(id) || this.disposed) return;
+    this.savingHtml.add(id);
+    const progress = this.reporter.startProgress(
+      getString("arxiv-browser-html-saving", { args: { id } }),
+    );
+    let version: number | undefined;
+    let result: HtmlSnapshotResult | "there";
+    try {
+      version = entry.listing.version;
+      if (version === undefined) {
+        const api = await (this.options.apiEntries ?? fetchArxivApiEntries)([
+          id,
+        ]);
+        version = api.entries.get(id)?.version;
+      }
+      if (version === undefined) {
+        result = {
+          status: "failed",
+          reason: "capture",
+          message: "The arXiv API gave no version",
+        };
+      } else if (htmlSnapshotID(item.id, id, version) !== null) {
+        result = "there";
+      } else {
+        result = await (this.options.saveHtmlSnapshot ?? saveArxivHtmlSnapshot)(
+          item,
+          { id, version },
+        );
+      }
+    } catch (error) {
+      result = { status: "failed", reason: "capture", message: String(error) };
+    } finally {
+      progress.close();
+      this.savingHtml.delete(id);
+    }
+    if (this.disposed) return;
+    if (result === "there" || result.status === "saved") {
+      const attachmentID =
+        result === "there"
+          ? htmlSnapshotID(item.id, id, version)
+          : result.attachment.id;
+      const args = { id, version: version! };
+      this.reporter.ask(
+        getString(
+          result === "there"
+            ? "arxiv-browser-html-there"
+            : "arxiv-browser-html-saved",
+          { args },
+        ),
+        [
+          ...(attachmentID !== null
+            ? [
+                {
+                  label: getString("arxiv-browser-html-menu-open"),
+                  run: () => void openAttachment(attachmentID),
+                },
+              ]
+            : []),
+          this.showAction([item.id]),
+        ],
+      );
+      return;
+    }
+    this.reporter.ask(
+      getString("arxiv-browser-html-failed", {
+        args: {
+          id,
+          reason:
+            version === undefined
+              ? getString("arxiv-browser-html-no-version")
+              : htmlFailureText(result),
+        },
+      }),
+      [],
+    );
   }
 
   // ───────────────────────────────────────────────────────────────────────────

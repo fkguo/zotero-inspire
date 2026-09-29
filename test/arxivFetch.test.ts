@@ -321,6 +321,71 @@ describe("ArxivScheduler cancellation", () => {
   });
 });
 
+describe("ArxivScheduler: loads in a request's place (run)", () => {
+  const snapshot = "https://arxiv.org/html/2609.28538v1";
+
+  it("starts a load 15 s after the previous request, sends nothing while it runs, and spaces the next request from its end", async () => {
+    const clock = new VirtualClock();
+    const { sent, transport } = simulatedNetwork(clock);
+    const scheduler = webScheduler(clock, transport);
+    const runs: { start: number; end?: number }[] = [];
+    const task = async (latency: number) => {
+      const record: { start: number; end?: number } = { start: clock.now() };
+      runs.push(record);
+      await clock.sleep(latency);
+      record.end = clock.now();
+      return `captured at ${record.start}`;
+    };
+    const first = scheduler.request(page(0));
+    const load = scheduler.run(snapshot, () => task(20000));
+    // A second load waits for the first
+    const second = scheduler.run(snapshot, () => task(1000));
+    const after = scheduler.request(page(1));
+    expect(scheduler.getStatus().queued).toBe(3);
+    await clock.run(Promise.all([first, load, second, after]));
+    // Request 0-500, load 15500-35500, load 50500-51500, request 66500
+    expect(runs).toEqual([
+      { start: 15500, end: 35500 },
+      { start: 50500, end: 51500 },
+    ]);
+    expect(sent.map((s) => s.start)).toEqual([0, 66500]);
+    expect(await load).toBe("captured at 15500");
+  });
+
+  it("gives the load's failure to the caller and keeps the queue going", async () => {
+    const clock = new VirtualClock();
+    const { sent, transport } = simulatedNetwork(clock);
+    const scheduler = webScheduler(clock, transport);
+    const failure = new Error("capture failed");
+    const load = scheduler.run(snapshot, async () => {
+      throw failure;
+    });
+    const next = scheduler.request(page(0));
+    await expect(clock.run(load)).rejects.toBe(failure);
+    await clock.run(next);
+    expect(sent.map((s) => s.start)).toEqual([15000]);
+  });
+
+  it("never starts a load cancelled while it waits, and refuses other hosts", async () => {
+    const clock = new VirtualClock();
+    const { transport } = simulatedNetwork(clock);
+    const scheduler = webScheduler(clock, transport);
+    const task = vi.fn(async () => "done");
+    const controller = new AbortController();
+    const first = scheduler.request(page(0));
+    const load = scheduler.run(snapshot, task, { signal: controller.signal });
+    await clock.advanceBy(1000);
+    controller.abort();
+    expect((await rejection(load)).kind).toBe("cancelled");
+    await clock.run(first);
+    await clock.advanceBy(30000);
+    expect(task).not.toHaveBeenCalled();
+    await expect(
+      scheduler.run("https://export.arxiv.org/api/query", task),
+    ).rejects.toThrow("does not belong");
+  });
+});
+
 describe("ArxivScheduler on 429, 503 and 403", () => {
   it("pauses for Retry-After and retries once", async () => {
     const clock = new VirtualClock();

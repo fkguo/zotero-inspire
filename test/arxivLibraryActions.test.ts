@@ -4,6 +4,7 @@ import type {
   AddPaperOutcome,
   AddPaperRequest,
 } from "../src/modules/arxiv/addToLibrary";
+import type { HtmlSnapshotResult } from "../src/modules/arxiv/arxivHtmlSnapshot";
 import type { ArxivPdfResult } from "../src/modules/arxiv/arxivPdf";
 import type { WindowReporter } from "../src/modules/arxiv/browser/browserActions";
 import {
@@ -181,6 +182,10 @@ function actions(
     /** The items chosen in the Select Items dialog */
     related?: FakeItem[];
     pick?: SaveTargetSelection | null;
+    /** What saving an HTML snapshot gives */
+    htmlResult?: HtmlSnapshotResult;
+    /** The version the arXiv API gives (none: it did not answer) */
+    apiVersion?: number;
   } = {},
 ) {
   const report = reporter();
@@ -192,6 +197,23 @@ function actions(
   const pickTarget = vi.fn(async () =>
     options.pick === undefined ? target : options.pick,
   );
+  const saveHtmlSnapshot = vi.fn(
+    async (_item: Zotero.Item, _source: { id: string; version: number }) =>
+      options.htmlResult ??
+      ({
+        status: "saved",
+        attachment: { id: 5001 } as Zotero.Item,
+      } as HtmlSnapshotResult),
+  );
+  const apiEntries = vi.fn(async (ids: readonly string[]) => ({
+    entries: new Map(
+      options.apiVersion === undefined
+        ? []
+        : ids.map((id) => [id, { id, version: options.apiVersion }]),
+    ),
+    missing: [],
+    failed: [],
+  }));
   const added: [BrowserEntry, number][] = [];
   const relationChanged: BrowserEntry[] = [];
   const shown: number[][] = [];
@@ -209,6 +231,8 @@ function actions(
     showInLibrary: (ids) => void shown.push([...ids]),
     addPapers: addPapers as any,
     pickTarget,
+    saveHtmlSnapshot,
+    apiEntries: apiEntries as any,
   });
   return {
     library,
@@ -220,6 +244,8 @@ function actions(
     added,
     relationChanged,
     shown,
+    saveHtmlSnapshot,
+    apiEntries,
   };
 }
 
@@ -460,6 +486,101 @@ describe("Relating a paper to items chosen in Zotero's Select Items dialog", () 
     expect(pickRelated).toHaveBeenCalledWith(1);
     expect(chosen.relatedItems).toEqual([added.key]);
     expect(added.relatedItems).toEqual([chosen.key]);
+  });
+});
+
+describe("Saving a paper's HTML version", () => {
+  it("saves it to the paper's item at the arXiv API's version when the listing gives none, and offers to open it", async () => {
+    const it1 = item(901);
+    const readerOpen = vi.fn(async () => ({ focus: vi.fn() }));
+    (globalThis as any).Zotero.Reader = { open: readerOpen };
+    const { library, report, saveHtmlSnapshot, apiEntries, shown, pickTarget } =
+      actions([], { apiVersion: 3 });
+    const entry = paper("2609.20001");
+    entry.localItemID = it1.id;
+    await library.saveHtmlSnapshot(entry, anchor);
+    expect(pickTarget).not.toHaveBeenCalled();
+    expect(apiEntries).toHaveBeenCalledWith(["2609.20001"]);
+    expect(saveHtmlSnapshot).toHaveBeenCalledWith(it1, {
+      id: "2609.20001",
+      version: 3,
+    });
+    expect(report.progress).toEqual([
+      msg("arxiv-browser-html-saving", { id: "2609.20001" }),
+    ]);
+    const [notice] = report.notices;
+    expect(notice.lines).toEqual([
+      msg("arxiv-browser-html-saved", { id: "2609.20001", version: 3 }),
+    ]);
+    expect(notice.actions.map((a) => a.label)).toEqual([
+      msg("arxiv-browser-html-menu-open"),
+      msg("arxiv-browser-show-in-library"),
+    ]);
+    notice.actions[0].run();
+    expect(readerOpen).toHaveBeenCalledWith(5001, undefined, {
+      allowDuplicate: false,
+    });
+    notice.actions[1].run();
+    expect(shown).toEqual([[901]]);
+  });
+
+  it("saves it to the item the add finds already in the library", async () => {
+    const found = item(77);
+    const { library, saveHtmlSnapshot, pickTarget } = actions([
+      {
+        status: "inLibrary",
+        hits: [{ itemID: 77, by: ["arxiv"] }],
+        doiOnly: false,
+      },
+    ]);
+    const entry = paper("2609.20001");
+    entry.listing.version = 2;
+    await library.saveHtmlSnapshot(entry, anchor);
+    expect(pickTarget).toHaveBeenCalledTimes(1);
+    expect(saveHtmlSnapshot).toHaveBeenCalledWith(found, {
+      id: "2609.20001",
+      version: 2,
+    });
+  });
+
+  it("says why it was not saved: no HTML version, or no version known", async () => {
+    const noHtml = actions([], {
+      htmlResult: { status: "failed", reason: "noHtml", message: "404" },
+    });
+    const entry = paper("2609.20001");
+    entry.localItemID = item(901).id;
+    entry.listing.version = 1;
+    await noHtml.library.saveHtmlSnapshot(entry, anchor);
+    expect(noHtml.report.notices[0].lines).toEqual([
+      msg("arxiv-browser-html-failed", {
+        id: "2609.20001",
+        reason: msg("arxiv-browser-html-no-html"),
+      }),
+    ]);
+
+    const noVersion = actions();
+    const other = paper("2609.20002");
+    other.localItemID = item(902).id;
+    await noVersion.library.saveHtmlSnapshot(other, anchor);
+    expect(noVersion.saveHtmlSnapshot).not.toHaveBeenCalled();
+    expect(noVersion.report.notices[0].lines).toEqual([
+      msg("arxiv-browser-html-failed", {
+        id: "2609.20002",
+        reason: msg("arxiv-browser-html-no-version"),
+      }),
+    ]);
+  });
+
+  it("saves a paper once when asked again while it is saved", async () => {
+    const { library, saveHtmlSnapshot } = actions();
+    const entry = paper("2609.20001");
+    entry.localItemID = item(901).id;
+    entry.listing.version = 1;
+    await Promise.all([
+      library.saveHtmlSnapshot(entry, anchor),
+      library.saveHtmlSnapshot(entry, anchor),
+    ]);
+    expect(saveHtmlSnapshot).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -49,3 +49,29 @@ export function checkbox(
   wrapper.append(input, doc.createTextNode(label));
   return { label: wrapper, input };
 }
+
+/** An entry of a menu */
+export interface MenuEntry {
+  label: string;
+  run: () => void;
+}
+
+/** A menu of `entries` below `anchor`, removed once closed */
+export function showMenu(
+  anchor: HTMLElement,
+  entries: readonly MenuEntry[],
+): void {
+  const doc = anchor.ownerDocument as Document & {
+    createXULElement(tag: string): XULElement;
+  };
+  const popup = doc.createXULElement("menupopup") as XUL.MenuPopup;
+  for (const entry of entries) {
+    const item = doc.createXULElement("menuitem");
+    item.setAttribute("label", entry.label);
+    item.addEventListener("command", () => entry.run());
+    popup.append(item);
+  }
+  doc.documentElement.append(popup);
+  popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
+  popup.openPopup(anchor as unknown as XULElement, "after_start", 0, 0);
+}

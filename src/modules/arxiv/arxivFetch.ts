@@ -6,6 +6,8 @@
 // Each scheduler is a single chain: one request in flight, and the next one is
 // sent no earlier than the end of the previous one plus the interval, whoever
 // queued it. Requests are anonymous (no cookies) and carry no user data.
+// A load the plugin does not send itself (a page Zotero's hidden browser
+// captures) takes its place in the chain in the same way (`run`).
 //
 // 429 / 503 with Retry-After pause the scheduler until that time and retry the
 // request once (the retry stays cancellable); a second 429 / 503, a 429 / 503
@@ -114,6 +116,8 @@ export interface ArxivRequestOptions {
 
 interface Job {
   url: string;
+  /** Work done in the request's place (`run`), instead of the transport */
+  task?: () => Promise<unknown>;
   timeoutMs: number;
   responseType?: "arraybuffer";
   signal?: AbortSignal;
@@ -122,7 +126,7 @@ interface Job {
   /** Aborts the request while it is in flight */
   cancel?: () => void;
   onAbort?: () => void;
-  resolve(response: ArxivResponse): void;
+  resolve(value: any): void;
   reject(error: unknown): void;
 }
 
@@ -163,6 +167,44 @@ export class ArxivScheduler {
     url: string,
     options: ArxivRequestOptions = {},
   ): Promise<ArxivResponse> {
+    const { signal } = options;
+    const refused = this.refuse(url, signal);
+    if (refused) return refused;
+    return this.enqueue<ArxivResponse>({
+      url,
+      timeoutMs: options.timeoutMs ?? this.timeoutMs,
+      responseType: options.responseType,
+      signal,
+    });
+  }
+
+  /**
+   * Run `task` in the chain as one request to `url` (an https URL on this
+   * scheduler's host) that the plugin does not send itself: it starts no
+   * earlier than the interval after the previous request, nothing else is
+   * sent while it runs, and the next request waits the interval after it.
+   * Cancelled only while it waits; its outcome is the task's.
+   */
+  run<T>(
+    url: string,
+    task: () => Promise<T>,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<T> {
+    const refused = this.refuse(url, options.signal);
+    if (refused) return refused;
+    return this.enqueue<T>({
+      url,
+      task,
+      timeoutMs: this.timeoutMs,
+      signal: options.signal,
+    });
+  }
+
+  /** A rejection for a URL not on this host, or a signal already aborted */
+  private refuse(
+    url: string,
+    signal: AbortSignal | undefined,
+  ): Promise<never> | null {
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -174,26 +216,27 @@ export class ArxivScheduler {
         new Error(`${url} does not belong to the ${this.host} scheduler`),
       );
     }
-    const { signal } = options;
-    if (signal?.aborted) {
-      return Promise.reject(cancelledError());
-    }
-    return new Promise<ArxivResponse>((resolve, reject) => {
-      const job: Job = {
-        url,
-        timeoutMs: options.timeoutMs ?? this.timeoutMs,
-        responseType: options.responseType,
-        signal,
+    if (signal?.aborted) return Promise.reject(cancelledError());
+    return null;
+  }
+
+  private enqueue<T>(
+    job: Pick<Job, "url" | "task" | "timeoutMs" | "responseType" | "signal">,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const queued: Job = {
+        ...job,
         retried: false,
         settled: false,
         resolve,
         reject,
       };
+      const { signal } = job;
       if (signal) {
-        job.onAbort = () => this.abort(job);
-        signal.addEventListener("abort", job.onAbort);
+        queued.onAbort = () => this.abort(queued);
+        signal.addEventListener("abort", queued.onAbort);
       }
-      this.queue.push(job);
+      this.queue.push(queued);
       this.notify();
       void this.pump();
     });
@@ -268,6 +311,23 @@ export class ArxivScheduler {
   private async send(job: Job): Promise<void> {
     this.inFlight = job;
     this.setState({ kind: "sending", url: job.url });
+    if (job.task) {
+      let value: unknown;
+      let failure: unknown = null;
+      let failed = false;
+      try {
+        value = await job.task();
+      } catch (error) {
+        failed = true;
+        failure = error;
+      }
+      this.lastEnd = this.clock.now();
+      this.inFlight = null;
+      if (failed) this.settle(job, failure);
+      else this.settle(job, null, value);
+      this.notify();
+      return;
+    }
     let response: ArxivResponse | null = null;
     let failure: unknown = null;
     try {
@@ -349,13 +409,14 @@ export class ArxivScheduler {
     }
   }
 
-  private settle(job: Job, error: unknown, response?: ArxivResponse): void {
+  /** Resolve with `value` when given (a response, a task's result) */
+  private settle(job: Job, error: unknown, ...value: [unknown?]): void {
     if (job.settled) return;
     job.settled = true;
     if (job.signal && job.onAbort) {
       job.signal.removeEventListener("abort", job.onAbort);
     }
-    if (response) job.resolve(response);
+    if (value.length) job.resolve(value[0]);
     else job.reject(error);
   }
 

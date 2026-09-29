@@ -34,6 +34,11 @@ export interface DetailPaneOptions {
   showInLibrary?(itemID: number): void;
   /** Open the paper's PDF (default: arXiv's, in the web browser) */
   openPdf?(entry: BrowserEntry): void;
+  /**
+   * The paper's HTML version: open it (default: arXiv's, in the web
+   * browser), and its menu (none: no menu)
+   */
+  html?: HtmlButtonActions;
   /** Adding the paper to the library and relating it (none: no buttons) */
   library?: DetailLibraryActions;
 }
@@ -50,6 +55,16 @@ export interface DetailLibraryActions {
   ): void;
   /** Relate the paper to items chosen in Zotero's Select Items dialog */
   relate(entry: BrowserEntry, anchor: HTMLElement): void;
+}
+
+/** What the HTML button and its menu do */
+export interface HtmlButtonActions {
+  /** Whether the paper's HTML version is saved in the library */
+  saved(entry: BrowserEntry): boolean;
+  /** Open the saved snapshot, else arXiv's HTML version in the web browser */
+  open(entry: BrowserEntry): void;
+  /** The ▾ menu, below `anchor` */
+  menu(entry: BrowserEntry, anchor: HTMLElement): void;
 }
 
 /** The name of a category or archive, if arXiv's table has it */
@@ -243,15 +258,7 @@ export class DetailPane {
       ),
     );
     // Unless the listing says arXiv has no HTML version
-    if (listing.html !== false) {
-      const openHtml = button(
-        doc,
-        getString("arxiv-browser-open-html-button"),
-        () => actions.openHtml(listing.id),
-      );
-      openHtml.title = getString("arxiv-browser-open-html");
-      buttons.append(openHtml);
-    }
+    if (listing.html !== false) buttons.append(this.htmlButton(entry));
     parts.push(buttons);
 
     if (listing.abstract) {
@@ -264,6 +271,42 @@ export class DetailPane {
     }
     container.replaceChildren(...parts);
     container.scrollTop = scroll;
+  }
+
+  /**
+   * The HTML button: the saved snapshot in Zotero, else arXiv's HTML version
+   * in the web browser; with its ▾ menu
+   */
+  private htmlButton(entry: BrowserEntry): HTMLElement {
+    const doc = this.doc;
+    const { actions, html: htmlActions } = this.options;
+    const open = button(doc, getString("arxiv-browser-open-html-button"), () =>
+      htmlActions
+        ? htmlActions.open(entry)
+        : actions.openHtml(entry.listing.id),
+    );
+    open.title = getString("arxiv-browser-open-html");
+    if (!htmlActions) return open;
+    // The tooltip tells what a click does now (a snapshot may have been
+    // saved since the pane was drawn)
+    open.addEventListener("mouseenter", () => {
+      open.title = getString(
+        htmlActions.saved(entry)
+          ? "arxiv-browser-open-html-snapshot"
+          : "arxiv-browser-open-html",
+      );
+    });
+    const more = button(
+      doc,
+      "▾",
+      (event) =>
+        htmlActions.menu(entry, event.currentTarget as HTMLButtonElement),
+      "arxiv-browser__button arxiv-browser__split-more",
+    );
+    more.title = getString("arxiv-browser-html-menu");
+    const split = html(doc, "span", "arxiv-browser__split");
+    split.append(open, more);
+    return split;
   }
 
   /**

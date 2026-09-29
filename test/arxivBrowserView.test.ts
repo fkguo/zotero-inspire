@@ -1074,9 +1074,14 @@ describe("arXiv browser: read-only actions and keys", () => {
 
     const withHtml = rowOf("2502.20357");
     const button = htmlButton(withHtml)!;
-    // Right after the PDF button, with its tooltip
-    expect(button.previousElementSibling?.classList).toContain(
+    // Right after the PDF button, with its ▾ menu, and its tooltip
+    const split = button.parentElement!;
+    expect(split.classList).toContain("arxiv-browser__html");
+    expect(split.previousElementSibling?.classList).toContain(
       "zinspire-ref-entry__pdf",
+    );
+    expect(button.nextElementSibling?.classList).toContain(
+      "arxiv-browser__html-more",
     );
     expect(button.title).toBe(msg("arxiv-browser-open-html"));
     button.click();
@@ -2466,6 +2471,8 @@ describe("arXiv browser: adding and relating", () => {
       relatedItems: [] as string[],
       isRegularItem: () => true,
       getDisplayTitle: () => `Item ${id}`,
+      attachments: [] as number[],
+      getAttachments: () => item.attachments,
       addRelatedItem(other: { key: string }) {
         if (item.relatedItems.includes(other.key)) return false;
         item.relatedItems.push(other.key);
@@ -2509,6 +2516,7 @@ describe("arXiv browser: adding and relating", () => {
       chosen.addRelatedItem(paper);
     }
     const undo = vi.fn(async () => true);
+    const readerOpen = vi.fn(async (_id: number) => ({ focus: vi.fn() }));
     const notLoaded = new Set(unloaded ? [77] : []);
     const pickRelated = vi.fn(async () => [chosen] as unknown as Zotero.Item[]);
     Object.assign((globalThis as any).Zotero, {
@@ -2546,6 +2554,7 @@ describe("arXiv browser: adding and relating", () => {
       Collections: { get: () => false, getByLibrary: () => [] },
       DB: { executeTransaction: async (fn: () => Promise<unknown>) => fn() },
       UndoHistory: { undo, redo: vi.fn(), stageAction: vi.fn() },
+      Reader: { open: readerOpen },
     });
     const added = new Map<string, ReturnType<typeof libraryItem>>();
     let nextID = 900;
@@ -2574,10 +2583,35 @@ describe("arXiv browser: adding and relating", () => {
         notes: [],
       };
     });
+    /** An HTML attachment of item `parentID` with URL `url` */
+    let nextAttachmentID = 5000;
+    const attach = (parentID: number, url: string) => {
+      const attachment = {
+        id: nextAttachmentID++,
+        attachmentContentType: "text/html",
+        getField: (field: string) => (field === "url" ? url : ""),
+      };
+      (items as Map<number, any>).set(attachment.id, attachment);
+      items.get(parentID)!.attachments.push(attachment.id);
+      return attachment;
+    };
+    const saveHtmlSnapshot = vi.fn(
+      async (
+        item: { id: number },
+        source: { id: string; version: number },
+      ) => ({
+        status: "saved" as const,
+        attachment: attach(
+          item.id,
+          `https://arxiv.org/html/${source.id}v${source.version}`,
+        ) as unknown as Zotero.Item,
+      }),
+    );
     const view = env.open({
       pickRelated,
       addPapers,
       pickTarget,
+      saveHtmlSnapshot,
       batchImport: { canImport: () => true, importEntry },
       ...(related
         ? {
@@ -2608,8 +2642,179 @@ describe("arXiv browser: adding and relating", () => {
       undo,
       notices,
       libraryItem,
+      readerOpen,
+      attach,
+      saveHtmlSnapshot,
     };
   }
+
+  /** The ▾ menu of a split HTML button: its entries, and running one */
+  function htmlMenu(more: HTMLElement) {
+    const doc = win.document as any;
+    let popup: any = null;
+    doc.createXULElement = (tag: string) => {
+      const element = doc.createElement(tag);
+      if (tag === "menupopup") {
+        element.openPopup = vi.fn();
+        popup = element;
+      }
+      return element;
+    };
+    more.click();
+    // Below the ▾ (elements compared by identity: jsdom's cannot be printed)
+    const [anchor, ...position] = popup.openPopup.mock.calls[0];
+    expect(anchor === more).toBe(true);
+    expect(position).toEqual(["after_start", 0, 0]);
+    const entries = [...popup.children] as HTMLElement[];
+    return {
+      labels: entries.map((entry) => entry.getAttribute("label")),
+      run(label: string) {
+        entries
+          .find((entry) => entry.getAttribute("label") === label)!
+          .dispatchEvent(new win.Event("command"));
+      },
+    };
+  }
+  const htmlParts = (row: HTMLElement) => ({
+    open: row.querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!,
+    more: row.querySelector<HTMLButtonElement>(".arxiv-browser__html-more")!,
+    stroke: () =>
+      row
+        .querySelector(".arxiv-browser__html-button path")!
+        .getAttribute("stroke"),
+  });
+  const detailHtml = (root: HTMLElement) => {
+    const split = root.querySelector<HTMLElement>(
+      ".arxiv-browser__detail .arxiv-browser__split",
+    )!;
+    return {
+      open: split.querySelector<HTMLButtonElement>(
+        ".arxiv-browser__button:not(.arxiv-browser__split-more)",
+      )!,
+      more: split.querySelector<HTMLButtonElement>(
+        ".arxiv-browser__split-more",
+      )!,
+    };
+  };
+  const MENU = {
+    browser: msg("arxiv-browser-html-menu-browser"),
+    save: msg("arxiv-browser-html-menu-save"),
+    open: msg("arxiv-browser-html-menu-open"),
+  };
+
+  it("opens a paper's saved HTML snapshot in Zotero, else arXiv's HTML version in the web browser; the translator's abstract snapshot is not one", async () => {
+    const { root, launch, readerOpen, attach, view } = await loaded({
+      related: "2609.28538",
+    });
+    await vi.waitFor(() => expect(dot(rows(root)[0])).toBe("●"));
+    const row = rows(root)[0];
+    const parts = htmlParts(row);
+    // Nothing saved: arXiv's page, grey; the menu has no "open snapshot"
+    parts.open.click();
+    expect(launch).toHaveBeenLastCalledWith(
+      "https://arxiv.org/html/2609.28538",
+    );
+    expect(readerOpen).not.toHaveBeenCalled();
+    expect(parts.stroke()).toBe("#9ca3af");
+    expect(parts.open.title).toBe(msg("arxiv-browser-open-html"));
+    expect(htmlMenu(parts.more).labels).toEqual([MENU.browser, MENU.save]);
+
+    // Zotero's arXiv translator's snapshot of the abstract page, and a PDF
+    attach(77, "https://arxiv.org/abs/2609.28538v1");
+    view.listPane.refreshPdfButtons();
+    parts.open.click();
+    expect(launch).toHaveBeenCalledTimes(2);
+    expect(readerOpen).not.toHaveBeenCalled();
+    expect(htmlMenu(parts.more).labels).toEqual([MENU.browser, MENU.save]);
+
+    // An HTML snapshot saved: green, and it opens in Zotero's reader
+    const snapshot = attach(77, "https://arxiv.org/html/2609.28538v1");
+    view.listPane.refreshPdfButtons();
+    expect(parts.stroke()).toBe("#1a8f4d");
+    expect(parts.open.title).toBe(msg("arxiv-browser-open-html-snapshot"));
+    parts.open.click();
+    expect(readerOpen).toHaveBeenLastCalledWith(snapshot.id, undefined, {
+      allowDuplicate: false,
+    });
+    expect(launch).toHaveBeenCalledTimes(2);
+    const menu = htmlMenu(parts.more);
+    expect(menu.labels).toEqual([MENU.browser, MENU.save, MENU.open]);
+    menu.run(MENU.browser);
+    expect(launch).toHaveBeenLastCalledWith(
+      "https://arxiv.org/html/2609.28538",
+    );
+    menu.run(MENU.open);
+    expect(readerOpen).toHaveBeenCalledTimes(2);
+
+    // The detail pane's split button does the same
+    const detail = detailHtml(root);
+    expect(detail.open.textContent).toBe(msg("arxiv-browser-open-html-button"));
+    detail.open.dispatchEvent(new win.MouseEvent("mouseenter"));
+    expect(detail.open.title).toBe(msg("arxiv-browser-open-html-snapshot"));
+    detail.open.click();
+    expect(readerOpen).toHaveBeenCalledTimes(3);
+    expect(htmlMenu(detail.more).labels).toEqual([
+      MENU.browser,
+      MENU.save,
+      MENU.open,
+    ]);
+  });
+
+  it("saves the HTML version of a paper in the library to its item, at the listing's version, once", async () => {
+    const { root, saveHtmlSnapshot, items, notices, pickTarget, addPapers } =
+      await loaded({ related: "2609.28538" });
+    await vi.waitFor(() => expect(dot(rows(root)[0])).toBe("●"));
+    const parts = htmlParts(rows(root)[0]);
+    htmlMenu(parts.more).run(MENU.save);
+    await vi.waitFor(() => expect(saveHtmlSnapshot).toHaveBeenCalledTimes(1));
+    expect(saveHtmlSnapshot.mock.calls[0][0]).toBe(items.get(77));
+    expect(saveHtmlSnapshot.mock.calls[0][1]).toEqual({
+      id: "2609.28538",
+      version: 1,
+    });
+    // Not added again
+    expect(pickTarget).not.toHaveBeenCalled();
+    expect(addPapers).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(notices().join()).toContain(
+        msg("arxiv-browser-html-saved", { id: "2609.28538", version: 1 }),
+      ),
+    );
+    // That version is there: not saved again
+    htmlMenu(parts.more).run(MENU.save);
+    await vi.waitFor(() =>
+      expect(notices().join()).toContain(
+        msg("arxiv-browser-html-there", { id: "2609.28538", version: 1 }),
+      ),
+    );
+    expect(saveHtmlSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds a paper not in the library first, where the user chooses, then saves its HTML version to the new item", async () => {
+    const {
+      root,
+      saveHtmlSnapshot,
+      added,
+      pickTarget,
+      addPapers,
+      readerOpen,
+      launch,
+    } = await loaded();
+    const row = rows(root)[0];
+    expect(dot(row)).not.toBe("●");
+    htmlMenu(htmlParts(row).more).run(MENU.save);
+    await vi.waitFor(() => expect(saveHtmlSnapshot).toHaveBeenCalledTimes(1));
+    expect(pickTarget).toHaveBeenCalledTimes(1);
+    expect(addPapers.mock.calls[0][0]).toMatchObject([
+      { arxivId: "2609.28538" },
+    ]);
+    expect(saveHtmlSnapshot.mock.calls[0][0]).toBe(added.get("2609.28538"));
+    // The main click now opens it in Zotero
+    await vi.waitFor(() => expect(dot(rows(root)[0])).toBe("●"));
+    htmlParts(rows(root)[0]).open.click();
+    expect(readerOpen).toHaveBeenCalledTimes(1);
+    expect(launch).not.toHaveBeenCalled();
+  });
 
   it("shows a related paper under Related only once its library's items have loaded", async () => {
     let load: () => void = () => undefined;

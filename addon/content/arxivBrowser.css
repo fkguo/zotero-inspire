@@ -670,3 +670,39 @@
   white-space: pre-wrap;
   user-select: text;
 }
+
+/* The HTML button and its ▾ menu, one split button in the detail pane */
+.arxiv-browser__split {
+  display: inline-flex;
+}
+
+.arxiv-browser__split > .arxiv-browser__button:first-child {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.arxiv-browser__split-more {
+  margin-inline-start: -1px;
+  padding: 2px 4px;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+}
+
+/* ... and in a row, after the PDF button */
+.arxiv-browser__html {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.arxiv-browser__html-more {
+  width: 9px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fill-secondary, #6b7280);
+  font-size: 9px;
+  line-height: 14px;
+  cursor: pointer;
+}

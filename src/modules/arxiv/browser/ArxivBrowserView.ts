@@ -53,7 +53,7 @@ import {
 } from "./browserList";
 import { formatShortDay, reasonText, schedulerText } from "./browserText";
 import { DayPicker, selectionLabel } from "./DayPicker";
-import { button, checkbox, html } from "./dom";
+import { button, checkbox, html, showMenu } from "./dom";
 import {
   ListingLoader,
   OPENING_SELECTIONS,
@@ -88,8 +88,10 @@ import { CompletionLine, type CompletionLineOptions } from "./completionLine";
 import { selectItemsDialog, type PickRelatedItems } from "./relatedItemsDialog";
 import {
   firstPdfAttachmentID,
+  openAttachment,
   openLocalPdf,
 } from "../../inspire/library/localPdf";
+import { htmlSnapshotID } from "../arxivHtmlSnapshot";
 import { countAuthorPapers } from "../../inspire/library/authorCount";
 import { DetailPane } from "./DetailPane";
 import { PaneDivider } from "./PaneDivider";
@@ -169,6 +171,8 @@ export interface ArxivBrowserViewOptions {
   addPapers?: LibraryActionsOptions["addPapers"];
   /** Asks for a save target (default: the save-target picker) */
   pickTarget?: LibraryActionsOptions["pickTarget"];
+  /** Saves an HTML snapshot (default: saveArxivHtmlSnapshot) */
+  saveHtmlSnapshot?: LibraryActionsOptions["saveHtmlSnapshot"];
   /** The INSPIRE completion entry's library, INSPIRE and dialog */
   completion?: Omit<CompletionLineOptions, "reporter">;
   /** The batch import's callbacks (default: arxivBatchImport) */
@@ -502,6 +506,44 @@ export class ArxivBrowserView {
       if (itemID !== undefined) void openLocalPdf(itemID);
       else this.actions.openPdf(entry.listing.id);
     };
+    // A paper's HTML version: the first snapshot of it saved among its items
+    // (opened in Zotero's reader), otherwise arXiv's, in the web browser
+    const htmlSnapshot = (entry: BrowserEntry) => {
+      for (const itemID of entry.localItemIDs ?? []) {
+        const attachmentID = htmlSnapshotID(itemID, entry.listing.id);
+        if (attachmentID !== null) return attachmentID;
+      }
+      return null;
+    };
+    const htmlActions = {
+      saved: (entry: BrowserEntry) => htmlSnapshot(entry) !== null,
+      open: (entry: BrowserEntry) => {
+        const attachmentID = htmlSnapshot(entry);
+        if (attachmentID === null) this.actions.openHtml(entry.listing.id);
+        else void openAttachment(attachmentID);
+      },
+      menu: (entry: BrowserEntry, anchor: HTMLElement) => {
+        const attachmentID = htmlSnapshot(entry);
+        showMenu(anchor, [
+          {
+            label: getString("arxiv-browser-html-menu-browser"),
+            run: () => this.actions.openHtml(entry.listing.id),
+          },
+          {
+            label: getString("arxiv-browser-html-menu-save"),
+            run: () => void this.library.saveHtmlSnapshot(entry, anchor),
+          },
+          ...(attachmentID === null
+            ? []
+            : [
+                {
+                  label: getString("arxiv-browser-html-menu-open"),
+                  run: () => void openAttachment(attachmentID),
+                },
+              ]),
+        ]);
+      },
+    };
     this.library = new LibraryActions({
       reporter: this.reporter,
       pickRelated: async (libraryID) => {
@@ -523,6 +565,7 @@ export class ArxivBrowserView {
       showInLibrary: (itemIDs) => showItemsInMainWindow(itemIDs),
       addPapers: options.addPapers,
       pickTarget: options.pickTarget,
+      saveHtmlSnapshot: options.saveHtmlSnapshot,
     });
     this.batch = new BatchImportManager({
       getDocument: () => doc,
@@ -563,6 +606,7 @@ export class ArxivBrowserView {
       onAuthorLeave: () => this.authorCard.scheduleHide(),
       showInLibrary,
       openPdf,
+      html: htmlActions,
       library: libraryButtons,
     });
     this.listPane = new ListPane({
@@ -576,6 +620,7 @@ export class ArxivBrowserView {
       onLibraryRetry: () => this.recheckLibrary(),
       hasPdf,
       openPdf,
+      html: htmlActions,
       onAuthorHover: (entry, index, anchor) =>
         this.showAuthorCard(entry, index, anchor),
       onAuthorLeave: () => this.authorCard.scheduleHide(),

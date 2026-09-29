@@ -44,6 +44,7 @@ import {
 } from "./browserList";
 import { formatDay, formatShortDay, reasonText } from "./browserText";
 import { notePaint, noteFormulas, type PaintTime } from "./paintTimes";
+import type { HtmlButtonActions } from "./DetailPane";
 import { button, html } from "./dom";
 import { SECTION_LABELS } from "./SubscriptionEditor";
 
@@ -87,6 +88,11 @@ export interface ListPaneOptions {
   hasPdf?(entry: BrowserEntry): boolean;
   /** Open the paper's PDF (default: arXiv's, in the web browser) */
   openPdf?(entry: BrowserEntry): void;
+  /**
+   * The paper's HTML version: open it (default: arXiv's, in the web
+   * browser), and its menu (none: no menu)
+   */
+  html?: HtmlButtonActions;
   /** The pointer is on the name of a paper's author (its index) */
   onAuthorHover?(entry: BrowserEntry, index: number, anchor: HTMLElement): void;
   onAuthorLeave?(): void;
@@ -375,6 +381,7 @@ export class ListPane {
       if (!row) continue;
       this.renderer.updateLocalState(row, entry);
       this.renderer.updatePdfButton(row, entry, this.hasPdf(entry));
+      this.redrawHtmlButton(row, entry);
       this.setDotTitle(row, entry);
       this.drawLink(row, entry);
     }
@@ -401,16 +408,22 @@ export class ListPane {
   }
 
   /**
-   * Items of the library changed (a PDF attached, say): redraw the PDF
-   * buttons of the papers shown that are in the library
+   * Items of the library changed (a PDF or a snapshot attached, say): redraw
+   * the PDF and HTML buttons of the papers shown that are in the library
    */
   refreshPdfButtons(): void {
     for (const [key, entry] of this.rowEntries) {
       const row = this.rows.get(key);
       if (row && entry.localItemID) {
         this.renderer.updatePdfButton(row, entry, this.hasPdf(entry));
+        this.redrawHtmlButton(row, entry);
       }
     }
+  }
+
+  private redrawHtmlButton(row: HTMLElement, entry: BrowserEntry): void {
+    const htmlButton = row.querySelector(".arxiv-browser__html-button");
+    if (htmlButton) this.drawHtmlButton(htmlButton, entry);
   }
 
   private hasPdf(entry: BrowserEntry): boolean {
@@ -693,7 +706,9 @@ export class ListPane {
     // arXiv's HTML version after the PDF button, in the TeX key's place,
     // unless the listing says there is none
     if (entry.listing.html !== false) {
-      row.querySelector(".zinspire-ref-entry__pdf")?.after(this.htmlButton());
+      row
+        .querySelector(".zinspire-ref-entry__pdf")
+        ?.after(this.htmlButton(entry));
     }
     this.setDotTitle(row, entry);
     this.setLinkTitle(row, entry);
@@ -710,12 +725,14 @@ export class ListPane {
     this.applyAbstract(row, entry.id);
   }
 
-  /** A row's HTML button: grey like the PDF button of a paper on arXiv */
-  private htmlButton(): HTMLButtonElement {
+  /**
+   * A row's HTML button, with its ▾ menu when the window offers one: grey
+   * like the PDF button of a paper on arXiv, green when the snapshot is saved
+   */
+  private htmlButton(entry: BrowserEntry): HTMLElement {
     const doc = this.doc;
     const htmlButton = html(doc, "button", "arxiv-browser__html-button");
     htmlButton.type = "button";
-    htmlButton.title = getString("arxiv-browser-open-html");
     applyPdfButtonStyle(htmlButton);
     // "</>"
     const SVG_NS = "http://www.w3.org/2000/svg";
@@ -727,16 +744,43 @@ export class ListPane {
     const path = doc.createElementNS(SVG_NS, "path");
     path.setAttribute("d", "M5 4 1.5 8 5 12M11 4l3.5 4-3.5 4M9.5 2.5l-3 11");
     path.setAttribute("fill", "none");
-    path.setAttribute(
-      "stroke",
-      isDarkMode(doc) ? PDF_BUTTON_COLORS.grayDark : PDF_BUTTON_COLORS.grayLight,
-    );
     path.setAttribute("stroke-width", "1.8");
     path.setAttribute("stroke-linecap", "round");
     path.setAttribute("stroke-linejoin", "round");
     svg.append(path);
     htmlButton.append(svg);
-    return htmlButton;
+    if (!this.options.html) {
+      this.drawHtmlButton(htmlButton, entry);
+      return htmlButton;
+    }
+    const more = html(doc, "button", "arxiv-browser__html-more", "▾");
+    more.type = "button";
+    more.title = getString("arxiv-browser-html-menu");
+    const split = html(doc, "span", "arxiv-browser__html");
+    split.append(htmlButton, more);
+    this.drawHtmlButton(htmlButton, entry);
+    return split;
+  }
+
+  /** The HTML button's colour and tooltip: whether the snapshot is saved */
+  private drawHtmlButton(htmlButton: Element, entry: BrowserEntry): void {
+    const saved = this.options.html?.saved(entry) ?? false;
+    const dark = isDarkMode(this.doc);
+    htmlButton
+      .querySelector("path")
+      ?.setAttribute(
+        "stroke",
+        saved
+          ? dark
+            ? PDF_BUTTON_COLORS.greenDark
+            : PDF_BUTTON_COLORS.greenLight
+          : dark
+            ? PDF_BUTTON_COLORS.grayDark
+            : PDF_BUTTON_COLORS.grayLight,
+      );
+    (htmlButton as HTMLElement).title = getString(
+      saved ? "arxiv-browser-open-html-snapshot" : "arxiv-browser-open-html",
+    );
   }
 
   /**
@@ -995,7 +1039,13 @@ export class ListPane {
       if (this.options.openPdf) this.options.openPdf(entry);
       else actions.openPdf(id);
     } else if (target.closest(".arxiv-browser__html-button")) {
-      actions.openHtml(id);
+      if (this.options.html) this.options.html.open(entry);
+      else actions.openHtml(id);
+    } else if (target.closest(".arxiv-browser__html-more")) {
+      this.options.html?.menu(
+        entry,
+        target.closest<HTMLElement>(".arxiv-browser__html-more")!,
+      );
     } else if (target.closest(".zinspire-ref-entry__author-link")) {
       event.preventDefault();
     } else if (target.closest(".zinspire-ref-entry__dot")) {

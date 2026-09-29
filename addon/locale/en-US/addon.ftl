@@ -913,6 +913,18 @@ arxiv-browser-open-abstract-page = arXiv page
 arxiv-browser-open-pdf-button = PDF
 arxiv-browser-open-html = Open arXiv's HTML version in the web browser
 arxiv-browser-open-html-button = HTML
+arxiv-browser-open-html-snapshot = Open the saved HTML snapshot in Zotero
+arxiv-browser-html-menu = More for the HTML version
+arxiv-browser-html-menu-browser = Open in the Web Browser
+arxiv-browser-html-menu-save = Save HTML Snapshot to the Library
+arxiv-browser-html-menu-open = Open Snapshot in Zotero
+arxiv-browser-html-saving = Saving the HTML version of { $id }…
+arxiv-browser-html-saved = Saved the HTML version of { $id } (v{ $version })
+arxiv-browser-html-there = The HTML version of { $id } (v{ $version }) is already saved
+arxiv-browser-html-failed = The HTML version of { $id } was not saved: { $reason }
+arxiv-browser-html-no-html = arXiv has no HTML version of it
+arxiv-browser-html-capture = Zotero could not save the page
+arxiv-browser-html-no-version = the arXiv API did not give its version; try again later
 arxiv-browser-dot-add = Click to add this paper to your library
 arxiv-browser-dot-local = In your library; click to select it in the main window
 arxiv-browser-row-related = { $count ->
@@ -975,3 +987,4 @@ arxiv-browser-batch-cancelled = Cancelled: { $count ->
        *[other] { $count } papers not added
     }
 arxiv-pdf-attachment-title = arXiv preprint PDF v{ $version }
+arxiv-html-snapshot-title = arXiv HTML v{ $version }
