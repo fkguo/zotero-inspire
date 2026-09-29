@@ -516,21 +516,19 @@ describe("quick filters", () => {
     }),
   ];
   const built = entries.map(toBrowserEntry);
-  // 2609.00021 is in the library, related to another item; the library
-  // state of 2609.00024 is unknown
+  // 2609.00021 is in the library; the library state of 2609.00024 is
+  // unknown
   Object.assign(built[0], { localItemID: 5, localItemIDs: [5] });
   Object.assign(built[3], { localStatusUnknown: true });
-  const related = (entry: BrowserEntry) => entry === built[0];
   const kept = (...types: QuickFilterType[]) =>
     built
-      .filter((entry) => passesQuickFilters(entry, new Set(types), related))
+      .filter((entry) => passesQuickFilters(entry, new Set(types)))
       .map((entry) => entry.listing.id);
 
   it("offers the References panel's filters whose data the listing has, and ≤10 authors", () => {
     expect(ARXIV_QUICK_FILTER_CONFIGS.map((config) => config.type)).toEqual([
       "localItems",
       "onlineItems",
-      "relatedOnly",
       "smallAuthorGroup",
       "publishedOnly",
       "preprintOnly",
@@ -542,7 +540,6 @@ describe("quick filters", () => {
     expect(kept("localItems")).toEqual(["2609.00021"]);
     // Not a paper whose library state is unknown
     expect(kept("onlineItems")).toEqual(["2609.00022", "2609.00023"]);
-    expect(kept("relatedOnly")).toEqual(["2609.00021"]);
     expect(kept("smallAuthorGroup")).toEqual(["2609.00023", "2609.00024"]);
     // From the journal reference
     expect(kept("publishedOnly")).toEqual(["2609.00021", "2609.00024"]);
@@ -556,8 +553,7 @@ describe("quick filters", () => {
       sections: ALL,
       filter: filterGroups("vami"),
       specs: ["hep-ex"],
-      quick: (entry) =>
-        passesQuickFilters(entry, new Set(["preprintOnly"]), related),
+      quick: (entry) => passesQuickFilters(entry, new Set(["preprintOnly"])),
     });
     expect(ids(list.entries)).toEqual(["2609.00023"]);
     // The day's count before the text and quick filters

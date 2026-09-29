@@ -241,7 +241,6 @@ export type FluentMessageId =
   | 'arxiv-browser-pdf-save'
   | 'arxiv-browser-quick-filter-local-tooltip'
   | 'arxiv-browser-quick-filter-online-tooltip'
-  | 'arxiv-browser-quick-filter-related-tooltip'
   | 'arxiv-browser-reading-file-kept'
   | 'arxiv-browser-reading-file-unreadable'
   | 'arxiv-browser-reason-cancelled'

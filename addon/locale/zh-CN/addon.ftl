@@ -834,7 +834,6 @@ arxiv-browser-search-limit = arXiv 只给出前 { $limit } 篇。
 arxiv-browser-search-refused = arXiv 不接受此搜索：{ $message }
 arxiv-browser-quick-filter-local-tooltip = 显示已存在于 Zotero 文库中的论文
 arxiv-browser-quick-filter-online-tooltip = 显示尚未存入 Zotero 文库的论文
-arxiv-browser-quick-filter-related-tooltip = 显示 Zotero 条目已有关联条目的论文
 arxiv-browser-page-size = 每页
 arxiv-browser-abstracts = 摘要
 arxiv-browser-abstract-show = 摘要 ▸

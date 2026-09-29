@@ -2491,17 +2491,14 @@ describe("arXiv browser: adding and relating", () => {
   /**
    * `related`: the arXiv ID of a paper in the library, related to the item
    * the Select Items dialog gives (`chosen`); `unloaded`: its library's items
-   * are not loaded until the library's waitForDataLoad, which waits for
-   * `loadGate` when given
+   * are not loaded until the library's waitForDataLoad
    */
   async function loaded({
     related,
     unloaded = false,
-    loadGate,
   }: {
     related?: string;
     unloaded?: boolean;
-    loadGate?: Promise<void>;
   } = {}) {
     const env = environment();
     subscribe(["hep-ph"]);
@@ -2543,7 +2540,6 @@ describe("arXiv browser: adding and relating", () => {
           name: "My Library",
           editable: true,
           waitForDataLoad: async () => {
-            await loadGate;
             notLoaded.clear();
           },
         }),
@@ -2617,36 +2613,6 @@ describe("arXiv browser: adding and relating", () => {
       libraryItem,
     };
   }
-
-  it("shows a related paper under Related only once its library's items have loaded", async () => {
-    let load: () => void = () => undefined;
-    const loadGate = new Promise<void>((resolve) => {
-      load = resolve;
-    });
-    const { root, view } = await loaded({
-      related: "2609.28538",
-      unloaded: true,
-      loadGate,
-    });
-    root
-      .querySelector<HTMLButtonElement>(".zinspire-quick-filter-btn")!
-      .click();
-    const related = [
-      ...root.querySelectorAll<HTMLLabelElement>(".zinspire-quick-filter-item"),
-    ].find(
-      (label) =>
-        label.querySelector(".zinspire-quick-filter-item-label")!
-          .textContent === msg("references-panel-quick-filter-related"),
-    )!;
-    related.querySelector("input")!.click();
-    // Its relations are not known yet
-    expect(view.listPane.entries).toHaveLength(0);
-    load();
-    await flushPromises();
-    expect(view.listPane.entries.map((entry) => entry.listing.id)).toEqual([
-      "2609.28538",
-    ]);
-  });
 
   const dot = (row: HTMLElement) =>
     row.querySelector(".zinspire-ref-entry__dot")!.textContent;
@@ -2959,7 +2925,6 @@ describe("arXiv browser: quick filters and the filter history", () => {
       [
         "references-panel-quick-filter-local-items",
         "references-panel-quick-filter-online-items",
-        "references-panel-quick-filter-related",
         "references-panel-chart-author-filter",
         "references-panel-quick-filter-published",
         "references-panel-quick-filter-preprint",

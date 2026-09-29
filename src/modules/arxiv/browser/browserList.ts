@@ -150,16 +150,16 @@ export function filterGroups(text: string): string[][] {
 
 /**
  * The References panel's quick filters whose data the listing has (the others
- * need INSPIRE's citations, dates or document types), and "≤10 authors"
+ * need INSPIRE's citations, dates or document types, or, "Related only", the
+ * item the panel shows), and "≤10 authors"
  */
 const ARXIV_TOOLTIPS: Partial<Record<QuickFilterType, FluentMessageId>> = {
   localItems: "arxiv-browser-quick-filter-local-tooltip",
   onlineItems: "arxiv-browser-quick-filter-online-tooltip",
-  relatedOnly: "arxiv-browser-quick-filter-related-tooltip",
 };
 
 export const ARXIV_QUICK_FILTER_CONFIGS: readonly QuickFilterConfig[] = [
-  ...(["localItems", "onlineItems", "relatedOnly"] as const).map(
+  ...(["localItems", "onlineItems"] as const).map(
     (type) => QUICK_FILTER_CONFIGS.find((config) => config.type === type)!,
   ),
   SMALL_AUTHOR_GROUP_FILTER_CONFIG,
@@ -167,8 +167,7 @@ export const ARXIV_QUICK_FILTER_CONFIGS: readonly QuickFilterConfig[] = [
     (type) => QUICK_FILTER_CONFIGS.find((config) => config.type === type)!,
   ),
 ].map((config) => {
-  // In the window's words: papers, and related to any item (no item is
-  // shown here)
+  // In the window's words: papers
   const tooltipKey = ARXIV_TOOLTIPS[config.type];
   return tooltipKey ? { ...config, tooltipKey } : config;
 });
@@ -191,12 +190,11 @@ function fewAuthors(entry: BrowserEntry): boolean {
 
 /**
  * Whether a paper passes the quick filters on; journal status is the
- * listing's journal reference. `isRelated`: its item has related items.
+ * listing's journal reference
  */
 export function passesQuickFilters(
   entry: BrowserEntry,
   active: ReadonlySet<QuickFilterType>,
-  isRelated: (entry: BrowserEntry) => boolean,
 ): boolean {
   for (const type of active) {
     let pass: boolean;
@@ -206,9 +204,6 @@ export function passesQuickFilters(
         break;
       case "onlineItems":
         pass = matchesOnlineItems(entry);
-        break;
-      case "relatedOnly":
-        pass = isRelated(entry);
         break;
       case "smallAuthorGroup":
         pass = fewAuthors(entry);

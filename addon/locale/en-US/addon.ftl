@@ -878,7 +878,6 @@ arxiv-browser-search-limit = arXiv gives the first { $limit } only.
 arxiv-browser-search-refused = arXiv did not accept the search: { $message }
 arxiv-browser-quick-filter-local-tooltip = Show papers already in your Zotero library
 arxiv-browser-quick-filter-online-tooltip = Show papers not yet in your Zotero library
-arxiv-browser-quick-filter-related-tooltip = Show papers whose Zotero item has related items
 arxiv-browser-page-size = Per page
 arxiv-browser-abstracts = Abstracts
 arxiv-browser-abstract-show = Abstract ▸

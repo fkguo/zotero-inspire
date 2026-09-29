@@ -581,7 +581,6 @@ export class ArxivBrowserView {
         if (this.detail.entry?.listing.id === entry.listing.id) {
           this.detail.show(this.detail.entry);
         }
-        this.rearrangeForMarks();
       },
       showInLibrary: (itemIDs) => showItemsInMainWindow(itemIDs),
       addPapers: options.addPapers,
@@ -678,7 +677,6 @@ export class ArxivBrowserView {
       this.listPane.refreshPdfButtons();
       // Relations may have been changed elsewhere
       this.listPane.refreshLinkStates();
-      this.rearrangeForMarks();
     });
 
     this.onSubscriptionChange(this.subscriptions.current);
@@ -889,10 +887,7 @@ export class ArxivBrowserView {
   /** The quick filters on, as a test of a paper (none: undefined) */
   private quickFilter(): ((entry: BrowserEntry) => boolean) | undefined {
     return this.quickFilters.size
-      ? (entry) =>
-          passesQuickFilters(entry, this.quickFilters, (paper) =>
-            this.library.isRelated(paper),
-          )
+      ? (entry) => passesQuickFilters(entry, this.quickFilters)
       : undefined;
   }
 
@@ -1142,8 +1137,6 @@ export class ArxivBrowserView {
       void library.waitForDataLoad("item").then(() => {
         if (this.disposed) return;
         this.listPane.refreshLibraryMarks(papers);
-        // Their relations are known now
-        this.rearrangeForMarks();
       });
     }
   }
@@ -1191,14 +1184,13 @@ export class ArxivBrowserView {
   }
 
   /**
-   * Papers added, found in the library or related enter or leave the list
-   * when a quick filter on reads those marks
+   * Papers added or found in the library enter or leave the list when a
+   * quick filter on reads those marks
    */
   private rearrangeForMarks(): void {
     if (
       this.quickFilters.has("localItems") ||
-      this.quickFilters.has("onlineItems") ||
-      this.quickFilters.has("relatedOnly")
+      this.quickFilters.has("onlineItems")
     ) {
       this.arrange("keep-page");
     }
