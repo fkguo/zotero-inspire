@@ -96,11 +96,13 @@ import { LibraryActions, type LibraryActionsOptions } from "./libraryActions";
 import { CompletionLine, type CompletionLineOptions } from "./completionLine";
 import { selectItemsDialog, type PickRelatedItems } from "./relatedItemsDialog";
 import {
+  firstAttachmentID,
   firstPdfAttachmentID,
   openAttachment,
   openLocalPdf,
 } from "../../inspire/library/localPdf";
 import { htmlSnapshotID } from "../arxivHtmlSnapshot";
+import { arxivPdfVersion } from "../arxivPdf";
 import { countAuthorPapers } from "../../inspire/library/authorCount";
 import { DetailPane } from "./DetailPane";
 import { PaneDivider } from "./PaneDivider";
@@ -151,6 +153,8 @@ export interface ArxivBrowserViewOptions {
    * inspireRecordOf)
    */
   inspireRecord?: BrowserActionsOptions["inspireRecord"];
+  /** One version of a paper from the arXiv API (default: from the API) */
+  apiVersion?: BrowserActionsOptions["apiVersion"];
   /**
    * The items with each of these arXiv identifiers, the one a click selects
    * first, for the "in library" marks (wired to the library index); null
@@ -322,6 +326,7 @@ export class ArxivBrowserView {
       copy: options.copy,
       inspireBibtex: options.inspireBibtex,
       inspireRecord: options.inspireRecord,
+      apiVersion: options.apiVersion,
       inLibrary: options.inLibrary,
     });
     this.reading = options.readingState ?? sharedReadingState();
@@ -561,43 +566,73 @@ export class ArxivBrowserView {
       },
     });
     // A paper's PDF: the first PDF among its items in the library (the green
-    // button), otherwise arXiv's, in the web browser
+    // button), otherwise arXiv's, in the web browser. An older version (the
+    // detail pane's choice): a PDF whose address names that version, else
+    // arXiv's of that version.
     const itemWithPdf = (entry: BrowserEntry) =>
       (entry.localItemIDs ?? []).find(
         (itemID) => firstPdfAttachmentID(itemID) !== null,
       );
     const hasPdf = (entry: BrowserEntry) => itemWithPdf(entry) !== undefined;
-    const openPdf = (entry: BrowserEntry) => {
+    const openPdf = (entry: BrowserEntry, version?: number) => {
+      if (version !== undefined) {
+        for (const itemID of entry.localItemIDs ?? []) {
+          const attachmentID = firstAttachmentID(
+            itemID,
+            (attachment) =>
+              arxivPdfVersion(attachment, entry.listing.id) === version,
+          );
+          if (attachmentID !== null) {
+            void openAttachment(attachmentID);
+            return;
+          }
+        }
+        this.actions.openPdf(entry.listing.id, version);
+        return;
+      }
       const itemID = itemWithPdf(entry);
       if (itemID !== undefined) void openLocalPdf(itemID);
       else this.actions.openPdf(entry.listing.id);
     };
-    // A paper's HTML version: the first snapshot of it saved among its items
-    // (opened in Zotero's reader), otherwise arXiv's, in the web browser
-    const htmlSnapshot = (entry: BrowserEntry) => {
+    // A paper's HTML version: a snapshot of it saved among its items (opened
+    // in Zotero's reader), otherwise arXiv's, in the web browser. The detail
+    // pane gives the version it shows: a snapshot of that version; the rows
+    // none: any snapshot. arXiv's newest version without a version number.
+    const htmlSnapshot = (entry: BrowserEntry, version?: number) => {
       for (const itemID of entry.localItemIDs ?? []) {
-        const attachmentID = htmlSnapshotID(itemID, entry.listing.id);
+        const attachmentID = htmlSnapshotID(itemID, entry.listing.id, version);
         if (attachmentID !== null) return attachmentID;
       }
       return null;
     };
+    const openHtmlOnArxiv = (entry: BrowserEntry, version?: number) =>
+      this.actions.openHtml(
+        entry.listing.id,
+        version === entry.listing.version ? undefined : version,
+      );
     const htmlActions = {
-      saved: (entry: BrowserEntry) => htmlSnapshot(entry) !== null,
-      open: (entry: BrowserEntry) => {
-        const attachmentID = htmlSnapshot(entry);
-        if (attachmentID === null) this.actions.openHtml(entry.listing.id);
+      saved: (entry: BrowserEntry, version?: number) =>
+        htmlSnapshot(entry, version) !== null,
+      open: (entry: BrowserEntry, version?: number) => {
+        const attachmentID = htmlSnapshot(entry, version);
+        if (attachmentID === null) openHtmlOnArxiv(entry, version);
         else void openAttachment(attachmentID);
       },
-      menu: (entry: BrowserEntry, anchor: HTMLElement) => {
-        const attachmentID = htmlSnapshot(entry);
+      menu: (entry: BrowserEntry, anchor: HTMLElement, version?: number) => {
+        const attachmentID = htmlSnapshot(entry, version);
         showMenu(anchor, [
           {
             label: getString("arxiv-browser-html-menu-browser"),
-            run: () => this.actions.openHtml(entry.listing.id),
+            run: () => openHtmlOnArxiv(entry, version),
           },
           {
             label: getString("arxiv-browser-html-menu-save"),
-            run: () => void this.library.saveHtmlSnapshot(entry, anchor),
+            run: () =>
+              void this.library.saveHtmlSnapshot(
+                entry,
+                anchor,
+                version ?? entry.listing.version,
+              ),
           },
           ...(attachmentID === null
             ? []
@@ -1407,16 +1442,17 @@ export class ArxivBrowserView {
         },
       );
     }
-    const entry = pane.classList.contains("arxiv-browser__detail")
-      ? this.detail.entry
-      : this.listPane.entryOf(target);
+    const inDetail = pane.classList.contains("arxiv-browser__detail");
+    const entry = inDetail ? this.detail.entry : this.listPane.entryOf(target);
     if (entry) {
       const id = entry.listing.id;
+      // The detail pane's title may be an older version's
+      const title = (inDetail && this.detail.title) || entry.listing.title;
       items.push(
         "-",
         {
           label: getString("arxiv-browser-menu-copy-title"),
-          run: () => void actions.copyText(entry.listing.title),
+          run: () => void actions.copyText(title),
         },
         {
           label: getString("arxiv-browser-copy-id"),

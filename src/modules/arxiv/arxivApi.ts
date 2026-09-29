@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // arXiv API client: the current version of papers by identifier (id_list), for
-// creating library items from arXiv data, and searches (search_query) for the
-// arXiv browser. Requests go through the API scheduler (export.arxiv.org, 3 s
+// creating library items from arXiv data, one given version of a paper
+// (id_list=<id>v<N>), and searches (search_query) for the arXiv browser. Requests go through the API scheduler (export.arxiv.org, 3 s
 // apart). Batches hold at most 50 identifiers and set max_results to the
 // batch size (the API's default of 10 would cut a batch short); answers are
 // matched to the request by identifier, since the API does not keep the
@@ -138,6 +138,39 @@ export async function fetchArxivApiEntries(
     }
   }
   return result;
+}
+
+export type ArxivApiVersionAnswer =
+  | { ok: true; entry: ArxivApiEntry }
+  | { ok: false; reason: ArxivApiFailureReason; message: string };
+
+/**
+ * Version `version` of paper `id`, one request: the API then gives that
+ * version's title, abstract, authors, comments and categories, with
+ * `updated` the submission of that version (`published` stays version 1's)
+ */
+export async function fetchArxivApiVersion(
+  id: string,
+  version: number,
+  options: ArxivApiOptions = {},
+): Promise<ArxivApiVersionAnswer> {
+  const answer = await fetchBatch(
+    options.scheduler ?? getArxivApiScheduler(),
+    options.parseXml ??
+      ((xml: string) =>
+        new DOMParser().parseFromString(xml, "application/xml")),
+    [`${id}v${version}`],
+    options.signal,
+  );
+  if (!answer.ok) return answer;
+  const entry = answer.entries.get(id);
+  return entry?.version === version
+    ? { ok: true, entry }
+    : {
+        ok: false,
+        reason: "parse",
+        message: `The arXiv API gave no ${id}v${version}`,
+      };
 }
 
 type BatchAnswer =

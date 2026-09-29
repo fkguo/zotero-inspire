@@ -1,8 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Read-only actions of the arXiv browser: copy a paper's arXiv identifier,
-// its BibTeX or the link to its INSPIRE record, and open the abstract page,
-// the PDF or the HTML version in the system's web browser (the user's own
-// browsing; the plugin sends no request for it).
+// its BibTeX or the link to its INSPIRE record, open the abstract page, the
+// PDF or the HTML version (the newest, or a given version) in the system's
+// web browser (the user's own browsing; the plugin sends no request for it),
+// and fetch an older version's title, abstract and so on from the arXiv API
+// (one request per version, kept for the window).
 // The BibTeX is INSPIRE's when INSPIRE has the paper (one request: by the
 // INSPIRE recid of its library item, else by its arXiv identifier), else
 // arXiv's own from arxiv.org/bibtex/<id>, fetched through the plugin's
@@ -32,6 +34,7 @@ import { pairAuthors, type AnyCreator } from "../../inspire/smartUpdate";
 import type { AuthorSearchInfo } from "../../inspire/types";
 import { createAbortController } from "../../inspire/utils";
 import type { ProgressDisplay, Reporter } from "../../inspire/panel/reporter";
+import { fetchArxivApiVersion, type ArxivApiEntry } from "../arxivApi";
 import {
   ArxivFetchError,
   getArxivWebScheduler,
@@ -59,13 +62,18 @@ export function abstractPageUrl(id: string): string {
   return `${ARXIV}/abs/${id}`;
 }
 
-export function pdfUrl(id: string): string {
-  return `${ARXIV}/pdf/${id}`;
+/** `id` with `version` when given (without: arXiv's newest version) */
+function versioned(id: string, version?: number): string {
+  return version === undefined ? id : `${id}v${version}`;
 }
 
-/** arXiv's HTML version of the paper; without version, like the PDF's */
-export function htmlUrl(id: string): string {
-  return `${ARXIV}/html/${id}`;
+export function pdfUrl(id: string, version?: number): string {
+  return `${ARXIV}/pdf/${versioned(id, version)}`;
+}
+
+/** arXiv's HTML version of the paper, like the PDF's */
+export function htmlUrl(id: string, version?: number): string {
+  return `${ARXIV}/html/${versioned(id, version)}`;
 }
 
 /**
@@ -210,6 +218,8 @@ export interface BrowserActionsOptions {
   inspireBibtex?: typeof inspireBibtexOf;
   /** INSPIRE's recid and authors of a paper (default: inspireRecordOf) */
   inspireRecord?: typeof inspireRecordOf;
+  /** One version of a paper from the arXiv API (default: fetchArxivApiVersion) */
+  apiVersion?: typeof fetchArxivApiVersion;
   /**
    * The library's items with each of these arXiv identifiers (the view's
    * lookup); none when absent or when the library cannot be read
@@ -226,6 +236,7 @@ export class BrowserActions {
   private readonly copy: (text: string) => Promise<boolean>;
   private readonly inspireBibtex: typeof inspireBibtexOf;
   private readonly inspireRecord: typeof inspireRecordOf;
+  private readonly apiVersion: typeof fetchArxivApiVersion;
   private readonly inLibrary: BrowserActionsOptions["inLibrary"];
   /**
    * INSPIRE's answers in this window, by arXiv identifier: the record's
@@ -237,6 +248,11 @@ export class BrowserActions {
   private readonly asking = new Map<
     string,
     Promise<InspireRecord | null | undefined>
+  >();
+  /** Versions fetched or being fetched in this window, by "<id>v<N>" */
+  private readonly versions = new Map<
+    string,
+    Promise<ArxivApiEntry | undefined>
   >();
   /** arXiv's BibTeX already fetched in this window, by arXiv identifier */
   private readonly arxiv = new Map<string, string>();
@@ -253,6 +269,7 @@ export class BrowserActions {
     this.copy = options.copy ?? copyToClipboard;
     this.inspireBibtex = options.inspireBibtex ?? inspireBibtexOf;
     this.inspireRecord = options.inspireRecord ?? inspireRecordOf;
+    this.apiVersion = options.apiVersion ?? fetchArxivApiVersion;
     this.inLibrary = options.inLibrary;
     this.controller = createAbortController();
   }
@@ -261,12 +278,46 @@ export class BrowserActions {
     this.launch(abstractPageUrl(id));
   }
 
-  openPdf(id: string): void {
-    this.launch(pdfUrl(id));
+  openPdf(id: string, version?: number): void {
+    this.launch(pdfUrl(id, version));
   }
 
-  openHtml(id: string): void {
-    this.launch(htmlUrl(id));
+  openHtml(id: string, version?: number): void {
+    this.launch(htmlUrl(id, version));
+  }
+
+  /**
+   * Version `version` of paper `id` as the arXiv API gives it: one request,
+   * shared by all who ask meanwhile and kept for the window; nothing when
+   * it failed (the user was told why, and a later choice asks again)
+   */
+  paperVersion(
+    id: string,
+    version: number,
+  ): Promise<ArxivApiEntry | undefined> {
+    const key = versioned(id, version);
+    let asking = this.versions.get(key);
+    if (!asking) {
+      asking = this.apiVersion(id, version, {
+        signal: this.controller?.signal,
+      }).then((answer) => {
+        if (answer.ok) return answer.entry;
+        this.versions.delete(key);
+        Zotero.debug(
+          `[${config.addonName}] arXiv ${key}: ${answer.reason} ${answer.message}`,
+        );
+        if (answer.reason !== "cancelled" && !this.disposed) {
+          this.reporter.notify(
+            getString("arxiv-browser-version-failed", {
+              args: { id, version, reason: reasonText(answer.reason) },
+            }),
+          );
+        }
+        return undefined;
+      });
+      this.versions.set(key, asking);
+    }
+    return asking;
   }
 
   /** Open a link in the web browser */

@@ -68,6 +68,8 @@ interface AddChoice {
   relate?: boolean;
   /** Save its HTML version, once added */
   htmlSnapshot?: boolean;
+  /** The version to save (absent: the listing's, else the newest) */
+  htmlVersion?: number;
 }
 
 export interface LibraryActionsOptions {
@@ -165,7 +167,7 @@ export class LibraryActions {
   private readonly addPapers: typeof addArxivPapers;
   /** Papers being added (arXiv IDs): a second press adds nothing */
   private readonly adding = new Set<string>();
-  /** Papers whose HTML version is being saved (arXiv IDs) */
+  /** HTML versions being saved ("<arXiv ID> <version asked for>") */
   private readonly savingHtml = new Set<string>();
   /** The target chosen for the batch import under way */
   batchTarget: NamedTarget | null = null;
@@ -283,7 +285,9 @@ export class LibraryActions {
           }
         });
         if (choice.relate) await this.relateItems(entry, [outcome.item]);
-        if (choice.htmlSnapshot) await this.saveHtmlTo(entry, outcome.item);
+        if (choice.htmlSnapshot) {
+          await this.saveHtmlTo(entry, outcome.item, choice.htmlVersion);
+        }
         return;
       }
       case "inLibrary": {
@@ -319,7 +323,7 @@ export class LibraryActions {
           .filter((item): item is Zotero.Item => item !== null);
         if (choice.relate) await this.relateItems(entry, items);
         if (choice.htmlSnapshot && items[0]) {
-          await this.saveHtmlTo(entry, items[0]);
+          await this.saveHtmlTo(entry, items[0], choice.htmlVersion);
         }
         return;
       }
@@ -447,38 +451,47 @@ export class LibraryActions {
   // ───────────────────────────────────────────────────────────────────────────
 
   /**
-   * Save arXiv's HTML version of the paper as a snapshot of its (first) item;
-   * a paper not in the library is added first (the user chooses where)
+   * Save arXiv's HTML version of the paper (at `version` when given) as a
+   * snapshot of its (first) item; a paper not in the library is added first
+   * (the user chooses where)
    */
   async saveHtmlSnapshot(
     entry: BrowserEntry,
     anchor: HTMLElement,
+    version?: number,
   ): Promise<void> {
     const item = entry.localItemID ? loadedItem(entry.localItemID) : null;
-    if (item) await this.saveHtmlTo(entry, item);
+    if (item) await this.saveHtmlTo(entry, item, version);
     else if (!entry.localItemID) {
-      await this.add(entry, { anchor, htmlSnapshot: true });
+      await this.add(entry, {
+        anchor,
+        htmlSnapshot: true,
+        ...(version === undefined ? {} : { htmlVersion: version }),
+      });
     }
   }
 
   /**
-   * Save the paper's HTML version, at the listing's version (else the arXiv
-   * API's), to `item`, unless that version is there already
+   * Save the paper's HTML version, at `wanted` (else the listing's version,
+   * else the arXiv API's), to `item`, unless that version is there already
    */
   private async saveHtmlTo(
     entry: BrowserEntry,
     item: Zotero.Item,
+    wanted?: number,
   ): Promise<void> {
     const id = entry.listing.id;
-    if (this.savingHtml.has(id) || this.disposed) return;
-    this.savingHtml.add(id);
+    // One save at a time per paper and version asked for
+    const job = `${id} ${wanted ?? ""}`;
+    if (this.savingHtml.has(job) || this.disposed) return;
+    this.savingHtml.add(job);
     const progress = this.reporter.startProgress(
       getString("arxiv-browser-html-saving", { args: { id } }),
     );
     let version: number | undefined;
     let result: HtmlSnapshotResult | "there";
     try {
-      version = entry.listing.version;
+      version = wanted ?? entry.listing.version;
       if (version === undefined) {
         const api = await (this.options.apiEntries ?? fetchArxivApiEntries)([
           id,
@@ -503,7 +516,7 @@ export class LibraryActions {
       result = { status: "failed", reason: "capture", message: String(error) };
     } finally {
       progress.close();
-      this.savingHtml.delete(id);
+      this.savingHtml.delete(job);
     }
     if (this.disposed) return;
     if (result === "there" || result.status === "saved") {
