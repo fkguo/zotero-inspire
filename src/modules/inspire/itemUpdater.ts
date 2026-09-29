@@ -8,7 +8,6 @@ import {
   DOI_ORG_URL,
   INSPIRE_API_BASE,
   INSPIRE_NOTE_HTML_ENTITIES,
-  INSPIRE_LITERATURE_URL,
 } from "./constants";
 
 // Plugin icon for progress windows (PNG format required for ProgressWindow headline)
@@ -32,7 +31,11 @@ import {
   getCrossrefCount,
   fetchBibTeX,
 } from "./metadataService";
-import { deriveRecidFromItem, copyToClipboard } from "./apiUtils";
+import {
+  deriveRecidFromItem,
+  copyToClipboard,
+  inspireLiteratureUrl,
+} from "./apiUtils";
 import { localCache } from "./localCache";
 import {
   fetchReferencesEntries,
@@ -1242,7 +1245,7 @@ export class ZInspire {
       return;
     }
 
-    const url = `${INSPIRE_LITERATURE_URL}/${recid}`;
+    const url = inspireLiteratureUrl(recid);
     const success = await copyToClipboard(url);
     if (success) {
       this.showCopyNotification(
@@ -1281,7 +1284,7 @@ export class ZInspire {
       return;
     }
 
-    const url = `${INSPIRE_LITERATURE_URL}/${recid}`;
+    const url = inspireLiteratureUrl(recid);
     const markdown = `[${citationKey}](${url})`;
     const success = await copyToClipboard(markdown);
     if (success) {

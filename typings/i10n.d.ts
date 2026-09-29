@@ -173,6 +173,8 @@ export type FluentMessageId =
   | 'arxiv-browser-editor-whole-archive'
   | 'arxiv-browser-empty'
   | 'arxiv-browser-filter'
+  | 'arxiv-browser-inspire-link-not-found'
+  | 'arxiv-browser-inspire-link-unreachable'
   | 'arxiv-browser-menu-copy-abs-link'
   | 'arxiv-browser-menu-copy-link'
   | 'arxiv-browser-menu-copy-title'

@@ -6,6 +6,7 @@ import type { InspireBibtexAnswer } from "../src/modules/arxiv/inspireByArxiv";
 import { ListingService } from "../src/modules/arxiv/listingService";
 import { MemoryListingStore } from "../src/modules/arxiv/listingStore";
 import { ArxivBrowserView } from "../src/modules/arxiv/browser/ArxivBrowserView";
+import type { InspireRecidAnswer } from "../src/modules/arxiv/browser/browserActions";
 import { servedListingDays } from "../src/modules/arxiv/browser/DayPicker";
 import type { ArxivSubscription } from "../src/modules/arxiv/browser/subscriptions";
 import { formatShortDay } from "../src/modules/arxiv/browser/browserText";
@@ -160,6 +161,12 @@ function environment() {
       _recid: string | null,
     ): Promise<InspireBibtexAnswer> => ({ status: "notFound" }),
   );
+  // INSPIRE's recid: none by default (no request to INSPIRE)
+  const inspireRecid = vi.fn(
+    async (_id: string): Promise<InspireRecidAnswer> => ({
+      status: "notFound",
+    }),
+  );
   const root = win.document.getElementById("root")!;
   const open = (options: Record<string, unknown> = {}) => {
     view = new ArxivBrowserView(root, {
@@ -169,6 +176,7 @@ function environment() {
       launch,
       copy,
       inspireBibtex,
+      inspireRecid,
       confirm: () => true,
       ...options,
     });
@@ -190,6 +198,7 @@ function environment() {
     launch,
     copy,
     inspireBibtex,
+    inspireRecid,
     root,
     open,
     settle,
@@ -1405,6 +1414,7 @@ describe("arXiv browser: the right-click menu and copying", () => {
       msg("arxiv-browser-menu-copy-title"),
       msg("arxiv-browser-copy-id"),
       msg("arxiv-browser-menu-copy-abs-link"),
+      msg("menuitem-copy-inspire-link"),
       msg("arxiv-browser-copy-bibtex"),
     ]);
     const abs = "https://arxiv.org/abs/2609.28538";
@@ -1532,6 +1542,185 @@ describe("arXiv browser: the right-click menu and copying", () => {
     });
     filter.dispatchEvent(selectAll);
     expect(selectAll.defaultPrevented).toBe(false);
+  });
+});
+
+describe("arXiv browser: Copy INSPIRE link", () => {
+  const ID = "2609.28538";
+  const LINK = "https://inspirehep.net/literature/";
+
+  /**
+   * The window with the first paper of 25 Sep (2609.28538); `recid`: that
+   * paper is library item 77 with this INSPIRE recid
+   */
+  async function loaded(recid?: string) {
+    if (recid) {
+      const item = {
+        getField: (name: string) =>
+          (
+            ({ archive: "INSPIRE", archiveLocation: recid }) as Record<
+              string,
+              string
+            >
+          )[name] ?? "",
+        getAttachments: () => [],
+      };
+      vi.stubGlobal("Zotero", {
+        ...Zotero,
+        Items: { get: (id: number) => (id === 77 ? item : false) },
+      });
+    }
+    const env = environment();
+    subscribe(["hep-ph"]);
+    serveHepPh(env.site);
+    const view = env.open({
+      inLibrary: async (ids: readonly string[]) =>
+        new Map(
+          recid ? ids.filter((id) => id === ID).map((id) => [id, [77]]) : [],
+        ),
+    });
+    await env.settle();
+    /** Run a menu entry of the first row's title, or of `at` */
+    const menuRun = (label: string, at?: Element) => {
+      const doc = win.document as any;
+      doc.createXULElement = (tag: string) => {
+        const element = doc.createElement(tag);
+        element.openPopupAtScreen = vi.fn();
+        return element;
+      };
+      (
+        at ??
+        rows(env.root)[0].querySelector(".zinspire-ref-entry__title-link")!
+      ).dispatchEvent(
+        new win.MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      [
+        ...win.document.getElementById("zinspire-abstract-context-popup")!
+          .children,
+      ]
+        .find((entry) => entry.getAttribute("label") === label)!
+        .dispatchEvent(new win.Event("command"));
+    };
+    const copyLink = async (at?: Element) => {
+      menuRun(msg("menuitem-copy-inspire-link"), at);
+      await env.clock.advanceBy(1000);
+    };
+    const copyBibtex = async () => {
+      menuRun(msg("arxiv-browser-copy-bibtex"));
+      await env.clock.advanceBy(20000);
+    };
+    const notices = () =>
+      [...env.root.querySelectorAll(".arxiv-browser__notice")].map(
+        (n) => n.textContent,
+      );
+    return { ...env, view, copyLink, copyBibtex, notices };
+  }
+
+  it("copies the link of the library item's recid at once, asking INSPIRE nothing", async () => {
+    const { copy, inspireRecid, inspireBibtex, copyLink, notices } =
+      await loaded("3071234");
+    await copyLink();
+    expect(copy).toHaveBeenLastCalledWith(`${LINK}3071234`);
+    expect(notices()).toContain(msg("copy-success-inspire-link"));
+    expect(inspireRecid).not.toHaveBeenCalled();
+    expect(inspireBibtex).not.toHaveBeenCalled();
+  });
+
+  it("asks INSPIRE once by the arXiv ID, then copies from memory; Copy BibTeX asks by that recid", async () => {
+    const { copy, inspireRecid, inspireBibtex, copyLink, copyBibtex } =
+      await loaded();
+    inspireRecid.mockResolvedValue({ status: "found", recid: "3071234" });
+    await copyLink();
+    expect(inspireRecid.mock.calls[0][0]).toBe(ID);
+    expect(copy).toHaveBeenLastCalledWith(`${LINK}3071234`);
+    await copyLink();
+    expect(copy).toHaveBeenCalledTimes(2);
+    expect(inspireRecid).toHaveBeenCalledTimes(1);
+
+    const bibtex = `@article{Vattolo:2026omw,\n    eprint = "${ID}"\n}`;
+    inspireBibtex.mockResolvedValue({ status: "found", bibtex });
+    await copyBibtex();
+    expect(inspireBibtex.mock.calls[0].slice(0, 2)).toEqual([ID, "3071234"]);
+    expect(copy).toHaveBeenLastCalledWith(bibtex);
+    // Both known: neither copy asks again
+    await copyLink();
+    await copyBibtex();
+    expect(inspireRecid).toHaveBeenCalledTimes(1);
+    expect(inspireBibtex).toHaveBeenCalledTimes(1);
+  });
+
+  it("copies the link from the detail pane too", async () => {
+    const { root, copy, inspireRecid, copyLink } = await loaded();
+    inspireRecid.mockResolvedValue({ status: "found", recid: "3071234" });
+    rows(root)[0].click();
+    const detail = root.querySelector(".arxiv-browser__detail")!;
+    expect(detail.textContent).toContain(ID);
+    await copyLink(detail);
+    expect(inspireRecid.mock.calls[0][0]).toBe(ID);
+    expect(copy).toHaveBeenLastCalledWith(`${LINK}3071234`);
+  });
+
+  it("keeps INSPIRE's BibTeX when the link's lookup adds the recid", async () => {
+    const { copy, inspireRecid, inspireBibtex, copyLink, copyBibtex } =
+      await loaded();
+    const bibtex = `@article{Vattolo:2026omw,\n    eprint = "${ID}"\n}`;
+    inspireBibtex.mockResolvedValue({ status: "found", bibtex });
+    await copyBibtex();
+    inspireRecid.mockResolvedValue({ status: "found", recid: "3071234" });
+    await copyLink();
+    expect(copy).toHaveBeenLastCalledWith(`${LINK}3071234`);
+    await copyBibtex();
+    expect(copy).toHaveBeenLastCalledWith(bibtex);
+    expect(inspireBibtex).toHaveBeenCalledTimes(1);
+    expect(inspireRecid).toHaveBeenCalledTimes(1);
+  });
+
+  it("copies nothing when INSPIRE has no record, saying so, and does not ask again", async () => {
+    const { copy, inspireRecid, copyLink, notices } = await loaded();
+    await copyLink();
+    expect(copy).not.toHaveBeenCalled();
+    expect(notices()).toContain(
+      msg("arxiv-browser-inspire-link-not-found", { id: ID }),
+    );
+    await copyLink();
+    expect(inspireRecid).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes Copy BibTeX's answer that INSPIRE has no record", async () => {
+    const { site, copy, inspireRecid, copyLink, copyBibtex, notices } =
+      await loaded();
+    site.html(
+      `https://arxiv.org/bibtex/${ID}`,
+      `@misc{x,\n  eprint={${ID}}\n}`,
+    );
+    await copyBibtex();
+    copy.mockClear();
+    await copyLink();
+    expect(inspireRecid).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(notices()).toContain(
+      msg("arxiv-browser-inspire-link-not-found", { id: ID }),
+    );
+  });
+
+  it("says INSPIRE could not be reached, never that it has no record, and asks again the next time", async () => {
+    const { copy, inspireRecid, copyLink, notices } = await loaded();
+    inspireRecid.mockResolvedValue({ status: "failed" });
+    await copyLink();
+    expect(copy).not.toHaveBeenCalled();
+    expect(notices()).toContain(
+      msg("arxiv-browser-inspire-link-unreachable", { id: ID }),
+    );
+    expect(notices()).not.toContain(
+      msg("arxiv-browser-inspire-link-not-found", { id: ID }),
+    );
+    inspireRecid.mockResolvedValue({ status: "found", recid: "42" });
+    await copyLink();
+    expect(inspireRecid).toHaveBeenCalledTimes(2);
+    expect(copy).toHaveBeenLastCalledWith(`${LINK}42`);
   });
 });
 

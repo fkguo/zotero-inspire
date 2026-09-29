@@ -104,6 +104,8 @@ export interface ArxivBrowserViewOptions {
   copy?: (text: string) => Promise<boolean>;
   /** INSPIRE's BibTeX of a paper (default: from INSPIRE, inspireBibtexOf) */
   inspireBibtex?: BrowserActionsOptions["inspireBibtex"];
+  /** INSPIRE's recid of a paper (default: from INSPIRE, inspireRecidOf) */
+  inspireRecid?: BrowserActionsOptions["inspireRecid"];
   /**
    * The items with each of these arXiv identifiers, the one a click selects
    * first, for the "in library" marks (wired to the library index); null
@@ -211,6 +213,7 @@ export class ArxivBrowserView {
       launch: options.launch,
       copy: options.copy,
       inspireBibtex: options.inspireBibtex,
+      inspireRecid: options.inspireRecid,
       inLibrary: options.inLibrary,
     });
     this.loader = new ListingLoader(
@@ -758,7 +761,7 @@ export class ArxivBrowserView {
    * The right-click menu in the list and the detail pane: copying the
    * selection (and, in an abstract, all of it or its TeX), selecting the
    * pane's text, a link's address, and the paper's title, identifier, arXiv
-   * page and BibTeX
+   * page, INSPIRE link and BibTeX
    */
   private readonly onContextMenu = (event: MouseEvent): void => {
     const target = event.target as Element | null;
@@ -805,6 +808,10 @@ export class ArxivBrowserView {
         {
           label: getString("arxiv-browser-menu-copy-abs-link"),
           run: () => void actions.copyText(abstractPageUrl(id)),
+        },
+        {
+          label: getString("menuitem-copy-inspire-link"),
+          run: () => void actions.copyInspireLink(id),
         },
         {
           label: getString("arxiv-browser-copy-bibtex"),

@@ -60,6 +60,11 @@ export function extractRecidFromUrl(url?: string | null): string | null {
 // URL Building Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** The INSPIRE page of the literature record `recid` ("Copy INSPIRE link") */
+export function inspireLiteratureUrl(recid: string): string {
+  return `${INSPIRE_LITERATURE_URL}/${recid}`;
+}
+
 export function buildReferenceUrl(
   reference: any,
   recid?: string | null,

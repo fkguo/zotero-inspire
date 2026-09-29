@@ -14,7 +14,10 @@ vi.mock("../src/utils/prefs", () => ({ getPref: vi.fn() }));
 vi.mock("../src/utils/locale", () => ({ getString: (key: string) => key }));
 
 import { inspireFetch } from "../src/modules/inspire/rateLimiter";
-import { inspireBibtexOf } from "../src/modules/arxiv/browser/browserActions";
+import {
+  inspireBibtexOf,
+  inspireRecidOf,
+} from "../src/modules/arxiv/browser/browserActions";
 import {
   clearNotFoundMemory,
   fetchInspireBibtexByArxiv,
@@ -450,6 +453,30 @@ describe("the identity check of an item's INSPIRE record", () => {
       }),
       { status: "notFound" },
     ]);
+  });
+});
+
+describe("INSPIRE's recid of an arXiv paper (Copy INSPIRE link)", () => {
+  it("is the record that lists the identifier, from one search", async () => {
+    record(3071234, "2609.11111", "2609.28538");
+    expect(await inspireRecidOf("2609.28538")).toEqual({
+      status: "found",
+      recid: "3071234",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("is none when INSPIRE has no record", async () => {
+    expect(await inspireRecidOf("2609.99999")).toEqual({
+      status: "notFound",
+    });
+  });
+
+  it("fails, not 'no record', when INSPIRE answers with an error or cannot be reached", async () => {
+    fetchMock.mockResolvedValue(new Response("", { status: 503 }));
+    expect(await inspireRecidOf("2609.28538")).toEqual({ status: "failed" });
+    fetchMock.mockRejectedValue(new TypeError("NetworkError"));
+    expect(await inspireRecidOf("2609.28538")).toEqual({ status: "failed" });
   });
 });
 
