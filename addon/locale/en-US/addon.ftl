@@ -376,6 +376,7 @@ references-panel-chart-published-only-tooltip = Filter: only show papers with jo
 # Rate limiter localization strings
 references-panel-rate-limit-tooltip = INSPIRE API rate limit status
 references-panel-rate-limit-queued = { $count } requests queued (rate limiting active)
+references-panel-rate-limit-label = INSPIRE queue: { $count }
 
 # Search feature localization strings
 references-panel-tab-search = 🔍

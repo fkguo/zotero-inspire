@@ -372,6 +372,7 @@ references-panel-chart-published-only-tooltip = 筛选：仅显示有期刊信�
 # 速率限制本地化字符串
 references-panel-rate-limit-tooltip = INSPIRE API 速率限制状态
 references-panel-rate-limit-queued = { $count } 个请求排队中（速率限制生效）
+references-panel-rate-limit-label = INSPIRE 排队 { $count }
 
 # 搜索功能本地化字符串
 references-panel-tab-search = 🔍

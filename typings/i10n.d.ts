@@ -724,6 +724,7 @@ export type FluentMessageId =
   | 'references-panel-quick-filter-related'
   | 'references-panel-quick-filter-related-tooltip'
   | 'references-panel-quick-filters'
+  | 'references-panel-rate-limit-label'
   | 'references-panel-rate-limit-queued'
   | 'references-panel-rate-limit-tooltip'
   | 'references-panel-reader-mode'
