@@ -426,15 +426,17 @@
   background: #fff;
 }
 
+/* The legend on its own line, the two buttons side by side below it */
 .arxiv-browser__daypicker-marks {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 6px;
 }
 
 .arxiv-browser__daypicker-marks .arxiv-browser__daypicker-note {
-  flex: 1 1 auto;
+  flex: 1 0 100%;
 }
 
 .arxiv-browser__daypicker-footer {
