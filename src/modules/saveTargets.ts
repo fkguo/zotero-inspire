@@ -7,11 +7,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../package.json";
+import { getString } from "../utils/locale";
 import {
   getPrimarySelectedCollection,
   getPrimarySelectedLibraryID,
 } from "../utils/zoteroPaneSelection";
-import type { SaveTargetRow, SaveTargetSelection } from "./pickerUI";
+import {
+  showTargetPickerUI,
+  type SaveTargetPickerOptions,
+  type SaveTargetRow,
+  type SaveTargetSelection,
+} from "./pickerUI";
 
 const RECENT_PREF = "recentSaveTargets";
 
@@ -117,6 +123,36 @@ export function buildSaveTargets(recentIDs: Set<string>): SaveTargetRow[] {
     }
   }
   return targets;
+}
+
+/**
+ * Ask where to save with the save-target picker over `body` (keeping `listEl`
+ * in place), the main window's target chosen at first; null when there is
+ * no editable library (`notify` says so) or the picker is closed
+ */
+export function pickSaveTarget(
+  anchor: HTMLElement,
+  body: HTMLElement,
+  listEl: HTMLElement,
+  notify: (message: string) => void,
+  pickerOptions?: SaveTargetPickerOptions,
+): Promise<SaveTargetSelection | null> {
+  const recent = recentSaveTargets();
+  const targets = buildSaveTargets(recent.ids);
+  if (!targets.length) {
+    notify(getString("references-panel-picker-empty"));
+    return Promise.resolve(null);
+  }
+  const defaultID =
+    mainWindowSaveTargetID() || recent.ordered[0] || targets[0]?.id || null;
+  return showTargetPickerUI(
+    targets,
+    defaultID,
+    anchor,
+    body,
+    listEl,
+    pickerOptions,
+  );
 }
 
 /**

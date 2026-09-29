@@ -9,10 +9,10 @@
 // boundaries, n / p turn pages, Home / End go to the first / last paper of the
 // page, Space shows or hides the abstract, Enter opens the arXiv page,
 // Ctrl/Cmd+Shift+C copies the BibTeX, Escape clears the focus, Ctrl/Cmd+W
-// closes the window; a adds the focused paper (choosing where), t adds it to
-// the default target, l relates it to items chosen in Zotero's Select Items
-// dialog, x ticks it for the batch import, Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z undo and
-// redo (Zotero's Edit → Undo: relations, not adding).
+// closes the window; a adds the focused paper (choosing where), l relates it
+// to items chosen in Zotero's Select Items dialog, x selects it for the batch
+// import (or unselects it), Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z undo and redo
+// (Zotero's Edit → Undo: relations, not adding).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../../../package.json";
@@ -75,6 +75,7 @@ import {
   BatchImportManager,
   type BatchImportManagerOptions,
 } from "../../inspire/panel/BatchImportManager";
+import { BatchToolbar } from "../../inspire/panel/BatchToolbar";
 import { arxivBatchImport } from "../batchAdd";
 import { LibraryActions, type LibraryActionsOptions } from "./libraryActions";
 import { CompletionLine, type CompletionLineOptions } from "./completionLine";
@@ -208,14 +209,12 @@ export class ArxivBrowserView {
   readonly actions: BrowserActions;
   /** Adding papers and relating them */
   readonly library: LibraryActions;
-  /** The ticked papers and their batch import */
+  /** The papers selected and their batch import */
   readonly batch: BatchImportManager;
+  /** The References panel's batch toolbar, shown while papers are selected */
+  private readonly batchToolbar: BatchToolbar;
   /** The INSPIRE completion entry of the status area */
   private readonly completion: CompletionLine;
-  private readonly tickBar: HTMLElement;
-  private readonly tickCount: HTMLElement;
-  private readonly addTickedButton: HTMLButtonElement;
-  private readonly tickAllButton: HTMLButtonElement;
   /** The window's notices */
   private readonly reporter: WindowReporter;
   private readonly clock: Clock;
@@ -413,39 +412,7 @@ export class ArxivBrowserView {
       abstracts.label,
     );
 
-    // The ticked papers and their import: a row shown only while papers
-    // are ticked
-    this.tickBar = html(doc, "div", "arxiv-browser__bar");
-    this.tickBar.classList.add("arxiv-browser__tickbar");
-    this.tickBar.hidden = true;
-    this.tickCount = html(doc, "span", "arxiv-browser__label");
-    this.addTickedButton = button(
-      doc,
-      getString("arxiv-browser-add-ticked"),
-      (event) =>
-        void this.batch.handleBatchImport(event.currentTarget as HTMLElement),
-    );
-    this.addTickedButton.classList.add("arxiv-browser__button--primary");
-    this.tickAllButton = button(doc, "", () =>
-      this.batch.setSelected(this.listPane.entries, true),
-    );
-    this.tickBar.append(
-      this.tickCount,
-      this.addTickedButton,
-      button(doc, getString("arxiv-browser-tick-page"), () =>
-        this.batch.setSelected(this.listPane.pageEntries, true),
-      ),
-      this.tickAllButton,
-      button(doc, getString("arxiv-browser-untick"), () =>
-        this.batch.clearSelection(),
-      ),
-    );
-    this.toolbar.append(
-      this.subscriptions.element,
-      daysBar,
-      listBar,
-      this.tickBar,
-    );
+    this.toolbar.append(this.subscriptions.element, daysBar, listBar);
 
     // List and detail, with a divider that sets their widths
     const main = html(doc, "div", "arxiv-browser__main");
@@ -518,9 +485,6 @@ export class ArxivBrowserView {
           this.detail.show(this.detail.entry);
         }
       },
-      onTargetChange: () => {
-        if (this.detail.entry) this.detail.show(this.detail.entry);
-      },
       showInLibrary: (itemIDs) => showItemsInMainWindow(itemIDs),
       addPapers: options.addPapers,
       pickTarget: options.pickTarget,
@@ -531,6 +495,7 @@ export class ArxivBrowserView {
       getListElement: () => this.listPane.list,
       // Every row loaded: a paper added shows on each of its rows
       getAllEntries: () => [...this.entryByKey.values()],
+      // Select all and Shift-click ranges: the papers listed, on every page
       getFilteredEntries: () => [...this.listPane.entries],
       ...(options.batchImport ?? arxivBatchImport()),
       promptForSaveTarget: async (anchor) =>
@@ -542,17 +507,16 @@ export class ArxivBrowserView {
         this.listPane.refreshLibraryMarks([row]);
         if (this.detail.entry === row) this.detail.show(row);
       },
-      onSelectionChange: (count) => this.showTicked(count),
-      onImportStateChange: (inProgress) => {
-        this.addTickedButton.disabled = inProgress;
-      },
+      onSelectionChange: (count) => this.batchToolbar.update(count),
+      onImportStateChange: (inProgress) =>
+        this.batchToolbar.setImportInProgress(inProgress),
     });
-    this.addTickedButton.disabled = this.batch.isImportInProgress();
+    this.batchToolbar = new BatchToolbar(doc, this.batch);
+    this.toolbar.append(this.batchToolbar.element);
     const libraryButtons = {
-      defaultTargetName: () => this.library.defaultTarget?.name ?? null,
       add: (
         entry: BrowserEntry,
-        how: { ask: boolean; anchor: HTMLElement; journalVersion?: boolean },
+        how: { anchor: HTMLElement; journalVersion?: boolean },
       ) => void this.library.add(entry, how),
       relate: (entry: BrowserEntry, anchor: HTMLElement) =>
         void this.library.relate(entry, anchor),
@@ -585,8 +549,7 @@ export class ArxivBrowserView {
       onTitleLeave: () => this.paperCard.scheduleHide(),
       ticked: this.batch.getSelectedEntryIDs(),
       onTick: (entry, event) => this.batch.handleCheckboxClick(entry, event),
-      onAdd: (entry, anchor) =>
-        void this.library.add(entry, { ask: true, anchor }),
+      onAdd: (entry, anchor) => void this.library.add(entry, { anchor }),
       onLink: (entry, anchor) => void this.library.relate(entry, anchor),
       isRelated: (entry) => this.library.isRelated(entry),
       relatedTitles: (entry) =>
@@ -594,7 +557,6 @@ export class ArxivBrowserView {
           .relatedItemsOf(entry)
           .map((item) => item.getDisplayTitle() || `#${item.id}`),
     });
-    this.showTicked(0);
 
     const scheduler = options.webScheduler ?? getArxivWebScheduler();
     this.stopFollowing = scheduler.onStatus((status) => {
@@ -718,7 +680,7 @@ export class ArxivBrowserView {
     const subscription = this.subscription;
     if (!subscription) return;
     this.entryByKey.clear();
-    // Ticks are of the rows of the listing loaded before
+    // The selection is of the rows of the listing loaded before
     this.batch.clearSelection();
     this.loadedFor = loadedFor(subscription);
     void this.loader.load(subscription, this.selection);
@@ -783,7 +745,6 @@ export class ArxivBrowserView {
       categories: this.categories,
     });
     this.listPane.setList(list, this.sort, update);
-    this.showTicked(this.batch.getSelectedEntryIDs().size);
     const focused = this.listPane.focused;
     if (focused && focused !== this.detail.entry) this.detail.show(focused);
     // More of the day's categories may list the paper shown
@@ -919,21 +880,6 @@ export class ArxivBrowserView {
     this.listPane.refreshLibraryMarks(changed);
     const shown = this.detail.entry;
     if (shown && rows.includes(shown)) this.detail.show(shown);
-  }
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Ticked papers
-  // ───────────────────────────────────────────────────────────────────────────
-
-  /** The tick bar shows when papers are ticked */
-  private showTicked(count: number): void {
-    this.tickBar.hidden = count === 0;
-    this.tickCount.textContent = getString("arxiv-browser-ticked", {
-      args: { count },
-    });
-    this.tickAllButton.textContent = getString("arxiv-browser-tick-all", {
-      args: { count: this.listPane.entries.length },
-    });
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -1215,9 +1161,8 @@ export class ArxivBrowserView {
         this.listPane.clearFocus();
         break;
       case "a":
-      case "t":
         if (!focused) return;
-        void this.library.add(focused, { ask: key === "a", anchor: anchor() });
+        void this.library.add(focused, { anchor: anchor() });
         break;
       case "l":
         if (!focused) return;

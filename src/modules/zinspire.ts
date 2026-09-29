@@ -14,9 +14,7 @@ import { getPref, setPref } from "../utils/prefs";
 import { applyClickSelection } from "../utils/clickSelection";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
-  showTargetPickerUI,
   showAmbiguousCitationPicker,
-  SaveTargetRow,
   SaveTargetSelection,
   applyRefEntryTextContainerStyle,
   applyRefEntryMarkerStyle,
@@ -264,13 +262,9 @@ import { onLibraryIndexChange } from "./inspire/library/arxivIndex";
 import { loadedItem, refreshLocalState } from "./inspire/library/localStatus";
 import { firstPdfAttachmentID, openLocalPdf } from "./inspire/library/localPdf";
 import { linkItems, unlinkItems } from "./inspire/library/relatedItems";
-import {
-  buildSaveTargets,
-  mainWindowSaveTargetID,
-  recentSaveTargets,
-  rememberSaveTarget,
-} from "./saveTargets";
+import { pickSaveTarget, rememberSaveTarget } from "./saveTargets";
 import { applyLocalMarker } from "./inspire/panel/localMarker";
+import { BatchToolbar } from "./inspire/panel/BatchToolbar";
 
 // Re-export for external use
 export { ZInsUtils, ZInsMenu, ZInspire };
@@ -1838,9 +1832,7 @@ export class InspireReferencePanelController {
   // Batch import state (FTR-BATCH-IMPORT)
   // Selection, duplicate detection and the import itself live in batchImport.
   private batchImport: BatchImportManager;
-  private batchToolbar?: HTMLDivElement;
-  private batchSelectedBadge?: HTMLSpanElement;
-  private batchImportButton?: HTMLButtonElement;
+  private batchToolbar?: BatchToolbar;
 
   // PDF Annotate (FTR-PDF-ANNOTATE)
   // FTR-MULTI-PDF-FIX-V3: LRU cache for labelMatchers, keyed by attachmentItemID
@@ -17465,33 +17457,11 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     this.pendingToken = undefined;
   }
 
-  private async promptForSaveTarget(
+  private promptForSaveTarget(
     anchor: HTMLElement,
   ): Promise<SaveTargetSelection | null> {
-    const recentTargets = recentSaveTargets();
-    const targets = buildSaveTargets(recentTargets.ids);
-    if (!targets.length) {
-      this.showToast(getString("references-panel-picker-empty"));
-      return null;
-    }
-    let defaultID = mainWindowSaveTargetID();
-    if (!defaultID) {
-      defaultID = recentTargets.ordered[0] || targets[0]?.id || null;
-    }
-    return this.showTargetPicker(targets, defaultID, anchor);
-  }
-
-  private showTargetPicker(
-    targets: SaveTargetRow[],
-    defaultID: string | null,
-    anchor: HTMLElement,
-  ): Promise<SaveTargetSelection | null> {
-    return showTargetPickerUI(
-      targets,
-      defaultID,
-      anchor,
-      this.body,
-      this.listEl,
+    return pickSaveTarget(anchor, this.body, this.listEl, (message) =>
+      this.showToast(message),
     );
   }
 
@@ -18175,13 +18145,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         startProgress: (text) => popupReporter.startProgress(text),
       },
       updateRowStatus: (entry) => this.updateRowStatus(entry),
-      onSelectionChange: (count) => this.updateBatchToolbarVisibility(count),
+      onSelectionChange: (count) => this.batchToolbar?.update(count),
       // One batch import at a time, across panels: Import waits for it
-      onImportStateChange: (inProgress) => {
-        if (this.batchImportButton) {
-          this.batchImportButton.disabled = inProgress;
-        }
-      },
+      onImportStateChange: (inProgress) =>
+        this.batchToolbar?.setImportInProgress(inProgress),
     };
   }
 
@@ -18189,84 +18156,12 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
    * Create the batch toolbar UI (hidden by default).
    */
   private createBatchToolbar() {
-    Zotero.debug(
-      `[${config.addonName}] createBatchToolbar: creating batch toolbar`,
+    this.batchToolbar = new BatchToolbar(
+      this.body.ownerDocument,
+      this.batchImport,
     );
-    const doc = this.body.ownerDocument;
-    this.batchToolbar = doc.createElement("div");
-    this.batchToolbar.className = "zinspire-batch-toolbar";
-    this.batchToolbar.style.display = "none";
-
-    // Selection badge
-    this.batchSelectedBadge = doc.createElement("span");
-    this.batchSelectedBadge.className = "zinspire-batch-toolbar__badge";
-    this.batchSelectedBadge.textContent = getString(
-      "references-panel-batch-selected",
-      { args: { count: 0 } },
-    );
-    this.batchToolbar.appendChild(this.batchSelectedBadge);
-
-    // Select All button
-    const selectAllBtn = doc.createElement("button");
-    selectAllBtn.className = "zinspire-batch-toolbar__btn";
-    selectAllBtn.textContent = getString("references-panel-batch-select-all");
-    selectAllBtn.addEventListener("click", () => this.batchImport.selectAll());
-    this.batchToolbar.appendChild(selectAllBtn);
-
-    // Clear button
-    const clearBtn = doc.createElement("button");
-    clearBtn.className = "zinspire-batch-toolbar__btn";
-    clearBtn.textContent = getString("references-panel-batch-clear");
-    clearBtn.addEventListener("click", () => this.batchImport.clearSelection());
-    this.batchToolbar.appendChild(clearBtn);
-
-    // Import button
-    this.batchImportButton = doc.createElement("button");
-    this.batchImportButton.className =
-      "zinspire-batch-toolbar__btn zinspire-batch-toolbar__btn--primary";
-    this.batchImportButton.textContent = getString(
-      "references-panel-batch-import",
-    );
-    // A batch import may already be running in another panel
-    this.batchImportButton.disabled = this.batchImport.isImportInProgress();
-    this.batchImportButton.addEventListener("click", () => {
-      Zotero.debug(`[${config.addonName}] Import button clicked`);
-      const anchor = this.batchImportButton || this.body;
-      this.batchImport.handleBatchImport(anchor).catch((err) => {
-        Zotero.debug(`[${config.addonName}] handleBatchImport error: ${err}`);
-      });
-    });
-    this.batchToolbar.appendChild(this.batchImportButton);
-
     // Insert batch toolbar after chart (before list), closer to the items it operates on
-    this.body.insertBefore(this.batchToolbar, this.listEl);
-  }
-
-  /**
-   * Update batch toolbar visibility and badge for `count` selected entries.
-   */
-  private updateBatchToolbarVisibility(count: number) {
-    if (!this.batchToolbar) {
-      Zotero.debug(
-        `[${config.addonName}] updateBatchToolbarVisibility: batchToolbar is null`,
-      );
-      return;
-    }
-
-    Zotero.debug(
-      `[${config.addonName}] updateBatchToolbarVisibility: count=${count}`,
-    );
-    if (count > 0) {
-      this.batchToolbar.style.display = "flex";
-      if (this.batchSelectedBadge) {
-        this.batchSelectedBadge.textContent = getString(
-          "references-panel-batch-selected",
-          { args: { count } },
-        );
-      }
-    } else {
-      this.batchToolbar.style.display = "none";
-    }
+    this.body.insertBefore(this.batchToolbar.element, this.listEl);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

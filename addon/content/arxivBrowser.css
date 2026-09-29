@@ -541,7 +541,7 @@
   font-weight: normal;
 }
 
-/* Rows: the References panel's rows, with its tick box, in-library mark and
+/* Rows: the References panel's rows, with its check box, in-library mark and
    relate button */
 
 /* Author names are not links here (a click does nothing; hovering shows
@@ -602,11 +602,6 @@
   justify-content: flex-end;
   gap: 6px;
   margin-top: 6px;
-}
-
-/* A toolbar row hidden (the tick bar while nothing is ticked) */
-.arxiv-browser__bar[hidden] {
-  display: none;
 }
 
 /* Detail pane of the focused paper */

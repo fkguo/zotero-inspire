@@ -15,12 +15,11 @@ import type { ArxivListingEntry } from "../src/modules/arxiv/listingTypes";
 import type { SaveTargetSelection } from "../src/modules/pickerUI";
 
 // Adding the arXiv browser's papers and relating them: where a paper goes
-// (the picker, or the window's default target with one key), what the user
+// (the picker, every time), what the user
 // is told of each outcome and offered next, and relations to items chosen in
 // Zotero's Select Items dialog.
 
 const PREFIX = config.prefsPrefix;
-const TARGET_PREF = `${PREFIX}.arxiv_browser_save_target`;
 
 let prefs: Record<string, unknown>;
 
@@ -207,7 +206,6 @@ function actions(
     list: () => ({}) as HTMLElement,
     onAdded: (entry, it) => void added.push([entry, it.id]),
     onRelationChange: (entry) => void relationChanged.push(entry),
-    onTargetChange: vi.fn(),
     showInLibrary: (ids) => void shown.push([...ids]),
     addPapers: addPapers as any,
     pickTarget,
@@ -238,16 +236,15 @@ const addedOutcome = (
 });
 
 describe("Adding a paper", () => {
-  it("asks where, remembers the choice as the window's default, and adds the paper there", async () => {
+  it("asks where, remembers the choice as the most recent target, and adds the paper there", async () => {
     const it1 = item(901);
     const { library, calls, pickTarget, added, report, shown } = actions([
       addedOutcome(it1),
     ]);
     const entry = paper("2609.20001");
-    await library.add(entry, { ask: true, anchor });
+    await library.add(entry, { anchor });
 
     expect(pickTarget).toHaveBeenCalledTimes(1);
-    expect(prefs[TARGET_PREF]).toBe("C12");
     expect(prefs.recentSaveTargets).toBe(JSON.stringify([{ id: "C12" }]));
     expect(calls).toHaveLength(1);
     expect(calls[0].requests).toEqual([
@@ -268,52 +265,37 @@ describe("Adding a paper", () => {
     ]);
     notice.actions[0].run();
     expect(shown).toEqual([[901]]);
-    expect(library.defaultTarget?.name).toBe("to-read");
   });
 
-  it("adds to the default target with one key, without asking", async () => {
-    prefs[TARGET_PREF] = "C12";
-    const { library, calls, pickTarget } = actions([addedOutcome(item(901))]);
-    await library.add(paper("2609.20001"), { ask: false, anchor });
-    expect(pickTarget).not.toHaveBeenCalled();
-    expect(calls[0].target).toMatchObject({ collectionIDs: [12] });
-  });
-
-  it("asks where the first time, when there is no default target yet", async () => {
-    const { library, pickTarget } = actions([addedOutcome(item(901))]);
-    await library.add(paper("2609.20001"), { ask: false, anchor });
-    expect(pickTarget).toHaveBeenCalledTimes(1);
-  });
-
-  it("asks where when the default target is gone (its collection deleted)", async () => {
-    prefs[TARGET_PREF] = "C99";
-    const { library, pickTarget } = actions([addedOutcome(item(901))]);
-    await library.add(paper("2609.20001"), { ask: false, anchor });
-    expect(pickTarget).toHaveBeenCalledTimes(1);
+  it("asks where again for the next paper", async () => {
+    const { library, pickTarget } = actions([
+      addedOutcome(item(901)),
+      addedOutcome(item(902)),
+    ]);
+    await library.add(paper("2609.20001"), { anchor });
+    await library.add(paper("2609.20002"), { anchor });
+    expect(pickTarget).toHaveBeenCalledTimes(2);
   });
 
   it("adds nothing when the picker is closed", async () => {
     const { library, addPapers } = actions([], { pick: null });
-    await library.add(paper("2609.20001"), { ask: true, anchor });
+    await library.add(paper("2609.20001"), { anchor });
     expect(addPapers).not.toHaveBeenCalled();
   });
 
   it("adds a paper once when its key is pressed again while it is added", async () => {
-    prefs[TARGET_PREF] = "L1";
     const { library, addPapers } = actions([addedOutcome(item(901))]);
     const entry = paper("2609.20001");
     await Promise.all([
-      library.add(entry, { ask: false, anchor }),
-      library.add(entry, { ask: false, anchor }),
+      library.add(entry, { anchor }),
+      library.add(entry, { anchor }),
     ]);
     expect(addPapers).toHaveBeenCalledTimes(1);
   });
 
   it("asks for the journal version when the user chose it", async () => {
-    prefs[TARGET_PREF] = "L1";
     const { library, calls } = actions([addedOutcome(item(901))]);
     await library.add(paper("2609.20001"), {
-      ask: false,
       anchor,
       journalVersion: true,
     });
@@ -321,13 +303,11 @@ describe("Adding a paper", () => {
   });
 
   it("says why a paper asked for in its journal version was added as the preprint when arXiv gives no journal DOI", async () => {
-    prefs[TARGET_PREF] = "L1";
     const { library, report } = actions([
       addedOutcome(item(901)),
       addedOutcome(item(902), { route: "inspire" }),
     ]);
     await library.add(paper("2609.20001"), {
-      ask: false,
       anchor,
       journalVersion: true,
     });
@@ -336,7 +316,6 @@ describe("Adding a paper", () => {
     );
     // INSPIRE's record (the journal version once published): no note
     await library.add(paper("2609.20002"), {
-      ask: false,
       anchor,
       journalVersion: true,
     });
@@ -344,22 +323,20 @@ describe("Adding a paper", () => {
   });
 
   it("lists the notes of the route taken", async () => {
-    prefs[TARGET_PREF] = "L1";
     const { library, report } = actions([
       addedOutcome(item(901), { notes: ["journalDoiMismatch"] }),
     ]);
-    await library.add(paper("2609.20001"), { ask: false, anchor });
+    await library.add(paper("2609.20001"), { anchor });
     expect(report.notices[0].lines[1]).toBe(
       msg("arxiv-browser-note-journal-mismatch"),
     );
   });
 
   it("tells when the PDF was not attached, and why", async () => {
-    prefs[TARGET_PREF] = "L1";
     let finish!: (result: ArxivPdfResult) => void;
     const pdf = new Promise<ArxivPdfResult>((resolve) => (finish = resolve));
     const { library, report } = actions([addedOutcome(item(901), { pdf })]);
-    await library.add(paper("2609.20001"), { ask: false, anchor });
+    await library.add(paper("2609.20001"), { anchor });
     expect(report.notices).toHaveLength(1);
     finish({ status: "failed", reason: "notPdf", message: "" });
     await vi.waitFor(() => expect(report.notices).toHaveLength(2));
@@ -372,12 +349,11 @@ describe("Adding a paper", () => {
   });
 
   it("offers to add from arXiv data, or to try later, when INSPIRE could not be reached", async () => {
-    prefs[TARGET_PREF] = "L1";
     const { library, report, calls } = actions([
       { status: "inspireUnknown" },
       addedOutcome(item(901)),
     ]);
-    await library.add(paper("2609.20001"), { ask: false, anchor });
+    await library.add(paper("2609.20001"), { anchor });
     const [question] = report.notices;
     expect(question.stay).toBe(true);
     expect(question.actions.map((action) => action.label)).toEqual([
@@ -392,7 +368,6 @@ describe("Adding a paper", () => {
   });
 
   it("shows the item a paper is found as, and asks when only its journal DOI matched", async () => {
-    prefs[TARGET_PREF] = "L1";
     item(700);
     const { library, report, calls, shown } = actions([
       {
@@ -402,7 +377,7 @@ describe("Adding a paper", () => {
       },
       addedOutcome(item(901)),
     ]);
-    await library.add(paper("2609.20001"), { ask: false, anchor });
+    await library.add(paper("2609.20001"), { anchor });
     const [question] = report.notices;
     expect(question.lines[0]).toBe(
       msg("arxiv-browser-doi-only", {
@@ -419,9 +394,8 @@ describe("Adding a paper", () => {
   });
 
   it("says why a paper was not added", async () => {
-    prefs[TARGET_PREF] = "L1";
     const { library, report } = actions([{ status: "arxivUnavailable" }]);
-    await library.add(paper("2609.20001"), { ask: false, anchor });
+    await library.add(paper("2609.20001"), { anchor });
     expect(report.notices[0].lines).toEqual([
       msg("arxiv-browser-not-added", {
         id: "2609.20001",

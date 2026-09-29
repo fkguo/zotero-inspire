@@ -914,10 +914,8 @@ arxiv-browser-row-related = { $count ->
     [one] Related to one item (click to relate it to more; remove relations in the item's Related section):
    *[other] Related to { $count } items (click to relate it to more; remove relations in the item's Related section):
 }
-arxiv-browser-row-tick = Tick papers to add them to your library together (“Add ticked…” in the toolbar)
 arxiv-browser-row-link = Click to choose the items to relate this paper to (a paper not in your library is added first)
 arxiv-browser-add = Add…
-arxiv-browser-add-to = Add to { $target }
 arxiv-browser-add-journal = Add the journal version…
 arxiv-browser-link = Relate to items…
 arxiv-browser-adding = Adding { $id }…
@@ -951,11 +949,6 @@ arxiv-browser-linked = Related to “{ $title }”
 arxiv-browser-linked-several = Related to { $count } items
 arxiv-browser-undo-hint = (Edit → Undo, or Ctrl/Cmd+Z, takes it back)
 arxiv-browser-notice-close = Close
-arxiv-browser-ticked = { $count } ticked
-arxiv-browser-add-ticked = Add ticked…
-arxiv-browser-tick-page = Tick this page
-arxiv-browser-tick-all = Tick all ({ $count })
-arxiv-browser-untick = Untick all
 arxiv-browser-batch-added = Added { $added } of { $total } papers to { $target }
 arxiv-browser-batch-not-added = Not added:
 arxiv-browser-batch-none-added = None of the { $total } papers was added

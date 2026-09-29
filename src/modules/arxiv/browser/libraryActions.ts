@@ -2,9 +2,9 @@
 // Adding the arXiv browser's papers to the library and relating them to
 // items the user chooses (Zotero's Select Items dialog, relatedItemsDialog.ts).
 //
-// A paper is added where the user chooses (the save-target picker), or with
-// one key to the window's default target: the target chosen last in the
-// window. Each add goes the route its data allow (addToLibrary.ts); what came
+// A paper is added where the user chooses, in the save-target picker as in
+// the References panel. Each add goes the route its data allow
+// (addToLibrary.ts); what came
 // of it is told in a notice: added (with "Show in library"), already there,
 // or why not. When INSPIRE cannot be reached the user chooses: add from
 // arXiv data now, or try later. Adding is not undoable; a relation is (one
@@ -12,7 +12,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getString } from "../../../utils/locale";
-import { getPref, setPref } from "../../../utils/prefs";
 import { loadedItem } from "../../inspire/library/localStatus";
 import {
   linkItems,
@@ -24,11 +23,9 @@ import type {
   NotAddedPaper,
 } from "../../inspire/panel/BatchImportManager";
 import type { InspireReferenceEntry } from "../../inspire/types";
-import { showTargetPickerUI, type SaveTargetSelection } from "../../pickerUI";
+import type { SaveTargetSelection } from "../../pickerUI";
 import {
-  buildSaveTargets,
-  mainWindowSaveTargetID,
-  recentSaveTargets,
+  pickSaveTarget,
   rememberSaveTarget,
   saveTargetOf,
 } from "../../saveTargets";
@@ -43,9 +40,6 @@ import { arxivAddRequest } from "../batchAdd";
 import type { NoticeAction, WindowReporter } from "./browserActions";
 import type { BrowserEntry } from "./browserList";
 import { reasonText } from "./browserText";
-
-/** The window's default target (a picker row ID) */
-const TARGET_PREF = "arxiv_browser_save_target";
 
 const NOTE_TEXTS: Record<AddNote, Parameters<typeof getString>[0]> = {
   journalDoiMismatch: "arxiv-browser-note-journal-mismatch",
@@ -79,16 +73,11 @@ export interface LibraryActionsOptions {
   onAdded(entry: BrowserEntry, item: Zotero.Item): void;
   /** Relations of the paper's items changed */
   onRelationChange(entry: BrowserEntry): void;
-  /** The default target changed */
-  onTargetChange(): void;
   showInLibrary(itemIDs: readonly number[]): void;
   /** Adds papers (default: the router, addArxivPapers) */
   addPapers?: typeof addArxivPapers;
   /** Asks for a target (default: the save-target picker) */
-  pickTarget?: (
-    anchor: HTMLElement,
-    defaultID: string | null,
-  ) => Promise<SaveTargetSelection | null>;
+  pickTarget?: (anchor: HTMLElement) => Promise<SaveTargetSelection | null>;
 }
 
 /** Why a paper was not added, in words */
@@ -158,58 +147,34 @@ export class LibraryActions {
     this.disposed = true;
   }
 
-  /** The window's default target: the one chosen last in the window */
-  get defaultTarget(): NamedTarget | null {
-    const id = getPref(TARGET_PREF);
-    return typeof id === "string" && id ? saveTargetOf(id) : null;
-  }
-
   /**
    * Ask for a target with the save-target picker; the target chosen becomes
-   * the window's default and the most recent target
+   * the most recent target
    */
   async chooseTarget(anchor: HTMLElement): Promise<NamedTarget | null> {
-    const recent = recentSaveTargets();
-    const targets = buildSaveTargets(recent.ids);
-    if (!targets.length) {
-      this.reporter.notify(getString("references-panel-picker-empty"));
-      return null;
-    }
-    const defaultID =
-      this.defaultTarget?.primaryRowID ??
-      mainWindowSaveTargetID() ??
-      recent.ordered[0] ??
-      targets[0].id;
     const selection = await (this.options.pickTarget
-      ? this.options.pickTarget(anchor, defaultID)
-      : showTargetPickerUI(
-          targets,
-          defaultID,
+      ? this.options.pickTarget(anchor)
+      : pickSaveTarget(
           anchor,
           this.options.host,
           this.options.list(),
+          (message) => this.reporter.notify(message),
           { document: this.options.host.ownerDocument },
         ));
     if (!selection || this.disposed) return null;
-    setPref(TARGET_PREF, selection.primaryRowID);
     rememberSaveTarget(selection.primaryRowID);
-    this.options.onTargetChange();
     const named = saveTargetOf(selection.primaryRowID);
     return { ...selection, name: named?.name ?? "" };
   }
 
-  /**
-   * Add a paper: to the default target, or (`ask`, or no default yet) where
-   * the user chooses
-   */
+  /** Add a paper where the user chooses */
   async add(
     entry: BrowserEntry,
-    how: { ask: boolean; anchor: HTMLElement } & AddChoice,
+    how: { anchor: HTMLElement } & AddChoice,
   ): Promise<void> {
     const id = entry.listing.id;
     if (this.adding.has(id)) return;
-    const target =
-      (!how.ask && this.defaultTarget) || (await this.chooseTarget(how.anchor));
+    const target = await this.chooseTarget(how.anchor);
     if (!target) return;
     await this.addTo(entry, target, how);
   }
@@ -475,7 +440,7 @@ export class LibraryActions {
    */
   async relate(entry: BrowserEntry, anchor: HTMLElement): Promise<void> {
     if (!entry.localItemID) {
-      await this.add(entry, { ask: true, anchor, relate: true });
+      await this.add(entry, { anchor, relate: true });
       return;
     }
     const items = (await Zotero.Items.getAsync(

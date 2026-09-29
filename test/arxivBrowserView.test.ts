@@ -1,4 +1,5 @@
 import { JSDOM, type DOMWindow } from "jsdom";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "../package.json";
 import { ArxivScheduler } from "../src/modules/arxiv/arxivFetch";
@@ -2526,7 +2527,6 @@ describe("arXiv browser: adding and relating", () => {
     ]);
     expect(part("dot").title).toBe(msg("arxiv-browser-dot-add"));
     expect(part<HTMLInputElement>("checkbox").checked).toBe(false);
-    expect(part("checkbox").title).toBe(msg("arxiv-browser-row-tick"));
     expect(part("link").dataset.state).toBe("unlinked");
     expect(part("link").title).toBe(msg("arxiv-browser-row-link"));
     // No relation target in the toolbar
@@ -2575,12 +2575,11 @@ describe("arXiv browser: adding and relating", () => {
     expect(part("link").title).toContain("• Item 42");
   });
 
-  it("adds the focused paper with t (asking where the first time) and with a, and shows it in the library", async () => {
+  it("adds the focused paper with a, asking where every time, and shows it in the library", async () => {
     const { root, list, addPapers, pickTarget, notices } = await loaded();
     key(list, "j");
-    key(list, "t");
+    key(list, "a");
     await vi.waitFor(() => expect(addPapers).toHaveBeenCalledTimes(1));
-    // No default target yet: the picker asked where
     expect(pickTarget).toHaveBeenCalledTimes(1);
     expect(addPapers.mock.calls[0][0]).toMatchObject([
       { arxivId: "2609.28538" },
@@ -2589,20 +2588,26 @@ describe("arXiv browser: adding and relating", () => {
     expect(notices().join()).toContain(
       msg("arxiv-browser-added", { id: "2609.28538", target: "My Library" }),
     );
-    // The detail pane has the add buttons, now with the default target
-    expect(root.querySelector(".arxiv-browser__detail")!.textContent).toContain(
-      msg("arxiv-browser-add-to", { target: "My Library" }),
-    );
+    // The detail pane adds where the user chooses too: no "Add to <target>"
+    const detailButtons = () =>
+      [
+        ...root.querySelectorAll<HTMLButtonElement>(
+          ".arxiv-browser__detail-actions button",
+        ),
+      ].map((button) => button.textContent);
+    key(list, "j");
+    expect(
+      detailButtons().filter((text) =>
+        text!.startsWith(msg("arxiv-browser-add")),
+      ),
+    ).toEqual([msg("arxiv-browser-add"), msg("arxiv-browser-add-journal")]);
 
-    // t again, on the next paper: to the default target, no picker
-    key(list, "j");
+    // a again, on the next paper: the picker asks again; t adds nothing
     key(list, "t");
-    await vi.waitFor(() => expect(addPapers).toHaveBeenCalledTimes(2));
-    expect(pickTarget).toHaveBeenCalledTimes(1);
-    // a asks where
-    key(list, "j");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(addPapers).toHaveBeenCalledTimes(1);
     key(list, "a");
-    await vi.waitFor(() => expect(addPapers).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(addPapers).toHaveBeenCalledTimes(2));
     expect(pickTarget).toHaveBeenCalledTimes(2);
   });
 
@@ -2620,61 +2625,130 @@ describe("arXiv browser: adding and relating", () => {
     expect(undo).toHaveBeenCalled();
   });
 
-  it("ticks papers with x and the tick box, and adds the ticked papers in one batch import", async () => {
+  /** The References panel's batch toolbar in the window */
+  const batchToolbar = (root: HTMLElement) =>
+    root.querySelector<HTMLElement>(".zinspire-batch-toolbar")!;
+  const toolbarButton = (root: HTMLElement, key: string) =>
+    [...batchToolbar(root).querySelectorAll("button")].find(
+      (button) => button.textContent === msg(key),
+    )!;
+  const checkboxes = (root: HTMLElement) =>
+    rows(root).map(
+      (row) =>
+        row.querySelector<HTMLInputElement>(".zinspire-ref-entry__checkbox")!,
+    );
+
+  it("with the window's stylesheet, shows the check box and ⊕ on a paper not in the library, and the batch toolbar only while papers are selected", async () => {
+    // The stylesheets the window's document loads, from the plugin's files
+    const markup = readFileSync(
+      new URL("../addon/content/arxivBrowser.xhtml", import.meta.url),
+      "utf8",
+    );
+    const sheets = [
+      ...markup.matchAll(
+        /<\?xml-stylesheet href="chrome:\/\/__addonRef__\/content\/([^"?]+)/g,
+      ),
+    ].map(([, file]) => file);
+    expect(sheets).toEqual(["arxivBrowser.css"]);
+    for (const file of sheets) {
+      const style = win.document.createElement("style");
+      style.textContent = readFileSync(
+        new URL(`../addon/content/${file}`, import.meta.url),
+        "utf8",
+      );
+      win.document.head.append(style);
+    }
+    const { root, view } = await loaded();
+    const row = rows(root)[0];
+    const shown = (element: Element) => {
+      const style = win.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden";
+    };
+    const dotOf = row.querySelector<HTMLElement>(".zinspire-ref-entry__dot")!;
+    expect([dotOf.textContent, dotOf.dataset.state]).toEqual(["⊕", "missing"]);
+    expect(shown(dotOf)).toBe(true);
+    const checkbox = checkboxes(root)[0];
+    expect(shown(checkbox)).toBe(true);
+
+    // Nothing selected: no toolbar
+    expect(shown(batchToolbar(root))).toBe(false);
+    checkbox.click();
+    expect(shown(batchToolbar(root))).toBe(true);
+    expect(
+      batchToolbar(root).querySelector(".zinspire-batch-toolbar__badge")!
+        .textContent,
+    ).toBe(msg("references-panel-batch-selected", { count: 1 }));
+    expect(
+      [...batchToolbar(root).querySelectorAll("button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual([
+      msg("references-panel-batch-select-all"),
+      msg("references-panel-batch-clear"),
+      msg("references-panel-batch-import"),
+    ]);
+    checkbox.click();
+    expect(view.batch.getSelectedEntryIDs().size).toBe(0);
+    expect(shown(batchToolbar(root))).toBe(false);
+    // The window's own tick bar is gone
+    expect(root.querySelector(".arxiv-browser__tickbar")).toBeNull();
+  });
+
+  it("selects papers with x, the check box and Shift-click, and imports the selected papers in one batch import", async () => {
     const { root, list, importEntry, pickTarget, notices } = await loaded();
-    const tickBar = () =>
-      root.querySelector<HTMLElement>(".arxiv-browser__tickbar")!;
-    expect(tickBar().hidden).toBe(true);
     key(list, "j");
     key(list, "x");
-    rows(root)[2]
-      .querySelector<HTMLInputElement>(".zinspire-ref-entry__checkbox")!
-      .click();
-    expect(tickBar().hidden).toBe(false);
-    expect(tickBar().textContent).toContain(
-      msg("arxiv-browser-ticked", { count: 2 }),
+    checkboxes(root)[2].click();
+    // Shift-click: the papers from the last one clicked to this one
+    checkboxes(root)[5].dispatchEvent(
+      new win.MouseEvent("click", { bubbles: true, shiftKey: true }),
     );
+    expect(checkboxes(root).map((box) => box.checked)).toEqual([
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      ...Array(44).fill(false),
+    ]);
     expect(
-      rows(root).map(
-        (row) =>
-          row.querySelector<HTMLInputElement>(".zinspire-ref-entry__checkbox")!
-            .checked,
-      ),
-    ).toEqual([true, false, true, ...Array(47).fill(false)]);
-    [...tickBar().querySelectorAll("button")]
-      .find((button) => button.textContent === msg("arxiv-browser-add-ticked"))!
-      .click();
-    await vi.waitFor(() => expect(importEntry).toHaveBeenCalledTimes(2));
+      batchToolbar(root).querySelector(".zinspire-batch-toolbar__badge")!
+        .textContent,
+    ).toBe(msg("references-panel-batch-selected", { count: 5 }));
+    // x again unselects the focused paper
+    key(list, "x");
+    expect(checkboxes(root)[0].checked).toBe(false);
+    toolbarButton(root, "references-panel-batch-import").click();
+    await vi.waitFor(() => expect(importEntry).toHaveBeenCalledTimes(4));
     expect(pickTarget).toHaveBeenCalledTimes(1);
     await vi.waitFor(() =>
       expect(notices().join()).toContain(
         msg("arxiv-browser-batch-added", {
-          added: 2,
-          total: 2,
+          added: 4,
+          total: 4,
           target: "My Library",
         }),
       ),
     );
-    expect(dot(rows(root)[0])).toBe("●");
-    expect(dot(rows(root)[2])).toBe("●");
-    expect(tickBar().hidden).toBe(true);
+    expect([2, 3, 4, 5].map((index) => dot(rows(root)[index]))).toEqual([
+      "●",
+      "●",
+      "●",
+      "●",
+    ]);
+    expect(batchToolbar(root).style.display).toBe("none");
   });
 
-  it("ticks this page, and all papers across the pages", async () => {
+  it("selects all papers of the listing, on every page, and clears the selection", async () => {
     const { root, view } = await loaded();
-    const button = (label: string) =>
-      [
-        ...root.querySelectorAll<HTMLButtonElement>(
-          ".arxiv-browser__tickbar button",
-        ),
-      ].find((b) => b.textContent === label)!;
-    key(root.querySelector(".arxiv-browser__list")!, "j");
-    key(root.querySelector(".arxiv-browser__list")!, "x");
-    button(msg("arxiv-browser-tick-page")).click();
-    expect(view.batch.getSelectedEntryIDs().size).toBe(50);
-    button(msg("arxiv-browser-tick-all", { count: 72 })).click();
+    checkboxes(root)[0].click();
+    toolbarButton(root, "references-panel-batch-select-all").click();
     expect(view.batch.getSelectedEntryIDs().size).toBe(72);
-    button(msg("arxiv-browser-untick")).click();
+    expect(checkboxes(root).every((box) => box.checked)).toBe(true);
+    toolbarButton(root, "references-panel-batch-clear").click();
     expect(view.batch.getSelectedEntryIDs().size).toBe(0);
+    expect(checkboxes(root).some((box) => box.checked)).toBe(false);
+    expect(batchToolbar(root).style.display).toBe("none");
   });
 });

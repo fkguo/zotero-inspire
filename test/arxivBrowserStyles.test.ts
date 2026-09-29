@@ -39,11 +39,20 @@ describe("arXiv window stylesheet", () => {
     expect(hiding).toEqual([]);
   });
 
-  it("hides the tick bar while nothing is ticked, although its class sets a display", () => {
-    expect(selectorsSetting("display")).toContain(".arxiv-browser__bar");
-    expect(css).toMatch(
-      /\.arxiv-browser__bar\[hidden\]\s*\{\s*display: none;\s*\}/,
+  it("is loaded under an address that changes with every build", () => {
+    // Zotero keeps a stylesheet it has loaded, by its address, until it
+    // restarts: a plugin updated in a running Zotero would draw its window
+    // with the stylesheet of the build before
+    const markup = readFileSync(
+      new URL("../addon/content/arxivBrowser.xhtml", import.meta.url),
+      "utf8",
     );
+    const hrefs = [...markup.matchAll(/<\?xml-stylesheet href="([^"]+)"/g)]
+      .map(([, href]) => href)
+      .filter((href) => href.startsWith("chrome://__addonRef__/"));
+    expect(hrefs).toEqual([
+      "chrome://__addonRef__/content/arxivBrowser.css?__buildTime__",
+    ]);
   });
 
   it("styles the References panel's row parts only inside the window's rows", () => {

@@ -4,7 +4,9 @@
 <?xml-stylesheet href="chrome://zotero/skin/overlay.css" type="text/css"?>
 <?xml-stylesheet href="chrome://zotero-platform/content/overlay.css" type="text/css"?>
 <?xml-stylesheet href="chrome://zotero-platform/content/zotero.css" type="text/css"?>
-<?xml-stylesheet href="chrome://__addonRef__/content/arxivBrowser.css" type="text/css"?>
+<!-- The build time in the stylesheet's address: Zotero keeps a stylesheet it
+     has loaded until it restarts, also when the plugin is updated -->
+<?xml-stylesheet href="chrome://__addonRef__/content/arxivBrowser.css?__buildTime__" type="text/css"?>
 <!-- The arXiv browser: the plugin builds the window's content on load -->
 <window
   id="__addonRef__-arxiv-browser"

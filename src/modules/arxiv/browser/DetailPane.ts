@@ -40,15 +40,13 @@ export interface DetailPaneOptions {
 
 /** What the detail pane's library buttons do */
 export interface DetailLibraryActions {
-  /** Name of the window's default target, if there is one */
-  defaultTargetName(): string | null;
   /**
-   * Add the paper: where the user chooses (`ask`) or to the default target;
-   * `journalVersion`: its journal version when there is one
+   * Add the paper where the user chooses; `journalVersion`: its journal
+   * version when there is one
    */
   add(
     entry: BrowserEntry,
-    how: { ask: boolean; anchor: HTMLElement; journalVersion?: boolean },
+    how: { anchor: HTMLElement; journalVersion?: boolean },
   ): void;
   /** Relate the paper to items chosen in Zotero's Select Items dialog */
   relate(entry: BrowserEntry, anchor: HTMLElement): void;
@@ -259,8 +257,8 @@ export class DetailPane {
   }
 
   /**
-   * Add (choosing where), add to the default target, add the journal
-   * version (for a paper with a journal reference), relate
+   * Add (choosing where), add the journal version (for a paper with a
+   * journal reference), relate
    */
   private libraryButtons(
     entry: BrowserEntry,
@@ -268,26 +266,20 @@ export class DetailPane {
   ): HTMLElement {
     const doc = this.doc;
     const buttons = html(doc, "div", "arxiv-browser__detail-actions");
-    const add = (ask: boolean, journalVersion = false) =>
+    const add = (journalVersion: boolean) =>
       button(
         doc,
-        journalVersion
-          ? getString("arxiv-browser-add-journal")
-          : ask
-            ? getString("arxiv-browser-add")
-            : getString("arxiv-browser-add-to", {
-                args: { target: library.defaultTargetName() ?? "" },
-              }),
+        getString(
+          journalVersion ? "arxiv-browser-add-journal" : "arxiv-browser-add",
+        ),
         (event) =>
           library.add(entry, {
-            ask,
             anchor: event.currentTarget as HTMLElement,
             ...(journalVersion ? { journalVersion } : {}),
           }),
       );
-    buttons.append(add(true));
-    if (library.defaultTargetName() !== null) buttons.append(add(false));
-    if (entry.listing.journalRef) buttons.append(add(true, true));
+    buttons.append(add(false));
+    if (entry.listing.journalRef) buttons.append(add(true));
     buttons.append(
       button(doc, getString("arxiv-browser-link"), (event) =>
         library.relate(entry, event.currentTarget as HTMLElement),

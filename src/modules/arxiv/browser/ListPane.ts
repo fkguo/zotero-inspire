@@ -92,9 +92,9 @@ export interface ListPaneOptions {
    */
   onTitleHover?(entry: BrowserEntry, row: HTMLElement): void;
   onTitleLeave?(): void;
-  /** The ticked rows (row keys), as the batch import keeps them */
+  /** The selected rows (row keys), as the batch import keeps them */
   ticked?: ReadonlySet<string>;
-  /** A row's tick box was clicked (it shows the new state) */
+  /** A row's check box was clicked (it shows the new state) */
   onTick?(entry: BrowserEntry, event: MouseEvent): void;
   /** Add a paper not in the library (its mark was clicked) */
   onAdd?(entry: BrowserEntry, anchor: HTMLElement): void;
@@ -673,9 +673,6 @@ export class ListPane {
       row.querySelector(".zinspire-ref-entry__checkbox")?.remove();
     }
     row.querySelector(".zinspire-ref-entry__texkey")?.remove();
-    row
-      .querySelector(".zinspire-ref-entry__checkbox")
-      ?.setAttribute("title", getString("arxiv-browser-row-tick"));
     this.setDotTitle(row, entry);
     this.setLinkTitle(row, entry);
     // The References panel's hint ("click to see the author's papers") does
