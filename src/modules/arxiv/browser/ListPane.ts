@@ -1,10 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ListPane: the arXiv browser's list — the index of the loaded days, the page
 // controls, and one page of papers under the headers of their days and
-// sections (or categories). Rows are the plugin's entry-list rows, built anew
-// for every page (EntryListRenderer without the row pool). Abstracts are
-// shown or hidden per paper; their formulas are rendered once they come into
-// view. The focused paper moves with j / k across page boundaries.
+// sections (or categories). Rows are the plugin's entry-list rows, built for
+// every page (EntryListRenderer without the row pool); when papers arrive,
+// the rows already drawn are kept and the rows in view stay in place.
+// Abstracts are shown or hidden per paper; their formulas are rendered once
+// they come into view. The focused paper moves with j / k across page
+// boundaries.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { FluentMessageId } from "../../../../typings/i10n";
@@ -37,6 +39,12 @@ import { notePaint, noteFormulas, type PaintTime } from "./paintTimes";
 import { button, html } from "./dom";
 import { SECTION_LABELS } from "./SubscriptionEditor";
 
+/** A paper row in view and its distance from the list's top edge */
+interface RowInView {
+  key: string;
+  offset: number;
+}
+
 const SECTION_TAGS: Record<ListingSection, FluentMessageId | null> = {
   new: null,
   cross: "arxiv-browser-section-tag-cross",
@@ -45,7 +53,10 @@ const SECTION_TAGS: Record<ListingSection, FluentMessageId | null> = {
 
 /** How the page is placed after the list changed */
 export type ListUpdate =
-  /** More days arrived, or a day was fetched again: the page stays */
+  /**
+   * Papers arrived (a day, more of a day's categories) or a day was fetched
+   * again: the papers in view stay in place
+   */
   | "keep-page"
   /** The order, filter or page size changed: the focused paper's page */
   | "focus";
@@ -182,6 +193,10 @@ export class ListPane {
 
   /** Show the arranged list */
   setList(arranged: ArrangedList, sort: ListSort, update: ListUpdate): void {
+    // Papers arriving before those in view (more of a day's categories) do
+    // not move them: the page and scroll follow the paper the reader is at
+    const anchor =
+      update === "keep-page" && !this.message ? this.rowInView() : null;
     this.message = null;
     this.arranged = arranged;
     this.sort = sort;
@@ -192,11 +207,15 @@ export class ListPane {
         : -1;
       if (page < 0) this.setFocus(null, false);
       this.page = page >= 0 ? page : 0;
-    } else if (this.focusedKey && !this.focused) {
-      this.setFocus(null, false);
+    } else {
+      if (this.focusedKey && !this.focused) this.setFocus(null, false);
+      const page = anchor
+        ? pageOfEntry(arranged, anchor.key, this.pageSize)
+        : -1;
+      if (page >= 0) this.page = page;
     }
     this.page = Math.min(this.page, pages - 1);
-    this.render(update === "focus" ? "focus" : "keep");
+    this.render(update === "focus" ? "focus" : "keep", anchor);
   }
 
   setPageSize(size: number): void {
@@ -355,15 +374,25 @@ export class ListPane {
 
   /**
    * Draw the page. scroll: "top" of the page, the "focus"ed paper, or "keep"
-   * the scroll position (days arriving while the user reads).
+   * the scroll position (papers arriving while the user reads): `anchor`, the
+   * paper then first in view, stays where it was. On "keep", the rows of
+   * papers drawn before and unchanged are kept (their rendered formulas,
+   * their cards).
    */
-  private render(scroll: "top" | "focus" | "keep"): void {
+  private render(
+    scroll: "top" | "focus" | "keep",
+    anchor?: RowInView | null,
+  ): void {
     if (this.message) return;
     const doc = this.doc;
     const win = doc.defaultView;
     const started = win?.performance.now() ?? 0;
     const scrollTop = this.list.scrollTop;
     this.observer?.disconnect();
+    const drawn =
+      scroll === "keep"
+        ? { rows: new Map(this.rows), entries: new Map(this.rowEntries) }
+        : null;
     this.rows.clear();
     this.rowEntries.clear();
     const context: EntryRenderContext = {
@@ -383,10 +412,20 @@ export class ListPane {
       } else if (block.kind === "group") {
         fragment.append(this.groupHeader(block.group, block.continued));
       } else {
-        const row = this.renderer.createRow(block.entry, context);
-        this.decorate(row, block.entry);
-        this.rows.set(block.entry.id, row);
-        this.rowEntries.set(block.entry.id, block.entry);
+        const key = block.entry.id;
+        const meta = this.metaSuffix(block.entry);
+        let row = drawn?.rows.get(key);
+        if (
+          !row ||
+          drawn!.entries.get(key) !== block.entry ||
+          row.dataset.meta !== meta
+        ) {
+          row = this.renderer.createRow(block.entry, context);
+          row.dataset.meta = meta;
+          this.decorate(row, block.entry);
+        }
+        this.rows.set(key, row);
+        this.rowEntries.set(key, block.entry);
         fragment.append(row);
       }
     }
@@ -410,12 +449,37 @@ export class ListPane {
     );
 
     if (scroll === "keep") {
-      this.list.scrollTop = scrollTop;
+      const row = anchor && this.rows.get(anchor.key);
+      this.list.scrollTop = row
+        ? this.list.scrollTop +
+          row.getBoundingClientRect().top -
+          this.list.getBoundingClientRect().top -
+          anchor.offset
+        : scrollTop;
     } else if (scroll === "focus" && this.focusedKey) {
       this.rows.get(this.focusedKey)?.scrollIntoView({ block: "nearest" });
     } else {
       this.list.scrollTop = 0;
     }
+  }
+
+  /**
+   * The paper row the reader is at, with its distance from the list's top
+   * edge: the focused paper's when it is in view, else the first in view;
+   * null when no row is in view
+   */
+  private rowInView(): RowInView | null {
+    const view = this.list.getBoundingClientRect();
+    const focused = this.focusedKey ? this.rows.get(this.focusedKey) : null;
+    const rect = focused?.getBoundingClientRect();
+    if (rect && rect.bottom > view.top && rect.top < view.bottom) {
+      return { key: this.focusedKey!, offset: rect.top - view.top };
+    }
+    for (const [key, row] of this.rows) {
+      const { top, bottom } = row.getBoundingClientRect();
+      if (bottom > view.top) return { key, offset: top - view.top };
+    }
+    return null;
   }
 
   private dayHeader(day: ListDay, continued: boolean): HTMLElement {
@@ -450,8 +514,11 @@ export class ListPane {
 
     const notes: string[] = [];
     let retry = false;
+    const loading: string[] = [];
     for (const { spec, state } of day.listing.specs) {
-      if (state.state === "failed") {
+      if (state.state === "loading") {
+        loading.push(spec);
+      } else if (state.state === "failed") {
         retry = true;
         notes.push(
           getString("arxiv-browser-day-spec-failed", {
@@ -473,7 +540,14 @@ export class ListPane {
         );
       }
     }
-    if (day.count === 0) {
+    if (loading.length) {
+      // More papers are coming: no "none" or "not complete" yet
+      notes.unshift(
+        getString("arxiv-browser-day-loading", {
+          args: { specs: loading.join(", ") },
+        }),
+      );
+    } else if (day.count === 0) {
       notes.unshift(
         getString(
           day.listing.status === "failed"
@@ -699,7 +773,9 @@ export class ListPane {
         "arxiv-browser__day-chip",
       );
       chip.title = formatDay(date);
-      if (day.listing.status !== "complete") {
+      if (day.listing.specs.some(({ state }) => state.state === "loading")) {
+        chip.textContent = `${chip.textContent} …`;
+      } else if (day.listing.status !== "complete") {
         chip.classList.add("arxiv-browser__day-chip--incomplete");
         chip.textContent = `${chip.textContent} ⚠`;
       }

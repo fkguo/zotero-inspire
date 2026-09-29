@@ -256,7 +256,7 @@ describe("detail pane", () => {
     );
   });
 
-  it("follows the focused paper when its day is fetched again, and shows a mark that comes later", async () => {
+  it("keeps the focused paper's entry when its day is fetched again, and shows a mark that comes later", async () => {
     const lookups: Array<
       (found: ReadonlyMap<string, readonly number[]> | null) => void
     > = [];
@@ -280,6 +280,7 @@ describe("detail pane", () => {
     const detail = root.querySelector(".arxiv-browser__detail")!;
     key(root.querySelector(".arxiv-browser__list")!, "j");
     const before = view.listPane.focused!;
+    const listingBefore = before.listing;
     lookups.shift()!(new Map());
     await flushPromises();
 
@@ -288,9 +289,10 @@ describe("detail pane", () => {
       await clock.advanceBy(1000);
     }
     await flushPromises();
+    // The same entry, with the listing fetched again
     const after = view.listPane.focused!;
-    expect(after).not.toBe(before);
-    expect(after.id).toBe(before.id);
+    expect(after).toBe(before);
+    expect(after.listing).not.toBe(listingBefore);
     expect(view.detail.entry).toBe(after);
     // The library answers for the day fetched again
     lookups.shift()!(new Map([[after.listing.id, [42]]]));

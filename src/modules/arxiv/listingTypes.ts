@@ -182,14 +182,20 @@ export type SpecDayState =
    * has not switched yet, or already switched to a newer listing)
    */
   | { state: "stale"; shownDate: IsoDate }
-  | { state: "failed"; reason: ListingFailureReason; message: string };
+  | { state: "failed"; reason: ListingFailureReason; message: string }
+  /**
+   * Not fetched yet: the day is shown while its categories are fetched one
+   * after another
+   */
+  | { state: "loading" };
 
 /** One announcement day of a subscription */
 export interface DayListing {
   date: IsoDate;
   /**
    * complete: every subscribed category's pages were fetched and passed the
-   * checks; incomplete: some were not; failed: none was
+   * checks; incomplete: some were not (or are still being fetched); failed:
+   * none was
    */
   status: "complete" | "incomplete" | "failed";
   /** Merged entries (only from categories whose state is complete) */

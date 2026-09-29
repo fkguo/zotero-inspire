@@ -377,6 +377,157 @@ describe("arXiv browser: loading", () => {
     );
   });
 
+  it("shows the first category's papers at once, noting the categories still being fetched", async () => {
+    const env = environment();
+    subscribe(["hep-ph", "hep-lat", "nucl-th"]);
+    serveHepPh(env.site);
+    for (const spec of ["hep-lat", "nucl-th"]) {
+      env.site.html(
+        LIST_URL(spec),
+        newPageHtml(spec, "2026-09-25", smallDay(spec, 3)),
+      );
+    }
+    const view = env.open();
+    // hep-ph's /new has come; hep-lat's waits for its turn
+    await env.clock.advanceBy(5000);
+    expect(view.loader.running).toBe(true);
+    expect(rows(env.root)).toHaveLength(50);
+    const header = () => env.root.querySelector(".arxiv-browser__day")!;
+    expect(header().textContent).toContain(
+      msg("arxiv-browser-day-loading", { specs: "hep-lat, nucl-th" }),
+    );
+    expect(header().textContent).not.toContain(
+      msg("arxiv-browser-day-incomplete"),
+    );
+    expect(header().querySelector(".arxiv-browser__retry")).toBeNull();
+    const chip = () =>
+      env.root.querySelector(".arxiv-browser__day-chip")!.textContent!;
+    expect(chip()).toMatch(/ …$/);
+    await env.clock.advanceBy(15000);
+    expect(header().textContent).toContain(
+      msg("arxiv-browser-day-loading", { specs: "nucl-th" }),
+    );
+
+    await env.settle();
+    expect(header().textContent).not.toContain(
+      msg("arxiv-browser-day-loading", { specs: "nucl-th" }),
+    );
+    expect(chip()).not.toMatch(/…|⚠/);
+    expect(view.listPane.entries).toHaveLength(78);
+  });
+
+  it("keeps the rows in view, their rows and library marks when more categories arrive", async () => {
+    const env = environment();
+    subscribe(["hep-ph", "hep-lat"]);
+    serveHepPh(env.site);
+    env.site.html(
+      LIST_URL("hep-lat"),
+      newPageHtml("hep-lat", "2026-09-25", smallDay("hep-lat", 3)),
+    );
+    // The library answers the first lookup only
+    let lookups = 0;
+    const view = env.open({
+      inLibrary: (ids: readonly string[]) =>
+        lookups++
+          ? new Promise(() => undefined)
+          : Promise.resolve(
+              new Map(
+                ids.filter((id) => id === "2609.28544").map((id) => [id, [77]]),
+              ),
+            ),
+    });
+    await env.clock.advanceBy(5000);
+    await flushPromises();
+    const list = env.root.querySelector<HTMLElement>(".arxiv-browser__list")!;
+    // jsdom lays nothing out: headers 20 px and rows 40 px high, one below
+    // the other, in a list 400 px high at the top of the window
+    const top = (element: Element) => {
+      let y = 0;
+      for (const child of list.children) {
+        if (child === element) return y - list.scrollTop;
+        y += child.classList.contains("zinspire-ref-entry") ? 40 : 20;
+      }
+      return NaN;
+    };
+    vi.spyOn(
+      win.HTMLElement.prototype,
+      "getBoundingClientRect",
+    ).mockImplementation(function (this: HTMLElement) {
+      const y = this === list ? 0 : top(this);
+      const height = this === list ? 400 : 40;
+      return { top: y, bottom: y + height } as DOMRect;
+    });
+    const byId = (id: string) =>
+      rows(env.root).find(
+        (row) => row.dataset.entryId === `arxiv-${id}-2026-09-25`,
+      )!;
+    // The reader is at hep-ph's first cross-list, 10 px into its row
+    const reading = byId("2609.22470");
+    list.scrollTop = top(reading) + 10;
+    const marked = byId("2609.28544");
+    const dot = () =>
+      byId("2609.28544")
+        .querySelector(".zinspire-ref-entry__dot")!
+        .getAttribute("data-state");
+    expect(dot()).toBe("local");
+
+    await env.settle();
+    expect(view.listPane.entries).toHaveLength(75);
+    // hep-lat's two new papers came before it: the row stays where it was
+    expect(rows(env.root).indexOf(byId("2609.22470"))).toBe(29);
+    expect(byId("2609.22470")).toBe(reading);
+    expect(reading.getBoundingClientRect().top).toBe(-10);
+    // Rows drawn before are kept, with their marks, before the library
+    // answers again
+    expect(byId("2609.28544")).toBe(marked);
+    expect(dot()).toBe("local");
+    expect(lookups).toBe(2);
+  });
+
+  it("keeps the focused paper in view when more categories push it to the next page", async () => {
+    const env = environment();
+    subscribe(["hep-ph", "hep-lat"]);
+    serveHepPh(env.site);
+    env.site.html(
+      LIST_URL("hep-lat"),
+      newPageHtml("hep-lat", "2026-09-25", smallDay("hep-lat", 3)),
+    );
+    const view = env.open();
+    await env.clock.advanceBy(5000);
+    const list = env.root.querySelector<HTMLElement>(".arxiv-browser__list")!;
+    // Rows 40 px and headers 20 px high, in a list 400 px high
+    const top = (element: Element) => {
+      let y = 0;
+      for (const child of list.children) {
+        if (child === element) return y - list.scrollTop;
+        y += child.classList.contains("zinspire-ref-entry") ? 40 : 20;
+      }
+      return NaN;
+    };
+    vi.spyOn(
+      win.HTMLElement.prototype,
+      "getBoundingClientRect",
+    ).mockImplementation(function (this: HTMLElement) {
+      const y = this === list ? 0 : top(this);
+      const height = this === list ? 400 : 40;
+      return { top: y, bottom: y + height } as DOMRect;
+    });
+    // The last paper of page 1 focused, near the bottom of the view
+    view.listPane.focusPageEnd("last");
+    const focused = view.listPane.focused!;
+    const row = () =>
+      rows(env.root).find((r) => r.dataset.entryId === focused.id);
+    list.scrollTop = top(row()!) - 300;
+    expect(top(row()!)).toBe(300);
+
+    await env.settle();
+    // hep-lat's papers came before it: page 2, the paper where it was
+    expect(view.listPane.currentPage).toBe(1);
+    expect(view.listPane.focused).toBe(focused);
+    expect(row()!.getBoundingClientRect().top).toBe(300);
+    expect(row()!.classList.contains("zinspire-entry-focused")).toBe(true);
+  });
+
   it("says when a day is a cached copy because fetching failed", async () => {
     const env = environment();
     subscribe(["hep-ph"]);

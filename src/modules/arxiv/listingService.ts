@@ -104,6 +104,17 @@ export interface ListingLoadOptions {
   /** Called with each day as soon as it is loaded */
   onDay?: (day: DayListing) => void;
   /**
+   * Called before each request for a day's next category (it may wait
+   * 15 s), with the day as far as fetched: the categories not fetched yet
+   * are in the state "loading". The newest day (from /new) is passed once a
+   * category's page of that day is fetched; an older day only with papers
+   * (a day without any may have had no announcement). The run's next call of this
+   * or `onDay` replaces it (the same day with more categories, or the newer
+   * day when an announcement came while loading); a day not replaced was
+   * cut short by the end of the run.
+   */
+  onPartialDay?: (day: DayListing) => void;
+  /**
    * Fetch the recent index and the /new pages again even when the cached
    * copies are recent enough (the user's "retry", e.g. when the newest
    * listing is still the previous one)
@@ -206,6 +217,18 @@ class Run {
     }
   }
 
+  /** A day as far as fetched (onPartialDay), not once stopped */
+  preview(day: DayListing): void {
+    if (this.signal?.aborted || this.stopped) return;
+    try {
+      this.options.onPartialDay?.(day);
+    } catch (error) {
+      Zotero.debug(
+        `[${config.addonName}] arXiv listing onPartialDay: ${error}`,
+      );
+    }
+  }
+
   result(): ListingLoadResult {
     const result: ListingLoadResult = { days: this.days };
     if (this.stopped) result.stopped = this.stopped;
@@ -272,7 +295,9 @@ export class ListingService {
   ): Promise<ListingLoadResult> {
     const specs = subscriptionPageSpecs(subscription);
     const run = new Run(options);
-    const batch = await this.latestBatch(run, specs, null);
+    const batch = await this.latestBatch(run, specs, null, {
+      preview: () => true,
+    });
     if (batch.date) {
       run.emit(this.dayFromBatch(batch, batch.date, specs));
       this.notePreviousIssue(run, batch.date);
@@ -298,12 +323,17 @@ export class ListingService {
       return run.result();
     }
     let dates = index.dates.slice(0, RECENT_DAYS);
-    const batch = await this.latestBatch(run, specs, dates[0]);
+    const batch = await this.latestBatch(run, specs, dates[0], {
+      preview: () => true,
+    });
     const latest = batch.date ?? dates[0];
     if (latest > dates[0] && !run.stopped) {
       // A newer listing appeared than the index knows: the days in between
       // come from the "next day" links, starting from the index's newest day
-      const between = await this.daysBetween(run, specs, dates[0], latest);
+      // (the newest day is shown while they are fetched)
+      const between = await this.daysBetween(run, specs, dates[0], latest, () =>
+        run.preview(this.dayFromBatch(batch, latest, specs)),
+      );
       dates = [latest, ...between.reverse(), ...dates].slice(0, RECENT_DAYS);
     }
     // The five days are settled only when /new told the newest day (a page
@@ -319,6 +349,7 @@ export class ListingService {
       const { day } = await this.loadPastDay(run, specs, dates[i], {
         batch,
         expectedNextDay: dates[i - 1],
+        preview: true,
       });
       run.emit(day);
     }
@@ -359,15 +390,12 @@ export class ListingService {
       // /new already shows the start day. A cached /new page answers this
       // only when it is recent enough and shows the start day or later.
       const startDay = date;
-      batch = await this.latestBatch(
-        run,
-        specs,
-        latest,
-        (marker) =>
+      batch = await this.latestBatch(run, specs, latest, {
+        reuse: (marker) =>
           !run.refresh &&
           this.isFresh(marker.fetchedAt, marker.date) &&
           marker.date >= startDay,
-      );
+      });
       if (batch.date) latest = batch.date;
       run.newestDay = latest;
       // "Not announced yet" needs every category's /new page
@@ -475,7 +503,10 @@ export class ListingService {
     // than the index right after an announcement)
     let batch: LatestBatch | null = null;
     if (chosen[0] >= latest) {
-      batch = await this.latestBatch(run, specs, latest);
+      // Shown while loading only when it is a chosen day
+      batch = await this.latestBatch(run, specs, latest, {
+        preview: (date) => chosen.includes(date),
+      });
       if (batch.date) latest = batch.date;
     }
     this.notePreviousIssue(run, latest);
@@ -492,6 +523,7 @@ export class ListingService {
       }
       const { day, listings } = await this.loadPastDay(run, specs, date, {
         batch,
+        preview: true,
       });
       const check = await this.checkEmptyDay(run, day, listings, index.dates);
       if (check.shown === "stop") break;
@@ -516,12 +548,9 @@ export class ListingService {
     if (options.latest) {
       // A category whose /new already showed this day keeps its copy; the
       // others are fetched again
-      const batch = await this.latestBatch(
-        run,
-        specs,
-        date,
-        (marker) => marker.date === date,
-      );
+      const batch = await this.latestBatch(run, specs, date, {
+        reuse: (marker) => marker.date === date,
+      });
       if (!batch.date || batch.date === date) {
         run.emit(this.dayFromBatch(batch, date, specs));
         return run.result();
@@ -598,22 +627,24 @@ export class ListingService {
   /**
    * /new of every spec. Specs whose page shows an older listing than the
    * newest one seen (or whose pages changed listing while paging) are fetched
-   * once more.
+   * once more. `reuse`: when a cached /new page will do (default: a recent
+   * enough one); `preview`: the newest day as far as fetched is shown before
+   * each spec's request when `preview` takes its date.
    */
   private async latestBatch(
     run: Run,
     specs: readonly string[],
     knownLatest: IsoDate | null,
-    reuse: (marker: NewPageMarker) => boolean = (marker) =>
-      !run.refresh && this.isFresh(marker.fetchedAt, marker.date),
+    options: {
+      reuse?: (marker: NewPageMarker) => boolean;
+      preview?: (date: IsoDate) => boolean;
+    } = {},
   ): Promise<LatestBatch> {
+    const reuse =
+      options.reuse ??
+      ((marker: NewPageMarker) =>
+        !run.refresh && this.isFresh(marker.fetchedAt, marker.date));
     const results = new Map<string, SpecResult>();
-    for (const spec of specs) {
-      results.set(
-        spec,
-        await this.guarded(run, () => this.fetchNew(run, spec, reuse)),
-      );
-    }
     const newest = () => {
       let date = knownLatest;
       for (const result of results.values()) {
@@ -623,6 +654,27 @@ export class ListingService {
       }
       return date;
     };
+    const { preview } = options;
+    // The newest day as far as fetched, once a category's page of that day
+    // is; `spec`, about to be fetched (again), is loading
+    const showSoFar = (spec: string) => () => {
+      const date = newest();
+      const shown = new Map(results);
+      shown.delete(spec);
+      const fetched = [...shown.values()].some(
+        (result) => result.ok && result.listing.date === date,
+      );
+      if (!date || !fetched || !preview?.(date)) return;
+      run.preview(this.dayFromBatch({ date, results: shown }, date, specs));
+    };
+    for (const spec of specs) {
+      results.set(
+        spec,
+        await this.guarded(run, () =>
+          this.fetchNew(run, spec, reuse, showSoFar(spec)),
+        ),
+      );
+    }
 
     const date = newest();
     for (const spec of specs) {
@@ -633,21 +685,27 @@ export class ListingService {
       if (behind && !run.stopped) {
         results.set(
           spec,
-          await this.guarded(run, () => this.fetchNew(run, spec, () => false)),
+          await this.guarded(run, () =>
+            this.fetchNew(run, spec, () => false, showSoFar(spec)),
+          ),
         );
       }
     }
     return { date: newest(), results };
   }
 
-  /** The day `date` from a batch of /new results */
+  /**
+   * The day `date` from a batch of /new results; specs without a result yet
+   * are loading
+   */
   private dayFromBatch(
     batch: LatestBatch,
     date: IsoDate,
     specs: readonly string[],
   ): DayListing {
     const states = specs.map((spec): DayState => {
-      const result = batch.results.get(spec)!;
+      const result = batch.results.get(spec);
+      if (!result) return { spec, state: { state: "loading" } };
       if (result.ok && result.listing.date !== date) {
         // A cached copy of another day stood in for a failed fetch
         if (result.fetchFailed)
@@ -665,22 +723,46 @@ export class ListingService {
   /**
    * A day older than the newest one: each spec from the batch of /new pages
    * when its page shows this day, else from the cache, else from /catchup.
+   * `preview`: the day as far as fetched is shown before each spec's request.
    */
   private async loadPastDay(
     run: Run,
     specs: readonly string[],
     date: IsoDate,
-    context: { batch?: LatestBatch | null; expectedNextDay?: IsoDate },
+    context: {
+      batch?: LatestBatch | null;
+      expectedNextDay?: IsoDate;
+      preview?: boolean;
+    },
   ): Promise<{ day: DayListing; listings: SpecDayListing[] }> {
     const states: DayState[] = [];
     const listings: SpecDayListing[] = [];
-    for (const spec of specs) {
+    for (const [index, spec] of specs.entries()) {
+      // Only with papers: a day without any may have had no announcement
+      const showSoFar = context.preview
+        ? () => {
+            const day = this.buildDay(
+              date,
+              [
+                ...states,
+                ...specs.slice(index).map(
+                  (rest): DayState => ({
+                    spec: rest,
+                    state: { state: "loading" },
+                  }),
+                ),
+              ],
+              false,
+            );
+            if (day.entries.length) run.preview(day);
+          }
+        : undefined;
       const fromBatch = context.batch?.results.get(spec);
       let result: SpecResult =
         fromBatch?.ok && fromBatch.listing.date === date
           ? fromBatch
           : await this.guarded(run, () =>
-              this.fetchCatchup(run, spec, date, true),
+              this.fetchCatchup(run, spec, date, true, showSoFar),
             );
       const nextDay = result.ok ? result.listing.nextDay : undefined;
       if (
@@ -822,12 +904,16 @@ export class ListingService {
     return null;
   }
 
-  /** The announcement days strictly between `from` and `to`, oldest first */
+  /**
+   * The announcement days strictly between `from` and `to`, oldest first;
+   * `beforeRequest` is called before each request
+   */
   private async daysBetween(
     run: Run,
     specs: readonly string[],
     from: IsoDate,
     to: IsoDate,
+    beforeRequest?: () => void,
   ): Promise<IsoDate[]> {
     const days: IsoDate[] = [];
     let date = from;
@@ -845,7 +931,7 @@ export class ListingService {
           break;
         }
         const result = await this.guarded(run, () =>
-          this.fetchCatchup(run, spec, date, false),
+          this.fetchCatchup(run, spec, date, false, beforeRequest),
         );
         // Only a page just fetched shows the current link
         if (result.ok && !result.fetchFailed) {
@@ -935,12 +1021,14 @@ export class ListingService {
 
   /**
    * A spec's /new pages; the cached copy is used instead when `reuse` says
-   * the time and date it was fetched with are good enough
+   * the time and date it was fetched with are good enough. `beforeRequest`
+   * is called when the pages are to be requested.
    */
   private async fetchNew(
     run: Run,
     spec: string,
     reuse: (marker: NewPageMarker) => boolean,
+    beforeRequest?: () => void,
   ): Promise<SpecResult> {
     const marker = await this.store.getNewMarker(spec);
     const cached =
@@ -950,6 +1038,7 @@ export class ListingService {
     if (cached && marker && reuse(marker)) {
       return { ok: true, listing: cached, fromCache: true };
     }
+    beforeRequest?.();
     const fetched = await this.fetchPages(run, spec, { kind: "new" });
     if (fetched.ok) {
       await this.store.putDay(fetched.listing);
@@ -970,17 +1059,22 @@ export class ListingService {
     return fetched;
   }
 
-  /** A spec's /catchup pages of `date`; `reuse`: a cached copy will do */
+  /**
+   * A spec's /catchup pages of `date`; `reuse`: a cached copy will do.
+   * `beforeRequest` is called when the pages are to be requested.
+   */
   private async fetchCatchup(
     run: Run,
     spec: string,
     date: IsoDate,
     reuse: boolean,
+    beforeRequest?: () => void,
   ): Promise<SpecResult> {
     const cached = isWithinRetention(date, this.clock.now())
       ? await this.store.getDay(spec, date)
       : null;
     if (reuse && cached) return { ok: true, listing: cached, fromCache: true };
+    beforeRequest?.();
     const fetched = await this.fetchPages(run, spec, { kind: "catchup", date });
     if (fetched.ok) {
       await this.store.putDay(fetched.listing);

@@ -674,8 +674,17 @@ describe("recent", () => {
       "2026-09-25",
       staleIndex,
     );
-    const result = await clock.run(service.loadRecent(["hep-ph"]));
+    const partial: DayListing[] = [];
+    const result = await clock.run(
+      service.loadRecent(["hep-ph"], {
+        onPartialDay: (day) => partial.push(day),
+      }),
+    );
     expect(result.days.map((day) => day.date)).toEqual(INDEX);
+    // Friday is shown while the links are fetched
+    expect(partial.map((day) => `${day.date} ${day.status}`)).toEqual([
+      "2026-09-25 complete",
+    ]);
     // Thursday was found from Wednesday's page; no page was fetched twice
     expect(new Set(site.sent.map((request) => request.url)).size).toBe(
       site.sent.length,
@@ -1594,6 +1603,207 @@ describe("cancellation", () => {
     expect(site.sent[1].end).toBe(Date.parse(SUNDAY_AFTERNOON) + 16000);
     expect(result.days).toEqual([]);
     expect(result.stopped?.reason).toBe("cancelled");
+  });
+});
+
+describe("a day shown while its categories are fetched", () => {
+  const SPECS = ["hep-ph", "hep-th", "hep-lat"];
+  const states = (day: DayListing) =>
+    day.specs.map(({ spec, state }) => `${spec} ${state.state}`);
+
+  it("is passed before each further category's request, with the categories fetched so far", async () => {
+    const { clock, site, service } = setup();
+    serveDays(site, SPECS, [], "2026-09-25");
+    const partial: Array<{ at: number; day: DayListing }> = [];
+    const result = await clock.run(
+      service.loadNew(SPECS, {
+        onPartialDay: (day) => partial.push({ at: clock.now(), day }),
+      }),
+    );
+    expect(partial.map(({ day }) => states(day))).toEqual([
+      ["hep-ph complete", "hep-th loading", "hep-lat loading"],
+      ["hep-ph complete", "hep-th complete", "hep-lat loading"],
+    ]);
+    expect(partial.map(({ day }) => [day.date, day.entries.length])).toEqual([
+      ["2026-09-25", 4],
+      ["2026-09-25", 8],
+    ]);
+    expect(partial.map(({ day }) => day.status)).toEqual([
+      "incomplete",
+      "incomplete",
+    ]);
+    // Each before the request that waits for its turn, not after it
+    expect(site.sent).toHaveLength(3);
+    expect(partial[0].at).toBeLessThanOrEqual(site.sent[1].start);
+    expect(partial[0].at).toBeGreaterThanOrEqual(site.sent[0].end!);
+    expect(partial[1].at).toBeLessThanOrEqual(site.sent[2].start);
+    expect(summary(result.days)).toEqual(["2026-09-25 complete 12"]);
+  });
+
+  it("is passed for the newest day once a category is fetched, also without papers, and not from the cache", async () => {
+    const { clock, site, service } = setup();
+    serveDays(site, SPECS, [], "2026-09-25");
+    // hep-ph had no papers that day
+    site.html(LIST_URL("hep-ph"), newPageHtml("hep-ph", "2026-09-25", []));
+    const partial: DayListing[] = [];
+    await clock.run(
+      service.loadNew(SPECS, { onPartialDay: (day) => partial.push(day) }),
+    );
+    expect(partial.map((day) => [...states(day), day.entries.length])).toEqual([
+      ["hep-ph complete", "hep-th loading", "hep-lat loading", 0],
+      ["hep-ph complete", "hep-th complete", "hep-lat loading", 4],
+    ]);
+    partial.length = 0;
+    const again = await clock.run(
+      service.loadNew(SPECS, { onPartialDay: (day) => partial.push(day) }),
+    );
+    expect(site.sent).toHaveLength(3);
+    expect(partial).toEqual([]);
+    expect(summary(again.days)).toEqual(["2026-09-25 complete 8"]);
+  });
+
+  it("is passed for the newest day only once a category's page of that day is fetched", async () => {
+    const { clock, site, service } = setup();
+    serveDays(site, SPECS, INDEX.slice(1).reverse(), "2026-09-25");
+    // hep-ph's /new fails: the index's Friday is not shown on that alone
+    site.page(LIST_URL("hep-ph"), { status: 500, text: "error" });
+    const partial: DayListing[] = [];
+    await clock.run(
+      service.loadRecent(SPECS, { onPartialDay: (day) => partial.push(day) }),
+    );
+    expect(
+      partial.filter((day) => day.date === "2026-09-25").map(states),
+    ).toEqual([["hep-ph failed", "hep-th complete", "hep-lat loading"]]);
+  });
+
+  it("is passed for an older day only once it has papers", async () => {
+    const { clock, site, service } = setup();
+    serveDays(site, SPECS, INDEX.slice(1).reverse(), "2026-09-25");
+    // hep-ph had no papers on 23 September
+    site.html(
+      CATCHUP_URL("hep-ph", "2026-09-23"),
+      catchupPageHtml("hep-ph", "2026-09-23", [], NEXT["2026-09-23"]),
+    );
+    const partial: DayListing[] = [];
+    await clock.run(
+      service.loadDays(SPECS, ["2026-09-23"], {
+        onPartialDay: (day) => partial.push(day),
+      }),
+    );
+    expect(partial.map(states)).toEqual([
+      ["hep-ph complete", "hep-th complete", "hep-lat loading"],
+    ]);
+  });
+
+  it("is passed for each of the last five days, and for chosen days only", async () => {
+    const { clock, site, service } = setup();
+    serveDays(
+      site,
+      ["hep-ph", "hep-th"],
+      INDEX.slice(1).reverse(),
+      "2026-09-25",
+    );
+    const partial: string[] = [];
+    const shown: string[] = [];
+    await clock.run(
+      service.loadRecent(["hep-ph", "hep-th"], {
+        onPartialDay: (day) => partial.push(day.date),
+        onDay: (day) => shown.push(day.date),
+      }),
+    );
+    expect(partial).toEqual(INDEX);
+    expect(shown).toEqual(INDEX);
+
+    // Monday is not announced yet: /new's Friday is not shown while loading
+    const other = setup();
+    serveDays(
+      other.site,
+      ["hep-ph", "hep-th"],
+      INDEX.slice(1).reverse(),
+      "2026-09-25",
+    );
+    const chosen: string[] = [];
+    const result = await other.clock.run(
+      other.service.loadDays(
+        ["hep-ph", "hep-th"],
+        ["2026-09-28", "2026-09-23"],
+        {
+          onPartialDay: (day) => chosen.push(day.date),
+        },
+      ),
+    );
+    expect(chosen).toEqual(["2026-09-23"]);
+    expect(result.days.map((day) => day.date)).toEqual(["2026-09-23"]);
+  });
+
+  it("is passed with the newer day before a category is fetched again after an announcement", async () => {
+    const { clock, site, service } = setup("2026-09-28T00:10:00Z");
+    site.page(LIST_URL("hep-ph"), (attempt) => ({
+      text:
+        attempt === 1
+          ? newPageHtml("hep-ph", "2026-09-25", smallDay("hep-ph"))
+          : newPageHtml("hep-ph", "2026-09-28", smallDay("hep-ph")),
+    }));
+    site.html(
+      LIST_URL("hep-th"),
+      newPageHtml("hep-th", "2026-09-28", smallDay("hep-th")),
+    );
+    const partial: DayListing[] = [];
+    const result = await clock.run(
+      service.loadNew(["hep-ph", "hep-th"], {
+        onPartialDay: (day) => partial.push(day),
+      }),
+    );
+    expect(partial.map((day) => [day.date, ...states(day)])).toEqual([
+      ["2026-09-25", "hep-ph complete", "hep-th loading"],
+      ["2026-09-28", "hep-ph loading", "hep-th complete"],
+    ]);
+    expect(summary(result.days)).toEqual(["2026-09-28 complete 8"]);
+  });
+
+  it("is passed with the newer day before a category is fetched again, also when the newer day has no papers yet", async () => {
+    const { clock, site, service } = setup("2026-09-28T00:10:00Z");
+    site.page(LIST_URL("hep-ph"), (attempt) => ({
+      text:
+        attempt === 1
+          ? newPageHtml("hep-ph", "2026-09-25", smallDay("hep-ph"))
+          : newPageHtml("hep-ph", "2026-09-28", smallDay("hep-ph")),
+    }));
+    // cs.GL had no papers on Monday
+    site.html(LIST_URL("cs.GL"), newPageHtml("cs.GL", "2026-09-28", []));
+    const partial: DayListing[] = [];
+    await clock.run(
+      service.loadNew(["hep-ph", "cs.GL"], {
+        onPartialDay: (day) => partial.push(day),
+      }),
+    );
+    expect(
+      partial.map((day) => [day.date, ...states(day), day.entries.length]),
+    ).toEqual([
+      ["2026-09-25", "hep-ph complete", "cs.GL loading", 4],
+      ["2026-09-28", "hep-ph loading", "cs.GL complete", 0],
+    ]);
+  });
+
+  it("is not passed once arXiv refused", async () => {
+    const { clock, site, service } = setup();
+    serveDays(site, SPECS, [], "2026-09-25");
+    site.page(LIST_URL("hep-th"), { status: 403 });
+    const partial: DayListing[] = [];
+    const result = await clock.run(
+      service.loadNew(SPECS, { onPartialDay: (day) => partial.push(day) }),
+    );
+    expect(partial.map(states)).toEqual([
+      ["hep-ph complete", "hep-th loading", "hep-lat loading"],
+    ]);
+    expect(site.sent).toHaveLength(2);
+    expect(result.stopped?.reason).toBe("forbidden");
+    // The day itself still comes, with the categories not fetched
+    expect(states(result.days[0])).toEqual([
+      "hep-ph complete",
+      "hep-th failed",
+      "hep-lat failed",
+    ]);
   });
 });
 

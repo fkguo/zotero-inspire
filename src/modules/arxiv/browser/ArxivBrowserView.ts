@@ -39,6 +39,7 @@ import {
   arrangeList,
   filterGroups,
   LIST_SORTS,
+  rowKey,
   toBrowserEntry,
   type BrowserEntry,
   type ListSort,
@@ -180,6 +181,8 @@ export class ArxivBrowserView {
   private countdown: number | undefined;
   private readonly stopFollowing: () => void;
   private readonly entriesOfDay = new WeakMap<DayListing, BrowserEntry[]>();
+  /** The papers of the listing loaded, by row key */
+  private readonly entryByKey = new Map<string, BrowserEntry>();
   /** Days whose papers were looked up in the library since it last changed */
   private checkedDays = new WeakSet<DayListing>();
   /** Counts the library's changes: a lookup older than one is not written */
@@ -498,6 +501,7 @@ export class ArxivBrowserView {
   private load(): void {
     const subscription = this.subscription;
     if (!subscription) return;
+    this.entryByKey.clear();
     this.loadedCategories = subscription.categories.join(" ");
     void this.loader.load(subscription, this.selection);
   }
@@ -515,11 +519,26 @@ export class ArxivBrowserView {
     void this.markLibraryPapers();
   }
 
-  /** The entries of a day, built once */
+  /**
+   * The entries of a day, built once. A paper listed before (its day shown
+   * again with more categories, or fetched again) keeps its entry, with the
+   * new listing: its marks, focus and cards stay.
+   */
   private entriesOf = (day: DayListing): BrowserEntry[] => {
     let entries = this.entriesOfDay.get(day);
     if (!entries) {
-      entries = day.entries.map(toBrowserEntry);
+      entries = day.entries.map((listing) => {
+        const known = this.entryByKey.get(
+          rowKey(listing.id, listing.announceDate),
+        );
+        if (known) {
+          known.listing = listing;
+          return known;
+        }
+        const entry = toBrowserEntry(listing);
+        this.entryByKey.set(entry.id, entry);
+        return entry;
+      });
       this.entriesOfDay.set(day, entries);
     }
     return entries;
@@ -546,10 +565,10 @@ export class ArxivBrowserView {
       categories: this.categories,
     });
     this.listPane.setList(list, this.sort, update);
-    // A day loaded again (a retry, Continue) brings new objects for its
-    // papers: the detail pane follows the focused paper's
     const focused = this.listPane.focused;
     if (focused && focused !== this.detail.entry) this.detail.show(focused);
+    // More of the day's categories may list the paper shown
+    else this.detail.refreshSections();
   }
 
   private setSection(section: ListingSection, shown: boolean): void {

@@ -118,6 +118,7 @@ export type FluentMessageId =
   | 'arxiv-browser-day-failed'
   | 'arxiv-browser-day-filtered'
   | 'arxiv-browser-day-incomplete'
+  | 'arxiv-browser-day-loading'
   | 'arxiv-browser-day-no-match'
   | 'arxiv-browser-day-none-chosen'
   | 'arxiv-browser-day-none-shown'

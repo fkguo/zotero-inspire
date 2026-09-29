@@ -552,6 +552,168 @@ describe("arXiv browser loading", () => {
   });
 });
 
+describe("a day shown while its categories are fetched", () => {
+  const three = { ...hepPh, categories: ["hep-ph", "hep-th", "hep-lat"] };
+  const states = (loader: ListingLoader) =>
+    loader.days.map((d) =>
+      d.specs.map(({ spec, state }) => `${spec} ${state.state}`).join(", "),
+    );
+
+  /** hep-th and hep-lat like hep-ph: /new of 25 Sep and the days before */
+  function serveOthers(site: ReturnType<typeof setup>["site"]) {
+    for (const spec of ["hep-th", "hep-lat"]) {
+      site.html(LIST_URL(spec), newPageHtml(spec, "2026-09-25", day(spec)));
+      for (const date of DAYS) {
+        site.html(
+          CATCHUP_URL(spec, date),
+          catchupPageHtml(spec, date, day(spec), NEXT[date] ?? null),
+        );
+      }
+    }
+  }
+
+  it("fills the day in its place as its categories arrive", async () => {
+    const { clock, site, loader } = setup();
+    serveOthers(site);
+    const done = loader.load(three, { kind: "newest" });
+    // hep-ph's /new has come; hep-th's waits for its turn
+    await clock.advanceBy(5000);
+    expect(dates(loader)).toEqual(["2026-09-25"]);
+    expect(states(loader)).toEqual([
+      "hep-ph complete, hep-th loading, hep-lat loading",
+    ]);
+    expect(loader.days[0].entries).toHaveLength(2);
+    await clock.advanceBy(15000);
+    expect(states(loader)).toEqual([
+      "hep-ph complete, hep-th complete, hep-lat loading",
+    ]);
+    await clock.run(done);
+    expect(dates(loader)).toEqual(["2026-09-25"]);
+    expect(loader.days[0].status).toBe("complete");
+    expect(loader.days[0].entries).toHaveLength(6);
+  });
+
+  it("keeps a day cut short by Cancel, the categories not fetched marked, and a retry fetches them", async () => {
+    const { clock, site, loader } = setup();
+    serveOthers(site);
+    const done = loader.load(three, { kind: "newest" });
+    await clock.advanceBy(5000);
+    loader.cancel();
+    await clock.run(done);
+    expect(loader.running).toBe(false);
+    expect(loader.days.map((d) => d.status)).toEqual(["incomplete"]);
+    expect(states(loader)).toEqual([
+      "hep-ph complete, hep-th failed, hep-lat failed",
+    ]);
+    expect(loader.days[0].specs[1].state).toMatchObject({
+      state: "failed",
+      reason: "cancelled",
+    });
+    expect(loader.days[0].entries).toHaveLength(2);
+
+    await clock.run(loader.retryDay("2026-09-25"));
+    expect(states(loader)).toEqual([
+      "hep-ph complete, hep-th complete, hep-lat complete",
+    ]);
+    expect(site.count(LIST_URL("hep-ph"))).toBe(1);
+  });
+
+  it("puts the newer day in place of the day shown when an announcement comes while loading", async () => {
+    // Sunday 20:10 in New York: Monday's listing is being announced
+    const { clock, site, loader } = setup("2026-09-28T00:10:00Z");
+    serveOthers(site);
+    site.page(LIST_URL("hep-ph"), (attempt) => ({
+      text:
+        attempt === 1
+          ? newPageHtml("hep-ph", "2026-09-25", day("hep-ph"))
+          : newPageHtml("hep-ph", "2026-09-28", day("hep-ph")),
+    }));
+    for (const spec of ["hep-th", "hep-lat"]) {
+      site.html(LIST_URL(spec), newPageHtml(spec, "2026-09-28", day(spec)));
+    }
+    const done = loader.load(three, { kind: "newest" });
+    await clock.advanceBy(5000);
+    expect(dates(loader)).toEqual(["2026-09-25"]);
+    await clock.run(done);
+    expect(dates(loader)).toEqual(["2026-09-28"]);
+    expect(loader.days[0].status).toBe("complete");
+  });
+
+  it("shows the newer day while a category is fetched again after an announcement, also when cancelled then", async () => {
+    // Sunday 20:10 in New York: Monday's listing is being announced
+    const { clock, site, loader } = setup("2026-09-28T00:10:00Z");
+    site.page(LIST_URL("hep-ph"), (attempt) => ({
+      text:
+        attempt === 1
+          ? newPageHtml("hep-ph", "2026-09-25", day("hep-ph"))
+          : newPageHtml("hep-ph", "2026-09-28", day("hep-ph")),
+    }));
+    site.html(
+      LIST_URL("hep-th"),
+      newPageHtml("hep-th", "2026-09-28", day("hep-th")),
+    );
+    const two = { ...hepPh, categories: ["hep-ph", "hep-th"] };
+    const done = loader.load(two, { kind: "newest" });
+    await clock.advanceBy(5000);
+    expect(dates(loader)).toEqual(["2026-09-25"]);
+    // hep-th showed Monday; hep-ph waits to be fetched again
+    await clock.advanceBy(15000);
+    expect(dates(loader)).toEqual(["2026-09-28"]);
+    expect(states(loader)).toEqual(["hep-ph loading, hep-th complete"]);
+    loader.cancel();
+    await clock.run(done);
+    expect(dates(loader)).toEqual(["2026-09-28"]);
+    expect(states(loader)).toEqual(["hep-ph failed, hep-th complete"]);
+    expect(site.count(LIST_URL("hep-ph"))).toBe(1);
+  });
+
+  it("shows the newer day when cancelled while a category is fetched again, also when the newer day has no papers yet", async () => {
+    const { clock, site, loader } = setup("2026-09-28T00:10:00Z");
+    site.page(LIST_URL("hep-ph"), (attempt) => ({
+      text:
+        attempt === 1
+          ? newPageHtml("hep-ph", "2026-09-25", day("hep-ph"))
+          : newPageHtml("hep-ph", "2026-09-28", day("hep-ph")),
+    }));
+    site.html(LIST_URL("cs.GL"), newPageHtml("cs.GL", "2026-09-28", []));
+    const done = loader.load(
+      { ...hepPh, categories: ["hep-ph", "cs.GL"] },
+      { kind: "newest" },
+    );
+    await clock.advanceBy(20000);
+    expect(dates(loader)).toEqual(["2026-09-28"]);
+    loader.cancel();
+    await clock.run(done);
+    expect(dates(loader)).toEqual(["2026-09-28"]);
+    expect(states(loader)).toEqual(["hep-ph failed, cs.GL complete"]);
+    expect(loader.days[0].entries).toEqual([]);
+  });
+
+  it("continues a chosen day cut short by Cancel in its place", async () => {
+    const { clock, site, loader } = setup();
+    serveOthers(site);
+    const two = { ...hepPh, categories: ["hep-ph", "hep-th"] };
+    const picked = {
+      kind: "days" as const,
+      dates: ["2026-09-23", "2026-09-24"],
+    };
+    const done = loader.load(two, picked);
+    // The index at 0 s, 24 Sep at 15 and 30 s, hep-ph of 23 Sep at 45 s
+    await clock.advanceBy(50000);
+    expect(states(loader)).toEqual([
+      "hep-ph complete, hep-th complete",
+      "hep-ph complete, hep-th loading",
+    ]);
+    loader.cancel();
+    await clock.run(done);
+    expect(loader.canContinue).toBe(true);
+    await clock.run(loader.continueLoading());
+    expect(dates(loader)).toEqual(["2026-09-24", "2026-09-23"]);
+    expect(loader.days.map((d) => d.status)).toEqual(["complete", "complete"]);
+    expect(site.count(CATCHUP_URL("hep-ph", "2026-09-23"))).toBe(1);
+  });
+});
+
 describe("this week", () => {
   it("is Monday to the newest scheduled listing, in New York's announcement calendar", () => {
     // Sunday 13:00 in New York: Friday's listing is the newest

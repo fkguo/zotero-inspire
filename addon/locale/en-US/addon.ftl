@@ -821,6 +821,7 @@ arxiv-browser-day-none-chosen = None on the chosen categories' pages.
 arxiv-browser-day-no-match = None matches the filter.
 arxiv-browser-day-failed = This day was not fetched.
 arxiv-browser-day-incomplete = This day was not fetched completely.
+arxiv-browser-day-loading = Still fetching: { $specs } …
 arxiv-browser-day-spec-failed = { $spec }: { $reason }
 arxiv-browser-day-spec-stale = { $spec }: arXiv still shows { $date }
 arxiv-browser-day-spec-cached = { $spec }: copy from the cache (fetching failed: { $reason })

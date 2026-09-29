@@ -9,7 +9,7 @@ import type { FluentMessageId } from "../../../../typings/i10n";
 import { getString } from "../../../utils/locale";
 import { renderMathContent } from "../../inspire/mathRenderer";
 import { ARXIV_ARCHIVES, arxivCategory } from "../arxivCategories";
-import type { ListingSection } from "../listingTypes";
+import type { ListingSection, ListingStream } from "../listingTypes";
 import { abstractPageUrl, type BrowserActions } from "./browserActions";
 import type { BrowserEntry } from "./browserList";
 import { formatDay } from "./browserText";
@@ -44,9 +44,22 @@ function categoryName(name: string): string | undefined {
   );
 }
 
+/** Where a paper was announced: its category pages and their sections */
+function sectionsText(streams: readonly ListingStream[]): string {
+  return streams
+    .map((stream) =>
+      getString(SECTION_NAMES[stream.section], {
+        args: { category: stream.category },
+      }),
+    )
+    .join("; ");
+}
+
 export class DetailPane {
   private readonly doc: Document;
   private shown: BrowserEntry | null = null;
+  /** The line of the sections the paper shown was announced in */
+  private sections: HTMLElement | null = null;
 
   constructor(private readonly options: DetailPaneOptions) {
     this.doc = options.container.ownerDocument;
@@ -58,12 +71,23 @@ export class DetailPane {
     return this.shown;
   }
 
+  /**
+   * Its sections line again, when more of the day's categories list the
+   * paper shown (the rest of the pane, a selection in it, stays)
+   */
+  refreshSections(): void {
+    if (!this.shown || !this.sections) return;
+    const text = sectionsText(this.shown.listing.streams);
+    if (this.sections.textContent !== text) this.sections.textContent = text;
+  }
+
   show(entry: BrowserEntry | null): void {
     const container = this.options.container;
     // The same paper shown again (a mark arrived) keeps its scroll position
     const scroll =
       entry && this.shown?.id === entry.id ? container.scrollTop : 0;
     this.shown = entry;
+    this.sections = null;
     const doc = this.doc;
     if (!entry) {
       container.replaceChildren(
@@ -150,14 +174,9 @@ export class DetailPane {
       doc,
       "div",
       "arxiv-browser__detail-line arxiv-browser__detail-quiet",
-      listing.streams
-        .map((stream) =>
-          getString(SECTION_NAMES[stream.section], {
-            args: { category: stream.category },
-          }),
-        )
-        .join("; "),
+      sectionsText(listing.streams),
     );
+    this.sections = where;
 
     const parts: HTMLElement[] = [title, authors, identity, categories, where];
     if (listing.comments) {

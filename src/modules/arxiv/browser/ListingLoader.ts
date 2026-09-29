@@ -2,7 +2,9 @@
 // ListingLoader: runs the ListingService for the arXiv browser, one run at a
 // time — loading the chosen days, retrying one day, or going on with the days
 // a run that stopped had not loaded. The days arrive one by one, newest
-// first; a new load cancels the run before it and starts from an empty list.
+// first, each shown as soon as its first categories are fetched and filled
+// in as the others arrive; a new load cancels the run before it and starts
+// from an empty list.
 //
 //   newest  the newest announcement day (arXiv's /new pages)
 //   recent  the last five announcement days
@@ -74,6 +76,11 @@ export class ListingLoader {
   private pending: IsoDate[] | undefined;
   /** The newest announcement day the runs of the choice found */
   private newestDay: IsoDate | undefined;
+  /**
+   * The place in the list of the day shown while its categories are fetched:
+   * the run's next day takes it
+   */
+  private partial: number | null = null;
 
   constructor(
     private readonly service: ListingService,
@@ -130,6 +137,7 @@ export class ListingLoader {
     this.subscription = subscription;
     this.chosen = selection;
     this.loaded = [];
+    this.partial = null;
     this.report = undefined;
     this.withoutAnnouncement.clear();
     this.newestDay = undefined;
@@ -191,6 +199,7 @@ export class ListingLoader {
         signal: run.controller?.signal,
         newestDay,
         onDay: (day) => this.receive(run, day),
+        onPartialDay: (day) => this.receive(run, day, true),
       });
     } catch (error) {
       result = this.failed(error);
@@ -220,6 +229,7 @@ export class ListingLoader {
       signal: run.controller?.signal,
       refresh,
       onDay: (day: DayListing) => this.receive(run, day),
+      onPartialDay: (day: DayListing) => this.receive(run, day, true),
     };
     try {
       if (this.chosen.kind === "newest") {
@@ -261,21 +271,47 @@ export class ListingLoader {
   }
 
   /**
-   * A day of the current run arrived: add it, or replace it (a retry). Days
-   * arrive newest first, and a continuation brings only days older than those
-   * listed, so the list stays newest first.
+   * A day of the current run arrived (`partial`: as far as fetched): add it,
+   * or replace it (a retry, a continuation), or replace the day shown while
+   * its categories were fetched. Days arrive newest first, and a
+   * continuation brings only days older than those listed, so the list stays
+   * newest first.
    */
-  private receive(run: Run, day: DayListing): void {
+  private receive(run: Run, day: DayListing, partial = false): void {
     if (run.generation !== this.generation) return;
-    const index = this.loaded.findIndex((item) => item.date === day.date);
+    let index =
+      this.partial ?? this.loaded.findIndex((item) => item.date === day.date);
     if (index >= 0) this.loaded[index] = day;
-    else this.loaded.push(day);
+    else index = this.loaded.push(day) - 1;
+    this.partial = partial ? index : null;
     this.onChange();
   }
 
   private finish(run: Run, result: ListingLoadResult | undefined): void {
     if (run.generation !== this.generation) return;
     this.run = null;
+    if (this.partial !== null) {
+      // The run ended while the day's categories were fetched: those not
+      // fetched are marked as such, and a retry fetches them
+      const day = this.loaded[this.partial];
+      const reason = result?.stopped?.reason ?? "cancelled";
+      this.loaded[this.partial] = {
+        ...day,
+        specs: day.specs.map((item) =>
+          item.state.state === "loading"
+            ? {
+                spec: item.spec,
+                state: {
+                  state: "failed",
+                  reason,
+                  message: "Not requested: loading stopped",
+                },
+              }
+            : item,
+        ),
+      };
+      this.partial = null;
+    }
     for (const date of result?.noAnnouncementDays ?? []) {
       this.withoutAnnouncement.add(date);
     }

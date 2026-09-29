@@ -788,6 +788,7 @@ arxiv-browser-day-none-chosen = 所选分类当天没有论文。
 arxiv-browser-day-no-match = 没有论文符合过滤条件。
 arxiv-browser-day-failed = 该日未能获取。
 arxiv-browser-day-incomplete = 该日未完整获取。
+arxiv-browser-day-loading = 仍在获取：{ $specs }……
 arxiv-browser-day-spec-failed = { $spec }：{ $reason }
 arxiv-browser-day-spec-stale = { $spec }：arXiv 仍显示 { $date }
 arxiv-browser-day-spec-cached = { $spec }：缓存副本（获取失败：{ $reason }）
