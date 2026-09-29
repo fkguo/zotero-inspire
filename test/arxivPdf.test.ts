@@ -176,6 +176,24 @@ describe("attaching a paper's arXiv PDF", () => {
     expect(importFromFile).not.toHaveBeenCalled();
   });
 
+  it("attaches nothing, and removes the file, when cancelled while the file is written", async () => {
+    const controller = new AbortController();
+    const write = (globalThis as any).IOUtils.write;
+    (globalThis as any).IOUtils.write = async (path: string, bytes: any) => {
+      await write(path, bytes);
+      controller.abort();
+    };
+    expect(
+      await attachArxivPdf(item, SOURCE, {
+        scheduler,
+        signal: controller.signal,
+      }),
+    ).toMatchObject({ status: "failed", reason: "cancelled" });
+    expect(importFromFile).not.toHaveBeenCalled();
+    expect(dirs.size).toBe(0);
+    expect(files.size).toBe(0);
+  });
+
   it("asks nothing for an item of a library that does not allow files", async () => {
     filesEditable = false;
     expect(await attachArxivPdf(item, SOURCE, { scheduler })).toMatchObject({

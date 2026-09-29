@@ -126,6 +126,26 @@ describe("adding a paper from the References panel", () => {
     expect(toasts).toEqual(["references-panel-toast-added"]);
   });
 
+  it("saves nothing, and says nothing, when a batch import is cancelled while INSPIRE is asked", async () => {
+    const controller = new AbortController();
+    // A cancel ends the request: fetchInspireMetaByRecid then gives -1
+    mocks.fetchMeta.mockImplementation(
+      async (_recid: string, signal: AbortSignal) => {
+        controller.abort();
+        return signal?.aborted ? -1 : { recid: "2800001" };
+      },
+    );
+    const item = await panel().importReference(
+      "2800001",
+      TARGET,
+      controller.signal,
+    );
+    expect(mocks.fetchMeta.mock.calls[0][1]).toBe(controller.signal);
+    expect(item).toBeNull();
+    expect(FakeNewItem.created).toEqual([]);
+    expect(toasts).toEqual([]);
+  });
+
   it("adds nothing when INSPIRE gives no record", async () => {
     mocks.fetchMeta.mockResolvedValue(-1);
     const item = await panel().importReference("2800001", TARGET);

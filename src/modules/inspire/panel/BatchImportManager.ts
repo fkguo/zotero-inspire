@@ -12,6 +12,8 @@ import {
   createMockSignal,
 } from "../index";
 import type { SaveTargetSelection } from "../../pickerUI";
+import type { AddPaperOutcome } from "../../arxiv/addToLibrary";
+import type { ArxivPdfResult } from "../../arxiv/arxivPdf";
 import { LibraryIndexError } from "../library/arxivIndex";
 import {
   duplicateInfo,
@@ -76,10 +78,42 @@ export function groupByPaper(
   return papers;
 }
 
+/** A paper added by a batch import */
+export interface AddedPaper {
+  /** Its selected rows */
+  entries: InspireReferenceEntry[];
+  outcome: Extract<AddPaperOutcome, { status: "added" }>;
+  /** How attaching its arXiv PDF ended, when one was attached */
+  pdf?: ArxivPdfResult;
+}
+
+/** A paper a batch import did not add, and why */
+export interface NotAddedPaper {
+  /** Its selected rows */
+  entries: InspireReferenceEntry[];
+  outcome: Exclude<AddPaperOutcome, { status: "added" }>;
+}
+
 /** The name of a library, as Zotero shows it */
 function libraryName(libraryID: number): string {
   const library = Zotero.Libraries.get(libraryID) as { name?: string } | false;
   return (library && library.name) || `Library ${libraryID}`;
+}
+
+/** A paper skipped in the duplicate dialog: in the library already */
+function skippedPaper(
+  paper: SelectedPaper,
+  info: DuplicateInfo | undefined,
+): NotAddedPaper {
+  const hits = info?.hits ?? [];
+  return {
+    entries: paper.entries,
+    outcome: {
+      status: "inLibrary",
+      hits,
+      doiOnly: hits.every((hit) => hit.by.every((by) => by === "doi")),
+    },
+  };
 }
 
 /**
@@ -87,8 +121,16 @@ function libraryName(libraryID: number): string {
  */
 export interface BatchImportResult {
   success: number;
+  /** Papers not added for another reason than the cancel */
   failed: number;
   cancelled: boolean;
+  /** The papers added, in list order */
+  added: AddedPaper[];
+  /**
+   * The papers not added, in list order: those the cancel stopped, and those
+   * skipped in the duplicate dialog (as in the library), included
+   */
+  notAdded: NotAddedPaper[];
 }
 
 /**
@@ -111,11 +153,32 @@ export interface BatchImportManagerOptions {
   getAllEntries: () => InspireReferenceEntry[];
   /** Callback to get filtered entries (current view) */
   getFilteredEntries: () => InspireReferenceEntry[];
-  /** Callback to import a single reference by recid */
-  importReference: (
-    recid: string,
+  /**
+   * Whether a selected row can be imported (default: it has an INSPIRE
+   * record)
+   */
+  canImport?: (entry: InspireReferenceEntry) => boolean;
+  /**
+   * Called once, before the first paper is imported, with the first row of
+   * every paper to import: what the papers need from the network can be
+   * asked for all of them at once
+   */
+  prepareImport?: (
+    entries: InspireReferenceEntry[],
     target: SaveTargetSelection,
-  ) => Promise<Zotero.Item | null>;
+    signal: AbortSignal,
+  ) => Promise<void>;
+  /**
+   * Import one paper (`entry` is its first selected row) into `target`, a
+   * few at a time. When the user cancels, `signal` aborts: the paper's
+   * requests, waiting or in flight, end, and nothing is saved after that; a
+   * save already under way completes.
+   */
+  importEntry: (
+    entry: InspireReferenceEntry,
+    target: SaveTargetSelection,
+    signal: AbortSignal,
+  ) => Promise<AddPaperOutcome>;
   /** Callback to prompt for save target (shows picker UI) */
   promptForSaveTarget: (
     anchor: HTMLElement,
@@ -301,8 +364,9 @@ export class BatchImportManager {
     }
 
     const allEntries = this.options.getAllEntries();
+    const canImport = this.options.canImport ?? ((e) => !!e.recid);
     const selectedEntries = allEntries.filter(
-      (e) => this.selectedEntryIDs.has(e.id) && e.recid,
+      (e) => this.selectedEntryIDs.has(e.id) && canImport(e),
     );
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: selectedEntries.length=${selectedEntries.length}`,
@@ -379,10 +443,7 @@ export class BatchImportManager {
     // If there are duplicates, show dialog
     let papersToImport = selectedPapers;
     if (duplicates.size > 0) {
-      const result = await this.showDuplicateDialog(
-        selectedPapers,
-        duplicates,
-      );
+      const result = await this.showDuplicateDialog(selectedPapers, duplicates);
       if (!result) {
         return null; // User cancelled
       }
@@ -393,7 +454,16 @@ export class BatchImportManager {
       this.options.reporter.notify(
         getString("references-panel-batch-no-selection"),
       );
-      return null;
+      // Every paper was skipped in the duplicate dialog
+      return {
+        success: 0,
+        failed: 0,
+        cancelled: false,
+        added: [],
+        notAdded: selectedPapers.map((paper) =>
+          skippedPaper(paper, duplicates.get(paper)),
+        ),
+      };
     }
 
     // Prompt for save target
@@ -412,7 +482,12 @@ export class BatchImportManager {
     Zotero.debug(
       `[${config.addonName}] handleBatchImport: starting batch import for ${papersToImport.length} papers`,
     );
-    return this.runBatchImport(papersToImport, target);
+    return this.runBatchImport(
+      selectedPapers,
+      papersToImport,
+      target,
+      duplicates,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -702,16 +777,20 @@ export class BatchImportManager {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Run batch import with progress display.
+   * Run batch import with progress display: import `papers`, of the
+   * `selectedPapers` (the others were skipped in the duplicate dialog).
    */
   private async runBatchImport(
+    selectedPapers: SelectedPaper[],
     papers: SelectedPaper[],
     target: SaveTargetSelection,
+    duplicates: Map<SelectedPaper, DuplicateInfo>,
   ): Promise<BatchImportResult> {
     const total = papers.length;
     let done = 0;
-    let success = 0;
-    let failed = 0;
+    const outcomes: AddPaperOutcome[] = [];
+    const pdfs: Promise<ArxivPdfResult>[] = [];
+    const pdfOf = new Map<number, ArxivPdfResult>();
 
     // Setup cancellation
     this.importAbort = createAbortController();
@@ -737,6 +816,17 @@ export class BatchImportManager {
       }),
     );
 
+    // The list's rows by paper, for writing each outcome to every row showing
+    // the paper
+    const rowsByKey = new Map<string, InspireReferenceEntry[]>();
+    for (const entry of this.options.getAllEntries()) {
+      for (const key of paperKeys(entry)) {
+        const rows = rowsByKey.get(key);
+        if (rows) rows.push(entry);
+        else rowsByKey.set(key, [entry]);
+      }
+    }
+
     // Concurrency limiter
     const CONCURRENCY = 3;
     let index = 0;
@@ -746,20 +836,44 @@ export class BatchImportManager {
         const currentIndex = index++;
         const paper = papers[currentIndex];
 
+        let outcome: AddPaperOutcome;
         try {
-          const newItem = await this.options.importReference(
-            paper.entries[0].recid!,
+          outcome = await this.options.importEntry(
+            paper.entries[0],
             target,
+            signal,
           );
-          if (newItem) {
-            this.markAdded(paper, newItem);
-            success++;
-          } else {
-            failed++;
-          }
         } catch (err) {
           Zotero.debug(`[${config.addonName}] Batch import error: ${err}`);
-          failed++;
+          outcome = signal.aborted
+            ? { status: "cancelled" }
+            : { status: "failed", reason: "save", message: String(err) };
+        }
+        outcomes[currentIndex] = outcome;
+        if (outcome.status === "cancelled") continue;
+        if (outcome.status === "added") {
+          try {
+            this.markAdded(paper, outcome.item, rowsByKey);
+          } catch (err) {
+            Zotero.debug(`[${config.addonName}] Batch import rows: ${err}`);
+          }
+          const pdf = outcome.pdf;
+          if (pdf) {
+            pdfs.push(
+              pdf
+                .catch(
+                  (err): ArxivPdfResult => ({
+                    status: "failed",
+                    reason: "save",
+                    message: String(err),
+                  }),
+                )
+                .then((result) => {
+                  pdfOf.set(currentIndex, result);
+                  return result;
+                }),
+            );
+          }
         }
 
         done++;
@@ -774,57 +888,124 @@ export class BatchImportManager {
     };
 
     try {
+      // Should it fail, each paper's import says why it was not added
+      await this.options
+        .prepareImport?.(
+          papers.map((paper) => paper.entries[0]),
+          target,
+          signal,
+        )
+        .catch((err) =>
+          Zotero.debug(`[${config.addonName}] Batch import: ${err}`),
+        );
       const workers: Promise<void>[] = [];
       for (let i = 0; i < Math.min(CONCURRENCY, papers.length); i++) {
         workers.push(worker());
       }
       await Promise.all(workers);
+      // The PDFs are fetched after the items are saved; Escape still stops
+      // them
+      if (pdfs.length) {
+        let attached = 0;
+        const showPdfs = () =>
+          progress.update(
+            getString("references-panel-batch-attaching-pdfs", {
+              args: { done: attached, total: pdfs.length },
+            }),
+            Math.round((attached / pdfs.length) * 100),
+          );
+        showPdfs();
+        await Promise.all(
+          pdfs.map((pdf) =>
+            pdf.then(() => {
+              attached++;
+              showPdfs();
+            }),
+          ),
+        );
+      }
     } finally {
       panelWindow?.removeEventListener("keydown", escapeHandler, true);
       this.importAbort = undefined;
 
       progress.close();
-
-      // Show result toast
-      if (signal.aborted) {
-        this.options.reporter.notify(
-          getString("references-panel-batch-import-cancelled", {
-            args: { done, total },
-          }),
-        );
-      } else if (failed > 0) {
-        this.options.reporter.notify(
-          getString("references-panel-batch-import-partial", {
-            args: { success, total, failed },
-          }),
-        );
-      } else {
-        this.options.reporter.notify(
-          getString("references-panel-batch-import-success", {
-            args: { count: success },
-          }),
-        );
-      }
-
-      this.updateAllCheckboxes();
-      this.notifySelectionChange();
     }
 
-    return { success, failed, cancelled: signal.aborted };
+    const added: AddedPaper[] = [];
+    const notAdded: NotAddedPaper[] = [];
+    const indexOf = new Map(papers.map((paper, i) => [paper, i]));
+    for (const paper of selectedPapers) {
+      const i = indexOf.get(paper);
+      if (i === undefined) {
+        notAdded.push(skippedPaper(paper, duplicates.get(paper)));
+        continue;
+      }
+      const outcome = outcomes[i] ?? { status: "cancelled" };
+      if (outcome.status === "added") {
+        const pdf = pdfOf.get(i);
+        added.push({
+          entries: paper.entries,
+          outcome,
+          ...(pdf ? { pdf } : {}),
+        });
+      } else {
+        notAdded.push({ entries: paper.entries, outcome });
+      }
+    }
+    const success = added.length;
+    // Of the papers imported, those not added for another reason than the
+    // cancel
+    const failed = outcomes.filter(
+      (o) => o && o.status !== "added" && o.status !== "cancelled",
+    ).length;
+
+    // Show result toast
+    if (signal.aborted) {
+      this.options.reporter.notify(
+        getString("references-panel-batch-import-cancelled", {
+          args: { done, total },
+        }),
+      );
+    } else if (failed > 0) {
+      this.options.reporter.notify(
+        getString("references-panel-batch-import-partial", {
+          args: { success, total, failed },
+        }),
+      );
+    } else {
+      this.options.reporter.notify(
+        getString("references-panel-batch-import-success", {
+          args: { count: success },
+        }),
+      );
+    }
+
+    this.updateAllCheckboxes();
+    this.notifySelectionChange();
+
+    return { success, failed, cancelled: signal.aborted, added, notAdded };
   }
 
   /**
    * Show `item` as the paper's on every row showing it (the selected ones,
    * and any other the list has), and unselect them
    */
-  private markAdded(paper: SelectedPaper, item: Zotero.Item): void {
-    const keys = new Set(paper.entries.flatMap(paperKeys));
+  private markAdded(
+    paper: SelectedPaper,
+    item: Zotero.Item,
+    rowsByKey: ReadonlyMap<string, InspireReferenceEntry[]>,
+  ): void {
     const rows = new Set(paper.entries);
-    for (const entry of this.options.getAllEntries()) {
-      if (paperKeys(entry).some((key) => keys.has(key))) rows.add(entry);
+    for (const key of paper.entries.flatMap(paperKeys)) {
+      for (const entry of rowsByKey.get(key) ?? []) rows.add(entry);
     }
     for (const entry of rows) {
+      // The new item first, as the mark shows it, with the items already known
       entry.localItemID = item.id;
+      entry.localItemIDs = [
+        item.id,
+        ...(entry.localItemIDs ?? []).filter((id) => id !== item.id),
+      ];
       entry.displayText = buildDisplayText(entry);
       entry.searchText = "";
       this.selectedEntryIDs.delete(entry.id);

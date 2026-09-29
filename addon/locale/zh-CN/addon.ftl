@@ -439,6 +439,7 @@ references-panel-batch-select-all = 全选
 references-panel-batch-clear = 清除
 references-panel-batch-import = 导入
 references-panel-batch-importing = 正在导入 { $done } / { $total }...
+references-panel-batch-attaching-pdfs = 正在附加 PDF { $done } / { $total }...
 references-panel-batch-import-success =
   { $count ->
     [one] 已导入 1 条引用

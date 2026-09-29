@@ -126,6 +126,7 @@ export async function attachArxivPdf(
       `${source.id.replace("/", "_")}v${source.version}.pdf`,
     );
     await IOUtils.write(file, bytes);
+    if (options.signal?.aborted) return fail("cancelled", "Request cancelled");
     // Named like the PDFs Zotero itself downloads, when the user has Zotero
     // rename files
     const rename =

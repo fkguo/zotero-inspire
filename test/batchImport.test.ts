@@ -283,7 +283,15 @@ function setUpManager(
     getListElement: () => listEl,
     getAllEntries: () => entries,
     getFilteredEntries: () => view,
-    importReference: vi.fn<BatchImportManagerOptions["importReference"]>(),
+    // The panel's INSPIRE import of a recid (its importReference)
+    importReference:
+      vi.fn<
+        (
+          recid: string,
+          target: SaveTargetSelection,
+          signal: AbortSignal,
+        ) => Promise<Zotero.Item | null>
+      >(),
     promptForSaveTarget: vi
       .fn<BatchImportManagerOptions["promptForSaveTarget"]>()
       .mockResolvedValue(TARGET),
@@ -293,8 +301,19 @@ function setUpManager(
     onSelectionChange: vi.fn<(count: number) => void>(),
     onImportStateChange: vi.fn<(inProgress: boolean) => void>(),
   };
+  // As the References panel imports a row: by its recid
+  const importEntry = vi.fn<BatchImportManagerOptions["importEntry"]>(
+    async (entry, target, signal) => {
+      const item = await options.importReference(entry.recid!, target, signal);
+      if (item) return { status: "added", route: "inspire", item, notes: [] };
+      return signal.aborted
+        ? { status: "cancelled" }
+        : { status: "failed", reason: "inspireRecord", message: "" };
+    },
+  );
   const manager = new BatchImportManager({
     ...options,
+    importEntry,
     reporter: {
       notify: options.showToast,
       startProgress: (text) => popupReporter.startProgress(text),
@@ -327,7 +346,7 @@ function setUpManager(
     dom,
     doc,
     body,
-    options,
+    options: { ...options, importEntry },
     manager,
     anchor,
     rerender,
@@ -489,7 +508,11 @@ describe("duplicate detection", () => {
       by,
     });
     expect(Object.fromEntries(duplicates)).toEqual({
-      byRecid: { localItemID: 21, matchType: "recid", hits: [hit(21, "recid")] },
+      byRecid: {
+        localItemID: 21,
+        matchType: "recid",
+        hits: [hit(21, "recid")],
+      },
       byArxiv: {
         localItemID: 23,
         matchType: "arxiv",
@@ -630,7 +653,7 @@ describe("duplicate dialog", () => {
     expect(
       panel.options.importReference.mock.calls.map(([recid]) => recid),
     ).toEqual(["rec-a", "rec-c", "rec-d"]);
-    expect(result).toEqual({ success: 3, failed: 0, cancelled: false });
+    expect(result).toMatchObject({ success: 3, failed: 0, cancelled: false });
   });
 
   it("ticks or unticks every duplicate at once", async () => {
@@ -649,7 +672,11 @@ describe("duplicate dialog", () => {
     buttonIn(dialog, "references-panel-batch-duplicate-import-all").click();
     buttonIn(dialog, "references-panel-batch-duplicate-confirm").click();
 
-    expect(await run).toEqual({ success: 2, failed: 0, cancelled: false });
+    expect(await run).toMatchObject({
+      success: 2,
+      failed: 0,
+      cancelled: false,
+    });
   });
 
   it.each([
@@ -778,8 +805,45 @@ describe("duplicate dialog", () => {
     panel.manager.dispose();
     answer(TARGET);
 
-    expect(await run).toEqual({ success: 1, failed: 0, cancelled: false });
-    expect(panel.options.importReference).toHaveBeenCalledWith("rec-a", TARGET);
+    expect(await run).toMatchObject({
+      success: 1,
+      failed: 0,
+      cancelled: false,
+    });
+    expect(panel.options.importReference).toHaveBeenCalledWith(
+      "rec-a",
+      TARGET,
+      expect.anything(),
+    );
+  });
+
+  it("lists the papers skipped in the dialog as in the library, not as failed", async () => {
+    const panel = setUpManager([localEntry("a", 12), entry("b")]);
+    panel.options.importReference.mockResolvedValue({ id: 100 } as any);
+    panel.manager.selectAll();
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    buttonIn(
+      await panel.dialog(),
+      "references-panel-batch-duplicate-confirm",
+    ).click();
+    const result = await run;
+
+    expect(result).toMatchObject({ success: 1, failed: 0, cancelled: false });
+    expect(result!.added.map((p) => p.entries[0].id)).toEqual(["b"]);
+    expect(result!.notAdded).toEqual([
+      {
+        entries: [expect.objectContaining({ id: "a" })],
+        outcome: {
+          status: "inLibrary",
+          hits: [{ itemID: 12, libraryID: 1, hasRecid: true, by: ["recid"] }],
+          doiOnly: false,
+        },
+      },
+    ]);
+    expect(panel.options.showToast).toHaveBeenLastCalledWith(
+      msg("references-panel-batch-import-success", { count: 1 }),
+    );
   });
 
   it("names the library of each duplicate when the user has group libraries", async () => {
@@ -801,7 +865,7 @@ describe("duplicate dialog", () => {
     expect(await run).toBeNull();
   });
 
-  it("has nothing to import when every duplicate is skipped", async () => {
+  it("has nothing to import when every duplicate is skipped, and lists them as in the library", async () => {
     const panel = setUpManager([localEntry("a", 1)]);
     panel.manager.selectAll();
 
@@ -809,7 +873,22 @@ describe("duplicate dialog", () => {
     const dialog = await panel.dialog();
     buttonIn(dialog, "references-panel-batch-duplicate-confirm").click();
 
-    expect(await run).toBeNull();
+    expect(await run).toEqual({
+      success: 0,
+      failed: 0,
+      cancelled: false,
+      added: [],
+      notAdded: [
+        {
+          entries: [expect.objectContaining({ id: "a" })],
+          outcome: {
+            status: "inLibrary",
+            hits: [{ itemID: 1, libraryID: 1, hasRecid: true, by: ["recid"] }],
+            doiOnly: false,
+          },
+        },
+      ],
+    });
     expect(panel.options.showToast).toHaveBeenCalledWith(
       msg("references-panel-batch-no-selection"),
     );
@@ -976,7 +1055,7 @@ describe("batch import", () => {
     }
     const result = await run;
 
-    expect(result).toEqual({ success: 4, failed: 3, cancelled: false });
+    expect(result).toMatchObject({ success: 4, failed: 3, cancelled: false });
     expect(imports.maxInFlight()).toBe(3);
     expect(imports.calls.map((call) => call.recid)).toEqual(
       ids.map((id) => `rec-${id}`),
@@ -1031,7 +1110,7 @@ describe("batch import", () => {
     panel.options.importReference.mockResolvedValue({ id: 100 } as any);
     panel.manager.selectAll();
 
-    expect(await panel.manager.handleBatchImport(panel.anchor)).toEqual({
+    expect(await panel.manager.handleBatchImport(panel.anchor)).toMatchObject({
       success: 2,
       failed: 0,
       cancelled: false,
@@ -1057,7 +1136,11 @@ describe("batch import", () => {
     expect(progressWindows).toHaveLength(1);
 
     for (const call of imports.calls) call.settle(100);
-    expect(await first).toEqual({ success: 2, failed: 0, cancelled: false });
+    expect(await first).toMatchObject({
+      success: 2,
+      failed: 0,
+      cancelled: false,
+    });
     expect(imports.calls).toHaveLength(2);
     expect(panel.options.onImportStateChange.mock.calls).toEqual([
       [true],
@@ -1140,7 +1223,11 @@ describe("batch import", () => {
         "references-panel-batch-duplicate-confirm",
       ).click();
     }
-    expect(await next).toEqual({ success: 1, failed: 0, cancelled: false });
+    expect(await next).toMatchObject({
+      success: 1,
+      failed: 0,
+      cancelled: false,
+    });
   });
 
   it("runs one batch import at a time across panels", async () => {
@@ -1161,11 +1248,13 @@ describe("batch import", () => {
     imports.calls[0].settle(100);
     await run;
     expect(second.options.onImportStateChange).toHaveBeenLastCalledWith(false);
-    expect(await second.manager.handleBatchImport(second.anchor)).toEqual({
-      success: 1,
-      failed: 0,
-      cancelled: false,
-    });
+    expect(await second.manager.handleBatchImport(second.anchor)).toMatchObject(
+      {
+        success: 1,
+        failed: 0,
+        cancelled: false,
+      },
+    );
   });
 
   it.each([
@@ -1223,16 +1312,25 @@ describe("batch import", () => {
       answer(null);
       if (phase === "import") imports.calls[0].settle(100);
 
-      expect(await run).toEqual(
-        phase === "import" ? { success: 1, failed: 0, cancelled: false } : null,
-      );
+      const result = await run;
+      if (phase === "import") {
+        expect(result).toMatchObject({
+          success: 1,
+          failed: 0,
+          cancelled: false,
+        });
+      } else {
+        expect(result).toBeNull();
+      }
       expect(second.manager.isImportInProgress()).toBe(false);
       expect(second.options.onImportStateChange).toHaveBeenLastCalledWith(
         false,
       );
       // The closed panel is no longer told about imports
       first.options.onImportStateChange.mockClear();
-      expect(await second.manager.handleBatchImport(second.anchor)).toEqual({
+      expect(
+        await second.manager.handleBatchImport(second.anchor),
+      ).toMatchObject({
         success: 1,
         failed: 0,
         cancelled: false,
@@ -1254,7 +1352,7 @@ describe("batch import", () => {
     panel.options.importReference.mockResolvedValue({ id: 100 } as any);
     panel.manager.selectAll();
 
-    expect(await panel.manager.handleBatchImport(panel.anchor)).toEqual({
+    expect(await panel.manager.handleBatchImport(panel.anchor)).toMatchObject({
       success: 1,
       failed: 0,
       cancelled: false,
@@ -1286,7 +1384,7 @@ describe("batch import", () => {
     for (const call of imports.calls) call.settle(100);
     const result = await run;
 
-    expect(result).toEqual({ success: 3, failed: 0, cancelled: true });
+    expect(result).toMatchObject({ success: 3, failed: 0, cancelled: true });
     expect(imports.calls).toHaveLength(3);
     expect(panel.options.showToast).toHaveBeenLastCalledWith(
       msg("references-panel-batch-import-cancelled", { done: 3, total: 5 }),
@@ -1298,7 +1396,7 @@ describe("batch import", () => {
     expect(escape().defaultPrevented).toBe(false);
     // and the rest can be imported
     panel.options.importReference.mockResolvedValue({ id: 101 } as any);
-    expect(await panel.manager.handleBatchImport(panel.anchor)).toEqual({
+    expect(await panel.manager.handleBatchImport(panel.anchor)).toMatchObject({
       success: 2,
       failed: 0,
       cancelled: false,
@@ -1345,7 +1443,7 @@ describe("batch import", () => {
     expect(escape(panel.dom.window).defaultPrevented).toBe(true);
     for (const call of imports.calls.slice(1)) call.settle(100);
 
-    expect(await run).toEqual({ success: 4, failed: 0, cancelled: true });
+    expect(await run).toMatchObject({ success: 4, failed: 0, cancelled: true });
     const importing = (done: number) =>
       msg("references-panel-batch-importing", { done, total: 5 });
     expect(shown).toEqual([
@@ -1360,6 +1458,174 @@ describe("batch import", () => {
     // Nothing went to the popups by the main window
     expect(progressWindows).toHaveLength(0);
     expect(panel.options.showToast).not.toHaveBeenCalled();
+  });
+});
+
+describe("cancelling, and what the import ends with", () => {
+  const abortError = () =>
+    Object.assign(new Error("aborted"), { name: "AbortError" });
+  const escapeIn = (panel: ReturnType<typeof setUpManager>) =>
+    panel.dom.window.dispatchEvent(
+      new panel.dom.window.KeyboardEvent("keydown", {
+        key: "Escape",
+        cancelable: true,
+      }),
+    );
+
+  it("ends the papers under way on Escape and lists the papers added and not added", async () => {
+    const entries = ["a", "b", "c", "d", "e"].map((id) => entry(id));
+    const panel = setUpManager(entries);
+    const signals: AbortSignal[] = [];
+    panel.options.importEntry.mockImplementation(async (e, _target, signal) => {
+      signals.push(signal);
+      if (e.id === "a") {
+        return {
+          status: "added",
+          route: "inspire",
+          item: { id: 1 } as any,
+          notes: [],
+        };
+      }
+      if (e.id === "b") {
+        return { status: "failed", reason: "inspireRecord", message: "gone" };
+      }
+      // Waits for the network until the cancel ends its request
+      await new Promise((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(abortError())),
+      );
+      throw new Error("unreachable");
+    });
+    panel.manager.selectAll();
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    await vi.waitFor(() => expect(signals).toHaveLength(5));
+    expect(signals.some((signal) => signal.aborted)).toBe(false);
+    escapeIn(panel);
+    const result = await run;
+
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(result!.cancelled).toBe(true);
+    expect(result!.added.map((p) => p.entries.map((e) => e.id))).toEqual([
+      ["a"],
+    ]);
+    expect(
+      result!.notAdded.map((p) => [p.entries[0].id, p.outcome.status]),
+    ).toEqual([
+      ["b", "failed"],
+      ["c", "cancelled"],
+      ["d", "cancelled"],
+      ["e", "cancelled"],
+    ]);
+    expect(result).toMatchObject({ success: 1, failed: 1 });
+    // Done: the papers that ended otherwise than by the cancel
+    expect(panel.options.showToast).toHaveBeenLastCalledWith(
+      msg("references-panel-batch-import-cancelled", { done: 2, total: 5 }),
+    );
+    expect(panel.selected()).toEqual(["b", "c", "d", "e"]);
+  });
+
+  it("waits for the PDFs of the papers added, which Escape stops too", async () => {
+    const panel = setUpManager([entry("a"), entry("b")]);
+    const pdfSignals: AbortSignal[] = [];
+    let attachA: (value: any) => void = () => {};
+    panel.options.importEntry.mockImplementation(async (e, _target, signal) => {
+      const pdf =
+        e.id === "a"
+          ? new Promise<any>((resolve) => (attachA = resolve))
+          : new Promise<any>((resolve) => {
+              pdfSignals.push(signal);
+              signal.addEventListener("abort", () =>
+                resolve({ status: "failed", reason: "cancelled", message: "" }),
+              );
+            });
+      return {
+        status: "added",
+        route: "arxiv",
+        item: { id: e.id === "a" ? 1 : 2 } as any,
+        notes: [],
+        pdf,
+      };
+    });
+    panel.manager.selectAll();
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    await vi.waitFor(() =>
+      expect(progressWindows[0]?.lines.at(-1)?.text).toBe(
+        msg("references-panel-batch-attaching-pdfs", { done: 0, total: 2 }),
+      ),
+    );
+    attachA({ status: "attached", attachment: { id: 10 } });
+    await vi.waitFor(() =>
+      expect(progressWindows[0].lines.at(-1)).toEqual({
+        text: msg("references-panel-batch-attaching-pdfs", {
+          done: 1,
+          total: 2,
+        }),
+        progress: 50,
+      }),
+    );
+    expect(panel.manager.isImportInProgress()).toBe(true);
+    escapeIn(panel);
+    const result = await run;
+
+    expect(pdfSignals[0].aborted).toBe(true);
+    expect(result!.added.map((p) => [p.entries[0].id, p.pdf?.status])).toEqual([
+      ["a", "attached"],
+      ["b", "failed"],
+    ]);
+    expect(progressWindows[0].closed).toBe(true);
+  });
+
+  it("imports rows without a recid when the caller can, after one preparation for every paper", async () => {
+    const rows = [
+      entry("arxiv-2609.00011-2026-09-24", {
+        recid: undefined,
+        arxivDetails: { id: "2609.00011" },
+      }),
+      entry("arxiv-2609.00011-2026-09-25", {
+        recid: undefined,
+        arxivDetails: { id: "2609.00011" },
+      }),
+      entry("arxiv-2609.00012-2026-09-24", {
+        recid: undefined,
+        arxivDetails: { id: "2609.00012" },
+      }),
+    ];
+    const panel = setUpManager(rows);
+    const calls: string[] = [];
+    const manager = new BatchImportManager({
+      ...panel.options,
+      reporter: {
+        notify: () => undefined,
+        startProgress: () => ({ update() {}, close() {} }),
+      },
+      canImport: (e) => !!e.arxivDetails,
+      prepareImport: async (entries, target, signal) => {
+        calls.push(
+          `prepare ${entries.map((e) => e.id).join(" ")} ${target === TARGET} ${signal.aborted}`,
+        );
+      },
+      importEntry: async (e) => {
+        calls.push(`import ${e.id}`);
+        return {
+          status: "added",
+          route: "arxiv",
+          item: { id: 5 } as any,
+          notes: [],
+        };
+      },
+    });
+    openedManagers.push(manager);
+    manager.selectAll();
+
+    const result = await manager.handleBatchImport(panel.anchor);
+
+    expect(calls).toEqual([
+      "prepare arxiv-2609.00011-2026-09-24 arxiv-2609.00012-2026-09-24 true false",
+      "import arxiv-2609.00011-2026-09-24",
+      "import arxiv-2609.00012-2026-09-24",
+    ]);
+    expect(result!.added.map((p) => p.entries.length)).toEqual([2, 1]);
   });
 });
 
@@ -1550,6 +1816,50 @@ describe("References panel batch toolbar and selection", () => {
     expect(importButton(third).disabled).toBe(false);
   });
 
+  it("ends the INSPIRE request of a paper under way on Escape and saves nothing for it", async () => {
+    const panel = setUpPanel([entry("a"), entry("b")]);
+    const { controller } = panel;
+    controller.promptForSaveTarget = vi.fn().mockResolvedValue(TARGET);
+    controller.showToast = vi.fn();
+    controller.currentItemID = 9;
+    (globalThis as any).Zotero.Items = { get: () => ({ id: 9, libraryID: 1 }) };
+    const requests: (AbortSignal | undefined)[] = [];
+    network.inspireFetch.mockImplementation(
+      (_url: string, options?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          requests.push(options?.signal);
+          options?.signal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        }),
+    );
+    controller.batchImport.selectAll();
+
+    const run = controller.batchImport.handleBatchImport(panel.toolbar);
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    panel.dom.window.dispatchEvent(
+      new panel.dom.window.KeyboardEvent("keydown", { key: "Escape" }),
+    );
+    const result = await run;
+
+    expect(requests.every((signal) => signal?.aborted)).toBe(true);
+    expect(result.notAdded.map((p: any) => p.outcome.status)).toEqual([
+      "cancelled",
+      "cancelled",
+    ]);
+    // Not taken for a record INSPIRE lacks
+    expect(controller.showToast).not.toHaveBeenCalledWith(
+      msg("references-panel-toast-missing"),
+    );
+    expect(controller.showToast).toHaveBeenLastCalledWith(
+      msg("references-panel-batch-import-cancelled", { done: 0, total: 2 }),
+    );
+    expect(controller.allEntries.map((e: any) => e.localItemID)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("imports the ticked rows into the save target picked at the Import button", async () => {
     const panel = setUpPanel([entry("a"), entry("b")]);
     const { controller } = panel;
@@ -1572,7 +1882,11 @@ describe("References panel batch toolbar and selection", () => {
     expect(controller.promptForSaveTarget.mock.calls[0][0]).toBe(
       buttonIn(panel.toolbar, "references-panel-batch-import"),
     );
-    expect(controller.importReference).toHaveBeenCalledWith("rec-a", TARGET);
+    expect(controller.importReference).toHaveBeenCalledWith(
+      "rec-a",
+      TARGET,
+      expect.anything(),
+    );
     expect(controller.allEntries[0].localItemID).toBe(50);
     // The imported row now shows the entry as in the library
     expect(marker("a").dataset.state).toBe("local");

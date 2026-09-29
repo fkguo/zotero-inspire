@@ -373,7 +373,7 @@ describe("batch import: duplicate check against the library", () => {
       getListElement: () => ({}) as HTMLElement,
       getAllEntries: () => [],
       getFilteredEntries: () => [],
-      importReference: vi.fn(),
+      importEntry: vi.fn(),
       promptForSaveTarget: vi.fn(),
       reporter: { notify: vi.fn(), startProgress: vi.fn() as any },
       updateRowStatus: vi.fn(),
@@ -462,7 +462,7 @@ describe("batch import: duplicate check against the library", () => {
     lib.queryError = new Error("database is locked");
     const entries = [entry("100"), entry("200")];
     const notify = vi.fn();
-    const importReference = vi.fn();
+    const importEntry = vi.fn();
     const promptForSaveTarget = vi.fn();
     const m = new BatchImportManager({
       getDocument: () => ({}) as Document,
@@ -470,21 +470,19 @@ describe("batch import: duplicate check against the library", () => {
       getListElement: () => ({ querySelectorAll: () => [] }) as any,
       getAllEntries: () => entries,
       getFilteredEntries: () => entries,
-      importReference,
+      importEntry,
       promptForSaveTarget,
       reporter: { notify, startProgress: vi.fn() as any },
       updateRowStatus: vi.fn(),
     });
-    await expect((m as any).detectDuplicates(entries)).rejects.toThrow(
-      LibraryIndexError,
-    );
+    await expect(findDuplicates(entries)).rejects.toThrow(LibraryIndexError);
     m.selectAll();
     expect(await m.handleBatchImport({} as HTMLElement)).toBeNull();
     expect(notify).toHaveBeenCalledWith(
       "zoteroinspire-references-panel-batch-duplicate-check-failed",
     );
     expect(promptForSaveTarget).not.toHaveBeenCalled();
-    expect(importReference).not.toHaveBeenCalled();
+    expect(importEntry).not.toHaveBeenCalled();
     m.dispose();
   });
 });

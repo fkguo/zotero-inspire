@@ -443,6 +443,7 @@ references-panel-batch-select-all = Select all
 references-panel-batch-clear = Clear
 references-panel-batch-import = Import
 references-panel-batch-importing = Importing { $done } / { $total }...
+references-panel-batch-attaching-pdfs = Attaching PDFs { $done } / { $total }...
 references-panel-batch-import-success =
   { $count ->
     [one] Imported 1 reference

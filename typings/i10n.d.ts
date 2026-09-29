@@ -509,6 +509,7 @@ export type FluentMessageId =
   | 'references-panel-author-stats-partial'
   | 'references-panel-back'
   | 'references-panel-back-tooltip'
+  | 'references-panel-batch-attaching-pdfs'
   | 'references-panel-batch-clear'
   | 'references-panel-batch-duplicate-cancel'
   | 'references-panel-batch-duplicate-check-failed'

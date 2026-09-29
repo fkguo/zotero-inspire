@@ -751,6 +751,52 @@ describe("the target library and cancelling", () => {
     expect(mocks.fromArxiv).toHaveBeenCalledOnce();
   });
 
+  it("keeps an item whose save began before the cancel, without fetching its PDF", async () => {
+    inspire({});
+    api([apiEntry("2609.00035")]);
+    const controller = new AbortController();
+    mocks.fromArxiv.mockImplementationOnce(async (...args: any[]) => {
+      const item = await writer((entry) => ({ extra: `arXiv:${entry.id}` }))(
+        ...args,
+      );
+      controller.abort();
+      return item;
+    });
+    const [outcome] = await addArxivPapers(
+      [{ arxivId: "2609.00035" }],
+      TARGET,
+      {
+        signal: controller.signal,
+        attachPdf: true,
+      },
+    );
+    expect(outcome).toMatchObject({ status: "added", route: "arxiv" });
+    expect(outcome).not.toHaveProperty("pdf");
+    expect(mocks.attachPdf).not.toHaveBeenCalled();
+  });
+
+  it("drops what Zotero's DOI lookup found when cancelled meanwhile, adding nothing", async () => {
+    inspire({});
+    api([apiEntry("2609.00036", { doi: "10.1103/y" })]);
+    const controller = new AbortController();
+    // The translator runs to its end: the cancel comes while it runs
+    mocks.lookUpJournal.mockImplementation(async () => {
+      controller.abort();
+      return {
+        status: "same",
+        data: { itemType: "journalArticle", DOI: "10.1103/y" },
+      };
+    });
+    const outcomes = await addArxivPapers(
+      [{ arxivId: "2609.00036", journalVersion: true }],
+      TARGET,
+      { signal: controller.signal },
+    );
+    expect(outcomes).toEqual([{ status: "cancelled" }]);
+    expect(mocks.fromJournal).not.toHaveBeenCalled();
+    expect(mocks.fromArxiv).not.toHaveBeenCalled();
+  });
+
   it("adds nothing when cancelled while INSPIRE is asked", async () => {
     mocks.lookupInspire.mockRejectedValue(
       Object.assign(new Error("aborted"), { name: "AbortError" }),

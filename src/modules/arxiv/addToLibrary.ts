@@ -400,8 +400,12 @@ async function addPaper(
 
   const item = created.created;
   const journalItem = route !== "arxiv" && item.itemType !== "preprint";
+  // A save under way when the cancel came completes; nothing follows it
   const pdf =
-    context.attachPdf && entry && !(context.skipJournalPdf && journalItem)
+    context.attachPdf &&
+    entry &&
+    !signal?.aborted &&
+    !(context.skipJournalPdf && journalItem)
       ? attachArxivPdf(item, entry, { signal })
       : undefined;
   return { status: "added", route, item, notes, ...(pdf ? { pdf } : {}) };

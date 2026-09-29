@@ -17311,14 +17311,23 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
   }
 
-  private async importReference(recid: string, target: SaveTargetSelection) {
+  /**
+   * Import the INSPIRE record `recid` into `target`. With `signal` (a batch
+   * import), a cancel ends the request and nothing is saved.
+   */
+  private async importReference(
+    recid: string,
+    target: SaveTargetSelection,
+    signal?: AbortSignal,
+  ) {
     const currentItem = this.currentItemID
       ? Zotero.Items.get(this.currentItemID)
       : null;
     if (!currentItem) {
       return null;
     }
-    const meta = await fetchInspireMetaByRecid(recid);
+    const meta = await fetchInspireMetaByRecid(recid, signal);
+    if (signal?.aborted) return null;
     if (meta === -1) {
       this.showToast(getString("references-panel-toast-missing"));
       return null;
@@ -18251,7 +18260,18 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       getListElement: () => this.listEl,
       getAllEntries: () => this.allEntries,
       getFilteredEntries: () => this.getFilteredEntries(this.allEntries),
-      importReference: (recid, target) => this.importReference(recid, target),
+      // The References panel's rows have INSPIRE records: the INSPIRE import
+      importEntry: async (entry, target, signal) => {
+        const item = await this.importReference(entry.recid!, target, signal);
+        if (item) return { status: "added", route: "inspire", item, notes: [] };
+        return signal.aborted
+          ? { status: "cancelled" }
+          : {
+              status: "failed",
+              reason: "inspireRecord",
+              message: `INSPIRE record ${entry.recid} not imported`,
+            };
+      },
       promptForSaveTarget: (anchor) => this.promptForSaveTarget(anchor),
       // The panel's notices and the import's progress: popups by the main
       // window, as for every notice of the panel
