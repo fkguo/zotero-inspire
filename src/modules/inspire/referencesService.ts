@@ -430,6 +430,96 @@ export async function enrichReferencesEntries(
   };
 }
 
+/** Records found by one batch search, and the query terms that failed */
+export interface LiteratureBatchResult {
+  /** The metadata of each record found */
+  hits: any[];
+  /** Terms of (sub-)batches INSPIRE did not answer */
+  failedTerms: string[];
+}
+
+/**
+ * Search INSPIRE's literature for `terms` (such as "recid:123" or
+ * "arxiv:2401.00001") joined by OR, asking for as many records as there are
+ * terms. A batch INSPIRE refuses as too large (502 and the like) is split in
+ * halves while it has more than 25 terms; a failed connection is tried once
+ * more. Rejects with an AbortError when `signal` aborts.
+ */
+export async function searchLiteratureInBatch(
+  terms: string[],
+  fields: string,
+  signal?: AbortSignal,
+  networkRetryCount = 0,
+): Promise<LiteratureBatchResult> {
+  if (!terms.length) return { hits: [], failedTerms: [] };
+  if (signal?.aborted) return { hits: [], failedTerms: terms };
+
+  const query = terms.join(" OR ");
+  const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${terms.length}${buildFieldsParam(fields)}`;
+
+  try {
+    const response = await inspireFetch(
+      url,
+      signal ? { signal } : undefined,
+    );
+    if (response.status !== 200) {
+      Zotero.debug(
+        `[${config.addonName}] literature batch HTTP ${response.status} (${terms.slice(0, 5).join(",")}${terms.length > 5 ? "..." : ""})`,
+      );
+      if (
+        shouldSplitFailedBatch(response.status) &&
+        terms.length > ADAPTIVE_SPLIT_MIN_BATCH_SIZE
+      ) {
+        const midpoint = Math.ceil(terms.length / 2);
+        Zotero.debug(
+          `[${config.addonName}] Splitting failed literature batch ${terms.length} -> ${midpoint} + ${terms.length - midpoint}`,
+        );
+        const first = await searchLiteratureInBatch(
+          terms.slice(0, midpoint),
+          fields,
+          signal,
+        );
+        const second = await searchLiteratureInBatch(
+          terms.slice(midpoint),
+          fields,
+          signal,
+        );
+        return {
+          hits: [...first.hits, ...second.hits],
+          failedTerms: [...first.failedTerms, ...second.failedTerms],
+        };
+      }
+      return { hits: [], failedTerms: terms };
+    }
+
+    const payload = (await response.json()) as unknown as
+      | InspireLiteratureSearchResponse
+      | null;
+    const hits = (payload?.hits?.hits ?? []).map((hit) => ({
+      ...(hit?.metadata ?? {}),
+      control_number: hit?.metadata?.control_number ?? hit?.id,
+    }));
+    return { hits, failedTerms: [] };
+  } catch (err) {
+    if ((err as any)?.name === "AbortError") {
+      throw err;
+    }
+    if (networkRetryCount < NETWORK_RETRY_LIMIT) {
+      Zotero.debug(
+        `[${config.addonName}] Retrying literature batch after network error: ${err}`,
+      );
+      return searchLiteratureInBatch(
+        terms,
+        fields,
+        signal,
+        networkRetryCount + 1,
+      );
+    }
+    Zotero.debug(`[${config.addonName}] Error fetching literature batch: ${err}`);
+    return { hits: [], failedTerms: terms };
+  }
+}
+
 /**
  * Fetch metadata for a batch of recids and apply to entries.
  */
@@ -438,7 +528,6 @@ async function fetchAndApplyBatchMetadata(
   recidToEntry: Map<string, InspireReferenceEntry[]>,
   strings: ReturnType<typeof getCachedStrings>,
   signal?: AbortSignal,
-  networkRetryCount = 0,
 ): Promise<BatchEnrichmentResult> {
   if (!batchRecids.length) return emptyBatchEnrichmentResult();
   if (signal?.aborted) {
@@ -449,104 +538,39 @@ async function fetchAndApplyBatchMetadata(
     };
   }
 
-  const query = batchRecids.map((r) => `recid:${r}`).join(" OR ");
   // FTR-API-FIELD-OPTIMIZATION: Use centralized field configuration
-  const fieldsParam = buildFieldsParam(API_FIELDS_ENRICHMENT);
-  const url = `${INSPIRE_API_BASE}/literature?q=${encodeURIComponent(query)}&size=${batchRecids.length}${fieldsParam}`;
+  const { hits, failedTerms } = await searchLiteratureInBatch(
+    batchRecids.map((recid) => `recid:${recid}`),
+    API_FIELDS_ENRICHMENT,
+    signal,
+  );
+  const failedRecids = failedTerms.map((term) => term.slice("recid:".length));
+  const processedRecids: string[] = [];
 
-  try {
-    const response = await inspireFetch(
-      url,
-      signal ? { signal } : undefined,
-    );
-    if (response.status !== 200) {
-      Zotero.debug(
-        `[${config.addonName}] enrich batch HTTP ${response.status} (recids=${batchRecids.slice(0, 5).join(",")}${batchRecids.length > 5 ? "..." : ""})`,
-      );
-      if (
-        shouldSplitFailedBatch(response.status) &&
-        batchRecids.length > ADAPTIVE_SPLIT_MIN_BATCH_SIZE
-      ) {
-        const midpoint = Math.ceil(batchRecids.length / 2);
-        Zotero.debug(
-          `[${config.addonName}] Splitting failed enrichment batch ${batchRecids.length} -> ${midpoint} + ${batchRecids.length - midpoint}`,
-        );
-        const first = await fetchAndApplyBatchMetadata(
-          batchRecids.slice(0, midpoint),
-          recidToEntry,
-          strings,
-          signal,
-        );
-        const second = await fetchAndApplyBatchMetadata(
-          batchRecids.slice(midpoint),
-          recidToEntry,
-          strings,
-          signal,
-        );
-        return mergeBatchEnrichmentResults(first, second);
-      }
-      return {
-        processedRecids: [],
-        unresolvedRecids: [],
-        failedRecids: batchRecids,
-      };
+  // Map results back to entries
+  for (const metadata of hits) {
+    const recid = String(metadata.control_number);
+    if (!recid) continue;
+
+    // PERF-FIX-9: Cache metadata for future lookups
+    if (isMetadataComplete(metadata)) {
+      enrichmentMetadataCache.set(recid, metadata);
     }
 
-    const payload = (await response.json()) as unknown as
-      | InspireLiteratureSearchResponse
-      | null;
-    const hits = payload?.hits?.hits ?? [];
-    const processedRecids: string[] = [];
+    const matchingEntries = recidToEntry.get(recid);
+    if (!matchingEntries) continue;
 
-    // Map results back to entries
-    for (const hit of hits) {
-      const recid = String(hit?.metadata?.control_number || hit?.id);
-      const metadata = hit?.metadata ?? {};
-
-      if (!recid) continue;
-
-      // PERF-FIX-9: Cache metadata for future lookups
-      if (isMetadataComplete(metadata)) {
-        enrichmentMetadataCache.set(recid, metadata);
-      }
-
-      const matchingEntries = recidToEntry.get(recid);
-      if (!matchingEntries) continue;
-
-      for (const entry of matchingEntries) {
-        applyMetadataToEntry(entry, metadata, strings);
-      }
-      processedRecids.push(recid);
+    for (const entry of matchingEntries) {
+      applyMetadataToEntry(entry, metadata, strings);
     }
-    const processedSet = new Set(processedRecids);
-    return {
-      processedRecids,
-      unresolvedRecids: batchRecids.filter((recid) => !processedSet.has(recid)),
-      failedRecids: [],
-    };
-  } catch (err) {
-    if ((err as any)?.name === "AbortError") {
-      throw err;
-    }
-    if (networkRetryCount < NETWORK_RETRY_LIMIT) {
-      Zotero.debug(
-        `[${config.addonName}] Retrying enrichment batch after network error: ${err}`,
-      );
-      return fetchAndApplyBatchMetadata(
-        batchRecids,
-        recidToEntry,
-        strings,
-        signal,
-        networkRetryCount + 1,
-      );
-    }
-    Zotero.debug(`[${config.addonName}] Error fetching batch metadata: ${err}`);
-    return {
-      processedRecids: [],
-      unresolvedRecids: [],
-      failedRecids: batchRecids,
-    };
+    processedRecids.push(recid);
   }
+  const answered = new Set([...processedRecids, ...failedRecids]);
+  return {
+    processedRecids,
+    unresolvedRecids: batchRecids.filter((recid) => !answered.has(recid)),
+    failedRecids,
+  };
 }
 
 /**

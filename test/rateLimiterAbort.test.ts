@@ -74,6 +74,8 @@ describe("INSPIRE request in a 429 backoff", () => {
     expect(getRateLimiterStatus().isThrottling).toBe(false);
   });
 
+  // Retry-After asks for 2 s; INSPIRE counts turned-away requests too, so
+  // the retry waits at least 5 s
   it("still retries after the backoff when not aborted", async () => {
     fetchMock
       .mockImplementationOnce(async () => ({
@@ -88,7 +90,7 @@ describe("INSPIRE request in a 429 backoff", () => {
     const response = inspireFetch("https://inspirehep.net/api/x", {
       signal: controller.signal,
     });
-    await vi.advanceTimersByTimeAsync(1999);
+    await vi.advanceTimersByTimeAsync(4999);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect((await response).status).toBe(200);

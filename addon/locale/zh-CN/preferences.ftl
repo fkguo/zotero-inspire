@@ -103,6 +103,9 @@ pref-reader-auto-reopen-desc = 启用后，如果阅读器标签页已关闭，�
 pref-auto-find-fulltext =
     .label = 添加到文库后自动“查找全文”
 pref-auto-find-fulltext-desc = 从面板将参考文献添加到文库时，自动对新条目执行 Zotero 的“查找全文”以获取 PDF（仅单条添加，不含批量导入）。
+pref-arxiv-pdf-skip-journal =
+    .label = 从 arXiv 浏览器加入的期刊条目不附 arXiv PDF
+pref-arxiv-pdf-skip-journal-desc = 开启上面的选项时，arXiv 浏览器作为期刊文章加入的论文（来自 INSPIRE 或按 DOI）不附 arXiv 预印本 PDF；期刊版本可用 Zotero 的“查找可用 PDF”获取。预印本条目照常附上。
 
 pref-nofound-enable =
     .label = 为没有 INSPIRE 记录的条目添加标签

@@ -497,6 +497,7 @@ smart-update-field-citations-wo-self = Citations (w/o self)
 smart-update-field-citekey = Citation Key
 smart-update-field-collaboration = Collaboration
 smart-update-field-authors = Authors
+smart-update-authors-lost = INSPIRE's author list lacks authors this item has; tick to replace them anyway.
 
 # Smart Update Preview Dialog
 smart-update-preview-title = Smart Update Preview
@@ -871,3 +872,4 @@ arxiv-browser-menu-copy-abs-link = Copy Link to the arXiv Page
 arxiv-browser-copied-text = Copied
 arxiv-browser-open-abstract-page = arXiv page
 arxiv-browser-open-pdf-button = PDF
+arxiv-pdf-attachment-title = arXiv preprint PDF v{ $version }

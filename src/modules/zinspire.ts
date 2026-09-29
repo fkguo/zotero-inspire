@@ -204,9 +204,6 @@ import {
   getCrossrefCount,
   // Item updater
   ZInspire,
-  setInspireMeta,
-  getItemTypePolicy,
-  resolveNewItemType,
   setCrossRefCitations,
   saveItemWithPendingInspireNote,
   // Local cache
@@ -266,6 +263,7 @@ import {
   BatchImportManager,
   type BatchImportManagerOptions,
 } from "./inspire";
+import { createItemFromInspireMeta } from "./inspire/library/itemCreation";
 import { onLibraryIndexChange } from "./inspire/library/arxivIndex";
 import { loadedItem, refreshLocalState } from "./inspire/library/localStatus";
 import { firstPdfAttachmentID, openLocalPdf } from "./inspire/library/localPdf";
@@ -17322,44 +17320,16 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       this.showToast(getString("references-panel-toast-missing"));
       return null;
     }
-    const pane = Zotero.getActiveZoteroPane();
     const originalItemID = this.currentItemID;
     const scrollState = this.captureScrollState();
 
-    const newItem = new Zotero.Item(
-      resolveNewItemType(meta as jsobject, getItemTypePolicy()),
-    );
-    newItem.libraryID = target.libraryID ?? currentItem.libraryID;
-    const targetCollectionIDs = Array.from(
-      new Set(target.collectionIDs),
-    ).filter((id): id is number => typeof id === "number");
-    newItem.setField("extra", "");
-    if (targetCollectionIDs.length) {
-      newItem.setCollections(targetCollectionIDs);
-    } else {
-      newItem.setCollections([]);
-    }
-
-    if (target.tags && target.tags.length) {
-      for (const tag of target.tags) {
-        newItem.addTag(tag);
-      }
-    }
-
-    await setInspireMeta(newItem, meta as jsobject, "full");
-    // Keep the reviewed item selected: add the new item (and its child notes)
-    // with skipSelect so Zotero's item tree does not auto-select the freshly
-    // added row. Without this, selection jumps off the paper being reviewed and
-    // the references panel reloads for a different item.
-    await saveItemWithPendingInspireNote(newItem, { skipSelect: true });
-
-    if (target.note) {
-      const newNote = new Zotero.Item("note");
-      newNote.setNote(target.note);
-      newNote.parentID = newItem.id;
-      newNote.libraryID = newItem.libraryID;
-      await newNote.saveTx({ skipSelect: true });
-    }
+    // Added without being selected (createItemFromInspireMeta): selection
+    // jumping off the paper being reviewed would reload the references panel
+    // for a different item.
+    const newItem = await createItemFromInspireMeta(meta as jsobject, {
+      ...target,
+      libraryID: target.libraryID ?? currentItem.libraryID,
+    });
 
     this.rememberRecentTarget(target.primaryRowID);
 

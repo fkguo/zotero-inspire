@@ -31,6 +31,7 @@ interface Sent {
   cancelled?: boolean;
   headers: Record<string, string>;
   timeoutMs: number;
+  responseType?: string;
 }
 
 function simulatedNetwork(
@@ -45,6 +46,7 @@ function simulatedNetwork(
       start: clock.now(),
       headers: options.headers,
       timeoutMs: options.timeoutMs,
+      responseType: options.responseType,
     };
     sent.push(record);
     const attempt = (attempts.get(url) ?? 0) + 1;
@@ -202,6 +204,19 @@ describe("ArxivScheduler spacing", () => {
       /^zotero-inspire\/\d+\.\d+\.\d+ \(\+https:\/\/github\.com\/fkguo\/zotero-inspire#readme\)$/,
     );
     expect(sent.map((s) => s.timeoutMs)).toEqual([60000, 120000]);
+  });
+
+  it("asks for the body as bytes when told to (a PDF)", async () => {
+    const clock = new VirtualClock();
+    const { sent, transport } = simulatedNetwork(clock);
+    const scheduler = webScheduler(clock, transport);
+    await clock.run(
+      scheduler.request("https://arxiv.org/pdf/2609.28544v2", {
+        responseType: "arraybuffer",
+      }),
+    );
+    await clock.run(scheduler.request(page(1)));
+    expect(sent.map((s) => s.responseType)).toEqual(["arraybuffer", undefined]);
   });
 
   it("refuses URLs of other hosts and plain http", async () => {
@@ -521,6 +536,28 @@ describe("zoteroTransport", () => {
     );
     expect([response.status, response.text]).toEqual([503, "down"]);
     expect(response.header("Retry-After")).toBe("300");
+  });
+
+  it("returns the body as bytes when asked to", async () => {
+    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer;
+    const request = stubZotero(async () => ({
+      status: 200,
+      response: bytes,
+      getResponseHeader: () => "application/pdf",
+    }));
+    const response = await zoteroTransport("https://arxiv.org/pdf/1", {
+      timeoutMs: 1000,
+      headers: {},
+      cancelReceiver: () => {},
+      responseType: "arraybuffer",
+    });
+    expect(request.mock.calls[0][2]).toMatchObject({
+      responseType: "arraybuffer",
+      followRedirects: false,
+      anon: true,
+    });
+    expect(response.body).toBe(bytes);
+    expect(response.text).toBe("");
   });
 
   it("reads an unfollowed redirect without body", async () => {

@@ -1,5 +1,6 @@
 import { config } from "../../../package.json";
 import { getString } from "../../utils/locale";
+import { addArxivCategoryTag } from "./arxivTag";
 import { getPref, setPref } from "../../utils/prefs";
 import { getPrimarySelectedCollection } from "../../utils/zoteroPaneSelection";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
@@ -53,6 +54,7 @@ import {
   getFieldProtectionConfig,
   showSmartUpdatePreviewDialog,
   mergeCreatorsWithProtectedNames,
+  creatorsForUpdate,
   type FieldChange,
 } from "./smartUpdate";
 import {
@@ -1028,11 +1030,16 @@ export class ZInspire {
             }
 
             // Show preview dialog only for single-item updates (not batch)
-            if (
+            const preview =
               allowedChanges.length > 0 &&
               shouldShowPreview() &&
-              run.total === 1
-            ) {
+              run.total === 1;
+            // Without a preview, an author list lacking authors of the item
+            // is not written; in the preview it is offered unticked
+            if (!preview) {
+              allowedChanges = allowedChanges.filter((c) => !c.conflict);
+            }
+            if (preview) {
               const result = await showSmartUpdatePreviewDialog(
                 diff,
                 allowedChanges,
@@ -2398,10 +2405,24 @@ function applyItemType(
 }
 
 /**
+ * An arXiv paper's line in Extra: "arXiv:2401.00001 [hep-ph]" with the
+ * primary category for new-style identifiers, "arXiv:hep-ph/0101001" for
+ * old-style ones (their archive names the subject)
+ */
+export function arxivExtraLine(
+  arxivId: string,
+  primaryCategory: string | undefined,
+): string {
+  return /^\d/.test(arxivId)
+    ? `arXiv:${arxivId} [${primaryCategory}]`
+    : `arXiv:${arxivId}`;
+}
+
+/**
  * Preprint items: fill the fields Zotero's own arXiv translator uses
  * (Archive ID "arXiv:ID", Repository "arXiv") when they are still empty.
  */
-function setPreprintArxivFields(
+export function setPreprintArxivFields(
   item: Zotero.Item,
   metaInspire: jsobject,
 ): void {
@@ -2524,25 +2545,22 @@ export async function setInspireMeta(
       }
       if (metaInspire.creators) {
         // Check for protected author names
-        const protectionConfig = getFieldProtectionConfig();
-        const localCreators = item.getCreators() as _ZoteroTypes.Item.Creator[];
-        const mergedCreators = mergeCreatorsWithProtectedNames(
-          localCreators,
-          metaInspire.creators,
-          protectionConfig.protectedNames,
+        // No one is asked here: an author INSPIRE's list lacks is not dropped
+        item.setCreators(
+          creatorsForUpdate(
+            item.getCreators() as _ZoteroTypes.Item.Creator[],
+            metaInspire.creators,
+            getFieldProtectionConfig().protectedNames,
+          ),
         );
-        item.setCreators(mergedCreators ?? metaInspire.creators);
       }
 
       if (metaInspire.arxiv) {
         const arxivId = metaInspire.arxiv.value;
-        let arXivInfo = "";
-        if (/^\d/.test(arxivId)) {
-          const arxivPrimeryCategory = metaInspire.arxiv.categories[0];
-          arXivInfo = `arXiv:${arxivId} [${arxivPrimeryCategory}]`;
-        } else {
-          arXivInfo = "arXiv:" + arxivId;
-        }
+        const arXivInfo = arxivExtraLine(
+          arxivId,
+          metaInspire.arxiv.categories[0],
+        );
         const numberOfArxiv = (extra.match(ARXIV_EXTRA_LINE_REGEX) || "")
           .length;
         if (numberOfArxiv !== 1) {
@@ -2633,7 +2651,7 @@ export async function setInspireMeta(
     extra = reorderExtraFields(extra);
     item.setField("extra", extra);
 
-    setArxivCategoryTag(item);
+    setArxivCategoryTag(item, metaInspire.arxiv?.categories?.[0]);
   }
 }
 
@@ -2914,7 +2932,7 @@ export async function setInspireMetaSelective(
     extra = reorderExtraFields(extra);
     item.setField("extra", extra);
 
-    setArxivCategoryTag(item);
+    setArxivCategoryTag(item, metaInspire.arxiv?.categories?.[0]);
   }
 }
 
@@ -3119,6 +3137,23 @@ function reorderExtraFields(extra: string): string {
   return reordered.join("\n");
 }
 
+/**
+ * Extra with INSPIRE's citation count lines set, laid out as the INSPIRE
+ * update lays them out
+ */
+export function setInspireCitationLines(
+  extra: string,
+  citationCount: number,
+  citationCountWithoutSelf: number,
+): string {
+  const updated = setCitations(
+    extra,
+    citationCount,
+    citationCountWithoutSelf,
+  ).replace(/\n\n/gm, "\n");
+  return reorderExtraFields(updated);
+}
+
 function setCitations(
   extra: string,
   citation_count: number,
@@ -3177,38 +3212,17 @@ function setCitations(
 // arXiv Tag Management
 // ─────────────────────────────────────────────────────────────────────────────
 
-function setArxivCategoryTag(item: Zotero.Item) {
-  const arxiv_tag_pref = getPref("arxiv_tag_enable");
-  if (!arxiv_tag_pref) {
-    return;
-  }
-
-  const extra = item.getField("extra") as string;
-  let primaryCategory = "";
-
-  const newFormatMatch = extra.match(/arXiv:\d{4}\.\d{4,5}\s*\[([^\]]+)\]/i);
-  if (newFormatMatch) {
-    primaryCategory = newFormatMatch[1];
-  } else {
-    const oldFormatMatch = extra.match(/arXiv:([a-z-]+)\/\d{7}/i);
-    if (oldFormatMatch) {
-      primaryCategory = oldFormatMatch[1];
-    }
-  }
-
-  if (primaryCategory) {
-    if (!item.hasTag(primaryCategory)) {
-      item.addTag(primaryCategory);
-      // Only persist here for an already-saved item. For a NEW (unsaved) item
-      // the caller (e.g. importReference) saves it right after, and a second
-      // concurrent saveTx on the same new item races that save -> duplicate
-      // INSERT -> "NOT NULL constraint failed: items.itemTypeID", which throws
-      // and aborts the whole add flow (including auto-find-full-text). The
-      // in-memory tag added above is persisted by the caller's save.
-      // skipSelect keeps the (already-saved) item's tree selection unchanged.
-      if (item.id) {
-        item.saveTx({ skipSelect: true });
-      }
+function setArxivCategoryTag(item: Zotero.Item, primaryCategory?: string) {
+  if (addArxivCategoryTag(item, primaryCategory)) {
+    // Only persist here for an already-saved item. For a NEW (unsaved) item
+    // the caller (e.g. importReference) saves it right after, and a second
+    // concurrent saveTx on the same new item races that save -> duplicate
+    // INSERT -> "NOT NULL constraint failed: items.itemTypeID", which throws
+    // and aborts the whole add flow (including auto-find-full-text). The
+    // in-memory tag added above is persisted by the caller's save.
+    // skipSelect keeps the (already-saved) item's tree selection unchanged.
+    if (item.id) {
+      item.saveTx({ skipSelect: true });
     }
   }
 }

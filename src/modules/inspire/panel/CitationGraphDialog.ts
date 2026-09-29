@@ -52,18 +52,9 @@ import type {
   MultiSeedGraphResult,
 } from "../types";
 import { inspireFetch } from "../rateLimiter";
-import {
-  fetchBibTeX,
-  fetchInspireMetaByRecid,
-  fetchInspireTexkey,
-} from "../metadataService";
+import { fetchBibTeX, fetchInspireTexkey } from "../metadataService";
 import { localCache } from "../localCache";
-import {
-  getItemTypePolicy,
-  saveItemWithPendingInspireNote,
-  setInspireMeta,
-} from "../itemUpdater";
-import { resolveNewItemType } from "../itemTypePolicy";
+import { createItemFromInspireRecord } from "../library/itemCreation";
 import { HoverPreviewController } from "./HoverPreviewController";
 
 type RecidSnapshot = { recid: string; title?: string; authorLabel?: string };
@@ -1803,44 +1794,13 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       return;
     }
 
-    const meta = await fetchInspireMetaByRecid(recid);
-    if (meta === -1) {
+    // Added without being selected, so the library selection stays
+    const newItem = await createItemFromInspireRecord(recid, target);
+    if (!newItem) {
       this.showToast(
         getString("references-panel-toast-missing") || "Record not found",
       );
       return;
-    }
-
-    const newItem = new Zotero.Item(
-      resolveNewItemType(meta as any, getItemTypePolicy()),
-    );
-    newItem.libraryID = target.libraryID;
-    const collectionIDs = Array.from(new Set(target.collectionIDs)).filter(
-      (id): id is number => typeof id === "number",
-    );
-    newItem.setField("extra", "");
-    newItem.setCollections(collectionIDs.length ? collectionIDs : []);
-
-    if (Array.isArray(target.tags) && target.tags.length) {
-      for (const tag of target.tags) {
-        if (typeof tag === "string" && tag.trim()) {
-          newItem.addTag(tag.trim());
-        }
-      }
-    }
-
-    await setInspireMeta(newItem, meta as any, "full");
-    // Add the new item and its child note without letting Zotero auto-select
-    // the new row, so the current library selection is not disturbed
-    // (consistent with importReference).
-    await saveItemWithPendingInspireNote(newItem, { skipSelect: true });
-
-    if (target.note) {
-      const note = new Zotero.Item("note");
-      note.setNote(target.note);
-      note.parentID = newItem.id;
-      note.libraryID = newItem.libraryID;
-      await note.saveTx({ skipSelect: true });
     }
 
     entry.localItemID = newItem.id;

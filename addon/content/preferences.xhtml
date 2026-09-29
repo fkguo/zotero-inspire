@@ -111,6 +111,11 @@
     type="bool"
   />
   <preference
+    id="pref-arxiv_pdf_skip_journal_items"
+    name="__prefsPrefix__.arxiv_pdf_skip_journal_items"
+    type="bool"
+  />
+  <preference
     id="pref-tag_enable"
     name="__prefsPrefix__.tag_enable"
     type="bool"
@@ -449,6 +454,17 @@
       <html:p
         class="zinspire-pref-desc"
         data-l10n-id="pref-auto-find-fulltext-desc"
+      ></html:p>
+    </vbox>
+    <vbox class="zinspire-pref-row" style="margin-top: 8px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-arxiv_pdf_skip_journal_items"
+        preference="extensions.zotero.inspiremeta.arxiv_pdf_skip_journal_items"
+        data-l10n-id="pref-arxiv-pdf-skip-journal"
+      />
+      <html:p
+        class="zinspire-pref-desc"
+        data-l10n-id="pref-arxiv-pdf-skip-journal-desc"
       ></html:p>
     </vbox>
     <vbox class="zinspire-pref-row" style="margin-top: 8px">

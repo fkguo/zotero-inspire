@@ -19,6 +19,7 @@ declare namespace _ZoteroTypes {
       "max_authors": number;
       "reader_auto_reopen": boolean;
       "auto_find_fulltext_on_import": boolean;
+      "arxiv_pdf_skip_journal_items": boolean;
       "chart_enable": boolean;
       "chart_default_collapsed": boolean;
       "related_papers_enable": boolean;
