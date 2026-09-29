@@ -15,8 +15,6 @@ The **arXiv browser** works for every arXiv category, from mathematics and compu
 **4.0.0** (requires Zotero 10):
 
 - **[arXiv browser](#arxiv-browser)**: a separate Zotero window for reading arXiv listings of any field. Subscribe to any categories, pick announcement days in a calendar, read titles, authors and abstracts with rendered formulas, search arXiv, and add papers to your library (through INSPIRE when it has the paper, otherwise from arXiv's data) or relate them to your items.
-- **INSPIRE requests**: one rate limit for all INSPIRE requests of the plugin, with requests you start served before the background preprint check; the References panel shows a waiting queue as **🚦 INSPIRE queue: N**.
-- **[Preprint check](#preprint-monitoring)**: INSPIRE is asked about 50 preprints per request, each answer is checked against the item's title and first author, all editable libraries are covered, and preprints whose items lack an INSPIRE record can have it written.
 
 Earlier:
 
