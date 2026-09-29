@@ -405,7 +405,7 @@
   color: var(--fill-quaternary, #c0c4cc);
 }
 
-/* A day not read yet: a dot under its number */
+/* A day not read yet: a blue dot at the top right of its cell */
 .arxiv-browser__daypicker-day--unread {
   position: relative;
 }
@@ -413,13 +413,12 @@
 .arxiv-browser__daypicker-day--unread::after {
   content: "";
   position: absolute;
-  left: 50%;
-  bottom: 1px;
-  width: 4px;
-  height: 4px;
-  margin-left: -2px;
+  top: 3px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--accent-blue, #2563eb);
+  background: #0a6cff;
 }
 
 .arxiv-browser__daypicker-day--picked.arxiv-browser__daypicker-day--unread::after {
