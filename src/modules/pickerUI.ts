@@ -360,7 +360,7 @@ export const PdfButtonState = {
 export type PdfButtonState = (typeof PdfButtonState)[keyof typeof PdfButtonState];
 
 /** Color constants for PDF button states */
-const PDF_BUTTON_COLORS = {
+export const PDF_BUTTON_COLORS = {
   greenDark: "#22c55e",
   greenLight: "#1a8f4d",
   blue: "#3b82f6",

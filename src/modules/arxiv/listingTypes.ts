@@ -40,6 +40,12 @@ export interface ListingPageEntry {
   id: string;
   /** Version from the entry's HTML link; only some entries have one */
   version?: number;
+  /**
+   * Whether the entry links arXiv's HTML version of the paper (none when
+   * arXiv's conversion failed). Absent in listings cached before it was
+   * recorded: not known.
+   */
+  html?: boolean;
   title: string;
   authors: ListingAuthor[];
   abstract: string;
@@ -126,6 +132,8 @@ export interface ListingStream {
 export interface ArxivListingEntry {
   id: string;
   version?: number;
+  /** Whether arXiv has an HTML version (absent: not known) */
+  html?: boolean;
   title: string;
   authors: ListingAuthor[];
   abstract: string;

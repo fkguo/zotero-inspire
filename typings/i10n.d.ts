@@ -226,6 +226,8 @@ export type FluentMessageId =
   | 'arxiv-browser-nothing-loaded'
   | 'arxiv-browser-notice-close'
   | 'arxiv-browser-open-abstract-page'
+  | 'arxiv-browser-open-html'
+  | 'arxiv-browser-open-html-button'
   | 'arxiv-browser-open-pdf'
   | 'arxiv-browser-open-pdf-button'
   | 'arxiv-browser-page-next'

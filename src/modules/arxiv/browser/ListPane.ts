@@ -22,7 +22,11 @@ import {
   type EntryRenderContext,
 } from "../../inspire/panel/EntryListRenderer";
 import { isDarkMode } from "../../inspire/styles";
-import { PdfButtonState } from "../../pickerUI";
+import {
+  applyPdfButtonStyle,
+  PDF_BUTTON_COLORS,
+  PdfButtonState,
+} from "../../pickerUI";
 import { arxivCategory } from "../arxivCategories";
 import type { IsoDate } from "../arxivDates";
 import type { ListingSection } from "../listingTypes";
@@ -662,7 +666,7 @@ export class ListPane {
     return header;
   }
 
-  /** The row's own parts: the abstract's toggle */
+  /** The row's own parts: the HTML button, the abstract's toggle */
   private decorate(row: HTMLDivElement, entry: BrowserEntry): void {
     row.classList.add("arxiv-browser__row");
     // No TeX keys here (the row keeps the References panel's other buttons)
@@ -673,6 +677,11 @@ export class ListPane {
       row.querySelector(".zinspire-ref-entry__checkbox")?.remove();
     }
     row.querySelector(".zinspire-ref-entry__texkey")?.remove();
+    // arXiv's HTML version after the PDF button, in the TeX key's place,
+    // unless the listing says there is none
+    if (entry.listing.html !== false) {
+      row.querySelector(".zinspire-ref-entry__pdf")?.after(this.htmlButton());
+    }
     this.setDotTitle(row, entry);
     this.setLinkTitle(row, entry);
     // The References panel's hint ("click to see the author's papers") does
@@ -686,6 +695,35 @@ export class ListPane {
     toggle.type = "button";
     abstract.before(toggle);
     this.applyAbstract(row, entry.id);
+  }
+
+  /** A row's HTML button: grey like the PDF button of a paper on arXiv */
+  private htmlButton(): HTMLButtonElement {
+    const doc = this.doc;
+    const htmlButton = html(doc, "button", "arxiv-browser__html-button");
+    htmlButton.type = "button";
+    htmlButton.title = getString("arxiv-browser-open-html");
+    applyPdfButtonStyle(htmlButton);
+    // "</>"
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const svg = doc.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("width", "12");
+    svg.setAttribute("height", "12");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.style.display = "block";
+    const path = doc.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", "M5 4 1.5 8 5 12M11 4l3.5 4-3.5 4M9.5 2.5l-3 11");
+    path.setAttribute("fill", "none");
+    path.setAttribute(
+      "stroke",
+      isDarkMode(doc) ? PDF_BUTTON_COLORS.grayDark : PDF_BUTTON_COLORS.grayLight,
+    );
+    path.setAttribute("stroke-width", "1.8");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.append(path);
+    htmlButton.append(svg);
+    return htmlButton;
   }
 
   /**
@@ -943,6 +981,8 @@ export class ListPane {
       event.preventDefault();
       if (this.options.openPdf) this.options.openPdf(entry);
       else actions.openPdf(id);
+    } else if (target.closest(".arxiv-browser__html-button")) {
+      actions.openHtml(id);
     } else if (target.closest(".zinspire-ref-entry__author-link")) {
       event.preventDefault();
     } else if (target.closest(".zinspire-ref-entry__dot")) {

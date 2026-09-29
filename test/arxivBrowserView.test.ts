@@ -1054,6 +1054,83 @@ describe("arXiv browser: read-only actions and keys", () => {
     expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/abs/2609.28538");
   });
 
+  it("opens arXiv's HTML version, offering it unless the listing says there is none", async () => {
+    const { root, launch } = await loaded();
+    // Oldest first: the replacements without and with an HTML link are on
+    // the first page
+    const sort = select(root, "sort");
+    sort.value = "id-asc";
+    sort.dispatchEvent(new win.Event("change"));
+    const rowOf = (id: string) =>
+      rows(root).find((row) => row.dataset.entryId!.includes(id))!;
+    const htmlButton = (row: HTMLElement) =>
+      row.querySelector<HTMLButtonElement>(".arxiv-browser__html-button");
+    const detailHtml = () =>
+      [
+        ...root.querySelectorAll<HTMLButtonElement>(
+          ".arxiv-browser__detail-actions button",
+        ),
+      ].find((b) => b.textContent === msg("arxiv-browser-open-html-button"));
+
+    const withHtml = rowOf("2502.20357");
+    const button = htmlButton(withHtml)!;
+    // Right after the PDF button, with its tooltip
+    expect(button.previousElementSibling?.classList).toContain(
+      "zinspire-ref-entry__pdf",
+    );
+    expect(button.title).toBe(msg("arxiv-browser-open-html"));
+    button.click();
+    expect(launch).toHaveBeenLastCalledWith(
+      "https://arxiv.org/html/2502.20357",
+    );
+    // A click on the row's HTML button also chose the paper
+    const detailButton = detailHtml()!;
+    expect(detailButton.title).toBe(msg("arxiv-browser-open-html"));
+    detailButton.click();
+    expect(launch).toHaveBeenLastCalledWith(
+      "https://arxiv.org/html/2502.20357",
+    );
+
+    // arXiv lists no HTML version of this one
+    const withoutHtml = rowOf("2506.21871");
+    expect(htmlButton(withoutHtml)).toBeNull();
+    expect(withoutHtml.querySelector(".zinspire-ref-entry__pdf")).not.toBeNull();
+    withoutHtml.click();
+    expect(
+      root.querySelector(".arxiv-browser__detail")!.textContent,
+    ).toContain("2506.21871");
+    expect(detailHtml()).toBeUndefined();
+  });
+
+  it("offers the HTML version of papers in a listing cached before it was recorded", async () => {
+    const env = environment();
+    subscribe(["hep-ph"]);
+    serveHepPh(env.site);
+    env.open();
+    await env.settle();
+    view!.dispose();
+    const cached = (await env.store.getDay("hep-ph", "2026-09-25"))!;
+    expect(cached.entries.find((e) => e.id === "2506.21871")?.html).toBe(
+      false,
+    );
+    for (const entry of cached.entries) delete entry.html;
+    // A day later arXiv cannot be reached; the copy from the cache is shown
+    env.site.page(LIST_URL("hep-ph"), { status: 0 });
+    await env.clock.advanceBy(24 * 3600 * 1000);
+    env.open();
+    await env.settle();
+    const sort = select(env.root, "sort");
+    sort.value = "id-asc";
+    sort.dispatchEvent(new win.Event("change"));
+    const row = rows(env.root).find((r) =>
+      r.dataset.entryId!.includes("2506.21871"),
+    )!;
+    row.querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!.click();
+    expect(env.launch).toHaveBeenLastCalledWith(
+      "https://arxiv.org/html/2506.21871",
+    );
+  });
+
   it("has no TeX key buttons in its rows (a relate button and a tick box, yes)", async () => {
     const { root } = await loaded();
     expect(rows(root).length).toBeGreaterThan(0);

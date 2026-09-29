@@ -196,16 +196,18 @@ function parseEntry(
   const id = parseArxivId(rawId)?.id;
   if (!id) throw new ListingParseError(`Entry without identifier: "${rawId}"`);
 
-  // The version is only in the entry's HTML link, when it has one
+  // The entry's HTML link, when arXiv has an HTML version; the version is
+  // only there
   let version: number | undefined;
+  let hasHtml = false;
   for (const link of queryAll(dt, "a")) {
     const html = (link.getAttribute("href") ?? "").match(
       /^https:\/\/arxiv\.org\/html\/(.+)$/,
     );
     const linked = html ? parseArxivId(html[1]) : null;
-    if (linked?.id === id && linked.version !== undefined) {
-      version = linked.version;
-    }
+    if (linked?.id !== id) continue;
+    hasHtml = true;
+    if (linked.version !== undefined) version = linked.version;
   }
 
   const titleElement = dd.querySelector(".list-title");
@@ -227,6 +229,7 @@ function parseEntry(
 
   const entry: ListingPageEntry = {
     id,
+    html: hasHtml,
     title,
     authors,
     abstract: abstractElement ? displayText(abstractElement) : "",

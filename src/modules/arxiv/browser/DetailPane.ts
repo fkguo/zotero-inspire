@@ -242,6 +242,16 @@ export class DetailPane {
           : actions.openPdf(listing.id),
       ),
     );
+    // Unless the listing says arXiv has no HTML version
+    if (listing.html !== false) {
+      const openHtml = button(
+        doc,
+        getString("arxiv-browser-open-html-button"),
+        () => actions.openHtml(listing.id),
+      );
+      openHtml.title = getString("arxiv-browser-open-html");
+      buttons.append(openHtml);
+    }
     parts.push(buttons);
 
     if (listing.abstract) {

@@ -339,6 +339,10 @@ describe("detail pane", () => {
     expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/abs/2609.28538");
     buttons[msg("arxiv-browser-open-pdf-button")].click();
     expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/pdf/2609.28538");
+    buttons[msg("arxiv-browser-open-html-button")].click();
+    expect(launch).toHaveBeenLastCalledWith(
+      "https://arxiv.org/html/2609.28538",
+    );
     expect(buttons[msg("arxiv-browser-copy-bibtex")]).toBeDefined();
   });
 

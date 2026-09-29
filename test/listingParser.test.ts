@@ -143,6 +143,14 @@ describe("parseNewPage on hep-ph /new of 25 September 2026", () => {
     expect(byId.get("2506.21871")).toBeDefined();
     expect(byId.get("2506.21871")?.version).toBeUndefined();
   });
+
+  it("records whether an entry links an HTML version", () => {
+    expect(byId.get("2502.20357")?.html).toBe(true);
+    expect(byId.get("2609.28538")?.html).toBe(true);
+    expect(byId.get("2506.21871")?.html).toBe(false);
+    // 71 of the 72 entries have an HTML link
+    expect(page.entries.filter((entry) => entry.html)).toHaveLength(71);
+  });
 });
 
 describe("parseNewPage on multi-page listings", () => {

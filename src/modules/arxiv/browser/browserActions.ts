@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Read-only actions of the arXiv browser: copy a paper's arXiv identifier,
-// its BibTeX or the link to its INSPIRE record, and open the abstract page or
-// the PDF in the system's web browser (the user's own browsing; the plugin
-// sends no request for it).
+// its BibTeX or the link to its INSPIRE record, and open the abstract page,
+// the PDF or the HTML version in the system's web browser (the user's own
+// browsing; the plugin sends no request for it).
 // The BibTeX is INSPIRE's when INSPIRE has the paper (one request: by the
 // INSPIRE recid of its library item, else by its arXiv identifier), else
 // arXiv's own from arxiv.org/bibtex/<id>, fetched through the plugin's
@@ -56,6 +56,11 @@ export function abstractPageUrl(id: string): string {
 
 export function pdfUrl(id: string): string {
   return `${ARXIV}/pdf/${id}`;
+}
+
+/** arXiv's HTML version of the paper; without version, like the PDF's */
+export function htmlUrl(id: string): string {
+  return `${ARXIV}/html/${id}`;
 }
 
 /**
@@ -201,6 +206,10 @@ export class BrowserActions {
 
   openPdf(id: string): void {
     this.launch(pdfUrl(id));
+  }
+
+  openHtml(id: string): void {
+    this.launch(htmlUrl(id));
   }
 
   /** Open a link in the web browser */
