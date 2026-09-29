@@ -100,8 +100,6 @@ The arXiv browser is a Zotero window for reading arXiv's announcements. It is no
 
 **Open it** with `View` → `arXiv Browser`, or with the arXiv button at the right end of Zotero's tab bar. A second request brings the open window to the front. The window can also open when Zotero starts (see [Preferences](#preferences)).
 
-![arXiv browser window](images/arxiv_browser.png)
-
 ### Getting started
 
 1. **Subscribe**: click **New…**, name the subscription, and tick categories in the category picker (search by name or identifier, e.g. `math.AG` or `quantum`). Choose the sections to show (new submissions, cross-lists, replacements) and click **Save**.
