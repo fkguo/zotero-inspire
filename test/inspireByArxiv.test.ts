@@ -208,6 +208,29 @@ describe("INSPIRE lookup by arXiv identifier", () => {
       lookupInspireByArxiv(["2609.50001"], { signal: controller.signal }),
     ).rejects.toMatchObject({ name: "AbortError" });
   });
+
+  it("sends a background lookup's requests, retries included, as background requests", async () => {
+    const ids = Array.from(
+      { length: 60 },
+      (_, i) => `2609.${String(20000 + i)}`,
+    );
+    // The first batch fails to connect once, and is tried again
+    fetchMock.mockImplementationOnce(async () => {
+      throw new TypeError("NetworkError");
+    });
+    await resolveInspireByArxiv(
+      ids.map((arxivId) => ({ arxivId, title: "T" })),
+      { background: true },
+    );
+    await lookupInspireByArxiv(["2609.30000"]);
+
+    expect(fetchMock.mock.calls.map((call) => call[1]?.background)).toEqual([
+      true,
+      true,
+      true,
+      undefined,
+    ]);
+  });
 });
 
 describe("the identity check of an item's INSPIRE record", () => {

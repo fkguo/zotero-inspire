@@ -181,7 +181,6 @@ describe("the check against INSPIRE", () => {
     const entries = await checked(a, b, c);
     expect(mocks.resolve.mock.calls[0][0]).toEqual([
       {
-        item: a,
         arxivId: "2609.00011",
         title: "Paper 2609.00011",
         firstAuthor: { lastName: "Pathak", firstName: "Rahul" },

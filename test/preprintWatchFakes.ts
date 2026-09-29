@@ -15,12 +15,27 @@ export interface FakeItem {
   itemType: string;
   deleted: boolean;
   fields: Fields;
+  creators: Creator[];
   getField: (name: string) => string;
+  getCreators: () => Creator[];
   setField: ReturnType<typeof vi.fn>;
   setType: ReturnType<typeof vi.fn>;
   saveTx: ReturnType<typeof vi.fn>;
   isRegularItem: () => boolean;
 }
+
+export interface Creator {
+  firstName?: string;
+  lastName: string;
+  creatorType?: string;
+}
+
+/** The first author of the fake items and of the fake INSPIRE records */
+export const FIRST_AUTHOR: Creator = {
+  firstName: "Rahul",
+  lastName: "Pathak",
+  creatorType: "author",
+};
 
 export interface FakeLibrary {
   libraryID: number;
@@ -72,7 +87,11 @@ export class FakeZotero {
   addItem(
     itemType: string,
     fields: Fields,
-    options: { libraryID?: number; deleted?: boolean } = {},
+    options: {
+      libraryID?: number;
+      deleted?: boolean;
+      creators?: Creator[];
+    } = {},
   ): FakeItem {
     const id = this.nextID++;
     const item: FakeItem = {
@@ -82,6 +101,8 @@ export class FakeZotero {
       itemType,
       deleted: options.deleted ?? false,
       fields: { ...fields },
+      creators: options.creators ?? [FIRST_AUTHOR],
+      getCreators: () => item.creators.map((creator) => ({ ...creator })),
       getField: (name: string) => {
         if (this.unloadedLibraries.has(item.libraryID)) {
           throw new Error(`Item data not loaded and field '${name}' not set`);
@@ -192,7 +213,21 @@ export class FakeZotero {
       ItemTypes: { getID: (name: string) => ITEM_TYPE_IDS[name] },
       getMainWindow: () => fake.mainWindow,
       getActiveZoteroPane: () => ({
-        getSelectedItems: () => fake.selectedItems,
+        getSelectedItems: (asIDs?: boolean) =>
+          asIDs
+            ? fake.selectedItems.map((item) => item.id)
+            : fake.selectedItems,
+        itemsView: {
+          selection: {
+            clearSelection: () => {
+              fake.selectedItems = [];
+            },
+          },
+          selectItems: async (ids: number[]) => {
+            fake.selectedItems = ids.map((id) => fake.items.get(id)!);
+            return ids.length;
+          },
+        },
         getSelectedCollections: () => {
           const id = fake.selectedCollectionID;
           if (id === null) return [];
@@ -241,9 +276,15 @@ export class FakeZotero {
 export interface InspireMetadata {
   control_number?: number;
   arxiv_eprints?: Array<{ value: string; categories?: string[] }>;
+  titles?: Array<{ title: string }>;
+  first_author?: { full_name?: string; last_name?: string };
+  collaborations?: Array<{ value: string }>;
   publication_info?: Array<Record<string, unknown>>;
   dois?: Array<{ value: string }>;
   preprint_date?: string;
+  texkeys?: string[];
+  citation_count?: number;
+  citation_count_without_self_citations?: number;
 }
 
 export function inspireResponse(
@@ -265,26 +306,33 @@ export function inspireResponse(
   } as unknown as Response;
 }
 
-/** The arXiv ID that a preprint-check request asks INSPIRE about */
-export function requestedArxivId(url: string): string {
+/** The arXiv IDs that a preprint-check request asks INSPIRE about */
+export function requestedArxivIds(url: string): string[] {
   const query = new URL(url).searchParams.get("q") ?? "";
-  return query.replace(/^eprint:/, "");
+  return query.split(" OR ").map((term) => term.replace(/^arxiv:/, ""));
 }
 
 /**
  * INSPIRE answers by arXiv ID for a mocked inspireFetch: a list of records,
  * an HTTP status for a failed request, or an Error for a network failure.
+ * A request for several IDs fails as a whole when one of them fails.
  */
 export function inspireAnswers(
   answers: Map<string, InspireMetadata[] | number | Error>,
 ) {
   return (url: string) => {
-    const answer = answers.get(requestedArxivId(url));
-    if (answer instanceof Error) return Promise.reject(answer);
-    if (typeof answer === "number") {
-      return Promise.resolve(inspireResponse([], answer));
+    const replies = requestedArxivIds(url).map((id) => answers.get(id));
+    const error = replies.find((reply) => reply instanceof Error);
+    if (error) return Promise.reject(error);
+    const status = replies.find((reply) => typeof reply === "number");
+    if (typeof status === "number") {
+      return Promise.resolve(inspireResponse([], status));
     }
-    return Promise.resolve(inspireResponse(answer ?? []));
+    return Promise.resolve(
+      inspireResponse(
+        replies.flatMap((reply) => (Array.isArray(reply) ? reply : [])),
+      ),
+    );
   };
 }
 
@@ -305,15 +353,35 @@ export function abortError(): Error {
   return error;
 }
 
+/**
+ * The INSPIRE record of the arXiv paper `arxivId`, with the title and first
+ * author of the fake items ("Paper <arXiv ID>", FIRST_AUTHOR)
+ */
+export function inspireRecord(
+  arxivId: string,
+  recid: number,
+  fields: InspireMetadata = {},
+): InspireMetadata {
+  return {
+    control_number: recid,
+    arxiv_eprints: [{ value: arxivId }],
+    titles: [{ title: `Paper ${arxivId}` }],
+    first_author: {
+      full_name: `${FIRST_AUTHOR.lastName}, ${FIRST_AUTHOR.firstName}`,
+      last_name: FIRST_AUTHOR.lastName,
+    },
+    preprint_date: "2024-01-15",
+    ...fields,
+  };
+}
+
 /** A published record: journal information plus the journal DOI */
 export function publishedRecord(
   arxivId: string,
   recid: number,
   journal = "Phys.Rev.D",
 ): InspireMetadata {
-  return {
-    control_number: recid,
-    arxiv_eprints: [{ value: arxivId }],
+  return inspireRecord(arxivId, recid, {
     publication_info: [
       {
         journal_title: journal,
@@ -323,8 +391,7 @@ export function publishedRecord(
       },
     ],
     dois: [{ value: `10.1103/PhysRevD.110.${recid}` }],
-    preprint_date: "2024-01-15",
-  };
+  });
 }
 
 /** A record of a paper that has not appeared in a journal */
@@ -332,9 +399,5 @@ export function unpublishedRecord(
   arxivId: string,
   recid: number,
 ): InspireMetadata {
-  return {
-    control_number: recid,
-    arxiv_eprints: [{ value: arxivId }],
-    preprint_date: "2024-01-15",
-  };
+  return inspireRecord(arxivId, recid);
 }

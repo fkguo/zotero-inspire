@@ -72,6 +72,10 @@ import {
   type PreprintCheckSummary,
 } from "./preprintWatchService";
 import {
+  writeInspireCompletion,
+  type CompletionEntry,
+} from "./library/inspireCompletion";
+import {
   isCollabTagEnabled,
   isCollabTagAutoEnabled,
   addCollabTagsToItem,
@@ -1571,27 +1575,69 @@ export class ZInspire {
   async showBackgroundPreprintResults(
     results: PreprintCheckResult[],
   ): Promise<void> {
-    const summary = buildCheckSummary(results);
-    const { selectedItemIDs, cancelled } =
+    await this.reviewPreprintResults(buildCheckSummary(results));
+  }
+
+  /**
+   * Show the results dialog, then apply what the user ticked: the publication
+   * update for published preprints, the INSPIRE record (recid, citation key,
+   * citation counts) for preprints INSPIRE has a record of that their items
+   * do not name yet.
+   */
+  private async reviewPreprintResults(
+    summary: PreprintCheckSummary,
+  ): Promise<void> {
+    const { published, records, cancelled } =
       await this.showPreprintCheckResultsDialog(summary);
+    if (cancelled) return;
 
-    if (cancelled || selectedItemIDs.length === 0) return;
-
-    // Filter results to only selected items
-    const selectedResults = summary.results.filter(
-      (r) => selectedItemIDs.includes(r.itemID) && r.status === "published",
-    );
-
-    // Perform updates
-    const updateResult = await batchUpdatePreprints(selectedResults);
-
-    // Show completion notification
-    this.showPreprintNotification(
-      getString("preprint-update-success", {
-        args: { count: updateResult.success },
-      }),
-      "success",
-    );
+    const lines: string[] = [];
+    let failed = false;
+    if (published.length) {
+      const updateResult = await batchUpdatePreprints(published);
+      lines.push(
+        getString("preprint-update-success", {
+          args: { count: updateResult.success },
+        }),
+      );
+    }
+    if (records.length) {
+      const writes = await this.writeTickedInspireRecords(records);
+      let written = 0;
+      let conflicts = 0;
+      let shown = 0;
+      let changed = 0;
+      for (const write of writes) {
+        if (write.status === "written" && !write.archiveConflict) written++;
+        else if (
+          write.status === "written" ||
+          write.reason === "nothingToWrite"
+        )
+          conflicts++;
+        else if (write.reason === "shown") shown++;
+        else changed++;
+      }
+      lines.push(
+        getString("preprint-records-written", { args: { count: written } }),
+      );
+      for (const [key, count] of [
+        ["preprint-records-archive-conflict", conflicts],
+        ["preprint-records-shown", shown],
+        ["preprint-records-changed", changed],
+      ] as const) {
+        if (count) {
+          lines.push(getString(key, { args: { count } }));
+          failed = true;
+        }
+      }
+    }
+    if (lines.length) {
+      this.showPreprintNotification(
+        lines,
+        failed ? "fail" : "success",
+        failed ? PREPRINT_SUMMARY_DISPLAY_MS : undefined,
+      );
+    }
   }
 
   /**
@@ -1818,27 +1864,7 @@ export class ZInspire {
         return;
       }
 
-      const summary = buildCheckSummary(results);
-      const { selectedItemIDs, cancelled } =
-        await this.showPreprintCheckResultsDialog(summary);
-
-      if (cancelled || selectedItemIDs.length === 0) return;
-
-      // Filter results to only selected items
-      const selectedResults = summary.results.filter(
-        (r) => selectedItemIDs.includes(r.itemID) && r.status === "published",
-      );
-
-      // Perform updates
-      const updateResult = await batchUpdatePreprints(selectedResults);
-
-      // Show completion notification
-      this.showPreprintNotification(
-        getString("preprint-update-success", {
-          args: { count: updateResult.success },
-        }),
-        "success",
-      );
+      await this.reviewPreprintResults(buildCheckSummary(results));
     } catch (err: any) {
       progressWindow.close();
       this.endRun(run);
@@ -1859,16 +1885,44 @@ export class ZInspire {
   }
 
   /**
-   * Show preprint check results dialog.
-   * Allows user to select which items to update.
+   * Write the INSPIRE records the user ticked. An item shown in the item pane
+   * is never written, and the library selection is shown there (batch editing
+   * shows every selected item): ticked items selected in the library, such as
+   * those of "Check Preprint Status", are unselected for the write and
+   * selected again afterwards. An item open in a reader stays unwritten.
+   */
+  private async writeTickedInspireRecords(records: CompletionEntry[]) {
+    const pane = Zotero.getActiveZoteroPane() as any;
+    const selected: number[] =
+      pane?.getSelectedItems?.(true, { libraryTabOnly: true }) ?? [];
+    const ticked = new Set(records.map((record) => record.itemID));
+    const unselect = selected.some((id) => ticked.has(id));
+    if (unselect) pane.itemsView.selection.clearSelection();
+    try {
+      return await writeInspireCompletion(records);
+    } finally {
+      if (unselect) await pane.itemsView.selectItems(selected, true, true);
+    }
+  }
+
+  /**
+   * Show preprint check results dialog: the published preprints (publication
+   * update) and the preprints INSPIRE has a record of that their items do
+   * not name yet (write the INSPIRE record). Rows whose INSPIRE record may be
+   * another paper say why and start unticked. Returns the ticked rows of
+   * each kind.
    */
   private async showPreprintCheckResultsDialog(
     summary: PreprintCheckSummary,
-  ): Promise<{ selectedItemIDs: number[]; cancelled: boolean }> {
+  ): Promise<{
+    published: PreprintCheckResult[];
+    records: CompletionEntry[];
+    cancelled: boolean;
+  }> {
     return new Promise((resolve) => {
       const win = Zotero.getMainWindow();
       if (!win) {
-        resolve({ selectedItemIDs: [], cancelled: true });
+        resolve({ published: [], records: [], cancelled: true });
         return;
       }
 
@@ -1876,9 +1930,10 @@ export class ZInspire {
       const publishedResults = summary.results.filter(
         (r) => r.status === "published" && r.publicationInfo,
       );
+      const recordResults = summary.results.filter((r) => r.completion);
 
-      // If no published items found, show how many preprints had each outcome
-      if (publishedResults.length === 0) {
+      // Nothing to update or write: show how many preprints had each outcome
+      if (publishedResults.length === 0 && recordResults.length === 0) {
         this.showPreprintNotification(
           getString("preprint-check-summary", {
             args: {
@@ -1892,7 +1947,7 @@ export class ZInspire {
           summary.errors > 0 ? "fail" : "default",
           PREPRINT_SUMMARY_DISPLAY_MS,
         );
-        resolve({ selectedItemIDs: [], cancelled: false });
+        resolve({ published: [], records: [], cancelled: false });
         return;
       }
 
@@ -1925,9 +1980,13 @@ export class ZInspire {
         background-color: var(--material-sidepane, #f5f5f5);
         border-radius: 8px 8px 0 0;
       `;
-      header.textContent = getString("preprint-found-published", {
-        args: { count: publishedResults.length },
-      });
+      header.textContent = publishedResults.length
+        ? getString("preprint-found-published", {
+            args: { count: publishedResults.length },
+          })
+        : getString("preprint-found-records", {
+            args: { count: recordResults.length },
+          });
       panel.appendChild(header);
 
       // Summary bar
@@ -1959,16 +2018,38 @@ export class ZInspire {
       listContainer.style.cssText = `flex: 1; overflow-y: auto; padding: 8px 16px;`;
       panel.appendChild(listContainer);
 
-      // Track selected items (all selected by default)
+      // Ticked at first: rows whose record is the item's paper
       const selectedIDs = new Set<number>(
-        publishedResults.map((r) => r.itemID),
+        [...publishedResults, ...recordResults]
+          .filter((r) => !r.mismatches?.length)
+          .map((r) => r.itemID),
       );
 
-      // Create rows for each published item using DocumentFragment for batching
+      // Create rows for each item using DocumentFragment for batching
       const fragment = doc.createDocumentFragment();
-      for (const result of publishedResults) {
-        const row = this.createPreprintResultRow(doc, result, selectedIDs);
-        fragment.appendChild(row);
+      for (const [heading, results] of [
+        ["preprint-section-published", publishedResults],
+        ["preprint-section-records", recordResults],
+      ] as const) {
+        if (!results.length) continue;
+        // A heading only when the dialog lists both kinds
+        if (publishedResults.length && recordResults.length) {
+          const title = doc.createElement("div");
+          title.style.cssText = `font-weight: 600; margin: 8px 0;`;
+          title.textContent = getString(heading);
+          fragment.appendChild(title);
+        }
+        for (const result of results) {
+          fragment.appendChild(
+            this.createPreprintResultRow(doc, result, selectedIDs),
+          );
+        }
+      }
+      if (!publishedResults.length) {
+        const note = doc.createElement("div");
+        note.style.cssText = `font-size: 12px; color: var(--fill-secondary, #666); margin-bottom: 8px;`;
+        note.textContent = getString("preprint-section-records");
+        fragment.prepend(note);
       }
       listContainer.appendChild(fragment);
 
@@ -1987,7 +2068,13 @@ export class ZInspire {
       selectAllContainer.style.cssText = `display: flex; align-items: center; gap: 6px; cursor: pointer;`;
       const selectAllCheckbox = doc.createElement("input");
       selectAllCheckbox.type = "checkbox";
-      selectAllCheckbox.checked = true;
+      const allTicked = () =>
+        selectedIDs.size === publishedResults.length + recordResults.length;
+      selectAllCheckbox.checked = allTicked();
+      // Follows the rows, so that it ticks every row after one was unticked
+      listContainer.addEventListener("change", () => {
+        selectAllCheckbox.checked = allTicked();
+      });
       selectAllCheckbox.addEventListener("change", () => {
         const checkboxes = listContainer.querySelectorAll(
           'input[type="checkbox"]',
@@ -2045,8 +2132,11 @@ export class ZInspire {
         isFinished = true;
         overlay.remove();
         doc.removeEventListener("keydown", onKeyDown, true);
+        const ticked = (r: PreprintCheckResult) =>
+          !cancelled && selectedIDs.has(r.itemID);
         resolve({
-          selectedItemIDs: cancelled ? [] : Array.from(selectedIDs),
+          published: publishedResults.filter(ticked),
+          records: recordResults.filter(ticked).map((r) => r.completion!),
           cancelled,
         });
       };
@@ -2086,7 +2176,7 @@ export class ZInspire {
     // Checkbox
     const checkbox = doc.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = true;
+    checkbox.checked = selectedIDs.has(result.itemID);
     checkbox.dataset.itemId = String(result.itemID);
     checkbox.style.cssText = `margin-right: 10px; margin-top: 3px; cursor: pointer;`;
     checkbox.addEventListener("change", () => {
@@ -2137,6 +2227,35 @@ export class ZInspire {
       content.appendChild(infoDiv);
     }
 
+    // The INSPIRE record that would be written
+    const record = result.completion?.record;
+    if (record) {
+      const recordLine = doc.createElement("div");
+      recordLine.style.cssText = `font-size: 12px; color: var(--fill-secondary, #666);`;
+      recordLine.textContent = getString("preprint-record-line", {
+        args: {
+          recid: record.recid,
+          title: record.title ?? "",
+          author: record.firstAuthor ?? "",
+        },
+      });
+      content.appendChild(recordLine);
+    }
+
+    // Why the record may be another paper's
+    if (result.mismatches?.length) {
+      const warning = doc.createElement("div");
+      warning.style.cssText = `font-size: 12px; color: #b45309; margin-top: 2px;`;
+      warning.textContent = `\u26a0 ${getString("preprint-mismatch", {
+        args: {
+          reasons: result.mismatches
+            .map((reason) => getString(`preprint-mismatch-${reason}`))
+            .join(", "),
+        },
+      })}`;
+      content.appendChild(warning);
+    }
+
     row.appendChild(content);
     return row;
   }
@@ -2145,7 +2264,7 @@ export class ZInspire {
    * Show a notification for preprint operations.
    */
   private showPreprintNotification(
-    text: string,
+    text: string | string[],
     type: "success" | "fail" | "default",
     closeDelayMs = 2500,
   ): void {
@@ -2155,11 +2274,13 @@ export class ZInspire {
     const progressWindow = new ProgressWindowHelper(config.addonName);
     const icon =
       type === "fail" ? "chrome://zotero/skin/cross.png" : PLUGIN_ICON;
-    progressWindow.createLine({
-      text,
-      icon,
-      type: type === "default" ? "success" : type,
-    });
+    for (const line of typeof text === "string" ? [text] : text) {
+      progressWindow.createLine({
+        text: line,
+        icon,
+        type: type === "default" ? "success" : type,
+      });
+    }
     progressWindow.show();
     progressWindow.startCloseTimer(closeDelayMs);
   }

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   prefs: new Map<string, unknown>(),
   fetchInspireMetaByRecid: vi.fn(),
+  writeInspireCompletion: vi.fn(),
 }));
 vi.mock("../src/modules/inspire/rateLimiter", () => ({
   inspireFetch: mocks.fetch,
@@ -24,6 +25,16 @@ vi.mock("../src/utils/prefs", () => ({
   getPref: (key: string) => mocks.prefs.get(key),
   setPref: (key: string, value: unknown) => mocks.prefs.set(key, value),
 }));
+// Writing an item's INSPIRE record (tested in inspireCompletion.test.ts)
+vi.mock(
+  "../src/modules/inspire/library/inspireCompletion",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../src/modules/inspire/library/inspireCompletion")
+    >()),
+    writeInspireCompletion: mocks.writeInspireCompletion,
+  }),
+);
 vi.mock("../src/modules/inspire/metadataService", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("../src/modules/inspire/metadataService")
@@ -89,7 +100,7 @@ import {
   inspireAnswers,
   inspireResponse,
   publishedRecord,
-  requestedArxivId,
+  requestedArxivIds,
   unpublishedRecord,
   type InspireMetadata,
 } from "./preprintWatchFakes";
@@ -109,6 +120,15 @@ beforeEach(() => {
   progressWindows.length = 0;
   mocks.prefs.clear();
   mocks.fetchInspireMetaByRecid.mockReset().mockResolvedValue(-1);
+  mocks.writeInspireCompletion
+    .mockReset()
+    .mockImplementation(async (entries: unknown[]) =>
+      entries.map(() => ({
+        status: "written",
+        wrote: ["recid"],
+        archiveConflict: false,
+      })),
+    );
   zotero = new FakeZotero();
   zotero.install();
   dom = new JSDOM("<!DOCTYPE html><html><body></body></html>", {
@@ -153,6 +173,29 @@ function preprint(arxivId: string, libraryID = 1) {
   );
 }
 
+/** A preprint whose item names its INSPIRE record */
+function preprintWithRecid(arxivId: string, recid: number) {
+  const item = preprint(arxivId);
+  item.fields.archive = "INSPIRE";
+  item.fields.archiveLocation = String(recid);
+  return item;
+}
+
+/** The dialog's checkboxes: item ID and ticked */
+const checkboxes = () =>
+  [
+    ...overlay()!.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"][data-item-id]',
+    ),
+  ].map((box) => [Number(box.dataset.itemId), box.checked]);
+
+/** Preprints of `count` papers from `first` on (2410.00001, ...) */
+function preprints(count: number, prefix = "2410", first = 1) {
+  return Array.from({ length: count }, (_, i) =>
+    preprint(`${prefix}.${String(first + i).padStart(5, "0")}`),
+  );
+}
+
 const overlay = () =>
   dom.window.document.getElementById("zinspire-preprint-results-overlay");
 
@@ -174,7 +217,7 @@ describe("checking the selected items", () => {
   it("lists the published preprints and updates only the ticked ones", async () => {
     const a = preprint("2403.00001");
     const b = preprint("2403.00002");
-    const c = preprint("2403.00003");
+    const c = preprintWithRecid("2403.00003", 103);
     zotero.selectedItems = [a, b, c];
     answers.set("2403.00001", [publishedRecord("2403.00001", 101)]);
     answers.set("2403.00002", [publishedRecord("2403.00002", 102)]);
@@ -246,12 +289,12 @@ describe("checking the selected items", () => {
   });
 
   it("stops when Escape is pressed during the check", async () => {
-    zotero.selectedItems = [preprint("2403.00006"), preprint("2403.00007")];
+    zotero.selectedItems = preprints(51, "2403", 6);
     const pending = new Map<string, ReturnType<typeof deferred<Response>>>();
     mocks.fetch.mockImplementation(
       (url: string, options?: { signal?: AbortSignal }) => {
         const request = deferred<Response>();
-        pending.set(requestedArxivId(url), request);
+        pending.set(requestedArxivIds(url)[0], request);
         options?.signal?.addEventListener("abort", () =>
           request.reject(abortError()),
         );
@@ -277,6 +320,190 @@ describe("checking the selected items", () => {
   });
 });
 
+describe("INSPIRE records the items do not name yet", () => {
+  it("lists them when no preprint is published, and writes the records of the ticked ones", async () => {
+    const found = preprint("2409.20001");
+    const doubtful = preprint("2409.20002");
+    doubtful.fields.title = "Sneaky Sneutrino Scattering";
+    const named = preprintWithRecid("2409.20003", 303);
+    zotero.selectedItems = [found, doubtful, named];
+    answers.set("2409.20001", [unpublishedRecord("2409.20001", 301)]);
+    answers.set("2409.20002", [unpublishedRecord("2409.20002", 302)]);
+    answers.set("2409.20003", [unpublishedRecord("2409.20003", 303)]);
+
+    const run = new ZInspire().checkSelectedItemsPreprints();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    const panel = overlay()!;
+    const text = panel.textContent;
+    const boxes = checkboxes();
+    button("preprint-update-selected").click();
+    await run;
+
+    expect(text).toContain(msg("preprint-found-records", { count: 2 }));
+    expect(text).toContain(msg("preprint-section-records"));
+    expect(text).toContain(
+      msg("preprint-record-line", {
+        recid: "301",
+        title: "Paper 2409.20001",
+        author: "Pathak, Rahul",
+      }),
+    );
+    expect(text).toContain(
+      msg("preprint-mismatch", { reasons: msg("preprint-mismatch-title") }),
+    );
+    // the doubtful record starts unticked; the item naming its record is not listed
+    expect(boxes).toEqual([
+      [found.id, true],
+      [doubtful.id, false],
+    ]);
+    expect(mocks.writeInspireCompletion).toHaveBeenCalledTimes(1);
+    expect(mocks.writeInspireCompletion.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        itemID: found.id,
+        arxivId: "2409.20001",
+        record: expect.objectContaining({ recid: "301" }),
+      }),
+    ]);
+    // nothing else is written
+    expect(found.saveTx).not.toHaveBeenCalled();
+    expect(found.setField).not.toHaveBeenCalled();
+    expect(notifications().at(-1)).toMatchObject({
+      text: msg("preprint-records-written", { count: 1 }),
+      type: "success",
+    });
+  });
+
+  it("lists both kinds under their headings and applies each to its ticked rows", async () => {
+    const published = preprint("2409.20004");
+    const unnamed = preprint("2409.20005");
+    zotero.selectedItems = [published, unnamed];
+    answers.set("2409.20004", [publishedRecord("2409.20004", 304)]);
+    answers.set("2409.20005", [unpublishedRecord("2409.20005", 305)]);
+
+    const run = new ZInspire().checkSelectedItemsPreprints();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    const text = overlay()!.textContent;
+    const boxes = checkboxes();
+    button("preprint-update-selected").click();
+    await run;
+
+    expect(text).toContain(msg("preprint-found-published", { count: 1 }));
+    expect(text).toContain(msg("preprint-section-published"));
+    expect(text).toContain(msg("preprint-section-records"));
+    expect(boxes).toEqual([
+      [published.id, true],
+      [unnamed.id, true],
+    ]);
+    expect(published.saveTx).toHaveBeenCalledTimes(1);
+    expect(unnamed.saveTx).not.toHaveBeenCalled();
+    expect(
+      mocks.writeInspireCompletion.mock.calls[0][0].map(
+        (entry: { itemID: number }) => entry.itemID,
+      ),
+    ).toEqual([unnamed.id]);
+    expect(notifications().at(-1)).toMatchObject({
+      text: msg("preprint-update-success", { count: 1 }),
+    });
+  });
+
+  it("says which records were not written, and why", async () => {
+    const items = [
+      preprint("2409.20006"),
+      preprint("2409.20007"),
+      preprint("2409.20008"),
+      preprint("2409.20009"),
+    ];
+    zotero.selectedItems = items;
+    for (const item of items) {
+      const id = item.fields.extra.slice(6, 16);
+      answers.set(id, [unpublishedRecord(id, 306)]);
+    }
+    mocks.writeInspireCompletion.mockResolvedValue([
+      { status: "written", wrote: ["recid"], archiveConflict: false },
+      { status: "skipped", reason: "shown" },
+      { status: "skipped", reason: "changed" },
+      { status: "written", wrote: ["citations"], archiveConflict: true },
+    ]);
+
+    const run = new ZInspire().checkSelectedItemsPreprints();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    button("preprint-update-selected").click();
+    await run;
+
+    const window = progressWindows.at(-1)!;
+    expect(window.lines.map((line) => line.text)).toEqual([
+      msg("preprint-records-written", { count: 1 }),
+      msg("preprint-records-archive-conflict", { count: 1 }),
+      msg("preprint-records-shown", { count: 1 }),
+      msg("preprint-records-changed", { count: 1 }),
+    ]);
+    expect(window.lines[0].type).toBe("fail");
+  });
+
+  it("writes the records of ticked items that are selected, unselected for the write, and selects them again", async () => {
+    const other = preprintWithRecid("2409.20011", 311);
+    const unnamed = preprint("2409.20012");
+    zotero.selectedItems = [other, unnamed];
+    answers.set("2409.20011", [unpublishedRecord("2409.20011", 311)]);
+    answers.set("2409.20012", [unpublishedRecord("2409.20012", 312)]);
+    let selectedDuringWrite: number[] | undefined;
+    mocks.writeInspireCompletion.mockImplementation(async () => {
+      selectedDuringWrite = zotero.selectedItems.map((item) => item.id);
+      return [{ status: "written", wrote: ["recid"], archiveConflict: false }];
+    });
+
+    const run = new ZInspire().checkSelectedItemsPreprints();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    button("preprint-update-selected").click();
+    await run;
+
+    expect(selectedDuringWrite).toEqual([]);
+    expect(zotero.selectedItems).toEqual([other, unnamed]);
+  });
+
+  it("ticks every row with Select All after a row was unticked", async () => {
+    const items = [preprint("2409.20013"), preprint("2409.20014")];
+    zotero.selectedItems = items;
+    answers.set("2409.20013", [unpublishedRecord("2409.20013", 313)]);
+    answers.set("2409.20014", [unpublishedRecord("2409.20014", 314)]);
+
+    const run = new ZInspire().checkSelectedItemsPreprints();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    const rows = [
+      ...overlay()!.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"][data-item-id]',
+      ),
+    ];
+    const selectAll = overlay()!.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]:not([data-item-id])',
+    )!;
+    rows[1].click();
+    expect(selectAll.checked).toBe(false);
+    selectAll.click();
+    const ticked = checkboxes();
+    button("preprint-update-selected").click();
+    await run;
+
+    expect(ticked).toEqual([
+      [items[0].id, true],
+      [items[1].id, true],
+    ]);
+    expect(mocks.writeInspireCompletion.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it("writes nothing when the dialog is cancelled", async () => {
+    zotero.selectedItems = [preprint("2409.20010")];
+    answers.set("2409.20010", [unpublishedRecord("2409.20010", 310)]);
+
+    const run = new ZInspire().checkSelectedItemsPreprints();
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    button("preprint-cancel").click();
+    await run;
+
+    expect(mocks.writeInspireCompletion).not.toHaveBeenCalled();
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Counts per outcome, and the scope of the collection and "all" entries
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,18 +518,16 @@ function progressTexts(): string[] {
 
 describe("the result of a check", () => {
   it("shows how many preprints had each outcome when none is published", async () => {
+    // two requests: 50 papers answered, the 51st and 52nd not
     zotero.selectedItems = [
-      preprint("2410.00001"),
-      preprint("2410.00002"),
-      preprint("2410.00003"),
-      preprint("2410.00004"),
-      preprint("2410.00005"),
+      preprintWithRecid("2410.00001", 1),
+      preprintWithRecid("2410.00002", 2),
+      ...preprints(50, "2410", 3),
     ];
     answers.set("2410.00001", [unpublishedRecord("2410.00001", 1)]);
     answers.set("2410.00002", [unpublishedRecord("2410.00002", 2)]);
-    answers.set("2410.00003", []);
-    answers.set("2410.00004", 502);
-    answers.set("2410.00005", new TypeError("NetworkError"));
+    answers.set("2410.00051", 502);
+    answers.set("2410.00052", 502);
 
     await new ZInspire().checkSelectedItemsPreprints();
 
@@ -310,10 +535,10 @@ describe("the result of a check", () => {
     expect(notifications()).toEqual([
       expect.objectContaining({
         text: msg("preprint-check-summary", {
-          total: 5,
+          total: 52,
           published: 0,
           unpublished: 2,
-          notInInspire: 1,
+          notInInspire: 48,
           errors: 2,
         }),
         type: "fail",
@@ -325,7 +550,10 @@ describe("the result of a check", () => {
   });
 
   it("shows the counts without the failure mark when every request was answered", async () => {
-    zotero.selectedItems = [preprint("2410.00006"), preprint("2410.00007")];
+    zotero.selectedItems = [
+      preprintWithRecid("2410.00006", 6),
+      preprint("2410.00007"),
+    ];
     answers.set("2410.00006", [unpublishedRecord("2410.00006", 6)]);
     answers.set("2410.00007", []);
 
@@ -346,16 +574,11 @@ describe("the result of a check", () => {
   });
 
   it("shows the counts of all four outcomes above the published preprints", async () => {
-    zotero.selectedItems = [
-      preprint("2410.00008"),
-      preprint("2410.00009"),
-      preprint("2410.00010"),
-      preprint("2410.00011"),
-    ];
+    // two requests: 50 papers answered, the 51st not
+    zotero.selectedItems = preprints(51, "2410", 8);
     answers.set("2410.00008", [publishedRecord("2410.00008", 8)]);
     answers.set("2410.00009", [unpublishedRecord("2410.00009", 9)]);
-    answers.set("2410.00010", []);
-    answers.set("2410.00011", 503);
+    answers.set("2410.00058", 503);
 
     const run = new ZInspire().checkSelectedItemsPreprints();
     await vi.waitFor(() => expect(overlay()).not.toBeNull());
@@ -368,7 +591,7 @@ describe("the result of a check", () => {
     expect(counts).toEqual([
       `${msg("preprint-results-published")}: 1`,
       `${msg("preprint-results-unpublished")}: 1`,
-      `${msg("preprint-results-not-in-inspire")}: 1`,
+      `${msg("preprint-results-not-in-inspire")}: 48`,
       `${msg("preprint-results-errors")}: 1`,
     ]);
   });
@@ -400,7 +623,7 @@ describe("checking all preprints", () => {
       ],
     });
     const cached = preprint("2411.00001");
-    const neverCached = preprint("2411.00002");
+    const neverCached = preprintWithRecid("2411.00002", 2);
     const inGroup = preprint("2411.00003", 2);
     preprint("2411.00004", 3);
     answers.set("2411.00001", [publishedRecord("2411.00001", 1)]);
@@ -418,7 +641,7 @@ describe("checking all preprints", () => {
     await run;
 
     expect(
-      mocks.fetch.mock.calls.map(([url]) => requestedArxivId(url)).sort(),
+      mocks.fetch.mock.calls.flatMap(([url]) => requestedArxivIds(url)).sort(),
     ).toEqual(["2411.00001", "2411.00002", "2411.00003"]);
     expect(boxes.map((box) => Number(box.dataset.itemId))).toEqual([
       cached.id,
@@ -436,7 +659,7 @@ describe("checking all preprints", () => {
 
 describe("checking a collection", () => {
   it("asks INSPIRE even about preprints answered earlier in the session", async () => {
-    const a = preprint("2412.00001");
+    const a = preprintWithRecid("2412.00001", 1);
     zotero.addCollection(5, [a]);
     zotero.selectedCollectionID = 5;
     answers.set("2412.00001", [unpublishedRecord("2412.00001", 1)]);
@@ -455,7 +678,7 @@ describe("checking a collection", () => {
 describe("manual checks and the background check", () => {
   it("stops a background check in progress", async () => {
     const signal = startBackgroundCheck()!;
-    zotero.selectedItems = [preprint("2408.10001")];
+    zotero.selectedItems = [preprintWithRecid("2408.10001", 1)];
     answers.set("2408.10001", [unpublishedRecord("2408.10001", 1)]);
 
     await new ZInspire().checkSelectedItemsPreprints();
@@ -465,7 +688,7 @@ describe("manual checks and the background check", () => {
 
   it("stops a background check before scanning for all preprints", async () => {
     const signal = startBackgroundCheck()!;
-    preprint("2408.10003");
+    preprintWithRecid("2408.10003", 3);
     answers.set("2408.10003", [unpublishedRecord("2408.10003", 3)]);
     const stoppedAtScan: boolean[] = [];
     const Search = (Zotero as any).Search;

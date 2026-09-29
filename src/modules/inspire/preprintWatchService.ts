@@ -8,8 +8,11 @@
  * - Reuses existing functions from metadataService.ts
  * - Every check scans the collection or the editable libraries for its
  *   preprints; the cache file keeps INSPIRE's answers only
- * - A check asks INSPIRE about every preprint; only the background check at
- *   startup reuses recent answers from the cache
+ * - A check asks INSPIRE about every preprint, 50 arXiv IDs per request, and
+ *   takes a record only when it is the record of the item's arXiv ID and its
+ *   title and first author agree with the item's (resolveInspireByArxiv);
+ *   only the background check at startup skips papers INSPIRE had no record
+ *   of in the last 7 days
  * - Worker pattern for concurrent API calls (max 3)
  * - Incremental library scanning to avoid UI freezing
  */
@@ -17,19 +20,27 @@
 import { config } from "../../../package.json";
 import { getPref, setPref } from "../../utils/prefs";
 import {
-  INSPIRE_API_BASE,
+  API_FIELDS_INSPIRE_COMPLETION,
   API_FIELDS_PREPRINT_CHECK,
-  buildFieldsParam,
 } from "./constants";
-import { inspireFetch } from "./rateLimiter";
 import { localCache } from "./localCache";
 import { fetchInspireMetaByRecid } from "./metadataService";
 import { creatorsForUpdate, getFieldProtectionConfig } from "./smartUpdate";
 import { createAbortControllerWithSignal } from "./utils";
 import { addArxivCategoryTag } from "./arxivTag";
 import { arxivIdFromItem } from "../arxiv/arxivId";
+import {
+  INSPIRE_ARXIV_BATCH_SIZE,
+  resolveInspireByArxiv,
+  type ResolvedInspireRecord,
+} from "../arxiv/inspireByArxiv";
+import {
+  completionEntry,
+  itemIdentity,
+  type CheckedIdentity,
+} from "./library/inspireCompletion";
+import { resolveItemRecid } from "./library/itemRecid";
 import type { jsobject } from "./types";
-import type { InspireLiteratureSearchResponse } from "./apiTypes";
 import type {
   PublicationInfo,
   PreprintCheckResult,
@@ -49,7 +60,7 @@ export const ARXIV_DOI_PREFIX = "10.48550/arXiv";
 /** Regex to match arXiv info in journalAbbreviation field */
 const ARXIV_JOURNAL_ABBREV_REGEX = /^arXiv:/i;
 
-/** Concurrent API request limit */
+/** Requests to INSPIRE in flight at once, each for up to 50 arXiv IDs */
 const CONCURRENCY = 3;
 
 /** Batch size for library scanning (to avoid UI freezing) */
@@ -68,14 +79,6 @@ const PREPRINT_WATCH_CACHE_VERSION = 2;
 
 /** Cache file name (without extension) */
 const PREPRINT_WATCH_CACHE_FILE = "preprintWatch";
-
-/**
- * Background check: an answer younger than this is reused instead of asking
- * INSPIRE again. Shorter than the day between two daily background checks, so
- * the answers of the previous one are always renewed, while those of a manual
- * check earlier the same day are reused.
- */
-const BACKGROUND_REUSE_MS = 20 * 60 * 60 * 1000;
 
 /** Background check: a paper without an INSPIRE record is asked about again at most this often */
 const BACKGROUND_NO_RECORD_REUSE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -494,65 +497,34 @@ type InspireAnswer =
   | { status: "unpublished" }
   | { status: "not_in_inspire" };
 
+/** INSPIRE fields the check reads, beyond those of the identity check */
+const PREPRINT_CHECK_FIELDS = [
+  ...API_FIELDS_PREPRINT_CHECK.split(","),
+  ...API_FIELDS_INSPIRE_COMPLETION.split(","),
+];
+
 /**
- * Ask INSPIRE about one arXiv preprint: "published" (its record has a journal
- * publication), "unpublished" (a record without one) or "not_in_inspire" (no
- * record). A failed or aborted request throws; it is not an answer.
+ * The journal publication of an INSPIRE record (the first entry with a
+ * journal that is not an erratum), or null for a record without one
  */
-async function checkPublicationStatus(
-  arxivId: string,
-  signal?: AbortSignal,
-  background = false,
-): Promise<InspireAnswer> {
-  const url = `${INSPIRE_API_BASE}/literature?q=eprint:${encodeURIComponent(arxivId)}&${buildFieldsParam(API_FIELDS_PREPRINT_CHECK).slice(1)}`;
-
-  const response = await inspireFetch(url, { signal, background });
-  if (!response.ok) throw new Error(`INSPIRE HTTP ${response.status}`);
-
-  const data =
-    (await response.json()) as unknown as InspireLiteratureSearchResponse | null;
-  const hits = data?.hits?.hits;
-  if (!Array.isArray(hits)) throw new Error("Unexpected INSPIRE response");
-  if (!hits.length) return { status: "not_in_inspire" };
-
-  const metadata = hits[0].metadata;
-
-  // Check for journal publication info
-  // Find the primary publication (first with journal_title that's not erratum)
+function publicationOf(metadata: any): PublicationInfo | null {
   // Some INSPIRE records have pubinfo_freetext in [0] and structured data in [1]
-  const pubInfo = metadata.publication_info;
-  if (pubInfo?.length) {
-    const primary = pubInfo.find(
-      (p) => p.journal_title && p.material !== "erratum",
-    );
-    if (primary?.journal_title) {
-      // Found journal publication!
-      // Also check for non-arXiv DOI
-      const journalDoi = extractPublishedDoi(metadata.dois);
-
-      // Format journal title consistently (add spaces after dots)
-      // This matches the formatting in metadataService.ts buildMetaFromMetadata
-      const formattedJournalTitle = primary.journal_title.replace(
-        /\.\s|\./g,
-        ". ",
-      );
-
-      return {
-        status: "published",
-        publicationInfo: {
-          journalTitle: formattedJournalTitle,
-          volume: primary.journal_volume,
-          pageStart: primary.page_start || primary.artid,
-          year: primary.year,
-          doi: journalDoi ?? undefined,
-          recid: metadata.control_number?.toString(),
-          preprintDate: metadata.preprint_date,
-        },
-      };
-    }
-  }
-
-  return { status: "unpublished" }; // Still a preprint
+  const primary = (metadata.publication_info as any[] | undefined)?.find(
+    (p) => p.journal_title && p.material !== "erratum",
+  );
+  if (!primary) return null;
+  // Format journal title consistently (add spaces after dots)
+  // This matches the formatting in metadataService.ts buildMetaFromMetadata
+  const formattedJournalTitle = primary.journal_title.replace(/\.\s|\./g, ". ");
+  return {
+    journalTitle: formattedJournalTitle,
+    volume: primary.journal_volume,
+    pageStart: primary.page_start || primary.artid,
+    year: primary.year,
+    doi: extractPublishedDoi(metadata.dois) ?? undefined,
+    recid: metadata.control_number?.toString(),
+    preprintDate: metadata.preprint_date,
+  };
 }
 
 /**
@@ -571,31 +543,67 @@ function extractPublishedDoi(
 }
 
 /**
- * The cached answer that the background check reuses instead of asking
- * INSPIRE again: one INSPIRE gave less than BACKGROUND_REUSE_MS ago
- * (BACKGROUND_NO_RECORD_REUSE_MS for a paper without an INSPIRE record).
+ * The result of `item`, checked as `identity`, from INSPIRE's answer about
+ * its arXiv ID: an unpublished record of an item without a recid carries
+ * the entry that "write INSPIRE record" writes
  */
-function reusableAnswer(
+function checkedResult(
+  item: Zotero.Item,
+  identity: CheckedIdentity,
+  answer: ResolvedInspireRecord,
+): PreprintCheckResult {
+  const base = {
+    itemID: item.id,
+    arxivId: identity.arxivId,
+    title: identity.title,
+  };
+  switch (answer.status) {
+    case "failed":
+      return { ...base, status: "error", error: "INSPIRE did not answer" };
+    case "notFound":
+      return { ...base, status: "not_in_inspire" };
+  }
+  const itemRecid = resolveItemRecid(item);
+  // An item that names the record already is the record's paper, also when
+  // the titles differ (a journal's title) or the record lacks an author
+  const mismatches = itemRecid === answer.recid ? [] : answer.mismatches;
+  const publicationInfo = publicationOf(answer.metadata);
+  if (publicationInfo) {
+    return { ...base, status: "published", publicationInfo, mismatches };
+  }
+  return {
+    ...base,
+    status: "unpublished",
+    mismatches,
+    ...(itemRecid
+      ? {}
+      : { completion: completionEntry(item, identity, answer) }),
+  };
+}
+
+/** INSPIRE's answer about an arXiv ID, as the cache keeps it */
+function answerOf(answer: ResolvedInspireRecord): InspireAnswer | null {
+  if (answer.status === "failed") return null;
+  if (answer.status === "notFound") return { status: "not_in_inspire" };
+  const publicationInfo = publicationOf(answer.metadata);
+  return publicationInfo
+    ? { status: "published", publicationInfo }
+    : { status: "unpublished" };
+}
+
+/**
+ * The background check does not ask again about a paper INSPIRE had no
+ * record of less than BACKGROUND_NO_RECORD_REUSE_MS ago
+ */
+function hasRecentNoRecord(
   entry: PreprintWatchEntry | undefined,
   now: number,
-): InspireAnswer | null {
-  if (!entry || entry.lastChecked <= 0) return null;
-  const age = now - entry.lastChecked;
-  if (age < 0) return null;
-  switch (entry.status) {
-    case "published":
-      return entry.publicationInfo && age < BACKGROUND_REUSE_MS
-        ? { status: "published", publicationInfo: entry.publicationInfo }
-        : null;
-    case "unpublished":
-      return age < BACKGROUND_REUSE_MS ? { status: "unpublished" } : null;
-    case "not_in_inspire":
-      return age < BACKGROUND_NO_RECORD_REUSE_MS
-        ? { status: "not_in_inspire" }
-        : null;
-    default:
-      return null;
+): boolean {
+  if (entry?.status !== "not_in_inspire" || entry.lastChecked <= 0) {
+    return false;
   }
+  const age = now - entry.lastChecked;
+  return age >= 0 && age < BACKGROUND_NO_RECORD_REUSE_MS;
 }
 
 /** The cache entry for an answer INSPIRE gave at `answeredAt` */
@@ -620,18 +628,18 @@ function cacheEntryForAnswer(
 
 /**
  * Batch check publication status for multiple items using worker pattern.
- * Fixed concurrency to avoid API overload. INSPIRE is asked once per arXiv
- * ID, also when the paper is in several items or libraries.
+ * INSPIRE is asked about 50 arXiv IDs per request, once per arXiv ID, also
+ * when the paper is in several items or libraries; each item is checked
+ * against the record (its title and first author) on its own.
  *
  * A manual check asks INSPIRE about every item. The background check
- * (`background: true`) reuses answers from the cache that INSPIRE gave
- * recently (see reusableAnswer).
+ * (`background: true`) skips papers INSPIRE had no record of in the last
+ * 7 days (see hasRecentNoRecord).
  *
- * The cache stores INSPIRE's answers with the time each was given; answers
- * reused from the cache keep their time. A failed request gives an "error"
- * result and leaves the item's cache entry as it was. When the signal aborts,
- * the answers received so far are stored, and the results of the items
- * answered so far are returned.
+ * The cache stores INSPIRE's answers with the time each was given. A failed
+ * request gives an "error" result and leaves the item's cache entry as it
+ * was. When the signal aborts, the answers received so far are stored, and
+ * the results of the items answered so far are returned.
  *
  * A manual check is enclosed in beginManualCheck(), which stops a background
  * check in progress: both would ask INSPIRE about the same preprints.
@@ -643,7 +651,7 @@ export async function batchCheckPublicationStatus(
     /** Called as items are answered: items answered so far, all items */
     onProgress?: (done: number, total: number) => void;
     /**
-     * Background check: reuse recent answers from the cache, and send the
+     * Background check: skip papers without a record lately, and send the
      * requests after those a user is waiting for
      */
     background?: boolean;
@@ -675,67 +683,103 @@ export async function batchCheckPublicationStatus(
       itemIndexesByArxivId.set(arxivId, [index]);
     }
   });
-  if (done > 0) options?.onProgress?.(done, total);
 
   const loaded = await loadPreprintWatchCache();
   const { cache } = loaded;
-  const arxivIds = [...itemIndexesByArxivId.keys()];
-  let next = 0;
-  let unsavedAnswers = 0;
-
-  const worker = async () => {
-    while (next < arxivIds.length && !options?.signal?.aborted) {
-      const arxivId = arxivIds[next++];
-
-      let outcome:
-        | InspireAnswer
-        | { status: "error"; error: string }
-        | null = options?.background
-        ? reusableAnswer(getCacheEntry(cache, arxivId), Date.now())
-        : null;
-      if (!outcome) {
-        try {
-          const answer = await checkPublicationStatus(
-            arxivId,
-            options?.signal,
-            options?.background,
-          );
-          updateCacheEntry(
-            cache,
-            cacheEntryForAnswer(arxivId, answer, Date.now()),
-          );
-          outcome = answer;
-          if (++unsavedAnswers >= SAVE_EVERY_ANSWERS) {
-            unsavedAnswers = 0;
-            await savePreprintWatchCache(loaded);
-          }
-        } catch (error: any) {
-          outcome = {
-            status: "error",
-            error:
-              error?.name === "AbortError"
-                ? "Cancelled"
-                : error?.message || "Unknown error",
-          };
-        }
-      }
-
-      for (const index of itemIndexesByArxivId.get(arxivId)!) {
+  const toAsk: string[] = [];
+  const now = Date.now();
+  for (const [arxivId, indexes] of itemIndexesByArxivId) {
+    if (
+      options?.background &&
+      hasRecentNoRecord(getCacheEntry(cache, arxivId), now)
+    ) {
+      for (const index of indexes) {
         results[index] = {
           itemID: items[index].id,
           arxivId,
           title: items[index].getField("title") as string,
-          ...outcome,
+          status: "not_in_inspire",
         };
         done++;
       }
+    } else {
+      toAsk.push(arxivId);
+    }
+  }
+  if (done > 0) options?.onProgress?.(done, total);
+
+  const batches: string[][] = [];
+  for (let i = 0; i < toAsk.length; i += INSPIRE_ARXIV_BATCH_SIZE) {
+    batches.push(toAsk.slice(i, i + INSPIRE_ARXIV_BATCH_SIZE));
+  }
+  let next = 0;
+  let unsavedAnswers = 0;
+
+  const worker = async () => {
+    while (next < batches.length && !options?.signal?.aborted) {
+      const batch = batches[next++];
+      const checked = batch.flatMap((arxivId) =>
+        itemIndexesByArxivId.get(arxivId)!.map((index) => ({
+          index,
+          identity: itemIdentity(items[index], arxivId),
+        })),
+      );
+
+      let answers: ResolvedInspireRecord[];
+      try {
+        answers = await resolveInspireByArxiv(
+          checked.map(({ identity }) => identity),
+          {
+            fields: PREPRINT_CHECK_FIELDS,
+            signal: options?.signal,
+            background: options?.background,
+          },
+        );
+      } catch (error: any) {
+        const message =
+          error?.name === "AbortError"
+            ? "Cancelled"
+            : error?.message || "Unknown error";
+        for (const { index, identity } of checked) {
+          results[index] = {
+            itemID: items[index].id,
+            arxivId: identity.arxivId,
+            title: identity.title,
+            status: "error",
+            error: message,
+          };
+        }
+        done += checked.length;
+        options?.onProgress?.(done, total);
+        continue;
+      }
+
+      const answeredAt = Date.now();
+      const stored = new Set<string>();
+      checked.forEach(({ index, identity }, i) => {
+        results[index] = checkedResult(items[index], identity, answers[i]);
+        const answer = answerOf(answers[i]);
+        if (answer && !stored.has(identity.arxivId)) {
+          stored.add(identity.arxivId);
+          updateCacheEntry(
+            cache,
+            cacheEntryForAnswer(identity.arxivId, answer, answeredAt),
+          );
+          unsavedAnswers++;
+        }
+      });
+      if (unsavedAnswers >= SAVE_EVERY_ANSWERS) {
+        unsavedAnswers = 0;
+        await savePreprintWatchCache(loaded);
+      }
+      done += checked.length;
       options?.onProgress?.(done, total);
     }
   };
 
   // Start worker pool
   const workers: Promise<void>[] = [];
-  for (let i = 0; i < Math.min(CONCURRENCY, arxivIds.length); i++) {
+  for (let i = 0; i < Math.min(CONCURRENCY, batches.length); i++) {
     workers.push(worker());
   }
   await Promise.all(workers);
@@ -1232,6 +1276,7 @@ export function buildCheckSummary(
     unpublished: results.filter((r) => r.status === "unpublished").length,
     errors: results.filter((r) => r.status === "error").length,
     notInInspire: results.filter((r) => r.status === "not_in_inspire").length,
+    withoutRecid: results.filter((r) => r.completion).length,
     results,
   };
 }
@@ -1306,8 +1351,9 @@ export function beginManualCheck(): () => void {
 
 /**
  * The background check at startup, as set by preprint_watch_auto_check: all
- * editable libraries, reusing recent answers. `showResults` shows the results
- * dialog when preprints were found published. A stopped check (by a manual
+ * editable libraries, skipping recent missing records. `showResults` shows
+ * the results dialog when preprints were found published, or with an INSPIRE
+ * record their items do not name yet. A stopped check (by a manual
  * check, or at shutdown) or one whose every result is an error is not
  * recorded as done, so the next start checks the papers not answered yet.
  */
@@ -1358,27 +1404,29 @@ export async function runBackgroundCheck(
       `[${config.addonName}] Found ${preprints.length} unpublished preprints, checking INSPIRE...`,
     );
 
-    // Check publication status, reusing recent answers (updates unified
-    // cache internally)
+    // Check publication status, skipping recent missing records (updates
+    // unified cache internally)
     const results = await batchCheckPublicationStatus(preprints, {
       signal,
       background: true,
     });
     if (signal.aborted) return;
     const summary = buildCheckSummary(results);
-    // Every result is an error (e.g. no network at startup, and no answer
-    // recent enough to reuse): not recorded as done, so a later start asks
-    // again. Reused answers count as results; failures among them are asked
-    // again by the next day's check (failures are not stored).
+    // Every result is an error (e.g. no network at startup): not recorded as
+    // done, so a later start asks again. Papers skipped for a recent missing
+    // record count as results; failures among the others are asked again by
+    // the next day's check (failures are not stored).
     if (summary.errors < summary.total) updateLastCheckTime();
 
-    // If publications found, show results dialog for user to review and update
-    if (summary.published > 0) {
+    // Show the results dialog when there is something to update or write:
+    // every published preprint not updated yet (also those shown by earlier
+    // checks), and every INSPIRE record an item does not name yet
+    if (summary.published > 0 || summary.withoutRecid > 0) {
       await showResults(results);
     }
 
     Zotero.debug(
-      `[${config.addonName}] Background preprint check completed: ${summary.published} published, ${summary.unpublished} unpublished, ${summary.notInInspire} not in INSPIRE, ${summary.errors} errors`,
+      `[${config.addonName}] Background preprint check completed: ${summary.published} published, ${summary.unpublished} unpublished (${summary.withoutRecid} without recid), ${summary.notInInspire} not in INSPIRE, ${summary.errors} errors`,
     );
   } catch (err) {
     Zotero.debug(

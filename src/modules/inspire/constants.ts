@@ -341,11 +341,19 @@ export const API_FIELDS_LOOKUP =
   "control_number,titles.title,dois,arxiv_eprints,texkeys";
 
 /**
- * Fields for preprint publication status check (FTR-PREPRINT-WATCH).
+ * Fields for preprint publication status check (FTR-PREPRINT-WATCH), beyond
+ * those of the lookup by arXiv ID and its identity check.
  * Minimal fields to detect if an arXiv preprint has been published.
  */
-export const API_FIELDS_PREPRINT_CHECK =
-  "control_number,publication_info,dois,preprint_date";
+export const API_FIELDS_PREPRINT_CHECK = "publication_info,dois,preprint_date";
+
+/**
+ * Fields that writing an item's INSPIRE record (INSPIRE completion) takes
+ * from the record, beyond those of the lookup by arXiv ID and its identity
+ * check.
+ */
+export const API_FIELDS_INSPIRE_COMPLETION =
+  "texkeys,citation_count,citation_count_without_self_citations";
 
 /**
  * Fields for author profile fetch (Authors API).

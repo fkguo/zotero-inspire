@@ -1,3 +1,6 @@
+import type { IdentityMismatch } from "../arxiv/inspireByArxiv";
+import type { CompletionEntry } from "./library/inspireCompletion";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Author Search Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -440,6 +443,16 @@ export interface PreprintCheckResult {
   status: "published" | "unpublished" | "error" | "not_in_inspire";
   publicationInfo?: PublicationInfo;
   error?: string;
+  /**
+   * INSPIRE has a record of the arXiv ID: reasons to doubt that it is the
+   * item's paper (its title or first author differs); none: it is
+   */
+  mismatches?: IdentityMismatch[];
+  /**
+   * An unpublished record, and the item has no recid yet: the entry that
+   * "write INSPIRE record" writes (attachInspireRecord)
+   */
+  completion?: CompletionEntry;
 }
 
 /**
@@ -451,6 +464,7 @@ export interface PreprintCheckSummary {
   unpublished: number; // Still preprints
   errors: number; // Check failures
   notInInspire: number; // Not found in INSPIRE
+  withoutRecid: number; // Unpublished, with a record the item does not name yet
   results: PreprintCheckResult[];
 }
 
