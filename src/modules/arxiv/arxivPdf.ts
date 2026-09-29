@@ -41,6 +41,26 @@ export interface ArxivPdfSource {
   pdfUrl?: string;
 }
 
+/**
+ * The version of a PDF attachment of paper `id` downloaded from arXiv, as its
+ * address names it (arxiv.org/pdf/<id>v<N>, with or without ".pdf"); null
+ * when the address names none (a journal's PDF, arxiv.org/pdf/<id>.pdf)
+ */
+export function arxivPdfVersion(
+  attachment: Zotero.Item,
+  id: string,
+): number | null {
+  if (!attachment.isPDFAttachment?.()) return null;
+  const escaped = id.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const match = String(attachment.getField?.("url") ?? "").match(
+    new RegExp(
+      `^https?://(?:www\\.|export\\.)?arxiv\\.org/pdf/${escaped}v(\\d+)(?:\\.pdf)?/?(?:[?#].*)?$`,
+      "i",
+    ),
+  );
+  return match ? Number(match[1]) : null;
+}
+
 interface ZoteroAttachments {
   createTemporaryStorageDirectory(): Promise<{ path: string }>;
   shouldAutoRenameFile(isLink: boolean, libraryID: number): boolean;

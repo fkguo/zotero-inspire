@@ -1115,6 +1115,184 @@ describe("arXiv browser: read-only actions and keys", () => {
     expect(detailHtml()).toBeUndefined();
   });
 
+  describe("the detail pane's version chooser", () => {
+    const ID = "2508.00226";
+    /** Version 2 as the arXiv API gives it */
+    const v2 = {
+      id: ID,
+      version: 2,
+      title: "An older title with $x^2$",
+      abstract: "The abstract\n  of version 2.",
+      authors: ["Ada Older", "Bob Author"],
+      published: "2025-07-31T10:00:00Z",
+      updated: "2025-08-20T09:30:00Z",
+      comments: "12 pages",
+      journalRef: "Phys. Rev. D 112 (2025) 014001",
+      primaryCategory: "hep-ph",
+      categories: ["hep-ph", "hep-ex"],
+    };
+    async function shown(apiVersion: ReturnType<typeof vi.fn>) {
+      const env = await loaded({ apiVersion });
+      const sort = select(env.root, "sort");
+      sort.value = "id-asc";
+      sort.dispatchEvent(new win.Event("change"));
+      rows(env.root)
+        .find((row) => row.dataset.entryId!.includes(ID))!
+        .click();
+      const detail = env.root.querySelector<HTMLElement>(
+        ".arxiv-browser__detail",
+      )!;
+      const chooser = () =>
+        detail.querySelector<HTMLSelectElement>(".arxiv-browser__version")!;
+      const choose = async (version: number) => {
+        chooser().value = String(version);
+        chooser().dispatchEvent(new win.Event("change"));
+        await flushPromises();
+      };
+      const buttonNamed = (label: string) =>
+        [
+          ...detail.querySelectorAll<HTMLButtonElement>(
+            ".arxiv-browser__detail-actions button",
+          ),
+        ].find((b) => b.textContent === label)!;
+      const notices = () =>
+        [...env.root.querySelectorAll(".arxiv-browser__notice")].map(
+          (notice) => notice.textContent,
+        );
+      return { ...env, detail, chooser, choose, buttonNamed, notices };
+    }
+
+    it("lists versions 1 to N, shows the newest from the listing, and asks nothing until an older one is chosen", async () => {
+      const apiVersion = vi.fn(async () => ({ ok: true, entry: v2 }));
+      const { detail, chooser, choose, buttonNamed, launch } =
+        await shown(apiVersion);
+      expect([...chooser().options].map((o) => o.textContent)).toEqual([
+        msg("arxiv-browser-detail-version", { version: 1 }),
+        msg("arxiv-browser-detail-version", { version: 2 }),
+        msg("arxiv-browser-detail-version", { version: 3 }),
+      ]);
+      expect(chooser().value).toBe("3");
+      const newest = detail.textContent;
+      expect(newest).toContain(
+        msg("arxiv-browser-detail-announced", {
+          date: formatDay("2026-09-25"),
+        }),
+      );
+      buttonNamed(msg("arxiv-browser-open-pdf-button")).click();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/pdf/${ID}`);
+      expect(apiVersion).not.toHaveBeenCalled();
+
+      // Version 2: its title, authors, abstract, comments, categories and
+      // submission; PDF and HTML of that version
+      await choose(2);
+      expect(apiVersion).toHaveBeenCalledTimes(1);
+      expect(apiVersion.mock.calls[0].slice(0, 2)).toEqual([ID, 2]);
+      expect(chooser().value).toBe("2");
+      expect(chooser().disabled).toBe(false);
+      const text = detail.textContent!;
+      expect(
+        detail.querySelector(".arxiv-browser__detail-title")!.textContent,
+      ).toContain("An older title");
+      expect(
+        detail.querySelector(".arxiv-browser__detail-authors")!.textContent,
+      ).toBe("Ada Older, Bob Author");
+      expect(
+        detail.querySelector(".arxiv-browser__detail-abstract")!.textContent,
+      ).toBe("The abstract of version 2.");
+      expect(text).toContain("12 pages");
+      expect(text).toContain("Phys. Rev. D 112 (2025) 014001");
+      expect(text).toContain("hep-ex");
+      expect(text).toContain(
+        msg("arxiv-browser-detail-submitted", {
+          date: formatDay("2025-08-20"),
+        }),
+      );
+      expect(text).not.toContain(
+        msg("arxiv-browser-detail-announced", {
+          date: formatDay("2026-09-25"),
+        }),
+      );
+      buttonNamed(msg("arxiv-browser-open-pdf-button")).click();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/pdf/${ID}v2`);
+      buttonNamed(msg("arxiv-browser-open-html-button")).click();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/html/${ID}v2`);
+
+      // Back to the newest: the listing's again; version 2 once more asks
+      // nothing
+      await choose(3);
+      expect(detail.textContent).toBe(newest);
+      buttonNamed(msg("arxiv-browser-open-pdf-button")).click();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/pdf/${ID}`);
+      await choose(2);
+      expect(apiVersion).toHaveBeenCalledTimes(1);
+      expect(detail.textContent).toContain("12 pages");
+      // Another paper shows its newest version
+      rows(view!.listPane.list as HTMLElement)[0].click();
+      expect(detail.textContent).not.toContain("12 pages");
+    });
+
+    it("stays at the version shown when the chosen one cannot be had, saying why", async () => {
+      let answer!: (value: unknown) => void;
+      const apiVersion = vi.fn(
+        () => new Promise((resolve) => (answer = resolve)),
+      );
+      const { detail, chooser, choose, notices, buttonNamed, launch } =
+        await shown(apiVersion);
+      const newest = detail.textContent;
+      await choose(1);
+      // While arXiv is asked: the choice shown, not changeable, the pane as
+      // it was
+      expect(chooser().value).toBe("1");
+      expect(chooser().disabled).toBe(true);
+      // The newest version's text greyed, its date replaced by a note
+      expect(
+        detail.querySelector(".arxiv-browser__detail-title")!.classList,
+      ).toContain("arxiv-browser__detail-stale");
+      expect(
+        detail.querySelector(".arxiv-browser__detail-abstract")!.classList,
+      ).toContain("arxiv-browser__detail-stale");
+      expect(detail.textContent).toContain(
+        msg("arxiv-browser-detail-version-loading"),
+      );
+      expect(detail.textContent).not.toContain(
+        msg("arxiv-browser-detail-announced", {
+          date: formatDay("2026-09-25"),
+        }),
+      );
+      // The buttons already refer to the version chosen
+      buttonNamed(msg("arxiv-browser-open-pdf-button")).click();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/pdf/${ID}v1`);
+      answer({ ok: false, reason: "network", message: "down" });
+      await flushPromises();
+      expect(chooser().value).toBe("3");
+      expect(chooser().disabled).toBe(false);
+      expect(detail.textContent).toBe(newest);
+      expect(detail.querySelector(".arxiv-browser__detail-stale")).toBeNull();
+      expect(notices().join()).toContain(
+        msg("arxiv-browser-version-failed", {
+          id: ID,
+          version: 1,
+          reason: msg("arxiv-browser-reason-network"),
+        }),
+      );
+      // Asked again the next time
+      await choose(1);
+      answer({ ok: false, reason: "network", message: "down" });
+      await flushPromises();
+      expect(apiVersion).toHaveBeenCalledTimes(2);
+    });
+
+    it("shows a paper of one version without a chooser", async () => {
+      const { root } = await loaded();
+      rows(root)[0].click();
+      const detail = root.querySelector(".arxiv-browser__detail")!;
+      expect(detail.querySelector(".arxiv-browser__version")).toBeNull();
+      expect(detail.textContent).toContain(
+        msg("arxiv-browser-detail-version", { version: 1 }),
+      );
+    });
+  });
+
   it("offers the HTML version of papers in a listing cached before it was recorded", async () => {
     const env = environment();
     subscribe(["hep-ph"]);
@@ -1481,11 +1659,11 @@ describe("arXiv browser: read-only actions and keys", () => {
 });
 
 describe("arXiv browser: the right-click menu and copying", () => {
-  async function loaded() {
+  async function loaded(options: Record<string, unknown> = {}) {
     const env = environment();
     subscribe(["hep-ph"]);
     serveHepPh(env.site);
-    const view = env.open();
+    const view = env.open(options);
     await env.settle();
     clipboard.copyToClipboard.mockClear();
     return { ...env, view };
@@ -1568,6 +1746,51 @@ describe("arXiv browser: the right-click menu and copying", () => {
         .querySelector(".arxiv-browser__list")!
         .contains(selection.anchorNode),
     ).toBe(true);
+  });
+
+  it("copies the title shown in the detail pane, an older version's when one is shown", async () => {
+    const apiVersion = vi.fn(async () => ({
+      ok: true,
+      entry: {
+        id: "2508.00226",
+        version: 1,
+        title: "The first title",
+        abstract: "A",
+        authors: ["A. Author"],
+        published: "2025-07-31T10:00:00Z",
+        updated: "2025-07-31T10:00:00Z",
+        primaryCategory: "hep-ph",
+        categories: ["hep-ph"],
+      },
+    }));
+    const { root, copy } = await loaded({ apiVersion });
+    const sort = select(root, "sort");
+    sort.value = "id-asc";
+    sort.dispatchEvent(new win.Event("change"));
+    const row = rows(root).find((r) =>
+      r.dataset.entryId!.includes("2508.00226"),
+    )!;
+    row.click();
+    const title = () =>
+      root.querySelector<HTMLElement>(".arxiv-browser__detail-title")!;
+    const newest = title().textContent;
+    menuAt(title()).run(msg("arxiv-browser-menu-copy-title"));
+    await vi.waitFor(() => expect(copy).toHaveBeenLastCalledWith(newest));
+    const chooser = root.querySelector<HTMLSelectElement>(
+      ".arxiv-browser__version",
+    )!;
+    chooser.value = "1";
+    chooser.dispatchEvent(new win.Event("change"));
+    await flushPromises();
+    menuAt(title()).run(msg("arxiv-browser-menu-copy-title"));
+    await vi.waitFor(() =>
+      expect(copy).toHaveBeenLastCalledWith("The first title"),
+    );
+    // The row's menu: the listing's title
+    menuAt(row.querySelector(".zinspire-ref-entry__title-link")!).run(
+      msg("arxiv-browser-menu-copy-title"),
+    );
+    await vi.waitFor(() => expect(copy).toHaveBeenLastCalledWith(newest));
   });
 
   it("copies the paper's arXiv ID from the detail pane", async () => {
@@ -2514,9 +2737,11 @@ describe("arXiv browser: adding and relating", () => {
   async function loaded({
     related,
     unloaded = false,
+    apiVersion,
   }: {
     related?: string;
     unloaded?: boolean;
+    apiVersion?: unknown;
   } = {}) {
     const env = environment();
     subscribe(["hep-ph"]);
@@ -2627,6 +2852,7 @@ describe("arXiv browser: adding and relating", () => {
       pickTarget,
       saveHtmlSnapshot,
       batchImport: { canImport: () => true, importEntry },
+      ...(apiVersion ? { apiVersion } : {}),
       ...(related
         ? {
             inLibrary: async (ids: readonly string[]) =>
@@ -2802,6 +3028,132 @@ describe("arXiv browser: adding and relating", () => {
       ),
     );
     expect(saveHtmlSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  describe("an older version chosen in the detail pane", () => {
+    const ID = "2508.00226";
+    const apiVersion = () =>
+      vi.fn(async () => ({
+        ok: true,
+        entry: {
+          id: ID,
+          version: 2,
+          title: "Version 2",
+          abstract: "Abstract 2",
+          authors: ["A. Author"],
+          published: "2025-07-31T10:00:00Z",
+          updated: "2025-08-20T09:30:00Z",
+          primaryCategory: "hep-ph",
+          categories: ["hep-ph"],
+        },
+      }));
+    async function atVersion2(related?: string) {
+      const env = await loaded({ related, apiVersion: apiVersion() });
+      const sort = select(env.root, "sort");
+      sort.value = "id-asc";
+      sort.dispatchEvent(new win.Event("change"));
+      const row = () =>
+        rows(env.root).find((r) => r.dataset.entryId!.includes(ID))!;
+      if (related) await vi.waitFor(() => expect(dot(row())).toBe("●"));
+      row().click();
+      const chooser = env.root.querySelector<HTMLSelectElement>(
+        ".arxiv-browser__detail .arxiv-browser__version",
+      )!;
+      chooser.value = "2";
+      chooser.dispatchEvent(new win.Event("change"));
+      await flushPromises();
+      expect(
+        env.root.querySelector(".arxiv-browser__detail-title")!.textContent,
+      ).toBe("Version 2");
+      const pdf = () =>
+        [
+          ...env.root.querySelectorAll<HTMLButtonElement>(
+            ".arxiv-browser__detail-actions button",
+          ),
+        ].find((b) => b.textContent === msg("arxiv-browser-open-pdf-button"))!;
+      return { ...env, row, pdf };
+    }
+    /** A PDF attachment of item `parentID` with URL `url` */
+    const attachPdf = (
+      items: Map<number, any>,
+      parentID: number,
+      url: string,
+      id: number,
+    ) => {
+      items.set(id, {
+        id,
+        attachmentContentType: "application/pdf",
+        isPDFAttachment: () => true,
+        getField: (field: string) => (field === "url" ? url : ""),
+      });
+      items.get(parentID)!.attachments.push(id);
+    };
+
+    it("opens the library's PDF of that version, else arXiv's of that version", async () => {
+      const { items, pdf, launch, readerOpen } = await atVersion2(ID);
+      // The library's PDF is of version 3
+      attachPdf(items, 77, `http://arxiv.org/pdf/${ID}v3`, 6001);
+      pdf().click();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/pdf/${ID}v2`);
+      expect(readerOpen).not.toHaveBeenCalled();
+      // One of version 2 (also with ".pdf")
+      attachPdf(items, 77, `https://arxiv.org/pdf/${ID}v2.pdf`, 6002);
+      pdf().click();
+      await flushPromises();
+      expect(readerOpen).toHaveBeenLastCalledWith(6002, undefined, {
+        allowDuplicate: false,
+      });
+      expect(launch).toHaveBeenCalledTimes(1);
+    });
+
+    it("saves the HTML version of that version, and then opens that snapshot", async () => {
+      const { root, saveHtmlSnapshot, items, notices, readerOpen, launch } =
+        await atVersion2(ID);
+      const detail = detailHtml(root);
+      expect(htmlMenu(detail.more).labels).toEqual([MENU.browser, MENU.save]);
+      htmlMenu(detail.more).run(MENU.browser);
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/html/${ID}v2`);
+      htmlMenu(detail.more).run(MENU.save);
+      await vi.waitFor(() => expect(saveHtmlSnapshot).toHaveBeenCalledTimes(1));
+      expect(saveHtmlSnapshot.mock.calls[0][0]).toBe(items.get(77));
+      expect(saveHtmlSnapshot.mock.calls[0][1]).toEqual({ id: ID, version: 2 });
+      await vi.waitFor(() =>
+        expect(notices().join()).toContain(
+          msg("arxiv-browser-html-saved", { id: ID, version: 2 }),
+        ),
+      );
+      detailHtml(root).open.click();
+      expect(readerOpen).toHaveBeenCalledTimes(1);
+      expect(launch).toHaveBeenCalledTimes(1);
+      // The newest version (3) has no snapshot: arXiv's, not version 2's
+      const chooser = root.querySelector<HTMLSelectElement>(
+        ".arxiv-browser__detail .arxiv-browser__version",
+      )!;
+      chooser.value = "3";
+      chooser.dispatchEvent(new win.Event("change"));
+      await flushPromises();
+      detailHtml(root).open.click();
+      expect(readerOpen).toHaveBeenCalledTimes(1);
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/html/${ID}`);
+      expect(htmlMenu(detailHtml(root).more).labels).toEqual([
+        MENU.browser,
+        MENU.save,
+      ]);
+      // The row (no version choice) opens any snapshot saved, as before
+      htmlParts(
+        rows(root).find((r) => r.dataset.entryId!.includes(ID))!,
+      ).open.click();
+      expect(readerOpen).toHaveBeenCalledTimes(2);
+    });
+
+    it("adds a paper not in the library as it is, then saves the HTML version of the version chosen", async () => {
+      const { root, saveHtmlSnapshot, added, addPapers } = await atVersion2();
+      htmlMenu(detailHtml(root).more).run(MENU.save);
+      await vi.waitFor(() => expect(saveHtmlSnapshot).toHaveBeenCalledTimes(1));
+      expect(addPapers.mock.calls[0][0]).toMatchObject([{ arxivId: ID }]);
+      expect(saveHtmlSnapshot.mock.calls[0][0]).toBe(added.get(ID));
+      expect(saveHtmlSnapshot.mock.calls[0][1]).toEqual({ id: ID, version: 2 });
+    });
   });
 
   it("adds a paper not in the library first, where the user chooses, then saves its HTML version to the new item", async () => {

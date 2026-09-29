@@ -4,6 +4,7 @@ import {
   apiUrl,
   arxivSearchQuery,
   fetchArxivApiEntries,
+  fetchArxivApiVersion,
   parseApiFeed,
   parseSearchFeed,
   searchArxiv,
@@ -16,7 +17,8 @@ import { VirtualClock } from "./virtualClock";
 
 // The arXiv API client on real answers of export.arxiv.org (fixtures
 // api-idlist-5.xml: 5 papers returned in another order than asked;
-// api-idlist-14-default-max10.xml: 14 asked without max_results, 10 returned).
+// api-idlist-14-default-max10.xml: 14 asked without max_results, 10 returned;
+// api-idlist-1706.03762v2.xml: version 2 of a paper whose newest is 7).
 
 const FIVE = [
   "1706.03762",
@@ -232,6 +234,47 @@ describe("fetchArxivApiEntries", () => {
       [10, "forbidden"],
     ]);
     expect(result.failed[1].ids).toEqual(second);
+  });
+});
+
+describe("fetchArxivApiVersion", () => {
+  const V2 =
+    "https://export.arxiv.org/api/query?id_list=1706.03762v2&max_results=1";
+
+  it("gives the version asked for, with its own submission and comments", async () => {
+    const { site, clock, scheduler } = setup();
+    site.html(V2, readArxivFixture("api-idlist-1706.03762v2.xml"));
+    const answer = await clock.run(
+      fetchArxivApiVersion("1706.03762", 2, {
+        scheduler,
+        parseXml: xmlDocument,
+      }),
+    );
+    expect(site.sent.map((request) => request.url)).toEqual([V2]);
+    expect(answer.ok).toBe(true);
+    const entry = answer.ok ? answer.entry : undefined;
+    expect(entry).toMatchObject({
+      id: "1706.03762",
+      version: 2,
+      title: "Attention Is All You Need",
+      // Version 1's submission, and version 2's
+      published: "2017-06-12T17:57:34Z",
+      updated: "2017-06-19T16:49:45Z",
+      comments: "15 pages, 5 figure",
+      categories: ["cs.CL", "cs.LG"],
+    });
+  });
+
+  it("fails when the answer holds another version", async () => {
+    const { site, clock, scheduler } = setup();
+    site.html(V2, feed(["1706.03762"]));
+    const answer = await clock.run(
+      fetchArxivApiVersion("1706.03762", 2, {
+        scheduler,
+        parseXml: xmlDocument,
+      }),
+    );
+    expect(answer).toMatchObject({ ok: false, reason: "parse" });
   });
 });
 

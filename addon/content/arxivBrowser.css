@@ -688,6 +688,11 @@
   font-size: 12px;
 }
 
+/* The previous version's text while a chosen version is fetched */
+.arxiv-browser__detail-stale {
+  opacity: 0.45;
+}
+
 .arxiv-browser__detail-label {
   font-weight: 600;
 }
