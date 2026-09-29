@@ -685,9 +685,12 @@
   font-weight: 600;
 }
 
+/* On the texts' baseline: the in-library note, the buttons and the HTML
+   split button line up */
 .arxiv-browser__detail-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: 6px;
   margin: 10px 0;
 }

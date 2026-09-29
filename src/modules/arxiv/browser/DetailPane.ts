@@ -233,25 +233,8 @@ export class DetailPane {
         this.labelled("arxiv-browser-detail-journal-ref", listing.journalRef),
       );
     }
-    if (entry.localItemID) {
-      const inLibrary = html(
-        doc,
-        "div",
-        "arxiv-browser__detail-line",
-        getString("arxiv-browser-detail-in-library"),
-      );
-      const itemID = entry.localItemID;
-      inLibrary.append(
-        doc.createTextNode(" "),
-        button(doc, getString("arxiv-browser-show-in-library"), () =>
-          this.options.showInLibrary?.(itemID),
-        ),
-      );
-      parts.push(inLibrary);
-    }
-
-    const library = this.options.library;
-    if (library) parts.push(this.libraryButtons(entry, library));
+    const library = this.libraryLine(entry);
+    if (library) parts.push(library);
 
     const buttons = html(doc, "div", "arxiv-browser__detail-actions");
     buttons.append(
@@ -323,35 +306,53 @@ export class DetailPane {
   }
 
   /**
-   * Add (choosing where), add the journal version (for a paper with a
-   * journal reference), relate
+   * One line: "In your library" with Show in library, or Add (choosing
+   * where) and Add the journal version (for a paper with a journal
+   * reference); then Relate. Not known to be in the library (also when the
+   * lookup failed): the Add buttons.
    */
-  private libraryButtons(
-    entry: BrowserEntry,
-    library: DetailLibraryActions,
-  ): HTMLElement {
+  private libraryLine(entry: BrowserEntry): HTMLElement | null {
     const doc = this.doc;
-    const buttons = html(doc, "div", "arxiv-browser__detail-actions");
-    const add = (journalVersion: boolean) =>
-      button(
-        doc,
-        getString(
-          journalVersion ? "arxiv-browser-add-journal" : "arxiv-browser-add",
+    const library = this.options.library;
+    const itemID = entry.localItemID;
+    if (!itemID && !library) return null;
+    const line = html(doc, "div", "arxiv-browser__detail-actions");
+    if (itemID) {
+      line.append(
+        html(
+          doc,
+          "span",
+          "arxiv-browser__detail-in-library",
+          getString("arxiv-browser-detail-in-library"),
         ),
-        (event) =>
-          library.add(entry, {
-            anchor: event.currentTarget as HTMLElement,
-            ...(journalVersion ? { journalVersion } : {}),
-          }),
+        button(doc, getString("arxiv-browser-show-in-library"), () =>
+          this.options.showInLibrary?.(itemID),
+        ),
       );
-    buttons.append(add(false));
-    if (entry.listing.journalRef) buttons.append(add(true));
-    buttons.append(
-      button(doc, getString("arxiv-browser-link"), (event) =>
-        library.relate(entry, event.currentTarget as HTMLElement),
-      ),
-    );
-    return buttons;
+    } else if (library) {
+      const add = (journalVersion: boolean) =>
+        button(
+          doc,
+          getString(
+            journalVersion ? "arxiv-browser-add-journal" : "arxiv-browser-add",
+          ),
+          (event) =>
+            library.add(entry, {
+              anchor: event.currentTarget as HTMLElement,
+              ...(journalVersion ? { journalVersion } : {}),
+            }),
+        );
+      line.append(add(false));
+      if (entry.listing.journalRef) line.append(add(true));
+    }
+    if (library) {
+      line.append(
+        button(doc, getString("arxiv-browser-link"), (event) =>
+          library.relate(entry, event.currentTarget as HTMLElement),
+        ),
+      );
+    }
+    return line;
   }
 
   private labelled(key: FluentMessageId, text: string): HTMLElement {

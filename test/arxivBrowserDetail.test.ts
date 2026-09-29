@@ -388,6 +388,71 @@ describe("detail pane", () => {
       msg("arxiv-browser-detail-in-library"),
     );
   });
+
+  it("gives the paper's library state and actions on one line", async () => {
+    let answer!: (found: ReadonlyMap<string, readonly number[]> | null) => void;
+    const { root } = await loaded({
+      inLibrary: () => new Promise((resolve) => (answer = resolve)),
+    });
+    const detail = root.querySelector(".arxiv-browser__detail")!;
+    const list = root.querySelector(".arxiv-browser__list")!;
+    /** The line with Relate: its parts' texts */
+    const libraryLine = () => {
+      const lines = [
+        ...detail.querySelectorAll(".arxiv-browser__detail-actions"),
+      ].filter((line) =>
+        [...line.children].some(
+          (part) => part.textContent === msg("arxiv-browser-link"),
+        ),
+      );
+      expect(lines).toHaveLength(1);
+      return [...lines[0].children].map((part) => part.textContent);
+    };
+    const addButtons = [msg("arxiv-browser-add"), msg("arxiv-browser-link")];
+    key(list, "j");
+    // Not known yet: added from here
+    expect(libraryLine()).toEqual(addButtons);
+    answer(new Map([["2609.28538", [42]]]));
+    await flushPromises();
+    // In the library: no Add, and no line of its own
+    expect(libraryLine()).toEqual([
+      msg("arxiv-browser-detail-in-library"),
+      msg("arxiv-browser-show-in-library"),
+      msg("arxiv-browser-link"),
+    ]);
+    expect(
+      [...detail.querySelectorAll("button")].filter((button) =>
+        button.textContent!.startsWith(msg("arxiv-browser-add")),
+      ),
+    ).toEqual([]);
+    // Not in the library (a paper with a journal reference)
+    key(list, "j");
+    expect(view.listPane.focused!.listing.journalRef).toBeTruthy();
+    expect(libraryLine()).toEqual([
+      msg("arxiv-browser-add"),
+      msg("arxiv-browser-add-journal"),
+      msg("arxiv-browser-link"),
+    ]);
+  });
+
+  it("offers Add and Relate on one line when the library cannot be read", async () => {
+    const { root } = await loaded({ inLibrary: async () => null });
+    key(root.querySelector(".arxiv-browser__list")!, "j");
+    await flushPromises();
+    expect(view.listPane.focused!.localStatusUnknown).toBe(true);
+    const lines = [
+      ...root.querySelectorAll(
+        ".arxiv-browser__detail .arxiv-browser__detail-actions",
+      ),
+    ].map((line) => [...line.children].map((part) => part.textContent));
+    expect(lines).toContainEqual([
+      msg("arxiv-browser-add"),
+      msg("arxiv-browser-link"),
+    ]);
+    expect(
+      root.querySelector(".arxiv-browser__detail")!.textContent,
+    ).not.toContain(msg("arxiv-browser-detail-in-library"));
+  });
 });
 
 describe("cards", () => {
