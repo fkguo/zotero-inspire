@@ -11,6 +11,10 @@
 // A paper without an HTML version (arXiv answers 404) or a failed capture
 // leaves nothing: Zotero removes what it had written, and a snapshot of
 // another page than the one asked for (a load Zotero gave up on) is erased.
+// arXiv shows SVG figures with <object type="image/svg+xml">; SingleFile
+// embeds them as data URIs, but Zotero's reader shows a snapshot under a
+// content policy that blocks every <object> (images from data URIs are
+// allowed), so the saved file shows them as <img> instead.
 // Snapshots saved so are recognised by their URL, arxiv.org/html/<id>[v<N>];
 // the abstract-page snapshot of Zotero's arXiv translator (arxiv.org/abs/…)
 // is not one of them.
@@ -148,6 +152,7 @@ export async function saveArxivHtmlSnapshot(
         `Zotero captured ${saved || "no page"}, not ${url}`,
       );
     }
+    await showSvgObjectsAsImages(attachment);
     return { status: "saved", attachment };
   } catch (err) {
     if (err instanceof ArxivFetchError) return fail(err.kind, err.message);
@@ -156,5 +161,57 @@ export async function saveArxivHtmlSnapshot(
       return fail("noHtml", `arXiv has no HTML version at ${url}`);
     }
     return fail("capture", String(err));
+  }
+}
+
+/** An <object> element with its start tag's attributes and its content */
+const OBJECT_ELEMENT =
+  /<object\b((?:[^>"']|"[^"]*"|'[^']*')*)>[\s\S]*?<\/object\s*>/gi;
+/** One attribute of a start tag: name, and value with its quotes if any */
+const ATTRIBUTE = /\s+([^\s=>"'\/]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>"']+))?/g;
+
+/**
+ * The page with each <object> showing an SVG image from a data URI turned
+ * into an <img> of that image, its other attributes kept; `count` is the
+ * number of objects turned
+ */
+export function svgObjectsAsImages(html: string): {
+  html: string;
+  count: number;
+} {
+  let count = 0;
+  const result = html.replace(OBJECT_ELEMENT, (element, attributes: string) => {
+    const kept: string[] = [];
+    let isSvg = false;
+    for (const [, name, value = ""] of attributes.matchAll(ATTRIBUTE)) {
+      const lower = name.toLowerCase();
+      if (lower === "type") continue;
+      if (lower === "data") {
+        isSvg = /^["']?data:image\/svg\+xml[;,]/i.test(value);
+        kept.push(`src=${value}`);
+      } else {
+        kept.push(value ? `${name}=${value}` : name);
+      }
+    }
+    if (!isSvg) return element;
+    count++;
+    return `<img ${kept.join(" ")}>`;
+  });
+  return { html: result, count };
+}
+
+/**
+ * Rewrite a saved snapshot's SVG objects as images, so that Zotero's reader
+ * shows them; the snapshot stays as it is when that fails
+ */
+async function showSvgObjectsAsImages(attachment: Zotero.Item): Promise<void> {
+  try {
+    const path = await attachment.getFilePathAsync();
+    if (!path) return;
+    const saved = (await Zotero.File.getContentsAsync(path, "utf-8")) as string;
+    const { html, count } = svgObjectsAsImages(saved);
+    if (count) await Zotero.File.putContentsAsync(path, html);
+  } catch (err) {
+    Zotero.debug(`[arXiv] SVG figures of the HTML snapshot kept: ${err}`);
   }
 }

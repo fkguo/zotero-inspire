@@ -3,7 +3,9 @@
 // versioned page, started only in the arxiv.org scheduler's slot (15 s after
 // the previous request); a paper without HTML version or a capture of
 // another page leaves nothing; snapshots are recognised by their URL, the
-// arXiv translator's abstract-page snapshot not among them.
+// arXiv translator's abstract-page snapshot not among them. SVG figures,
+// which arXiv shows with <object> and Zotero's reader blocks, are saved as
+// <img>.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +22,7 @@ import {
   htmlSnapshotID,
   htmlSnapshotVersion,
   saveArxivHtmlSnapshot,
+  svgObjectsAsImages,
 } from "../src/modules/arxiv/arxivHtmlSnapshot";
 import { VirtualClock } from "./virtualClock";
 
@@ -32,9 +35,24 @@ function attachment(id: number, url: string, contentType = "text/html") {
     id,
     attachmentContentType: contentType,
     getField: (field: string) => (field === "url" ? url : ""),
+    getFilePathAsync: async () => `/storage/${id}/2609.html`,
     eraseTx: vi.fn(async () => undefined),
   };
 }
+
+// An SVG figure and a PNG figure as SingleFile saves arXiv's HTML version
+const SVG_DATA = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iIi8+";
+const SVG_FIGURE =
+  `<figure id=S4.F2 class=ltx_figure><object type=image/svg+xml data="${SVG_DATA}" ` +
+  `id=S4.F2.g1 class="ltx_graphics ltx_centering ltx_img_landscape" ` +
+  `style=aspect-ratio:476/211 width=476 height=211></object>`;
+const SVG_AS_IMAGE =
+  `<figure id=S4.F2 class=ltx_figure><img src="${SVG_DATA}" ` +
+  `id=S4.F2.g1 class="ltx_graphics ltx_centering ltx_img_landscape" ` +
+  `style=aspect-ratio:476/211 width=476 height=211>`;
+const PNG_FIGURE =
+  `<figure id=S3.F1 class=ltx_figure><img src=data:image/png;base64,iVBORw0K ` +
+  `id=S3.F1.g1 class="ltx_graphics" width=476 height=403 alt="Refer to caption">`;
 
 let clock: VirtualClock;
 let scheduler: ArxivScheduler;
@@ -42,6 +60,7 @@ let sent: { url: string; at: number }[];
 let imports: { options: any; at: number }[];
 let importFromURL: (options: any) => Promise<unknown>;
 let filesEditable: boolean;
+let files: Record<string, string>;
 
 const item = { id: 77, libraryID: 1 } as unknown as Zotero.Item;
 
@@ -61,8 +80,15 @@ beforeEach(() => {
     },
   });
   importFromURL = async (options) => attachment(78, options.url);
+  files = {};
   vi.stubGlobal("Zotero", {
     debug: vi.fn(),
+    File: {
+      getContentsAsync: async (path: string) => files[path] ?? "",
+      putContentsAsync: async (path: string, text: string) => {
+        files[path] = text;
+      },
+    },
     Libraries: { get: () => ({ filesEditable }) },
     Attachments: {
       importFromURL: (options: any) => {
@@ -98,6 +124,18 @@ describe("saving arXiv's HTML version as a snapshot", () => {
       },
     ]);
     expect(result).toMatchObject({ status: "saved", attachment: { id: 78 } });
+  });
+
+  it("saves SVG figures as images, which Zotero's reader shows, and leaves the rest of the page", async () => {
+    const page = `<p>${PNG_FIGURE}</figure>${SVG_FIGURE}</figure></p>`;
+    files["/storage/78/2609.html"] = page;
+    const result = await clock.run(
+      saveArxivHtmlSnapshot(item, SOURCE, { scheduler }),
+    );
+    expect(result).toMatchObject({ status: "saved" });
+    expect(files["/storage/78/2609.html"]).toBe(
+      `<p>${PNG_FIGURE}</figure>${SVG_AS_IMAGE}</figure></p>`,
+    );
   });
 
   it("captures one page at a time: a second save waits for the first to end", async () => {
@@ -155,6 +193,32 @@ describe("saving arXiv's HTML version as a snapshot", () => {
       await clock.run(saveArxivHtmlSnapshot(item, SOURCE, { scheduler })),
     ).toMatchObject({ status: "failed", reason: "filesNotEditable" });
     expect(imports).toHaveLength(0);
+  });
+});
+
+describe("turning SVG objects into images", () => {
+  it("turns an <object> of an SVG data URI into an <img> with the same attributes, quoted or not", () => {
+    expect(svgObjectsAsImages(SVG_FIGURE)).toEqual({
+      html: SVG_AS_IMAGE,
+      count: 1,
+    });
+    expect(
+      svgObjectsAsImages(
+        `<OBJECT data='${SVG_DATA}' type="image/svg+xml" hidden>fallback</OBJECT>`,
+      ),
+    ).toEqual({ html: `<img src='${SVG_DATA}' hidden>`, count: 1 });
+    expect(
+      svgObjectsAsImages(
+        `<object type=image/svg+xml data=${SVG_DATA} id=S0.F1.g1></object>`,
+      ),
+    ).toEqual({ html: `<img src=${SVG_DATA} id=S0.F1.g1>`, count: 1 });
+  });
+
+  it("leaves other objects and images alone", () => {
+    const page =
+      `${PNG_FIGURE}<object type=application/pdf data="data:application/pdf;base64,JVBERi0="></object>` +
+      `<object type=image/svg+xml data="x1.svg"></object>`;
+    expect(svgObjectsAsImages(page)).toEqual({ html: page, count: 0 });
   });
 });
 
