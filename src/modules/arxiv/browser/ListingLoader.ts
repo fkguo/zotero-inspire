@@ -271,18 +271,22 @@ export class ListingLoader {
   }
 
   /**
-   * A day of the current run arrived (`partial`: as far as fetched): add it,
-   * or replace it (a retry, a continuation), or replace the day shown while
-   * its categories were fetched. Days arrive newest first, and a
-   * continuation brings only days older than those listed, so the list stays
-   * newest first.
+   * A day of the current run arrived (`partial`: as far as fetched). It takes
+   * the place of the day shown while its categories were fetched, or of the
+   * listed day of its date (a retry, a continuation), or is added; the list
+   * stays newest first (a continuation can bring a day announced after the
+   * run that stopped).
    */
   private receive(run: Run, day: DayListing, partial = false): void {
     if (run.generation !== this.generation) return;
-    let index =
-      this.partial ?? this.loaded.findIndex((item) => item.date === day.date);
-    if (index >= 0) this.loaded[index] = day;
-    else index = this.loaded.push(day) - 1;
+    if (this.partial !== null) this.loaded.splice(this.partial, 1);
+    let index = this.loaded.findIndex((item) => item.date <= day.date);
+    if (index < 0) index = this.loaded.length;
+    this.loaded.splice(
+      index,
+      this.loaded[index]?.date === day.date ? 1 : 0,
+      day,
+    );
     this.partial = partial ? index : null;
     this.onChange();
   }

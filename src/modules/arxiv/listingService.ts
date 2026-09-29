@@ -310,22 +310,30 @@ export class ListingService {
     return run.result();
   }
 
-  /** The last five announcement days, newest first */
+  /**
+   * The last five announcement days, newest first. The newest day's /new
+   * pages come first, so that it is shown as soon as possible; the index
+   * that dates the other days follows.
+   */
   async loadRecent(
     subscription: readonly string[],
     options: ListingLoadOptions = {},
   ): Promise<ListingLoadResult> {
     const specs = subscriptionPageSpecs(subscription);
     const run = new Run(options);
-    const index = await this.recentIndex(run);
-    if (!index.ok) {
-      run.stop(index.reason, index.message);
-      return run.result();
-    }
-    let dates = index.dates.slice(0, RECENT_DAYS);
-    const batch = await this.latestBatch(run, specs, dates[0], {
+    let batch = await this.latestBatch(run, specs, null, {
       preview: () => true,
     });
+    const index = await this.indexAfterBatch(run, specs, batch, () => true);
+    if (!index) return run.result();
+    let dates = index.dates.slice(0, RECENT_DAYS);
+    if (batch.date && batch.date < dates[0] && !run.stopped) {
+      // The index shows a newer listing than every /new page (an
+      // announcement came while loading): /new is asked again
+      batch = await this.latestBatch(run, specs, dates[0], {
+        preview: () => true,
+      });
+    }
     const latest = batch.date ?? dates[0];
     if (latest > dates[0] && !run.stopped) {
       // A newer listing appeared than the index knows: the days in between
@@ -489,23 +497,39 @@ export class ListingService {
     const run = new Run(options);
     const chosen = [...new Set(dates)].sort().reverse();
     if (!chosen.length) return run.result();
-    const index = await this.recentIndex(run);
+    run.planned = chosen;
+    // A day is shown while loading only when it is a chosen day
+    const isChosen = (date: IsoDate) => chosen.includes(date);
+    // With the newest scheduled listing chosen, its /new pages come first,
+    // so that it is shown as soon as possible; the index follows
+    let batch: LatestBatch | null = null;
+    if (chosen[0] >= latestScheduledListingDate(this.clock.now())) {
+      batch = await this.latestBatch(run, specs, options.newestDay ?? null, {
+        preview: isChosen,
+      });
+    }
+    const index = batch
+      ? await this.indexAfterBatch(run, specs, batch, isChosen)
+      : await this.recentIndex(run);
+    if (!index) return run.result();
     if (!index.ok) {
       run.stop(index.reason, index.message);
       return run.result();
     }
-    run.planned = chosen;
     let latest = index.dates[0];
     if (options.newestDay && options.newestDay > latest) {
       latest = options.newestDay;
     }
+    if (batch?.date && batch.date > latest) latest = batch.date;
     // /new tells whether a chosen day is the newest one (it can be newer
-    // than the index right after an announcement)
-    let batch: LatestBatch | null = null;
-    if (chosen[0] >= latest) {
-      // Shown while loading only when it is a chosen day
+    // than the index right after an announcement); asked again when the
+    // index shows a newer listing than every /new page
+    if (
+      chosen[0] >= latest &&
+      (!batch || (batch.date !== null && batch.date < latest))
+    ) {
       batch = await this.latestBatch(run, specs, latest, {
-        preview: (date) => chosen.includes(date),
+        preview: isChosen,
       });
       if (batch.date) latest = batch.date;
     }
@@ -531,6 +555,33 @@ export class ListingService {
       else (run.noAnnouncementDays ??= []).push(date);
     }
     return run.result();
+  }
+
+  /**
+   * The recent index after the newest day's /new pages (recent, chosen
+   * days): the newest day is shown while it is fetched when `shown` takes
+   * it. When the run stopped or the index could not be had, the newest day
+   * from /new is shown all the same and null is returned (the run ends).
+   */
+  private async indexAfterBatch(
+    run: Run,
+    specs: readonly string[],
+    batch: LatestBatch,
+    shown: (date: IsoDate) => boolean,
+  ): Promise<{ ok: true; dates: IsoDate[] } | null> {
+    const newest = batch.date && shown(batch.date) ? batch.date : null;
+    const index = run.stopped
+      ? null
+      : await this.recentIndex(run, () => {
+          if (newest) run.preview(this.dayFromBatch(batch, newest, specs));
+        });
+    if (index?.ok) return index;
+    if (index) run.stop(index.reason, index.message);
+    if (newest) {
+      run.emit(this.dayFromBatch(batch, newest, specs));
+      this.notePreviousIssue(run, newest);
+    }
+    return null;
   }
 
   /**
@@ -1203,9 +1254,13 @@ export class ListingService {
     }
   }
 
-  /** The dates of the recent index (newest first), cached like /new */
+  /**
+   * The dates of the recent index (newest first), cached like /new;
+   * `beforeRequest` is called when it is to be requested
+   */
   private async recentIndex(
     run: Run,
+    beforeRequest?: () => void,
   ): Promise<{ ok: true; dates: IsoDate[] } | SpecFailure> {
     const cached = await this.store.getRecentIndex(INDEX_ARCHIVE);
     if (
@@ -1219,6 +1274,7 @@ export class ListingService {
     const url = `${ARXIV}/list/${INDEX_ARCHIVE}/recent?show=25`;
     let fetched: { ok: true; dates: IsoDate[] } | SpecFailure;
     try {
+      beforeRequest?.();
       const response = await this.scheduler.request(url, {
         signal: run.signal,
       });

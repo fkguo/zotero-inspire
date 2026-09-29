@@ -577,7 +577,7 @@ describe("new", () => {
 });
 
 describe("recent", () => {
-  it("dates the days by the math index and loads the newest first: 1 + 5N requests", async () => {
+  it("loads the newest day first, then dates the others by the math index: 1 + 5N requests", async () => {
     const { clock, site, service } = setup();
     // Real hep-ph pages for Friday (/new) and Monday (catch-up)
     serveDays(
@@ -595,16 +595,24 @@ describe("recent", () => {
       readArxivFixture("catchup-hep-ph-2026-09-21.html"),
     );
     const emitted: [string, number][] = [];
+    const partial: [string, number, string][] = [];
+    const complete = (day: DayListing) =>
+      day.specs
+        .filter(({ state }) => state.state === "complete")
+        .map(({ spec }) => spec)
+        .join(" ");
     const result = await clock.run(
       service.loadRecent(["hep-ph", "hep-th"], {
         onDay: (day) => emitted.push([day.date, clock.now()]),
+        onPartialDay: (day) =>
+          partial.push([day.date, clock.now(), complete(day)]),
       }),
     );
     expect(site.sent).toHaveLength(1 + 5 * 2);
     expect(site.sent.slice(0, 3).map((request) => request.url)).toEqual([
-      INDEX_URL,
       LIST_URL("hep-ph"),
       LIST_URL("hep-th"),
+      INDEX_URL,
     ]);
     expect(summary(result.days)).toEqual([
       "2026-09-25 complete 76",
@@ -620,10 +628,24 @@ describe("recent", () => {
       false,
       false,
     ]);
-    // Each day is shown as soon as its pages are in: the newest after 3
-    // requests, then one day per 2 requests (each 0.8 s, 15 s after the
-    // previous one ended)
+    // The newest day is shown with hep-ph's page after the first request,
+    // complete after the second, while the index is fetched (each request
+    // 0.8 s, 15 s after the previous one ended)
     const start = Date.parse(SUNDAY_AFTERNOON);
+    expect(
+      partial
+        .filter(([date]) => date === "2026-09-25")
+        .map(([date, at, specs]) => [
+          date,
+          Math.round(at - start) / 1000,
+          specs,
+        ]),
+    ).toEqual([
+      ["2026-09-25", 0.8, "hep-ph"],
+      ["2026-09-25", 16.6, "hep-ph hep-th"],
+    ]);
+    // Each day is final once its pages are in and the index dated the days:
+    // the newest after 3 requests, then one day per 2 requests
     expect(
       emitted.map(([date, at]) => [date, Math.round(at - start) / 1000]),
     ).toEqual([
@@ -633,6 +655,55 @@ describe("recent", () => {
       ["2026-09-22", 127.2],
       ["2026-09-21", 158.8],
     ]);
+  });
+
+  it("asks /new again when the index shows a newer listing than every /new page, and takes the older day from the pages at hand", async () => {
+    // Sunday 20:00:10 in New York: Monday's listing is being announced
+    const { clock, site, service } = setup("2026-09-28T00:00:10Z");
+    serveDays(
+      site,
+      ["hep-ph", "hep-th"],
+      ["2026-09-22", "2026-09-23", "2026-09-24"],
+      "2026-09-25",
+      ["2026-09-28", ...INDEX.slice(0, 4)],
+    );
+    // Both /new pages still show Friday the first time
+    for (const spec of ["hep-ph", "hep-th"]) {
+      site.page(LIST_URL(spec), (attempt) => ({
+        text: newPageHtml(
+          spec,
+          attempt === 1 ? "2026-09-25" : "2026-09-28",
+          smallDay(spec),
+        ),
+      }));
+    }
+    const shown: string[] = [];
+    const result = await clock.run(
+      service.loadRecent(["hep-ph", "hep-th"], {
+        onDay: (day) => shown.push(day.date),
+      }),
+    );
+    expect(shown).toEqual([
+      "2026-09-28",
+      "2026-09-25",
+      "2026-09-24",
+      "2026-09-23",
+      "2026-09-22",
+    ]);
+    expect(summary(result.days).slice(0, 2)).toEqual([
+      "2026-09-28 complete 8",
+      "2026-09-25 complete 8",
+    ]);
+    expect(site.sent.slice(0, 5).map((request) => request.url)).toEqual([
+      LIST_URL("hep-ph"),
+      LIST_URL("hep-th"),
+      INDEX_URL,
+      LIST_URL("hep-ph"),
+      LIST_URL("hep-th"),
+    ]);
+    // Friday from its /new pages fetched before
+    expect(site.count(CATCHUP_URL("hep-ph", "2026-09-25"))).toBe(0);
+    expect(site.count(CATCHUP_URL("hep-th", "2026-09-25"))).toBe(0);
   });
 
   it("adds a newer listing than the index knows and drops the oldest day", async () => {
@@ -681,8 +752,9 @@ describe("recent", () => {
       }),
     );
     expect(result.days.map((day) => day.date)).toEqual(INDEX);
-    // Friday is shown while the links are fetched
+    // Friday is shown while the index and then the links are fetched
     expect(partial.map((day) => `${day.date} ${day.status}`)).toEqual([
+      "2026-09-25 complete",
       "2026-09-25 complete",
     ]);
     // Thursday was found from Wednesday's page; no page was fetched twice
@@ -837,14 +909,15 @@ describe("recent", () => {
     const result = await clock.run(
       service.loadRecent(["hep-ph", "hep-th", "hep-ex"]),
     );
+    // The /new pages come first; after the refusal nothing more is sent,
+    // not even the index
     expect(site.sent.map((request) => request.url)).toEqual([
-      INDEX_URL,
       LIST_URL("hep-ph"),
       LIST_URL("hep-th"),
       LIST_URL("hep-th"),
     ]);
     // The retry waited for Retry-After
-    expect(site.sent[3].start - site.sent[2].end!).toBe(120000);
+    expect(site.sent[2].start - site.sent[1].end!).toBe(120000);
     expect(result.stopped?.reason).toBe("unavailable");
     expect(summary(result.days)).toEqual(["2026-09-25 incomplete 4"]);
     expect(stateOf(result.days[0], "hep-ex")).toMatchObject({
@@ -864,8 +937,12 @@ describe("recent", () => {
     );
     site.page(LIST_URL("hep-ph"), { status: 403 });
     const result = await clock.run(service.loadRecent(["hep-ph", "hep-th"]));
-    expect(site.sent).toHaveLength(2);
+    // Nothing is sent after the refusal, not even the index
+    expect(site.sent.map((request) => request.url)).toEqual([
+      LIST_URL("hep-ph"),
+    ]);
     expect(result.stopped?.reason).toBe("forbidden");
+    expect(result.days).toEqual([]);
   });
 });
 
@@ -1664,16 +1741,27 @@ describe("a day shown while its categories are fetched", () => {
 
   it("is passed for the newest day only once a category's page of that day is fetched", async () => {
     const { clock, site, service } = setup();
-    serveDays(site, SPECS, INDEX.slice(1).reverse(), "2026-09-25");
-    // hep-ph's /new fails: the index's Friday is not shown on that alone
+    // arXiv is late: the index and /new still end on Thursday, so a choice
+    // of Thursday asks the index first and knows the date before /new
+    serveDays(
+      site,
+      SPECS,
+      ["2026-09-21", "2026-09-22", "2026-09-23"],
+      "2026-09-24",
+      ["2026-09-24", "2026-09-23", "2026-09-22", "2026-09-21", "2026-09-18"],
+    );
+    // hep-ph's /new fails: Thursday is not shown on that alone
     site.page(LIST_URL("hep-ph"), { status: 500, text: "error" });
     const partial: DayListing[] = [];
     await clock.run(
-      service.loadRecent(SPECS, { onPartialDay: (day) => partial.push(day) }),
+      service.loadDays(SPECS, ["2026-09-24"], {
+        onPartialDay: (day) => partial.push(day),
+      }),
     );
-    expect(
-      partial.filter((day) => day.date === "2026-09-25").map(states),
-    ).toEqual([["hep-ph failed", "hep-th complete", "hep-lat loading"]]);
+    expect(site.sent[0].url).toBe(INDEX_URL);
+    expect(partial.map(states)).toEqual([
+      ["hep-ph failed", "hep-th complete", "hep-lat loading"],
+    ]);
   });
 
   it("is passed for an older day only once it has papers", async () => {
@@ -1711,7 +1799,8 @@ describe("a day shown while its categories are fetched", () => {
         onDay: (day) => shown.push(day.date),
       }),
     );
-    expect(partial).toEqual(INDEX);
+    // The newest day also while the index is fetched
+    expect(partial).toEqual([INDEX[0], ...INDEX]);
     expect(shown).toEqual(INDEX);
 
     // Monday is not announced yet: /new's Friday is not shown while loading
@@ -1947,9 +2036,10 @@ describe("loadDays", () => {
       "2026-09-23 complete 4",
       "2026-09-21 complete 57",
     ]);
+    // The newest scheduled listing is chosen: its /new first, the index next
     expect(site.sent.map((request) => request.url)).toEqual([
-      INDEX_URL,
       LIST_URL("hep-ph"),
+      INDEX_URL,
       CATCHUP_URL("hep-ph", "2026-09-23"),
       CATCHUP_URL("hep-ph", "2026-09-21"),
     ]);
@@ -1960,6 +2050,34 @@ describe("loadDays", () => {
     const before = site.sent.length;
     await clock.run(service.loadDays(["hep-ph"], ["2026-09-23", "2026-09-21"]));
     expect(site.sent.length).toBe(before);
+  });
+
+  it("asks /new once more for the newest chosen day when it was announced between /new and the index", async () => {
+    // Sunday 20:00:10 in New York: Monday is being announced; hep-ph's /new
+    // still shows Friday, the index fetched 15 s later shows Monday
+    const { clock, site, service } = setup("2026-09-28T00:00:10Z");
+    serveHepPh(site);
+    site.page(LIST_URL("hep-ph"), (attempt) => ({
+      text: newPageHtml(
+        "hep-ph",
+        attempt === 1 ? "2026-09-25" : "2026-09-28",
+        smallDay("hep-ph"),
+      ),
+    }));
+    site.html(
+      INDEX_URL,
+      recentIndexHtml("math", ["2026-09-28", ...INDEX.slice(0, 4)]),
+    );
+    const result = await clock.run(
+      service.loadDays(["hep-ph"], ["2026-09-28"]),
+    );
+    expect(summary(result.days)).toEqual(["2026-09-28 complete 4"]);
+    // One /new more than when the announcement is not in between
+    expect(site.sent.map((request) => request.url)).toEqual([
+      LIST_URL("hep-ph"),
+      INDEX_URL,
+      LIST_URL("hep-ph"),
+    ]);
   });
 
   it("reports a chosen day that had no announcement and does not show it", async () => {
@@ -2047,11 +2165,14 @@ describe("loadDays", () => {
     const loading = service.loadDays(["hep-ph"], ["2026-09-28", "2026-09-25"], {
       signal: controller.signal,
     });
-    // The index at once; /new would go 15 s later
-    await clock.advanceBy(5000);
+    // /new at once: cancelled while it is in flight
+    await clock.advanceBy(500);
     controller.abort();
     const result = await clock.run(loading);
     expect(result.days).toEqual([]);
+    expect(site.sent.map((request) => request.url)).toEqual([
+      LIST_URL("hep-ph"),
+    ]);
     expect(result.notLoaded).toEqual(["2026-09-28", "2026-09-25"]);
   });
 

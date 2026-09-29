@@ -262,9 +262,13 @@ describe("arXiv browser: loading", () => {
     serveHepPh(env.site);
     prefs[`${PREFIX}.arxiv_browser_open_days`] = "recent";
     const view = env.open();
-    // The index, then /new: after both, the newest day is shown and the next
-    // request waits for its turn
-    await env.clock.advanceBy(17000);
+    // /new first: the newest day is shown at once, while the index waits
+    await env.clock.advanceBy(2000);
+    expect(rows(env.root).length).toBeGreaterThan(0);
+    expect(env.site.count(INDEX_URL)).toBe(0);
+    // After the index the newest day is final and the next request waits
+    // for its turn
+    await env.clock.advanceBy(15000);
     expect(view.loader.days.map((day) => day.date)).toEqual(["2026-09-25"]);
     expect(rows(env.root).length).toBeGreaterThan(0);
     expect(statusText(env.root)).toMatch(

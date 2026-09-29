@@ -221,7 +221,7 @@ describe("arXiv browser loading", () => {
     expect(site.count(CATCHUP_URL("hep-ph", "2026-09-25"))).toBe(1);
   });
 
-  it("offers to continue a chosen day whose announcement was not checked yet", async () => {
+  it("keeps the newest chosen day /new showed when cancelled while the index waits, and continues", async () => {
     const { clock, site, loader } = setup("2026-09-28T00:30:00Z");
     site.html(
       LIST_URL("hep-ph"),
@@ -231,15 +231,17 @@ describe("arXiv browser loading", () => {
       kind: "days",
       dates: ["2026-09-28"],
     });
-    // Cancelled while /new, which tells whether 28 Sep is out, waits
+    // /new told that 28 Sep is out; cancelled while the index waits
     await clock.advanceBy(5000);
     loader.cancel();
     await clock.run(running);
-    expect(loader.days).toEqual([]);
+    expect(dates(loader)).toEqual(["2026-09-28"]);
     expect(loader.canContinue).toBe(true);
     await clock.run(loader.continueLoading());
     expect(dates(loader)).toEqual(["2026-09-28"]);
+    expect(loader.days[0].status).toBe("complete");
     expect(site.count(INDEX_URL)).toBe(1);
+    expect(site.count(LIST_URL("hep-ph"))).toBe(1);
   });
 
   it("continues with the days not loaded, newest first, when a listing was announced between Cancel and Continue", async () => {
@@ -456,11 +458,12 @@ describe("arXiv browser loading", () => {
     expect(loader.canContinue).toBe(false);
   });
 
-  it("begins again when a run stopped before anything was listed", async () => {
+  it("lists the newest day when the index cannot be had, and continues with the others", async () => {
     const { clock, site, loader } = setup();
     site.page(INDEX_URL, { status: 503 });
     await clock.run(loader.load(hepPh, { kind: "week" }));
-    expect(loader.days).toEqual([]);
+    // /new came first: Friday is listed
+    expect(dates(loader)).toEqual(["2026-09-25"]);
     expect(loader.result?.stopped?.reason).toBe("unavailable");
     expect(loader.canContinue).toBe(true);
 
@@ -468,6 +471,36 @@ describe("arXiv browser loading", () => {
     await clock.advanceBy(60000);
     await clock.run(loader.continueLoading());
     expect(dates(loader)).toEqual([...DAYS].reverse());
+  });
+
+  it("puts a newer day continued after a stop above the days listed", async () => {
+    // Monday 20:30 in New York: this week is Monday and Tuesday, but arXiv
+    // is late and /new still shows Monday
+    const { clock, site, loader } = setup("2026-09-29T00:30:00Z");
+    site.page(LIST_URL("hep-ph"), (attempt) => ({
+      text: newPageHtml(
+        "hep-ph",
+        attempt === 1 ? "2026-09-28" : "2026-09-29",
+        day("hep-ph"),
+      ),
+    }));
+    site.page(INDEX_URL, { status: 503 });
+    await clock.run(loader.load(hepPh, { kind: "week" }));
+    expect(dates(loader)).toEqual(["2026-09-28"]);
+    expect(loader.canContinue).toBe(true);
+
+    // Tuesday is out when the user continues
+    site.html(
+      INDEX_URL,
+      recentIndexHtml("math", [
+        "2026-09-29",
+        "2026-09-28",
+        ...DAYS.slice(1).reverse(),
+      ]),
+    );
+    await clock.advanceBy(60000);
+    await clock.run(loader.continueLoading());
+    expect(dates(loader)).toEqual(["2026-09-29", "2026-09-28"]);
   });
 
   it("drops the days of a run that a new load replaced", async () => {
