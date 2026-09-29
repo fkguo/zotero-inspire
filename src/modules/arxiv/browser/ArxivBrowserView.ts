@@ -9,7 +9,10 @@
 // boundaries, n / p turn pages, Home / End go to the first / last paper of the
 // page, Space shows or hides the abstract, Enter opens the arXiv page,
 // Ctrl/Cmd+Shift+C copies the BibTeX, Escape clears the focus, Ctrl/Cmd+W
-// closes the window.
+// closes the window; a adds the focused paper (choosing where), t adds it to
+// the default target, l relates it to the relation target (or undoes that),
+// x ticks it for the batch import, Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z undo and
+// redo (Zotero's Edit → Undo: relations, not adding).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../../../package.json";
@@ -35,6 +38,7 @@ import {
   BrowserActions,
   windowReporter,
   type BrowserActionsOptions,
+  type WindowReporter,
 } from "./browserActions";
 import {
   arrangeList,
@@ -62,8 +66,18 @@ import {
   showAbstractContextMenu,
   type ContextMenuItem,
 } from "../../inspire/panel/abstractContextMenu";
-import type { Reporter } from "../../inspire/panel/reporter";
 import { writeMarks, type LocalPaper } from "../../inspire/library/localStatus";
+import {
+  BatchImportManager,
+  type BatchImportManagerOptions,
+} from "../../inspire/panel/BatchImportManager";
+import { arxivBatchImport } from "../batchAdd";
+import { LibraryActions, type LibraryActionsOptions } from "./libraryActions";
+import {
+  RelationTarget,
+  relationTargetLine,
+  type RelationTargetOptions,
+} from "./relationTarget";
 import {
   firstPdfAttachmentID,
   openLocalPdf,
@@ -135,6 +149,19 @@ export interface ArxivBrowserViewOptions {
   showInLibrary?: (itemID: number) => void;
   /** The days marked read (default: the plugin's, sharedReadingState) */
   readingState?: ReadingState;
+  /** The main window's current items (default: its ZoteroPane's) */
+  mainItems?: RelationTargetOptions["mainItems"];
+  /** Asks for a relation target (default: Zotero's Select Items dialog) */
+  pickItem?: RelationTargetOptions["pickItem"];
+  /** Adds papers (default: the router, addArxivPapers) */
+  addPapers?: LibraryActionsOptions["addPapers"];
+  /** Asks for a save target (default: the save-target picker) */
+  pickTarget?: LibraryActionsOptions["pickTarget"];
+  /** The batch import's callbacks (default: arxivBatchImport) */
+  batchImport?: Pick<
+    BatchImportManagerOptions,
+    "canImport" | "prepareImport" | "importEntry"
+  >;
 }
 
 /** Page size from the settings, kept within 10–500 */
@@ -175,8 +202,19 @@ export class ArxivBrowserView {
   /** The days marked read, of every subscription */
   private readonly reading: ReadingState;
   readonly actions: BrowserActions;
+  /** The item papers are related to */
+  readonly relation: RelationTarget;
+  /** Adding papers and relating them */
+  readonly library: LibraryActions;
+  /** The ticked papers and their batch import */
+  readonly batch: BatchImportManager;
+  private readonly relationLine: { element: HTMLElement; render(): void };
+  private readonly tickBar: HTMLElement;
+  private readonly tickCount: HTMLElement;
+  private readonly addTickedButton: HTMLButtonElement;
+  private readonly tickAllButton: HTMLButtonElement;
   /** The window's notices */
-  private readonly reporter: Reporter;
+  private readonly reporter: WindowReporter;
   private readonly clock: Clock;
   /** The days listed: a preset or days picked in the calendar */
   private selection: DaySelection;
@@ -361,7 +399,54 @@ export class ArxivBrowserView {
       this.labelled("arxiv-browser-page-size", pageSize),
       abstracts.label,
     );
-    this.toolbar.append(this.subscriptions.element, daysBar, listBar);
+
+    // Relation target; the ticked papers and their import
+    const libraryBar = html(doc, "div", "arxiv-browser__bar");
+    this.relation = new RelationTarget({
+      mainItems: options.mainItems,
+      pickItem: options.pickItem,
+      onChange: () => this.onRelationTargetChange(),
+    });
+    this.relationLine = relationTargetLine(doc, this.relation, () => {
+      const win = doc.defaultView;
+      if (win) {
+        void this.relation.choose(
+          win as unknown as Window,
+          this.library.defaultTarget?.libraryID,
+        );
+      }
+    });
+    this.tickBar = html(doc, "span", "arxiv-browser__relation");
+    this.tickBar.hidden = true;
+    this.tickCount = html(doc, "span", "arxiv-browser__label");
+    this.addTickedButton = button(
+      doc,
+      getString("arxiv-browser-add-ticked"),
+      (event) =>
+        void this.batch.handleBatchImport(event.currentTarget as HTMLElement),
+    );
+    this.addTickedButton.classList.add("arxiv-browser__button--primary");
+    this.tickAllButton = button(doc, "", () =>
+      this.batch.setSelected(this.listPane.entries, true),
+    );
+    this.tickBar.append(
+      this.tickCount,
+      this.addTickedButton,
+      button(doc, getString("arxiv-browser-tick-page"), () =>
+        this.batch.setSelected(this.listPane.pageEntries, true),
+      ),
+      this.tickAllButton,
+      button(doc, getString("arxiv-browser-untick"), () =>
+        this.batch.clearSelection(),
+      ),
+    );
+    libraryBar.append(this.relationLine.element, this.tickBar);
+    this.toolbar.append(
+      this.subscriptions.element,
+      daysBar,
+      listBar,
+      libraryBar,
+    );
 
     // List and detail, with a divider that sets their widths
     const main = html(doc, "div", "arxiv-browser__main");
@@ -417,6 +502,59 @@ export class ArxivBrowserView {
       if (itemID !== undefined) void openLocalPdf(itemID);
       else this.actions.openPdf(entry.listing.id);
     };
+    this.library = new LibraryActions({
+      reporter: this.reporter,
+      relation: this.relation,
+      host: root,
+      list: () => this.listPane.list,
+      onAdded: (entry, item) => this.markAdded(entry.listing.id, item.id),
+      onRelationChange: (entry) => {
+        this.listPane.refreshLinkStates(this.rowsOfPaper(entry.listing.id));
+        if (this.detail.entry?.listing.id === entry.listing.id) {
+          this.detail.show(this.detail.entry);
+        }
+      },
+      onTargetChange: () => {
+        if (this.detail.entry) this.detail.show(this.detail.entry);
+      },
+      showInLibrary: (itemIDs) => showItemsInMainWindow(itemIDs),
+      addPapers: options.addPapers,
+      pickTarget: options.pickTarget,
+    });
+    this.batch = new BatchImportManager({
+      getDocument: () => doc,
+      getBody: () => root,
+      getListElement: () => this.listPane.list,
+      // Every row loaded: a paper added shows on each of its rows
+      getAllEntries: () => [...this.entryByKey.values()],
+      getFilteredEntries: () => [...this.listPane.entries],
+      ...(options.batchImport ?? arxivBatchImport()),
+      promptForSaveTarget: async (anchor) =>
+        (this.library.batchTarget = await this.library.chooseTarget(anchor)),
+      reporter: this.reporter,
+      summarize: (result) => this.library.reportBatch(result),
+      updateRowStatus: (entry) => {
+        const row = entry as BrowserEntry;
+        this.listPane.refreshLibraryMarks([row]);
+        this.listPane.refreshLinkStates([row]);
+        if (this.detail.entry === row) this.detail.show(row);
+      },
+      onSelectionChange: (count) => this.showTicked(count),
+      onImportStateChange: (inProgress) => {
+        this.addTickedButton.disabled = inProgress;
+      },
+    });
+    this.addTickedButton.disabled = this.batch.isImportInProgress();
+    const libraryButtons = {
+      defaultTargetName: () => this.library.defaultTarget?.name ?? null,
+      add: (
+        entry: BrowserEntry,
+        how: { ask: boolean; anchor: HTMLElement; journalVersion?: boolean },
+      ) => void this.library.add(entry, how),
+      toggleLink: (entry: BrowserEntry, anchor: HTMLElement) =>
+        void this.library.toggleLink(entry, anchor),
+      isRelated: (entry: BrowserEntry) => this.library.isRelated(entry),
+    };
     this.detail = new DetailPane({
       container: detailContainer,
       actions: this.actions,
@@ -425,6 +563,7 @@ export class ArxivBrowserView {
       onAuthorLeave: () => this.authorCard.scheduleHide(),
       showInLibrary,
       openPdf,
+      library: libraryButtons,
     });
     this.listPane = new ListPane({
       container: listContainer,
@@ -442,7 +581,14 @@ export class ArxivBrowserView {
       onAuthorLeave: () => this.authorCard.scheduleHide(),
       onTitleHover: (entry, row) => this.paperCard.scheduleShow(entry, row),
       onTitleLeave: () => this.paperCard.scheduleHide(),
+      ticked: this.batch.getSelectedEntryIDs(),
+      onTick: (entry, event) => this.batch.handleCheckboxClick(entry, event),
+      onAdd: (entry, anchor) =>
+        void this.library.add(entry, { ask: true, anchor }),
+      onLink: (entry, anchor) => void this.library.toggleLink(entry, anchor),
+      isRelated: (entry) => this.library.isRelated(entry),
     });
+    this.showTicked(0);
 
     const scheduler = options.webScheduler ?? getArxivWebScheduler();
     this.stopFollowing = scheduler.onStatus((status) => {
@@ -455,8 +601,12 @@ export class ArxivBrowserView {
       this.recheckLibrary(),
     );
     this.stopFollowingItems = options.followItems?.(() => {
-      if (!this.disposed) this.listPane.refreshPdfButtons();
+      if (this.disposed) return;
+      this.listPane.refreshPdfButtons();
+      // Relations may have been changed elsewhere
+      this.listPane.refreshLinkStates();
     });
+    doc.defaultView?.addEventListener("focus", this.onWindowFocus);
 
     this.onSubscriptionChange(this.subscriptions.current);
 
@@ -491,6 +641,9 @@ export class ArxivBrowserView {
     this.disposed = true;
     this.doc.removeEventListener("keydown", this.onKeyDown);
     this.doc.removeEventListener("contextmenu", this.onContextMenu);
+    this.doc.defaultView?.removeEventListener("focus", this.onWindowFocus);
+    this.batch.dispose();
+    this.library.dispose();
     this.stopFollowing();
     this.stopFollowingLibrary?.();
     this.stopFollowingItems?.();
@@ -560,6 +713,8 @@ export class ArxivBrowserView {
     const subscription = this.subscription;
     if (!subscription) return;
     this.entryByKey.clear();
+    // Ticks are of the rows of the listing loaded before
+    this.batch.clearSelection();
     this.loadedFor = loadedFor(subscription);
     void this.loader.load(subscription, this.selection);
   }
@@ -623,6 +778,7 @@ export class ArxivBrowserView {
       categories: this.categories,
     });
     this.listPane.setList(list, this.sort, update);
+    this.showTicked(this.batch.getSelectedEntryIDs().size);
     const focused = this.listPane.focused;
     if (focused && focused !== this.detail.entry) this.detail.show(focused);
     // More of the day's categories may list the paper shown
@@ -702,6 +858,62 @@ export class ArxivBrowserView {
     this.libraryChanges++;
     this.checkedDays = new WeakSet();
     void this.markLibraryPapers();
+  }
+
+  /** The rows loaded that show the paper `id` (one per announcement day) */
+  private rowsOfPaper(id: string): BrowserEntry[] {
+    return [...this.entryByKey.values()].filter(
+      (entry) => entry.listing.id === id,
+    );
+  }
+
+  /**
+   * The paper `id` was added as the item `itemID`: its rows show it in the
+   * library at once (the library's lookup follows)
+   */
+  private markAdded(id: string, itemID: number): void {
+    const rows = this.rowsOfPaper(id);
+    const changed = rows.filter((entry) =>
+      writeMarks(entry, {
+        localItemID: itemID,
+        localItemIDs: [
+          itemID,
+          ...(entry.localItemIDs ?? []).filter((other) => other !== itemID),
+        ],
+        localFoundBy: "arxiv",
+      }),
+    );
+    this.listPane.refreshLibraryMarks(changed);
+    this.listPane.refreshLinkStates(changed);
+    const shown = this.detail.entry;
+    if (shown && rows.includes(shown)) this.detail.show(shown);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Relation target and ticked papers
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** The window got the focus: the main window's item may be another now */
+  private readonly onWindowFocus = (): void => {
+    if (!this.disposed) this.relation.refresh();
+  };
+
+  private onRelationTargetChange(): void {
+    if (this.disposed) return;
+    this.relationLine.render();
+    this.listPane.refreshLinkStates();
+    if (this.detail.entry) this.detail.show(this.detail.entry);
+  }
+
+  /** The tick bar shows when papers are ticked */
+  private showTicked(count: number): void {
+    this.tickBar.hidden = count === 0;
+    this.tickCount.textContent = getString("arxiv-browser-ticked", {
+      args: { count },
+    });
+    this.tickAllButton.textContent = getString("arxiv-browser-tick-all", {
+      args: { count: this.listPane.entries.length },
+    });
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -935,9 +1147,20 @@ export class ArxivBrowserView {
         return;
       }
     }
+    if (accel && !event.altKey && key.toLowerCase() === "z") {
+      // Zotero's Edit → Undo / Redo: relations made here, among others
+      const history = (Zotero as any).UndoHistory;
+      if (history) {
+        event.preventDefault();
+        void (event.shiftKey ? history.redo() : history.undo());
+      }
+      return;
+    }
     if (accel || event.altKey) return;
     // Space and Enter keep their meaning on buttons and links
     const onControl = /^(BUTTON|A)$/.test(tag);
+    const anchor = () =>
+      (focused && this.listPane.rowOf(focused)) || this.listPane.list;
     switch (key) {
       case "j":
       case "ArrowDown":
@@ -971,11 +1194,35 @@ export class ArxivBrowserView {
         if (!focused) return;
         this.listPane.clearFocus();
         break;
+      case "a":
+      case "t":
+        if (!focused) return;
+        void this.library.add(focused, { ask: key === "a", anchor: anchor() });
+        break;
+      case "l":
+        if (!focused) return;
+        void this.library.toggleLink(focused, anchor());
+        break;
+      case "x":
+        if (!focused) return;
+        this.batch.setSelected(
+          [focused],
+          !this.batch.getSelectedEntryIDs().has(focused.id),
+        );
+        break;
       default:
         return;
     }
     event.preventDefault();
   };
+}
+
+/** Select items in the main window's library and bring the window forward */
+function showItemsInMainWindow(itemIDs: readonly number[]): void {
+  const main = Zotero.getMainWindow();
+  if (!main || !itemIDs.length) return;
+  void main.ZoteroPane.selectItems([...itemIDs]);
+  main.focus();
 }
 
 /** Select an item in the main window's library and bring the window forward */

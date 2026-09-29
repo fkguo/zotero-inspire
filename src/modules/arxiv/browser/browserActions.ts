@@ -41,11 +41,14 @@ import {
 } from "../inspireByArxiv";
 import type { ListingAuthor, ListingFailureReason } from "../listingTypes";
 import { reasonText } from "./browserText";
+import { button } from "./dom";
 
 const ARXIV = "https://arxiv.org";
 
 /** How long a notice stays */
 const NOTICE_MS = 3000;
+/** How long a notice with buttons stays, unless it asks a question */
+const ASK_MS = 15000;
 
 export function abstractPageUrl(id: string): string {
   return `${ARXIV}/abs/${id}`;
@@ -392,8 +395,31 @@ export class BrowserActions {
   }
 }
 
-/** Notices in an area of the window; each goes away after a few seconds */
-export function windowReporter(area: HTMLElement): Reporter {
+/** A button of a notice */
+export interface NoticeAction {
+  label: string;
+  run(): void;
+}
+
+/** The window's notices and progress */
+export interface WindowReporter extends Reporter {
+  /**
+   * A notice with buttons (and a close button); `lines` are shown one below
+   * the other. It goes when a button is clicked, or after a while unless it
+   * is to `stay` until answered.
+   */
+  ask(
+    lines: string | readonly string[],
+    actions: readonly NoticeAction[],
+    options?: { stay?: boolean },
+  ): void;
+}
+
+/**
+ * Notices in an area of the window; each goes away after a few seconds,
+ * those with buttons when one is clicked
+ */
+export function windowReporter(area: HTMLElement): WindowReporter {
   const doc = area.ownerDocument;
   const win = doc.defaultView;
   const show = (text: string): HTMLElement => {
@@ -407,6 +433,31 @@ export function windowReporter(area: HTMLElement): Reporter {
     notify(message) {
       const notice = show(message);
       win?.setTimeout(() => notice.remove(), NOTICE_MS);
+    },
+    ask(lines, actions, options = {}) {
+      const notice = show("");
+      notice.classList.add("arxiv-browser__notice--ask");
+      for (const line of typeof lines === "string" ? [lines] : lines) {
+        const text = doc.createElement("div");
+        text.textContent = line;
+        notice.append(text);
+      }
+      const buttons = doc.createElement("div");
+      buttons.className = "arxiv-browser__notice-actions";
+      for (const action of [
+        ...actions,
+        { label: getString("arxiv-browser-notice-close"), run: () => {} },
+      ]) {
+        buttons.append(
+          button(doc, action.label, () => {
+            notice.remove();
+            action.run();
+          }),
+        );
+      }
+      notice.append(buttons);
+      // A question stays until answered; a result with a button a while
+      if (!options.stay) win?.setTimeout(() => notice.remove(), ASK_MS);
     },
     startProgress(text): ProgressDisplay {
       const notice = show(text);

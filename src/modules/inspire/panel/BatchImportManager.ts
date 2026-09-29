@@ -185,6 +185,11 @@ export interface BatchImportManagerOptions {
   ) => Promise<SaveTargetSelection | null>;
   /** Where notices and the import's progress are shown */
   reporter: Reporter;
+  /**
+   * Tell the user what came of an import (default: a notice with the counts
+   * of papers added and not added)
+   */
+  summarize?: (result: BatchImportResult) => void;
   /** Callback to update a single row's status in the list */
   updateRowStatus: (entry: InspireReferenceEntry) => void;
   /** Callback when batch toolbar visibility should be updated */
@@ -294,6 +299,19 @@ export class BatchImportManager {
     }
 
     this.lastSelectedEntryID = entry.id;
+    this.notifySelectionChange();
+  }
+
+  /** Select or unselect these rows */
+  setSelected(
+    entries: readonly InspireReferenceEntry[],
+    selected: boolean,
+  ): void {
+    for (const entry of entries) {
+      if (selected) this.selectedEntryIDs.add(entry.id);
+      else this.selectedEntryIDs.delete(entry.id);
+    }
+    this.updateAllCheckboxes();
     this.notifySelectionChange();
   }
 
@@ -451,11 +469,8 @@ export class BatchImportManager {
     }
 
     if (papersToImport.length === 0) {
-      this.options.reporter.notify(
-        getString("references-panel-batch-no-selection"),
-      );
       // Every paper was skipped in the duplicate dialog
-      return {
+      const result: BatchImportResult = {
         success: 0,
         failed: 0,
         cancelled: false,
@@ -464,6 +479,14 @@ export class BatchImportManager {
           skippedPaper(paper, duplicates.get(paper)),
         ),
       };
+      if (this.options.summarize) {
+        this.options.summarize(result);
+      } else {
+        this.options.reporter.notify(
+          getString("references-panel-batch-no-selection"),
+        );
+      }
+      return result;
     }
 
     // Prompt for save target
@@ -959,8 +982,17 @@ export class BatchImportManager {
       (o) => o && o.status !== "added" && o.status !== "cancelled",
     ).length;
 
-    // Show result toast
-    if (signal.aborted) {
+    const result: BatchImportResult = {
+      success,
+      failed,
+      cancelled: signal.aborted,
+      added,
+      notAdded,
+    };
+    if (this.options.summarize) {
+      this.options.summarize(result);
+    } else if (signal.aborted) {
+      // Show result toast
       this.options.reporter.notify(
         getString("references-panel-batch-import-cancelled", {
           args: { done, total },
@@ -983,7 +1015,7 @@ export class BatchImportManager {
     this.updateAllCheckboxes();
     this.notifySelectionChange();
 
-    return { success, failed, cancelled: signal.aborted, added, notAdded };
+    return result;
   }
 
   /**

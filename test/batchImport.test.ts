@@ -266,6 +266,7 @@ function buttonIn(root: ParentNode, key: string) {
 function setUpManager(
   entries: InspireReferenceEntry[],
   visible: InspireReferenceEntry[] = entries,
+  extra: Partial<BatchImportManagerOptions> = {},
 ) {
   const dom = new JSDOM(
     "<!DOCTYPE html><body><div class='panel'></div></body>",
@@ -318,6 +319,7 @@ function setUpManager(
       notify: options.showToast,
       startProgress: (text) => popupReporter.startProgress(text),
     },
+    ...extra,
   });
   openedManagers.push(manager);
 
@@ -654,6 +656,39 @@ describe("duplicate dialog", () => {
       panel.options.importReference.mock.calls.map(([recid]) => recid),
     ).toEqual(["rec-a", "rec-c", "rec-d"]);
     expect(result).toMatchObject({ success: 3, failed: 0, cancelled: false });
+  });
+
+  it("gives the result to the caller's summary instead of its notice, also when every paper was skipped", async () => {
+    const summarize = vi.fn();
+    const entries = [localEntry("a", 1), localEntry("b", 2)];
+    const panel = setUpManager(entries, entries, { summarize });
+    panel.manager.selectAll();
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    const dialog = await panel.dialog();
+    buttonIn(dialog, "references-panel-batch-duplicate-confirm").click();
+    const result = await run;
+
+    expect(panel.options.promptForSaveTarget).not.toHaveBeenCalled();
+    expect(summarize).toHaveBeenCalledWith(result);
+    expect(result!.notAdded.map((paper) => paper.outcome.status)).toEqual([
+      "inLibrary",
+      "inLibrary",
+    ]);
+    expect(panel.options.showToast).not.toHaveBeenCalled();
+  });
+
+  it("ticks and unticks given rows", () => {
+    const entries = [entry("a"), entry("b"), entry("c")];
+    const panel = setUpManager(entries);
+    panel.manager.setSelected([entries[0], entries[2]], true);
+    expect([...panel.manager.getSelectedEntryIDs()]).toEqual([
+      entries[0].id,
+      entries[2].id,
+    ]);
+    expect(panel.options.onSelectionChange).toHaveBeenLastCalledWith(2);
+    panel.manager.setSelected([entries[0]], false);
+    expect([...panel.manager.getSelectedEntryIDs()]).toEqual([entries[2].id]);
   });
 
   it("ticks or unticks every duplicate at once", async () => {

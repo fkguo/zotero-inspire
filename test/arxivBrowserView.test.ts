@@ -41,6 +41,16 @@ vi.mock("../src/modules/inspire/apiUtils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/modules/inspire/apiUtils")>()),
   ...clipboard,
 }));
+// The batch import's duplicate check: none of the papers is in the library
+vi.mock(
+  "../src/modules/inspire/library/localStatus",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../src/modules/inspire/library/localStatus")
+    >()),
+    findDuplicates: async () => new Map(),
+  }),
+);
 
 // The arXiv browser window's content in a jsdom window, loading from a
 // simulated arxiv.org on a simulated clock (real hep-ph listing of Friday
@@ -1043,12 +1053,19 @@ describe("arXiv browser: read-only actions and keys", () => {
     expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/abs/2609.28538");
   });
 
-  it("has no buttons for relating items or TeX keys in its rows", async () => {
+  it("has no TeX key buttons in its rows (a relate button and a tick box, yes)", async () => {
     const { root } = await loaded();
     expect(rows(root).length).toBeGreaterThan(0);
     for (const row of rows(root)) {
-      expect(row.querySelector(".zinspire-ref-entry__link")).toBeNull();
-      expect(row.querySelector(".zinspire-ref-entry__texkey")).toBeNull();
+      expect(row.querySelector(".zinspire-ref-entry__link") === null).toBe(
+        false,
+      );
+      expect(row.querySelector(".zinspire-ref-entry__checkbox") === null).toBe(
+        false,
+      );
+      expect(row.querySelector(".zinspire-ref-entry__texkey") === null).toBe(
+        true,
+      );
       expect(row.querySelector(".zinspire-ref-entry__bibtex")).not.toBeNull();
     }
   });
@@ -2334,5 +2351,244 @@ describe("arXiv browser: listing days served", () => {
       days.every((date) => ![0, 6].includes(new Date(date).getUTCDay())),
     ).toBe(true);
     expect([...days].sort()).toEqual(days);
+  });
+});
+
+describe("arXiv browser: adding and relating", () => {
+  /** A library item that keeps its relations by key, as Zotero does */
+  function libraryItem(id: number) {
+    const item = {
+      id,
+      key: `KEY${id}`,
+      libraryID: 1,
+      relatedItems: [] as string[],
+      isRegularItem: () => true,
+      getDisplayTitle: () => `Item ${id}`,
+      addRelatedItem(other: { key: string }) {
+        if (item.relatedItems.includes(other.key)) return false;
+        item.relatedItems.push(other.key);
+        return true;
+      },
+      async removeRelatedItem(other: { key: string }) {
+        const at = item.relatedItems.indexOf(other.key);
+        if (at >= 0) item.relatedItems.splice(at, 1);
+        return at >= 0;
+      },
+      save: async () => undefined,
+    };
+    return item;
+  }
+
+  async function loaded() {
+    const env = environment();
+    subscribe(["hep-ph"]);
+    serveHepPh(env.site);
+    const items = new Map<number, ReturnType<typeof libraryItem>>();
+    const relationTarget = libraryItem(42);
+    items.set(42, relationTarget);
+    const undo = vi.fn(async () => true);
+    Object.assign((globalThis as any).Zotero, {
+      Items: {
+        get: (id: number) => items.get(id) ?? false,
+        getAsync: async (ids: number | number[]) =>
+          Array.isArray(ids)
+            ? ids.map((id) => items.get(id)).filter(Boolean)
+            : (items.get(ids) ?? false),
+      },
+      Libraries: {
+        get: (libraryID: number) => ({
+          libraryID,
+          name: "My Library",
+          editable: true,
+          waitForDataLoad: async () => undefined,
+        }),
+        getAll: () => [{ libraryID: 1, name: "My Library", editable: true }],
+        userLibrary: { libraryID: 1 },
+      },
+      Collections: { get: () => false, getByLibrary: () => [] },
+      DB: { executeTransaction: async (fn: () => Promise<unknown>) => fn() },
+      UndoHistory: { undo, redo: vi.fn(), stageAction: vi.fn() },
+    });
+    const main = { items: [relationTarget] as unknown[] };
+    const added = new Map<string, ReturnType<typeof libraryItem>>();
+    let nextID = 900;
+    const addPapers = vi.fn(async (requests: { arxivId: string }[]) =>
+      requests.map((request) => {
+        const item = libraryItem(nextID++);
+        items.set(item.id, item);
+        added.set(request.arxivId, item);
+        return { status: "added", route: "arxiv", item, notes: [] };
+      }),
+    );
+    const pickTarget = vi.fn(async () => ({
+      libraryID: 1,
+      primaryRowID: "L1",
+      collectionIDs: [],
+      tags: [],
+      note: "",
+    }));
+    const importEntry = vi.fn(async (entry: { arxivDetails?: any }) => {
+      const item = libraryItem(nextID++);
+      items.set(item.id, item);
+      return {
+        status: "added" as const,
+        route: "arxiv" as const,
+        item,
+        notes: [],
+      };
+    });
+    const view = env.open({
+      mainItems: () => main.items,
+      addPapers,
+      pickTarget,
+      batchImport: { canImport: () => true, importEntry },
+    });
+    await env.settle();
+    const list = env.root.querySelector(".arxiv-browser__list")!;
+    const notices = () =>
+      [...env.root.querySelectorAll(".arxiv-browser__notice")].map(
+        (notice) => notice.textContent,
+      );
+    return {
+      ...env,
+      view,
+      list,
+      main,
+      items,
+      added,
+      relationTarget,
+      addPapers,
+      pickTarget,
+      importEntry,
+      undo,
+      notices,
+      libraryItem,
+    };
+  }
+
+  const dot = (row: HTMLElement) =>
+    row.querySelector(".zinspire-ref-entry__dot")!.textContent;
+  const linkState = (row: HTMLElement) =>
+    row.querySelector<HTMLElement>(".zinspire-ref-entry__link")!.dataset.state;
+
+  it("names the relation target in the toolbar and reads it again when the window gets the focus", async () => {
+    const { root, main, libraryItem: newItem } = await loaded();
+    const line = () =>
+      root.querySelector(".arxiv-browser__relation")!.textContent ?? "";
+    expect(line()).toContain("Item 42");
+    expect(line()).toContain(msg("arxiv-browser-relation-main"));
+    main.items = [newItem(43)];
+    expect(line()).toContain("Item 42");
+    win.dispatchEvent(new win.FocusEvent("focus"));
+    expect(line()).toContain("Item 43");
+  });
+
+  it("adds the focused paper with t (asking where the first time) and with a, and shows it in the library", async () => {
+    const { root, list, addPapers, pickTarget, notices } = await loaded();
+    key(list, "j");
+    key(list, "t");
+    await vi.waitFor(() => expect(addPapers).toHaveBeenCalledTimes(1));
+    // No default target yet: the picker asked where
+    expect(pickTarget).toHaveBeenCalledTimes(1);
+    expect(addPapers.mock.calls[0][0]).toMatchObject([
+      { arxivId: "2609.28538" },
+    ]);
+    await vi.waitFor(() => expect(dot(rows(root)[0])).toBe("●"));
+    expect(notices().join()).toContain(
+      msg("arxiv-browser-added", { id: "2609.28538", target: "My Library" }),
+    );
+    // The detail pane has the add buttons, now with the default target
+    expect(root.querySelector(".arxiv-browser__detail")!.textContent).toContain(
+      msg("arxiv-browser-add-to", { target: "My Library" }),
+    );
+
+    // t again, on the next paper: to the default target, no picker
+    key(list, "j");
+    key(list, "t");
+    await vi.waitFor(() => expect(addPapers).toHaveBeenCalledTimes(2));
+    expect(pickTarget).toHaveBeenCalledTimes(1);
+    // a asks where
+    key(list, "j");
+    key(list, "a");
+    await vi.waitFor(() => expect(addPapers).toHaveBeenCalledTimes(3));
+    expect(pickTarget).toHaveBeenCalledTimes(2);
+  });
+
+  it("relates the focused paper to the target with l, undoes that with Ctrl+Z, and draws the relate button", async () => {
+    const { root, list, relationTarget, added, undo } = await loaded();
+    key(list, "j");
+    key(list, "l");
+    // Not in the library: added first (asking where), then related
+    await vi.waitFor(() => expect(added.size).toBe(1));
+    const item = added.get("2609.28538")!;
+    await vi.waitFor(() =>
+      expect(relationTarget.relatedItems).toEqual([item.key]),
+    );
+    expect(item.relatedItems).toEqual([relationTarget.key]);
+    await vi.waitFor(() => expect(linkState(rows(root)[0])).toBe("linked"));
+    // l again: the relation is removed
+    key(list, "l");
+    await vi.waitFor(() => expect(relationTarget.relatedItems).toEqual([]));
+    await vi.waitFor(() => expect(linkState(rows(root)[0])).toBe("unlinked"));
+    key(list, "z", { ctrlKey: true });
+    expect(undo).toHaveBeenCalled();
+  });
+
+  it("ticks papers with x and the tick box, and adds the ticked papers in one batch import", async () => {
+    const { root, list, importEntry, pickTarget, notices } = await loaded();
+    const tickBar = () =>
+      root.querySelectorAll<HTMLElement>(".arxiv-browser__relation")[1];
+    expect(tickBar().hidden).toBe(true);
+    key(list, "j");
+    key(list, "x");
+    rows(root)[2]
+      .querySelector<HTMLInputElement>(".zinspire-ref-entry__checkbox")!
+      .click();
+    expect(tickBar().hidden).toBe(false);
+    expect(tickBar().textContent).toContain(
+      msg("arxiv-browser-ticked", { count: 2 }),
+    );
+    expect(
+      rows(root).map(
+        (row) =>
+          row.querySelector<HTMLInputElement>(".zinspire-ref-entry__checkbox")!
+            .checked,
+      ),
+    ).toEqual([true, false, true, ...Array(47).fill(false)]);
+    [...tickBar().querySelectorAll("button")]
+      .find((button) => button.textContent === msg("arxiv-browser-add-ticked"))!
+      .click();
+    await vi.waitFor(() => expect(importEntry).toHaveBeenCalledTimes(2));
+    expect(pickTarget).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(notices().join()).toContain(
+        msg("arxiv-browser-batch-added", {
+          added: 2,
+          total: 2,
+          target: "My Library",
+        }),
+      ),
+    );
+    expect(dot(rows(root)[0])).toBe("●");
+    expect(dot(rows(root)[2])).toBe("●");
+    expect(tickBar().hidden).toBe(true);
+  });
+
+  it("ticks this page, and all papers across the pages", async () => {
+    const { root, view } = await loaded();
+    const button = (label: string) =>
+      [
+        ...root.querySelectorAll<HTMLButtonElement>(
+          ".arxiv-browser__relation button",
+        ),
+      ].find((b) => b.textContent === label)!;
+    key(root.querySelector(".arxiv-browser__list")!, "j");
+    key(root.querySelector(".arxiv-browser__list")!, "x");
+    button(msg("arxiv-browser-tick-page")).click();
+    expect(view.batch.getSelectedEntryIDs().size).toBe(50);
+    button(msg("arxiv-browser-tick-all", { count: 72 })).click();
+    expect(view.batch.getSelectedEntryIDs().size).toBe(72);
+    button(msg("arxiv-browser-untick")).click();
+    expect(view.batch.getSelectedEntryIDs().size).toBe(0);
   });
 });

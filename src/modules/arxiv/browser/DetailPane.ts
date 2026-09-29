@@ -34,6 +34,25 @@ export interface DetailPaneOptions {
   showInLibrary?(itemID: number): void;
   /** Open the paper's PDF (default: arXiv's, in the web browser) */
   openPdf?(entry: BrowserEntry): void;
+  /** Adding the paper to the library and relating it (none: no buttons) */
+  library?: DetailLibraryActions;
+}
+
+/** What the detail pane's library buttons do */
+export interface DetailLibraryActions {
+  /** Name of the window's default target, if there is one */
+  defaultTargetName(): string | null;
+  /**
+   * Add the paper: where the user chooses (`ask`) or to the default target;
+   * `journalVersion`: its journal version when there is one
+   */
+  add(
+    entry: BrowserEntry,
+    how: { ask: boolean; anchor: HTMLElement; journalVersion?: boolean },
+  ): void;
+  /** Relate the paper to the relation target, or undo that */
+  toggleLink(entry: BrowserEntry, anchor: HTMLElement): void;
+  isRelated(entry: BrowserEntry): boolean;
 }
 
 /** The name of a category or archive, if arXiv's table has it */
@@ -206,6 +225,9 @@ export class DetailPane {
       parts.push(inLibrary);
     }
 
+    const library = this.options.library;
+    if (library) parts.push(this.libraryButtons(entry, library));
+
     const buttons = html(doc, "div", "arxiv-browser__detail-actions");
     buttons.append(
       button(doc, getString("arxiv-browser-copy-id"), () => {
@@ -235,6 +257,51 @@ export class DetailPane {
     }
     container.replaceChildren(...parts);
     container.scrollTop = scroll;
+  }
+
+  /**
+   * Add (choosing where), add to the default target, add the journal
+   * version (for a paper with a journal reference), relate
+   */
+  private libraryButtons(
+    entry: BrowserEntry,
+    library: DetailLibraryActions,
+  ): HTMLElement {
+    const doc = this.doc;
+    const buttons = html(doc, "div", "arxiv-browser__detail-actions");
+    const add = (ask: boolean, journalVersion = false) =>
+      button(
+        doc,
+        journalVersion
+          ? getString("arxiv-browser-add-journal")
+          : ask
+            ? getString("arxiv-browser-add")
+            : getString("arxiv-browser-add-to", {
+                args: { target: library.defaultTargetName() ?? "" },
+              }),
+        (event) =>
+          library.add(entry, {
+            ask,
+            anchor: event.currentTarget as HTMLElement,
+            ...(journalVersion ? { journalVersion } : {}),
+          }),
+      );
+    buttons.append(add(true));
+    if (library.defaultTargetName() !== null) buttons.append(add(false));
+    if (entry.listing.journalRef) buttons.append(add(true, true));
+    buttons.append(
+      button(
+        doc,
+        getString(
+          library.isRelated(entry)
+            ? "arxiv-browser-unlink"
+            : "arxiv-browser-link",
+        ),
+        (event) =>
+          library.toggleLink(entry, event.currentTarget as HTMLElement),
+      ),
+    );
+    return buttons;
   }
 
   private labelled(key: FluentMessageId, text: string): HTMLElement {

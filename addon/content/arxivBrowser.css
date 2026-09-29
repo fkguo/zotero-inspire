@@ -597,6 +597,42 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
+/* A notice with buttons: they can be clicked */
+.arxiv-browser__notice--ask {
+  pointer-events: auto;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.arxiv-browser__notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Relation target and ticked papers */
+
+.arxiv-browser__relation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.arxiv-browser__relation-target {
+  max-width: 40em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.arxiv-browser__relation-note {
+  color: var(--fill-secondary, #6b7280);
+}
+
 /* Detail pane of the focused paper */
 
 .arxiv-browser__detail-title {

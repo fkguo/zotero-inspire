@@ -72,6 +72,7 @@ declare namespace _ZoteroTypes {
       "arxiv_browser_page_size": number;
       "arxiv_browser_abstracts_expanded": boolean;
       "arxiv_browser_open_on_startup": boolean;
+      "arxiv_browser_save_target": string;
       "arxiv_browser_list_share": number;
     };
   }

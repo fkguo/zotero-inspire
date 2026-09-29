@@ -88,6 +88,16 @@ export interface ListPaneOptions {
    */
   onTitleHover?(entry: BrowserEntry, row: HTMLElement): void;
   onTitleLeave?(): void;
+  /** The ticked rows (row keys), as the batch import keeps them */
+  ticked?: ReadonlySet<string>;
+  /** A row's tick box was clicked (it shows the new state) */
+  onTick?(entry: BrowserEntry, event: MouseEvent): void;
+  /** Add a paper not in the library (its mark was clicked) */
+  onAdd?(entry: BrowserEntry, anchor: HTMLElement): void;
+  /** Relate the paper to the relation target, or undo that (its button) */
+  onLink?(entry: BrowserEntry, anchor: HTMLElement): void;
+  /** Whether the paper is related to the relation target */
+  isRelated?(entry: BrowserEntry): boolean;
 }
 
 export class ListPane {
@@ -158,6 +168,12 @@ export class ListPane {
   /** The papers shown, in order */
   get entries(): readonly BrowserEntry[] {
     return this.arranged.entries;
+  }
+
+  /** The papers of the page shown */
+  get pageEntries(): readonly BrowserEntry[] {
+    const first = this.page * this.pageSize;
+    return this.arranged.entries.slice(first, first + this.pageSize);
   }
 
   get currentPage(): number {
@@ -344,6 +360,30 @@ export class ListPane {
   }
 
   /**
+   * The relation target, or its relations, changed: redraw the relation
+   * buttons of the papers shown (of `entries` only, when given)
+   */
+  refreshLinkStates(entries?: Iterable<BrowserEntry>): void {
+    const isRelated = this.options.isRelated;
+    if (!isRelated) return;
+    const keys = entries
+      ? [...entries].map((entry) => entry.id)
+      : [...this.rowEntries.keys()];
+    for (const key of keys) {
+      const row = this.rows.get(key);
+      const entry = this.rowEntries.get(key);
+      if (row && entry) {
+        this.renderer.updateLinkState(row, isRelated(entry));
+      }
+    }
+  }
+
+  /** The row of a paper on the page shown, if any */
+  rowOf(entry: BrowserEntry): HTMLElement | null {
+    return this.rows.get(entry.id) ?? null;
+  }
+
+  /**
    * Items of the library changed (a PDF attached, say): redraw the PDF
    * buttons of the papers shown that are in the library
    */
@@ -395,14 +435,18 @@ export class ListPane {
         : null;
     this.rows.clear();
     this.rowEntries.clear();
+    const isRelated = this.options.isRelated;
     const context: EntryRenderContext = {
-      selectedEntryIDs: new Set(),
+      selectedEntryIDs: this.options.ticked ?? new Set(),
       focusedEntryID: this.focusedKey ?? undefined,
       viewMode: "references",
       maxAuthors: Number(getPref("max_authors")) || 3,
       getCitationValue: () => 0,
       hasPdf: (entry) => this.hasPdf(entry as BrowserEntry),
       darkMode: isDarkMode(doc),
+      ...(isRelated
+        ? { isRelated: (entry) => isRelated(entry as BrowserEntry) }
+        : {}),
     };
     const fragment = doc.createDocumentFragment();
     const blocks = pageBlocks(this.arranged, this.page, this.pageSize);
@@ -613,9 +657,13 @@ export class ListPane {
   /** The row's own parts: the abstract's toggle */
   private decorate(row: HTMLDivElement, entry: BrowserEntry): void {
     row.classList.add("arxiv-browser__row");
-    // No relating to the item shown and no TeX keys here (the row keeps the
-    // References panel's other buttons)
-    row.querySelector(".zinspire-ref-entry__link")?.remove();
+    // No TeX keys here (the row keeps the References panel's other buttons)
+    if (!this.options.onLink) {
+      row.querySelector(".zinspire-ref-entry__link")?.remove();
+    }
+    if (!this.options.onTick) {
+      row.querySelector(".zinspire-ref-entry__checkbox")?.remove();
+    }
     row.querySelector(".zinspire-ref-entry__texkey")?.remove();
     // The References panel's hint ("click to see the author's papers") does
     // not hold here: a click on a name does nothing
@@ -819,7 +867,15 @@ export class ListPane {
     const { actions } = this.options;
     const id = entry.listing.id;
 
-    if (target.closest(".arxiv-browser__abstract-toggle")) {
+    if (target.closest(".zinspire-ref-entry__checkbox")) {
+      this.options.onTick?.(entry, event);
+      return;
+    }
+    const link = target.closest<HTMLElement>(".zinspire-ref-entry__link");
+    if (link) {
+      event.preventDefault();
+      this.options.onLink?.(entry, link);
+    } else if (target.closest(".arxiv-browser__abstract-toggle")) {
       this.toggleAbstract(entry.id);
     } else if (target.closest(".zinspire-ref-entry__title-link")) {
       // The arXiv page opens in the web browser, not in this window
@@ -835,10 +891,11 @@ export class ListPane {
     } else if (target.closest(".zinspire-ref-entry__author-link")) {
       event.preventDefault();
     } else if (target.closest(".zinspire-ref-entry__dot")) {
+      const dot = target.closest<HTMLElement>(".zinspire-ref-entry__dot")!;
       if (entry.localStatusUnknown) this.options.onLibraryRetry?.();
       else if (entry.localItemID) {
         this.options.showInLibrary?.(entry.localItemID);
-      }
+      } else this.options.onAdd?.(entry, dot);
     } else if (target.closest("a, button, input")) {
       return;
     }

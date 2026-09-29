@@ -74,4 +74,5 @@ pref("__prefsPrefix__.arxiv_browser_open_days", "newest"); // days the window op
 pref("__prefsPrefix__.arxiv_browser_page_size", 50); // papers per page (10-500)
 pref("__prefsPrefix__.arxiv_browser_abstracts_expanded", false); // abstracts shown in the list by default (else in the detail pane only)
 pref("__prefsPrefix__.arxiv_browser_open_on_startup", false); // open the arXiv browser when Zotero starts
+pref("__prefsPrefix__.arxiv_browser_save_target", ""); // where "Add to …" (key t) adds: the save target chosen last in the window ("L<libraryID>" or "C<collectionID>")
 pref("__prefsPrefix__.arxiv_browser_list_share", 60); // the list's share of the window width, in percent (25-80; the divider sets it)

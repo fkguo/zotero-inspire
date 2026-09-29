@@ -908,4 +908,61 @@ arxiv-browser-menu-copy-abs-link = Copy Link to the arXiv Page
 arxiv-browser-copied-text = Copied
 arxiv-browser-open-abstract-page = arXiv page
 arxiv-browser-open-pdf-button = PDF
+arxiv-browser-relation-label = Relate to:
+arxiv-browser-relation-change = Change…
+arxiv-browser-relation-main = (selected in the main window)
+arxiv-browser-relation-several = (the first of the items selected in the main window)
+arxiv-browser-relation-chosen = (chosen here; another item selected in the main window takes over)
+arxiv-browser-relation-none = none: select a paper in the main window, or choose one
+arxiv-browser-relation-not-regular = none: the main window shows a note or a file of its own; select a paper, or choose one
+arxiv-browser-add = Add…
+arxiv-browser-add-to = Add to { $target }
+arxiv-browser-add-journal = Add the journal version…
+arxiv-browser-link = Relate
+arxiv-browser-unlink = Remove relation
+arxiv-browser-adding = Adding { $id }…
+arxiv-browser-added = Added { $id } to { $target }
+arxiv-browser-note-journal-mismatch = The journal DOI given on arXiv belongs to another paper: added as the arXiv preprint.
+arxiv-browser-note-journal-not-found = The journal DOI could not be looked up: added as the arXiv preprint.
+arxiv-browser-note-no-pdf = The arXiv API did not answer: added from INSPIRE, without the PDF.
+arxiv-browser-note-no-journal-doi = arXiv gives no journal DOI for this paper: added as the arXiv preprint.
+arxiv-browser-pdf-failed = The PDF of { $id } was not attached: { $reason }
+arxiv-browser-pdf-not-pdf = arXiv did not send a PDF
+arxiv-browser-pdf-files-not-editable = the library does not allow files
+arxiv-browser-pdf-save = Zotero could not store the file
+arxiv-browser-in-library-already = { $id } is already in { $library }
+arxiv-browser-doi-only = { $library } has an item with the journal DOI given for { $id } on arXiv: { $titles }. Is it this paper?
+arxiv-browser-doi-only-add = Not this paper: add it
+arxiv-browser-inspire-unknown = INSPIRE could not be reached, so it is not known whether INSPIRE has { $id }.
+arxiv-browser-add-from-arxiv = Add from arXiv data
+arxiv-browser-add-from-arxiv-count = { $count ->
+        [one] Add 1 paper from arXiv data
+       *[other] Add { $count } papers from arXiv data
+    }
+arxiv-browser-try-later = Try later
+arxiv-browser-not-added = { $id } was not added: { $reason }
+arxiv-browser-not-added-in-library = already in the library
+arxiv-browser-not-added-inspire-unknown = INSPIRE could not be reached
+arxiv-browser-not-added-arxiv-unavailable = the arXiv API is not answering; try again later
+arxiv-browser-not-added-not-on-arxiv = the arXiv API does not know it
+arxiv-browser-not-added-library-unreadable = the library could not be read
+arxiv-browser-not-added-not-editable = the library cannot be edited
+arxiv-browser-link-no-target = No item to relate to: select a paper in the main window, or choose one in the toolbar.
+arxiv-browser-linked = Related to “{ $title }”
+arxiv-browser-unlinked = Relation to “{ $title }” removed
+arxiv-browser-undo-hint = (Edit → Undo, or Ctrl/Cmd+Z, takes it back)
+arxiv-browser-notice-close = Close
+arxiv-browser-ticked = { $count } ticked
+arxiv-browser-add-ticked = Add ticked…
+arxiv-browser-tick-page = Tick this page
+arxiv-browser-tick-all = Tick all ({ $count })
+arxiv-browser-untick = Untick all
+arxiv-browser-batch-added = Added { $added } of { $total } papers to { $target }
+arxiv-browser-batch-not-added = Not added:
+arxiv-browser-batch-none-added = None of the { $total } papers was added
+arxiv-browser-batch-pdf-failed = PDF not attached:
+arxiv-browser-batch-cancelled = Cancelled: { $count ->
+        [one] 1 paper not added
+       *[other] { $count } papers not added
+    }
 arxiv-pdf-attachment-title = arXiv preprint PDF v{ $version }
