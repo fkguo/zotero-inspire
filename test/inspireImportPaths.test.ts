@@ -54,13 +54,21 @@ const TARGET = {
 
 let lib: FakeLibrary;
 let toasts: string[];
+let prefs: Record<string, unknown>;
 
 beforeEach(() => {
   lib = new FakeLibrary();
   toasts = [];
+  prefs = {};
   vi.stubGlobal("Zotero", {
     ...lib.zoteroGlobals(),
-    Prefs: { get: () => undefined },
+    Prefs: {
+      get: (key: string) => prefs[key],
+      set: (key: string, value: unknown) => {
+        prefs[key] = value;
+      },
+      clear: (key: string) => delete prefs[key],
+    },
     // Read (unused) by the panel's copy before the merge
     getActiveZoteroPane: () => null,
   });
@@ -110,7 +118,6 @@ describe("adding a paper from the References panel", () => {
     Object.assign(controller, {
       currentItemID: shown.id,
       captureScrollState: () => ({ scrollTop: 0, scrollLeft: 0 }),
-      rememberRecentTarget: vi.fn(),
       restoreScrollPositionIfNeeded: vi.fn(),
       showToast: (text: string) => toasts.push(text),
     });
@@ -122,7 +129,8 @@ describe("adding a paper from the References panel", () => {
     const item = await controller.importReference("2800001", TARGET);
     expect(mocks.fetchMeta.mock.calls[0][0]).toBe("2800001");
     expectSavedPaper(item);
-    expect(controller.rememberRecentTarget).toHaveBeenCalledWith("C7");
+    // The target used, first among the recent ones
+    expect(prefs.recentSaveTargets).toBe(JSON.stringify([{ id: "C7" }]));
     expect(toasts).toEqual(["references-panel-toast-added"]);
   });
 

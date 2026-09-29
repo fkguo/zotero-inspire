@@ -10,16 +10,18 @@ import { AcademicTreeView } from "./AcademicTreeView";
 import type { AuthorSearchInfo } from "../types";
 import { getString } from "../../../utils/locale";
 import { getPref, setPref } from "../../../utils/prefs";
-import {
-  getPrimarySelectedCollection,
-  getPrimarySelectedLibraryID,
-} from "../../../utils/zoteroPaneSelection";
+import { getPrimarySelectedLibraryID } from "../../../utils/zoteroPaneSelection";
 import {
   applyPillButtonStyle,
   showTargetPickerUI,
-  type SaveTargetRow,
   type SaveTargetSelection,
 } from "../../pickerUI";
+import {
+  buildSaveTargets,
+  mainWindowSaveTargetID,
+  recentSaveTargets,
+  rememberSaveTarget,
+} from "../../saveTargets";
 import { invalidateDarkModeCache, isDarkMode } from "../styles";
 import type { CitationGraphSortMode } from "../citationGraphService";
 import {
@@ -1581,104 +1583,9 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
     }
   }
 
-  private getRecentTargets(): { ids: Set<string>; ordered: string[] } {
-    const ids = new Set<string>();
-    const ordered: string[] = [];
-    try {
-      const raw = Zotero.Prefs.get("recentSaveTargets") as string | undefined;
-      if (!raw) {
-        return { ids, ordered };
-      }
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        for (const entry of parsed) {
-          if (entry?.id && typeof entry.id === "string") {
-            ids.add(entry.id);
-            ordered.push(entry.id);
-          }
-        }
-      }
-    } catch (_err) {
-      Zotero.Prefs.clear("recentSaveTargets");
-    }
-    return { ids, ordered };
-  }
-
-  private rememberRecentTarget(targetID: string): void {
-    try {
-      const raw = Zotero.Prefs.get("recentSaveTargets") as string | undefined;
-      let entries: Array<{ id: string }> = [];
-      if (raw) {
-        entries = JSON.parse(raw);
-      }
-      if (!Array.isArray(entries)) {
-        entries = [];
-      }
-      entries = entries.filter((entry) => entry?.id !== targetID);
-      entries.unshift({ id: targetID });
-      Zotero.Prefs.set(
-        "recentSaveTargets",
-        JSON.stringify(entries.slice(0, 5)),
-      );
-    } catch (_err) {
-      Zotero.Prefs.clear("recentSaveTargets");
-    }
-  }
-
-  private getDefaultTargetID(): string | null {
-    const pane = Zotero.getActiveZoteroPane?.();
-    const selected = getPrimarySelectedCollection(pane);
-    if (selected) {
-      return `C${selected.id}`;
-    }
-    const libraryID =
-      getPrimarySelectedLibraryID(pane) ??
-      (Zotero.Libraries as any)?.userLibrary?.libraryID;
-    return libraryID ? `L${libraryID}` : null;
-  }
-
-  private buildSaveTargets(recentIDs: Set<string>): SaveTargetRow[] {
-    const targets: SaveTargetRow[] = [];
-    for (const library of Zotero.Libraries.getAll()) {
-      if (!library?.editable) {
-        continue;
-      }
-      const libraryID = library.libraryID;
-      targets.push({
-        id: `L${libraryID}`,
-        name: library.name,
-        level: 0,
-        type: "library",
-        libraryID,
-        filesEditable: library.filesEditable,
-        recent: recentIDs.has(`L${libraryID}`),
-      });
-      const collections =
-        Zotero.Collections.getByLibrary(libraryID, true) || [];
-      for (const collection of collections) {
-        const rawLevel = (collection as any)?.level;
-        const level = typeof rawLevel === "number" ? rawLevel + 1 : 1;
-        targets.push({
-          id: collection.treeViewID,
-          name: collection.name,
-          level,
-          type: "collection",
-          libraryID,
-          collectionID: collection.id,
-          filesEditable: library.filesEditable,
-          parentID: collection.parentID
-            ? `C${collection.parentID}`
-            : `L${libraryID}`,
-          recent: recentIDs.has(collection.treeViewID),
-        });
-      }
-    }
-    return targets;
-  }
-
   private async promptForSaveTarget(): Promise<SaveTargetSelection | null> {
-    const recentTargets = this.getRecentTargets();
-    const targets = this.buildSaveTargets(recentTargets.ids);
+    const recentTargets = recentSaveTargets();
+    const targets = buildSaveTargets(recentTargets.ids);
     if (!targets.length) {
       this.showToast(
         getString("references-panel-picker-empty") || "No writable libraries",
@@ -1686,7 +1593,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
       return null;
     }
 
-    let defaultID = this.getDefaultTargetID();
+    let defaultID = mainWindowSaveTargetID();
     if (!defaultID) {
       defaultID = recentTargets.ordered[0] || targets[0]?.id || null;
     }
@@ -1722,7 +1629,7 @@ button.zinspire-citation-graph-refresh.zinspire-citation-graph-refresh--loading 
         container,
       );
       if (selection?.primaryRowID) {
-        this.rememberRecentTarget(selection.primaryRowID);
+        rememberSaveTarget(selection.primaryRowID);
       }
       return selection;
     } finally {

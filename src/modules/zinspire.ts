@@ -12,10 +12,6 @@ import { getLocaleID, getString } from "../utils/locale";
 import type { FluentMessageId } from "../../typings/i10n";
 import { getPref, setPref } from "../utils/prefs";
 import { applyClickSelection } from "../utils/clickSelection";
-import {
-  getPrimarySelectedCollection,
-  getPrimarySelectedLibraryID,
-} from "../utils/zoteroPaneSelection";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
 import {
   showTargetPickerUI,
@@ -268,6 +264,12 @@ import { onLibraryIndexChange } from "./inspire/library/arxivIndex";
 import { loadedItem, refreshLocalState } from "./inspire/library/localStatus";
 import { firstPdfAttachmentID, openLocalPdf } from "./inspire/library/localPdf";
 import { linkItems, unlinkItems } from "./inspire/library/relatedItems";
+import {
+  buildSaveTargets,
+  mainWindowSaveTargetID,
+  recentSaveTargets,
+  rememberSaveTarget,
+} from "./saveTargets";
 import { applyLocalMarker } from "./inspire/panel/localMarker";
 
 // Re-export for external use
@@ -17339,7 +17341,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       libraryID: target.libraryID ?? currentItem.libraryID,
     });
 
-    this.rememberRecentTarget(target.primaryRowID);
+    rememberSaveTarget(target.primaryRowID);
 
     // Save scroll state so switching back to the original item restores the view
     if (originalItemID) {
@@ -17466,120 +17468,17 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   private async promptForSaveTarget(
     anchor: HTMLElement,
   ): Promise<SaveTargetSelection | null> {
-    const recentTargets = this.getRecentTargets();
-    const targets = this.buildSaveTargets(recentTargets.ids);
+    const recentTargets = recentSaveTargets();
+    const targets = buildSaveTargets(recentTargets.ids);
     if (!targets.length) {
       this.showToast(getString("references-panel-picker-empty"));
       return null;
     }
-    let defaultID = this.getDefaultTargetID();
+    let defaultID = mainWindowSaveTargetID();
     if (!defaultID) {
       defaultID = recentTargets.ordered[0] || targets[0]?.id || null;
     }
     return this.showTargetPicker(targets, defaultID, anchor);
-  }
-
-  private buildSaveTargets(recentIDs: Set<string>): SaveTargetRow[] {
-    const targets: SaveTargetRow[] = [];
-    for (const library of Zotero.Libraries.getAll()) {
-      if (!library?.editable) {
-        continue;
-      }
-      const libraryID = library.libraryID;
-      const libraryRow: SaveTargetRow = {
-        id: `L${libraryID}`,
-        name: library.name,
-        level: 0,
-        type: "library",
-        libraryID,
-        filesEditable: library.filesEditable,
-        recent: recentIDs.has(`L${libraryID}`),
-      };
-      targets.push(libraryRow);
-      const collections =
-        Zotero.Collections.getByLibrary(libraryID, true) || [];
-      for (const collection of collections) {
-        const rawLevel = (collection as any)?.level;
-        const level = typeof rawLevel === "number" ? rawLevel + 1 : 1;
-        const row: SaveTargetRow = {
-          id: collection.treeViewID,
-          name: collection.name,
-          level,
-          type: "collection",
-          libraryID,
-          collectionID: collection.id,
-          filesEditable: library.filesEditable,
-          parentID: collection.parentID
-            ? `C${collection.parentID}`
-            : `L${libraryID}`,
-          recent: recentIDs.has(collection.treeViewID),
-        };
-        targets.push(row);
-      }
-    }
-    return targets;
-  }
-
-  private getDefaultTargetID(): string | null {
-    const pane = Zotero.getActiveZoteroPane();
-    const selected = getPrimarySelectedCollection(pane);
-    if (selected) {
-      return `C${selected.id}`;
-    }
-    const libraryID =
-      getPrimarySelectedLibraryID(pane) ??
-      Zotero.Libraries.userLibrary?.libraryID;
-    return libraryID ? `L${libraryID}` : null;
-  }
-
-  private getRecentTargets() {
-    const ids = new Set<string>();
-    const ordered: string[] = [];
-    try {
-      const raw = Zotero.Prefs.get("recentSaveTargets") as string | undefined;
-      if (!raw) {
-        return { ids, ordered };
-      }
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        for (const entry of parsed) {
-          if (entry?.id && typeof entry.id === "string") {
-            ids.add(entry.id);
-            ordered.push(entry.id);
-          }
-        }
-      }
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] Failed to parse recentSaveTargets: ${err}`,
-      );
-      Zotero.Prefs.clear("recentSaveTargets");
-    }
-    return { ids, ordered };
-  }
-
-  private rememberRecentTarget(targetID: string) {
-    try {
-      const raw = Zotero.Prefs.get("recentSaveTargets") as string | undefined;
-      let entries: Array<{ id: string }> = [];
-      if (raw) {
-        entries = JSON.parse(raw);
-      }
-      if (!Array.isArray(entries)) {
-        entries = [];
-      }
-      entries = entries.filter((entry) => entry?.id !== targetID);
-      entries.unshift({ id: targetID });
-      Zotero.Prefs.set(
-        "recentSaveTargets",
-        JSON.stringify(entries.slice(0, 5)),
-      );
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] Failed to update recentSaveTargets: ${err}`,
-      );
-      Zotero.Prefs.clear("recentSaveTargets");
-    }
   }
 
   private showTargetPicker(

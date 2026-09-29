@@ -1,10 +1,12 @@
 import { config } from "../../package.json";
 import { ensureExternalToken } from "../utils/externalToken";
+import { showTargetPickerUI } from "./pickerUI";
 import {
-  getPrimarySelectedCollection,
-  getPrimarySelectedLibraryID,
-} from "../utils/zoteroPaneSelection";
-import { showTargetPickerUI, type SaveTargetRow } from "./pickerUI";
+  buildSaveTargets,
+  mainWindowSaveTargetID,
+  recentSaveTargets,
+  rememberSaveTarget,
+} from "./saveTargets";
 
 const ENDPOINT_PATH = "/connector/zinspirePickSaveTarget";
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -110,99 +112,6 @@ function cleanupExpiredRequests(now = Date.now()): void {
   }
 }
 
-function getRecentTargets(): { ids: Set<string>; ordered: string[] } {
-  const ids = new Set<string>();
-  const ordered: string[] = [];
-  try {
-    const raw = Zotero.Prefs.get("recentSaveTargets") as string | undefined;
-    if (!raw) {
-      return { ids, ordered };
-    }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      for (const entry of parsed) {
-        if (entry?.id && typeof entry.id === "string") {
-          ids.add(entry.id);
-          ordered.push(entry.id);
-        }
-      }
-    }
-  } catch (err) {
-    debug(`[${config.addonName}] Failed to parse recentSaveTargets: ${err}`);
-    Zotero.Prefs.clear("recentSaveTargets");
-  }
-  return { ids, ordered };
-}
-
-function rememberRecentTarget(targetID: string) {
-  try {
-    const raw = Zotero.Prefs.get("recentSaveTargets") as string | undefined;
-    let entries: Array<{ id: string }> = [];
-    if (raw) {
-      entries = JSON.parse(raw);
-    }
-    if (!Array.isArray(entries)) {
-      entries = [];
-    }
-    entries = entries.filter((entry) => entry?.id !== targetID);
-    entries.unshift({ id: targetID });
-    Zotero.Prefs.set("recentSaveTargets", JSON.stringify(entries.slice(0, 5)));
-  } catch (err) {
-    debug(`[${config.addonName}] Failed to update recentSaveTargets: ${err}`);
-    Zotero.Prefs.clear("recentSaveTargets");
-  }
-}
-
-function getDefaultTargetID(): string | null {
-  const pane = Zotero.getActiveZoteroPane();
-  const selected = getPrimarySelectedCollection(pane);
-  if (selected) {
-    return `C${selected.id}`;
-  }
-  const libraryID =
-    getPrimarySelectedLibraryID(pane) ??
-    Zotero.Libraries.userLibrary?.libraryID;
-  return libraryID ? `L${libraryID}` : null;
-}
-
-function buildSaveTargets(recentIDs: Set<string>): SaveTargetRow[] {
-  const targets: SaveTargetRow[] = [];
-  for (const library of Zotero.Libraries.getAll()) {
-    if (!library?.editable) {
-      continue;
-    }
-    const libraryID = library.libraryID;
-    targets.push({
-      id: `L${libraryID}`,
-      name: library.name,
-      level: 0,
-      type: "library",
-      libraryID,
-      filesEditable: library.filesEditable,
-      recent: recentIDs.has(`L${libraryID}`),
-    });
-    const collections = Zotero.Collections.getByLibrary(libraryID, true) || [];
-    for (const collection of collections) {
-      const rawLevel = (collection as any)?.level;
-      const level = typeof rawLevel === "number" ? rawLevel + 1 : 1;
-      targets.push({
-        id: collection.treeViewID,
-        name: collection.name,
-        level,
-        type: "collection",
-        libraryID,
-        collectionID: collection.id,
-        filesEditable: library.filesEditable,
-        parentID: collection.parentID
-          ? `C${collection.parentID}`
-          : `L${libraryID}`,
-        recent: recentIDs.has(collection.treeViewID),
-      });
-    }
-  }
-  return targets;
-}
-
 async function getSelectedPath(
   libraryID: number,
   primaryRowID: string,
@@ -289,13 +198,13 @@ async function promptForSaveTargetFromMainWindow(options: {
     // Ignore focus errors
   }
 
-  const recentTargets = getRecentTargets();
+  const recentTargets = recentSaveTargets();
   const targets = buildSaveTargets(recentTargets.ids);
   if (!targets.length) {
     return null;
   }
 
-  let defaultID = getDefaultTargetID();
+  let defaultID = mainWindowSaveTargetID();
   if (!defaultID) {
     defaultID = recentTargets.ordered[0] || targets[0]?.id || null;
   }
@@ -335,7 +244,7 @@ async function promptForSaveTargetFromMainWindow(options: {
       },
     );
     if (selection?.primaryRowID) {
-      rememberRecentTarget(selection.primaryRowID);
+      rememberSaveTarget(selection.primaryRowID);
     }
     return selection;
   } finally {
