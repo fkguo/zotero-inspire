@@ -552,6 +552,13 @@
   visibility: hidden;
 }
 
+/* Author names are not links here (a click does nothing; hovering shows
+   the author card): the row's text colour, not the References panel's link
+   blue, which the renderer sets inline */
+.arxiv-browser__row .zinspire-ref-entry__author-link {
+  color: inherit !important;
+}
+
 .arxiv-browser__row--collapsed .zinspire-ref-entry__abstract {
   display: none;
 }
