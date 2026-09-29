@@ -264,6 +264,29 @@ export const QUICK_FILTER_EXCLUSIONS: Record<
 };
 
 /**
+ * Switch a quick filter on or off in `active`; switching one on switches off
+ * those it excludes. Returns whether `active` changed.
+ */
+export function setQuickFilter(
+  active: Set<QuickFilterType>,
+  filterType: QuickFilterType,
+  enabled: boolean,
+): boolean {
+  if (active.has(filterType) === enabled) {
+    return false;
+  }
+  if (enabled) {
+    active.add(filterType);
+    for (const excluded of getExcludedFilters(filterType)) {
+      active.delete(excluded);
+    }
+  } else {
+    active.delete(filterType);
+  }
+  return true;
+}
+
+/**
  * Enforce mutual exclusivity constraints when enabling a filter.
  * Returns the set of filters that should be disabled.
  */

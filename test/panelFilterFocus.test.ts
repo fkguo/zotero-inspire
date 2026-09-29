@@ -119,7 +119,11 @@ describe("References panel keyboard focus", () => {
     expect(focusInFilter).toEqual([true, true, true]);
     expect(controller.focusedEntryID).toBe("a");
     // Leaving the box saves its text to the filter history; typing does not
-    expect(controller.filterHistory).toEqual([]);
+    expect(
+      vi
+        .mocked(Zotero.Prefs.set)
+        .mock.calls.filter(([key]) => String(key).endsWith("FilterHistory")),
+    ).toEqual([]);
   });
 
   it("keeps the focus in the filter box when the filter matches nothing", async () => {

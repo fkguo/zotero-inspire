@@ -5,12 +5,20 @@ import {
   SEARCH_HISTORY_MAX_ENTRIES,
   SEARCH_HISTORY_DAYS_PREF_KEY,
   SEARCH_HISTORY_DAYS_DEFAULT,
+  FILTER_HISTORY_PREF_KEY,
 } from "./constants";
 import type { SearchHistoryItem } from "./types";
 
 /** Shared persistent history, with separate namespaces for different searches. */
 export class SearchHistoryStore {
-  constructor(private key: string) {}
+  /**
+   * @param expires Whether entries older than the "keep search history"
+   * setting are dropped (search histories); filter histories are kept
+   */
+  constructor(
+    private key: string,
+    private expires = true,
+  ) {}
 
   read(): SearchHistoryItem[] {
     try {
@@ -19,17 +27,7 @@ export class SearchHistoryStore {
       const parsed: unknown = JSON.parse(stored);
       if (!Array.isArray(parsed)) return [];
       const now = Date.now();
-      const configured = Zotero.Prefs.get(
-        `${config.prefsPrefix}.${SEARCH_HISTORY_DAYS_PREF_KEY}`,
-        true,
-      );
-      const days =
-        typeof configured === "number" &&
-        configured > 0 &&
-        Number.isFinite(configured)
-          ? configured
-          : SEARCH_HISTORY_DAYS_DEFAULT;
-      const cutoff = now - days * 86400000;
+      const cutoff = this.expires ? now - keptDays() * 86400000 : -Infinity;
       const result: SearchHistoryItem[] = [];
       const seen = new Set<string>();
       for (const value of parsed) {
@@ -90,9 +88,30 @@ export class SearchHistoryStore {
   }
 }
 
+/** Days the search histories keep an entry (the plugin's setting) */
+function keptDays(): number {
+  const configured = Zotero.Prefs.get(
+    `${config.prefsPrefix}.${SEARCH_HISTORY_DAYS_PREF_KEY}`,
+    true,
+  );
+  return typeof configured === "number" &&
+    configured > 0 &&
+    Number.isFinite(configured)
+    ? configured
+    : SEARCH_HISTORY_DAYS_DEFAULT;
+}
+
 export const literatureSearchHistory = new SearchHistoryStore(
   SEARCH_HISTORY_PREF_KEY,
 );
 export const academicSearchHistory = new SearchHistoryStore(
   ACADEMIC_SEARCH_HISTORY_PREF_KEY,
+);
+/**
+ * The filter boxes' history: the References panel's and the arXiv browser
+ * window's filter texts, one list, kept until they fall off its end
+ */
+export const filterHistory = new SearchHistoryStore(
+  FILTER_HISTORY_PREF_KEY,
+  false,
 );
