@@ -470,14 +470,22 @@
   flex: 1 1 auto;
 }
 
-/* Day index and pages */
+/* Day index and pages. The chips wrap onto more lines: a horizontal
+   scrollbar would cover them. */
 
 .arxiv-browser__days {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  overflow-x: auto;
   padding: 6px 8px 2px;
   flex: 0 0 auto;
+}
+
+/* No chips for a search's months; the order and sections are the days' */
+.arxiv-browser__days[hidden],
+.arxiv-browser__label[hidden],
+.arxiv-browser__sections[hidden] {
+  display: none;
 }
 
 .arxiv-browser__day-chip {

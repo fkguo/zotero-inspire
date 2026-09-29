@@ -42,7 +42,6 @@ export function formatShortDay(date: IsoDate): string {
 }
 
 let monthFormat: Intl.DateTimeFormat | null = null;
-let shortMonthFormat: Intl.DateTimeFormat | null = null;
 
 /** "September 2026" (en-US) or "2026年9月" (zh-CN), of "2026-09" */
 export function formatMonth(month: string): string {
@@ -52,16 +51,6 @@ export function formatMonth(month: string): string {
     year: "numeric",
   });
   return monthFormat.format(new Date(isoDateToMs(`${month}-01`)));
-}
-
-/** "Sep 2026" (en-US) or "2026年9月" (zh-CN), for the month index */
-export function formatShortMonth(month: string): string {
-  shortMonthFormat ??= new Intl.DateTimeFormat(locale(), {
-    timeZone: "UTC",
-    month: "short",
-    year: "numeric",
-  });
-  return shortMonthFormat.format(new Date(isoDateToMs(`${month}-01`)));
 }
 
 const REASONS: Record<ListingFailureReason, FluentMessageId> = {

@@ -23,7 +23,6 @@ import {
   formatDay,
   formatMonth,
   formatShortDay,
-  formatShortMonth,
 } from "../src/modules/arxiv/browser/browserText";
 import { invalidateDarkModeCache } from "../src/modules/inspire/styles";
 import { htmlDocument, readArxivFixture, xmlDocument } from "./arxivFixtures";
@@ -1106,11 +1105,13 @@ describe("arXiv browser: read-only actions and keys", () => {
     // arXiv lists no HTML version of this one
     const withoutHtml = rowOf("2506.21871");
     expect(htmlButton(withoutHtml)).toBeNull();
-    expect(withoutHtml.querySelector(".zinspire-ref-entry__pdf")).not.toBeNull();
-    withoutHtml.click();
     expect(
-      root.querySelector(".arxiv-browser__detail")!.textContent,
-    ).toContain("2506.21871");
+      withoutHtml.querySelector(".zinspire-ref-entry__pdf"),
+    ).not.toBeNull();
+    withoutHtml.click();
+    expect(root.querySelector(".arxiv-browser__detail")!.textContent).toContain(
+      "2506.21871",
+    );
     expect(detailHtml()).toBeUndefined();
   });
 
@@ -1122,9 +1123,7 @@ describe("arXiv browser: read-only actions and keys", () => {
     await env.settle();
     view!.dispose();
     const cached = (await env.store.getDay("hep-ph", "2026-09-25"))!;
-    expect(cached.entries.find((e) => e.id === "2506.21871")?.html).toBe(
-      false,
-    );
+    expect(cached.entries.find((e) => e.id === "2506.21871")?.html).toBe(false);
     for (const entry of cached.entries) delete entry.html;
     // A day later arXiv cannot be reached; the copy from the cache is shown
     env.site.page(LIST_URL("hep-ph"), { status: 0 });
@@ -1137,7 +1136,9 @@ describe("arXiv browser: read-only actions and keys", () => {
     const row = rows(env.root).find((r) =>
       r.dataset.entryId!.includes("2506.21871"),
     )!;
-    row.querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!.click();
+    row
+      .querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!
+      .click();
     expect(env.launch).toHaveBeenLastCalledWith(
       "https://arxiv.org/html/2506.21871",
     );
@@ -3409,8 +3410,29 @@ describe("arXiv browser: searching arXiv", () => {
       msg("arxiv-browser-detail-submitted", { date: formatDay("2026-09-29") }),
     );
     expect(detail).not.toContain("arxiv-browser-detail-announced");
-    // The order and sections are the days'
-    expect(select(root, "sort").disabled).toBe(true);
+    // The order and sections are the days': hidden, as is the day index
+    const sortLabel = select(root, "sort").parentElement!;
+    const sections = root.querySelector<HTMLElement>(
+      ".arxiv-browser__sections",
+    )!;
+    expect(sortLabel.hidden).toBe(true);
+    expect(sections.hidden).toBe(true);
+    expect(
+      root.querySelector<HTMLElement>(".arxiv-browser__days")!.hidden,
+    ).toBe(true);
+    expect(root.querySelector(".arxiv-browser__day-chip")).toBeNull();
+    // The other controls of the bar stay: filters, page size, abstracts
+    const bar = sections.parentElement!;
+    expect(
+      [...bar.children]
+        .filter((control) => !(control as HTMLElement).hidden)
+        .map((control) => control.className),
+    ).toEqual([
+      expect.stringContaining("quick"),
+      expect.stringContaining("arxiv-browser__filter"),
+      "arxiv-browser__label",
+      "arxiv-browser__check",
+    ]);
   });
 
   it("fetches the next page only when the reader turns past the results fetched", async () => {
@@ -3462,17 +3484,23 @@ describe("arXiv browser: searching arXiv", () => {
     expect(view.listPane.entries).toHaveLength(120);
     expect(next().disabled).toBe(true);
     expect(root.querySelector(".arxiv-browser__next-page")).toBeNull();
-    // Months, newest first
+    // No chips of the months: the list's month headers show where the
+    // reader is, without counts (those would be of the pages fetched)
+    expect(root.querySelector(".arxiv-browser__day-chip")).toBeNull();
     expect(
-      [...root.querySelectorAll(".arxiv-browser__day-chip")].map(
-        (chip) => chip.textContent,
-      ),
-    ).toEqual([
-      `${formatShortMonth("2026-09")} · 29`,
-      `${formatShortMonth("2026-08")} · 31`,
-      `${formatShortMonth("2026-07")} · 31`,
-      `${formatShortMonth("2026-06")} · 29`,
-    ]);
+      root.querySelector<HTMLElement>(".arxiv-browser__days")!.hidden,
+    ).toBe(true);
+    expect(headers(root)).toEqual(["# 2026-06-01 (cont.)"]);
+    expect(
+      [
+        ...root.querySelectorAll(
+          ".arxiv-browser__list .arxiv-browser__day-title",
+        ),
+      ].map((title) => title.textContent),
+    ).toEqual([formatMonth("2026-06")]);
+    expect(
+      root.querySelector(".arxiv-browser__list .arxiv-browser__day-count"),
+    ).toBeNull();
   });
 
   it("after a change of page size, shows the page of the first paper fetched", async () => {
@@ -3556,7 +3584,19 @@ describe("arXiv browser: searching arXiv", () => {
     expect(statusText(root)).toBe(
       msg("arxiv-browser-status-loaded", { days: 1, papers: 72 }),
     );
-    expect(select(root, "sort").disabled).toBe(false);
+    // The order, sections and day chips are back
+    expect(select(root, "sort").closest("[hidden]")).toBeNull();
+    expect(
+      root.querySelector<HTMLElement>(".arxiv-browser__sections")!.hidden,
+    ).toBe(false);
+    expect(
+      root.querySelector<HTMLElement>(".arxiv-browser__days")!.hidden,
+    ).toBe(false);
+    expect(
+      [...root.querySelectorAll(".arxiv-browser__day-chip")].map(
+        (chip) => chip.textContent,
+      ),
+    ).toEqual([`${formatShortDay(day.date)} · 72`]);
     // Only the day listing's own requests went to arxiv.org
     expect(apiRequests(site)).toHaveLength(1);
     expect(setRead).not.toHaveBeenCalled();

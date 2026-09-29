@@ -46,7 +46,6 @@ import {
   formatDay,
   formatMonth,
   formatShortDay,
-  formatShortMonth,
   reasonText,
 } from "./browserText";
 import { notePaint, noteFormulas, type PaintTime } from "./paintTimes";
@@ -261,6 +260,7 @@ export class ListPane {
     if (extra) empty.append(html(this.doc, "br"), extra);
     this.list.replaceChildren(empty);
     this.dayIndex.replaceChildren();
+    this.dayIndex.hidden = true;
     this.pager.replaceChildren();
   }
 
@@ -656,13 +656,18 @@ export class ListPane {
         day.month ? formatMonth(day.month) : formatDay(day.listing.date),
       ),
     );
-    const count =
-      day.count < day.inSections
-        ? getString("arxiv-browser-day-filtered", {
-            args: { shown: day.count, count: day.inSections },
-          })
-        : getString("arxiv-browser-day-count", { args: { count: day.count } });
-    header.append(html(doc, "span", "arxiv-browser__day-count", count));
+    // A search's month: no count, which would be of the pages fetched so far
+    if (!day.month) {
+      const count =
+        day.count < day.inSections
+          ? getString("arxiv-browser-day-filtered", {
+              args: { shown: day.count, count: day.inSections },
+            })
+          : getString("arxiv-browser-day-count", {
+              args: { count: day.count },
+            });
+      header.append(html(doc, "span", "arxiv-browser__day-count", count));
+    }
     if (continued) {
       header.append(
         html(
@@ -1039,18 +1044,26 @@ export class ListPane {
     );
   }
 
+  /**
+   * The chips of the days, wrapping onto more lines as needed. None for a
+   * search's months: their counts would be of the pages fetched so far, and
+   * the list's month headers show where the reader is.
+   */
   private renderDayIndex(): void {
     const doc = this.doc;
     this.dayIndex.replaceChildren();
-    for (const day of this.arranged.days) {
+    const days = this.arranged.days;
+    this.dayIndex.hidden = !days.length || days.some((day) => day.month);
+    if (this.dayIndex.hidden) return;
+    for (const day of days) {
       const date = day.listing.date;
       const chip = button(
         doc,
-        `${day.month ? formatShortMonth(day.month) : formatShortDay(date)} · ${day.count}`,
+        `${formatShortDay(date)} · ${day.count}`,
         () => this.goToDay(date),
         "arxiv-browser__day-chip",
       );
-      chip.title = day.month ? formatMonth(day.month) : formatDay(date);
+      chip.title = formatDay(date);
       if (day.listing.specs.some(({ state }) => state.state === "loading")) {
         chip.textContent = `${chip.textContent} …`;
       } else if (day.listing.status !== "complete") {

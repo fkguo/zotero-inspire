@@ -66,6 +66,25 @@ describe("arXiv window stylesheet", () => {
     ]);
   });
 
+  it("wraps the day chips onto more lines instead of scrolling them sideways", () => {
+    // A horizontal scrollbar drawn over the chips cut them in half
+    const block = (selector: string) =>
+      [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selectors]) =>
+        selectors.split(",").some((s) => s.trim() === selector),
+      )?.[2] ?? "";
+    expect(block(".arxiv-browser__days")).toMatch(/flex-wrap:\s*wrap/);
+    expect(selectorsSetting("overflow-x")).not.toContain(
+      ".arxiv-browser__days",
+    );
+    expect(selectorsSetting("overflow")).not.toContain(".arxiv-browser__days");
+    // Hidden during a search, with the order and the sections
+    expect(block(".arxiv-browser__days[hidden]")).toMatch(/display:\s*none/);
+    expect(block(".arxiv-browser__label[hidden]")).toMatch(/display:\s*none/);
+    expect(block(".arxiv-browser__sections[hidden]")).toMatch(
+      /display:\s*none/,
+    );
+  });
+
   it("styles the References panel's row parts only inside the window's rows", () => {
     const panelParts = [...css.matchAll(/([^{}]+)\{/g)]
       .flatMap(([, selectors]) => selectors.split(","))

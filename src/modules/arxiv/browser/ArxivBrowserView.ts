@@ -270,7 +270,8 @@ export class ArxivBrowserView {
   private readonly reloadButton: HTMLButtonElement;
   private readonly cancelButton: HTMLButtonElement;
   private readonly status: HTMLElement;
-  private readonly sortSelect: HTMLSelectElement;
+  /** The order and the sections: the days' only, hidden during a search */
+  private readonly dayControls: HTMLElement[];
   private readonly sectionBoxes = new Map<ListingSection, HTMLInputElement>();
   /** The filter box, with the filter history */
   private readonly filterBox: FilterHistoryInput;
@@ -433,7 +434,6 @@ export class ArxivBrowserView {
     // Sort, sections, filter, page size, abstracts
     const listBar = html(doc, "div", "arxiv-browser__bar");
     const sortSelect = html(doc, "select", "arxiv-browser__select");
-    this.sortSelect = sortSelect;
     for (const sort of LIST_SORTS) {
       const option = html(
         doc,
@@ -495,9 +495,12 @@ export class ArxivBrowserView {
       getPref("arxiv_browser_abstracts_expanded") === true,
       (checked) => this.listPane.setAbstractsShown(checked),
     );
-    listBar.append(
+    this.dayControls = [
       this.labelled("arxiv-browser-sort", sortSelect),
       sections,
+    ];
+    listBar.append(
+      ...this.dayControls,
       this.quickFiltersControl.element,
       this.filterBox.wrapper,
       this.labelled("arxiv-browser-page-size", pageSize),
@@ -1076,13 +1079,13 @@ export class ArxivBrowserView {
 
   /**
    * The order and sections are the days' (results come newest first and
-   * belong to no section)
+   * belong to no section): hidden during a search
    */
   private enableListControls(): void {
     const searching = this.search.active;
-    this.sortSelect.disabled = searching;
+    for (const control of this.dayControls) control.hidden = searching;
     for (const box of this.sectionBoxes.values()) {
-      box.disabled = searching || !this.subscription;
+      box.disabled = !this.subscription;
     }
   }
 
