@@ -3079,12 +3079,14 @@ describe("arXiv browser: adding and relating", () => {
       parentID: number,
       url: string,
       id: number,
+      title = "",
     ) => {
       items.set(id, {
         id,
         attachmentContentType: "application/pdf",
         isPDFAttachment: () => true,
-        getField: (field: string) => (field === "url" ? url : ""),
+        getField: (field: string) =>
+          field === "url" ? url : field === "title" ? title : "",
       });
       items.get(parentID)!.attachments.push(id);
     };
@@ -3106,11 +3108,26 @@ describe("arXiv browser: adding and relating", () => {
       expect(launch).toHaveBeenCalledTimes(1);
     });
 
+    it("knows the version of the PDFs the plugin attached by their title (they have no address)", async () => {
+      const { items, pdf, launch, readerOpen } = await atVersion2(ID);
+      attachPdf(items, 77, "", 6001, "arXiv preprint PDF v3");
+      pdf().click();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/pdf/${ID}v2`);
+      attachPdf(items, 77, "", 6002, "arXiv 预印本 PDF v2");
+      pdf().click();
+      await flushPromises();
+      expect(readerOpen).toHaveBeenLastCalledWith(6002, undefined, {
+        allowDuplicate: false,
+      });
+    });
+
     it("opens for the newest version a library PDF of that version, else one of no known version, never one of another version", async () => {
       const { root, items, pdf, launch, readerOpen, row } =
         await atVersion2(ID);
-      // Only arXiv's version 2 in the library: arXiv's newest
+      // Only version 2 in the library (arXiv's address, and one the plugin
+      // attached, known by its title): arXiv's newest
       attachPdf(items, 77, `http://arxiv.org/pdf/${ID}v2`, 6001);
+      attachPdf(items, 77, "", 6005, "arXiv preprint PDF v2");
       const chooser = root.querySelector<HTMLSelectElement>(
         ".arxiv-browser__detail .arxiv-browser__version",
       )!;
@@ -3713,7 +3730,7 @@ describe("arXiv browser: searching arXiv", () => {
   /**
    * An answer of the API: `count` papers from `first` on (2609.3xxxx), of
    * `total`, submitted one a day back from 29 September 2026; the first
-   * (2609.30000) has a version 2, submitted on 30 September
+   * (2609.30000) has a version 2, submitted on 2 October
    */
   function results(first: number, count: number, total: number): string {
     const entries = Array.from({ length: count }, (_, i) => {
@@ -3721,7 +3738,7 @@ describe("arXiv browser: searching arXiv", () => {
       const date = new Date(Date.parse("2026-09-29T12:00:00Z") - n * 86400000)
         .toISOString()
         .replace(/\.\d+Z$/, "Z");
-      const updated = n ? date : "2026-09-30T08:00:00Z";
+      const updated = n ? date : "2026-10-02T08:00:00Z";
       return `<entry><id>http://arxiv.org/abs/2609.${30000 + n}v${n ? 1 : 2}</id>
         <title>Result ${n} on $m_\\pi$</title><summary>Abstract
         ${n}</summary><published>${date}</published><updated>${updated}</updated>
@@ -3813,9 +3830,9 @@ describe("arXiv browser: searching arXiv", () => {
     // of an announcement; the list groups by the first version's month
     const detail = root.querySelector(".arxiv-browser__detail")!.textContent;
     expect(detail).toContain(
-      msg("arxiv-browser-detail-submitted", { date: formatDay("2026-09-30") }),
+      msg("arxiv-browser-detail-submitted", { date: formatDay("2026-10-02") }),
     );
-    expect(detail).not.toContain("arxiv-browser-detail-announced");
+    expect(detail).not.toContain(msg("arxiv-browser-detail-announced"));
     // The order and sections are the days': hidden, as is the day index
     const sortLabel = select(root, "sort").parentElement!;
     const sections = root.querySelector<HTMLElement>(

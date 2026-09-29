@@ -42,9 +42,16 @@ export interface ArxivPdfSource {
 }
 
 /**
+ * The title of the PDFs attachArxivPdf adds, which have no address:
+ * "arXiv preprint PDF v<N>" (Chinese: "arXiv 预印本 PDF v<N>")
+ */
+const PLUGIN_PDF_TITLE = /^arXiv\b.*\bPDF v(\d+)$/;
+
+/**
  * The version of a PDF attachment of paper `id` downloaded from arXiv, as its
- * address names it (arxiv.org/pdf/<id>v<N>, with or without ".pdf"); null
- * when the address names none (a journal's PDF, arxiv.org/pdf/<id>.pdf)
+ * address names it (arxiv.org/pdf/<id>v<N>, with or without ".pdf"), else
+ * its title when the plugin attached it; null when neither names one (a
+ * journal's PDF, arxiv.org/pdf/<id>.pdf)
  */
 export function arxivPdfVersion(
   attachment: Zotero.Item,
@@ -52,12 +59,13 @@ export function arxivPdfVersion(
 ): number | null {
   if (!attachment.isPDFAttachment?.()) return null;
   const escaped = id.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  const match = String(attachment.getField?.("url") ?? "").match(
-    new RegExp(
-      `^https?://(?:www\\.|export\\.)?arxiv\\.org/pdf/${escaped}v(\\d+)(?:\\.pdf)?/?(?:[?#].*)?$`,
-      "i",
-    ),
-  );
+  const match =
+    String(attachment.getField?.("url") ?? "").match(
+      new RegExp(
+        `^https?://(?:www\\.|export\\.)?arxiv\\.org/pdf/${escaped}v(\\d+)(?:\\.pdf)?/?(?:[?#].*)?$`,
+        "i",
+      ),
+    ) ?? String(attachment.getField?.("title") ?? "").match(PLUGIN_PDF_TITLE);
   return match ? Number(match[1]) : null;
 }
 
