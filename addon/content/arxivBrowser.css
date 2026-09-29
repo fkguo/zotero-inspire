@@ -488,19 +488,34 @@
   display: none;
 }
 
+/* Flat pills like the category chips, drawn in full here: a button with its
+   own corners keeps no system drawing and would show a bevelled border. The
+   chip of the page shown is filled as a picked day in the calendar is. */
 .arxiv-browser__day-chip {
+  appearance: none;
   flex: 0 0 auto;
+  margin: 0;
   padding: 1px 8px;
+  border: 1px solid transparent;
   border-radius: 10px;
+  background: var(--fill-quinary, #e5e7eb);
+  color: inherit;
   white-space: nowrap;
+  cursor: pointer;
 }
 
-.arxiv-browser__day-chip--here {
-  font-weight: 600;
+.arxiv-browser__day-chip:hover {
+  border-color: var(--fill-quaternary, #d1d5db);
 }
 
 .arxiv-browser__day-chip--incomplete {
   color: var(--accent-orange, #b45309);
+}
+
+.arxiv-browser__day-chip--here {
+  background: var(--accent-blue, #2563eb);
+  color: #fff;
+  font-weight: 600;
 }
 
 .arxiv-browser__pager {

@@ -85,6 +85,28 @@ describe("arXiv window stylesheet", () => {
     );
   });
 
+  it("draws the day chips as flat pills, the chip of the page shown filled", () => {
+    // Its own corners turn a button's system drawing off: without its own
+    // border and background it would show the bevelled fallback
+    const block = (selector: string) =>
+      [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selectors]) =>
+        selectors.split(",").some((s) => s.trim() === selector),
+      )?.[2] ?? "";
+    const chip = block(".arxiv-browser__day-chip");
+    expect(chip).toMatch(/appearance:\s*none;/);
+    expect(chip).toMatch(/border:\s*1px solid transparent;/);
+    expect(chip).toMatch(/border-radius:\s*10px;/);
+    expect(chip).toMatch(/background:\s*var\(--fill-quinary/);
+    expect(chip).not.toMatch(/outset/);
+    expect(block(".arxiv-browser__day-chip--here")).toMatch(
+      /background:\s*var\(--accent-blue[^;]*;\s*color:\s*#fff;/,
+    );
+    // The page shown stays white on blue when its day is incomplete too
+    expect(css.indexOf(".arxiv-browser__day-chip--here {")).toBeGreaterThan(
+      css.indexOf(".arxiv-browser__day-chip--incomplete {"),
+    );
+  });
+
   it("draws the HTML button and its menu as one system button, like the PDF button", () => {
     // A button given its own corners, border or background loses the
     // system's drawing and turns square and bevelled
