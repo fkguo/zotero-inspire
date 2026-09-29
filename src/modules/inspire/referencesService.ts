@@ -443,12 +443,14 @@ export interface LiteratureBatchResult {
  * "arxiv:2401.00001") joined by OR, asking for as many records as there are
  * terms. A batch INSPIRE refuses as too large (502 and the like) is split in
  * halves while it has more than 25 terms; a failed connection is tried once
- * more. Rejects with an AbortError when `signal` aborts.
+ * more. Rejects with an AbortError when `signal` aborts. `background`: no
+ * user waits for the answer (see inspireFetch).
  */
 export async function searchLiteratureInBatch(
   terms: string[],
   fields: string,
   signal?: AbortSignal,
+  background = false,
   networkRetryCount = 0,
 ): Promise<LiteratureBatchResult> {
   if (!terms.length) return { hits: [], failedTerms: [] };
@@ -460,7 +462,7 @@ export async function searchLiteratureInBatch(
   try {
     const response = await inspireFetch(
       url,
-      signal ? { signal } : undefined,
+      background ? { signal, background } : signal ? { signal } : undefined,
     );
     if (response.status !== 200) {
       Zotero.debug(
@@ -478,11 +480,13 @@ export async function searchLiteratureInBatch(
           terms.slice(0, midpoint),
           fields,
           signal,
+          background,
         );
         const second = await searchLiteratureInBatch(
           terms.slice(midpoint),
           fields,
           signal,
+          background,
         );
         return {
           hits: [...first.hits, ...second.hits],
@@ -512,6 +516,7 @@ export async function searchLiteratureInBatch(
         terms,
         fields,
         signal,
+        background,
         networkRetryCount + 1,
       );
     }

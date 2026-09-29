@@ -53,6 +53,8 @@ export interface InspireArxivLookupOptions {
    * no record for in the last hour are answered from memory
    */
   automatic?: boolean;
+  /** No user waits for the answer: sent after the requests a user waits for */
+  background?: boolean;
 }
 
 /** When INSPIRE last had no record for an identifier, in this session */
@@ -106,6 +108,7 @@ export async function lookupInspireByArxiv(
         batch.map((id) => `arxiv:${id}`),
         fields,
         options.signal,
+        options.background,
       );
       const failed = new Set(failedTerms.map((t) => t.slice("arxiv:".length)));
       const asked = new Set(batch);
@@ -256,13 +259,18 @@ export const TITLE_OVERLAP_MIN = 0.5;
  */
 export async function resolveInspireByArxiv(
   items: readonly ArxivItemIdentity[],
-  options: { fields?: string[]; signal?: AbortSignal } = {},
+  options: {
+    fields?: string[];
+    signal?: AbortSignal;
+    background?: boolean;
+  } = {},
 ): Promise<ResolvedInspireRecord[]> {
   const answers = await lookupInspireByArxiv(
     items.map((item) => item.arxivId),
     {
       fields: [...IDENTITY_FIELDS, ...(options.fields ?? [])],
       signal: options.signal,
+      background: options.background,
     },
   );
   return items.map((item) => {
