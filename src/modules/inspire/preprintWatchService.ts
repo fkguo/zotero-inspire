@@ -1352,8 +1352,9 @@ export function beginManualCheck(): () => void {
 /**
  * The background check at startup, as set by preprint_watch_auto_check: all
  * editable libraries, skipping recent missing records. `showResults` shows
- * the results dialog when preprints were found published. A stopped check (by
- * a manual check, or at shutdown) or one whose every result is an error is not
+ * the results dialog when preprints were found published, or with an INSPIRE
+ * record their items do not name yet. A stopped check (by a manual
+ * check, or at shutdown) or one whose every result is an error is not
  * recorded as done, so the next start checks the papers not answered yet.
  */
 export async function runBackgroundCheck(
@@ -1417,8 +1418,10 @@ export async function runBackgroundCheck(
     // the next day's check (failures are not stored).
     if (summary.errors < summary.total) updateLastCheckTime();
 
-    // If publications found, show results dialog for user to review and update
-    if (summary.published > 0) {
+    // Show the results dialog when there is something to update or write:
+    // every published preprint not updated yet (also those shown by earlier
+    // checks), and every INSPIRE record an item does not name yet
+    if (summary.published > 0 || summary.withoutRecid > 0) {
       await showResults(results);
     }
 

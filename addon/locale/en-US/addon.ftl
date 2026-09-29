@@ -543,7 +543,7 @@ preprint-check-summary =
   Checked { $total ->
     [one] 1 preprint
    *[other] { $total } preprints
-  }: { $published } published, { $unpublished } unpublished, { $notInInspire } not in INSPIRE, { $errors } failed
+  }: { $published } published, { $unpublished } unpublished, { $notInInspire } not covered by INSPIRE (publication unknown), { $errors } failed
 preprint-no-preprints = No unpublished preprints found.
 preprint-update-success =
   { $count ->
@@ -556,8 +556,28 @@ preprint-cancel = Cancel
 preprint-doi-updated = DOI updated: { $oldDoi } → { $newDoi }
 preprint-results-published = Published
 preprint-results-unpublished = Unpublished
-preprint-results-not-in-inspire = Not in INSPIRE
+preprint-results-not-in-inspire = Not covered by INSPIRE (publication unknown)
 preprint-results-errors = Errors
+preprint-found-records =
+  { $count ->
+    [one] 1 preprint has an INSPIRE record its item does not name yet
+   *[other] { $count } preprints have an INSPIRE record their items do not name yet
+  }
+preprint-section-published = Published: update the bibliographic information
+preprint-section-records = In INSPIRE, not published: write the INSPIRE record only (recid, empty citation key, citation counts; bibliographic information unchanged)
+preprint-record-line = INSPIRE { $recid }: { $title } ({ $author })
+preprint-mismatch = May be another paper: { $reasons }
+preprint-mismatch-title = the titles differ
+preprint-mismatch-firstAuthor = the first authors differ
+preprint-mismatch-recordIncomplete = INSPIRE's record has no title or first author
+preprint-records-written =
+  { $count ->
+    [one] Wrote the INSPIRE record of 1 item.
+   *[other] Wrote the INSPIRE record of { $count } items.
+  }
+preprint-records-shown = { $count } not written: shown in the item pane or a reader (select another item and check again)
+preprint-records-changed = { $count } not written: changed or deleted since the check, or with unsaved changes
+preprint-records-archive-conflict = { $count } without recid: Archive or Loc. in Archive holds another value
 
 # Collaboration Tags feature (FTR-COLLAB-TAGS)
 collab-tag-menu-add = Add Collaboration Tags

@@ -907,8 +907,13 @@ describe("the background check at startup", () => {
     );
   });
 
-  it("shows nothing when no preprint is published, and records a check without preprints as done", async () => {
-    preprint("2406.00022");
+  it("shows nothing when no preprint is published and every item names its record, and records a check without preprints as done", async () => {
+    zotero.addItem("preprint", {
+      extra: "arXiv:2406.00022 [hep-ph]",
+      title: "Paper 2406.00022",
+      archive: "INSPIRE",
+      archiveLocation: "72",
+    });
     answers.set("2406.00022", [unpublishedRecord("2406.00022", 72)]);
     await runBackgroundCheck(showResults);
     expect(showResults).not.toHaveBeenCalled();
@@ -918,6 +923,19 @@ describe("the background check at startup", () => {
     zotero.items.clear();
     await runBackgroundCheck(showResults);
     expect(shouldRunBackgroundCheck()).toBe(false);
+  });
+
+  it("shows the INSPIRE records the items do not name yet, also when no preprint is published", async () => {
+    preprint("2406.00026");
+    answers.set("2406.00026", [unpublishedRecord("2406.00026", 76)]);
+
+    await runBackgroundCheck(showResults);
+
+    expect(showResults).toHaveBeenCalledTimes(1);
+    expect(
+      (showResults.mock.calls[0][0] as Array<{ completion?: unknown }>)[0]
+        .completion,
+    ).toMatchObject({ record: { recid: "76" } });
   });
 
   it("is not recorded as done when every request failed, and is when INSPIRE answered some", async () => {

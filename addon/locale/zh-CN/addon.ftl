@@ -534,7 +534,7 @@ preprint-found-published =
     [one] 发现 1 篇预印本已正式发表！
    *[other] 发现 { $count } 篇预印本已正式发表！
   }
-preprint-check-summary = 已检查 { $total } 篇预印本：已发表 { $published }，未发表 { $unpublished }，INSPIRE 未覆盖 { $notInInspire }，查询出错 { $errors }
+preprint-check-summary = 已检查 { $total } 篇预印本：已发表 { $published }，未发表 { $unpublished }，INSPIRE 未覆盖（无法判断是否已发表）{ $notInInspire }，查询出错 { $errors }
 preprint-no-preprints = 未找到未发表的预印本。
 preprint-update-success =
   { $count ->
@@ -547,8 +547,20 @@ preprint-cancel = 取消
 preprint-doi-updated = DOI 已更新: { $oldDoi } → { $newDoi }
 preprint-results-published = 已发表
 preprint-results-unpublished = 未发表
-preprint-results-not-in-inspire = INSPIRE 未覆盖
+preprint-results-not-in-inspire = INSPIRE 未覆盖（无法判断是否已发表）
 preprint-results-errors = 查询出错
+preprint-found-records = { $count } 篇预印本在 INSPIRE 已有记录，条目尚无 INSPIRE 编号
+preprint-section-published = 已发表：更新书目信息
+preprint-section-records = INSPIRE 已收录、尚未发表：只写入 INSPIRE 编号（编号、空着的引用键、被引数；不改书目信息）
+preprint-record-line = INSPIRE { $recid }：{ $title }（{ $author }）
+preprint-mismatch = 可能是另一篇论文：{ $reasons }
+preprint-mismatch-title = 标题不同
+preprint-mismatch-firstAuthor = 第一作者不同
+preprint-mismatch-recordIncomplete = INSPIRE 记录缺标题或第一作者
+preprint-records-written = 已为 { $count } 篇写入 INSPIRE 编号。
+preprint-records-shown = { $count } 篇未写入：正在条目栏或阅读器中显示（选中其他条目后重新检查）
+preprint-records-changed = { $count } 篇未写入：检查后已改动或删除，或有未保存的改动
+preprint-records-archive-conflict = { $count } 篇未写入编号：“存档”或“存档位置”已有其他值
 
 # Collaboration Tags feature (FTR-COLLAB-TAGS)
 collab-tag-menu-add = 添加合作组标签

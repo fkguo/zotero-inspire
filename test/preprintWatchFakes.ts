@@ -213,7 +213,21 @@ export class FakeZotero {
       ItemTypes: { getID: (name: string) => ITEM_TYPE_IDS[name] },
       getMainWindow: () => fake.mainWindow,
       getActiveZoteroPane: () => ({
-        getSelectedItems: () => fake.selectedItems,
+        getSelectedItems: (asIDs?: boolean) =>
+          asIDs
+            ? fake.selectedItems.map((item) => item.id)
+            : fake.selectedItems,
+        itemsView: {
+          selection: {
+            clearSelection: () => {
+              fake.selectedItems = [];
+            },
+          },
+          selectItems: async (ids: number[]) => {
+            fake.selectedItems = ids.map((id) => fake.items.get(id)!);
+            return ids.length;
+          },
+        },
         getSelectedCollections: () => {
           const id = fake.selectedCollectionID;
           if (id === null) return [];
