@@ -50,9 +50,8 @@ export interface DetailLibraryActions {
     entry: BrowserEntry,
     how: { ask: boolean; anchor: HTMLElement; journalVersion?: boolean },
   ): void;
-  /** Relate the paper to the relation target, or undo that */
-  toggleLink(entry: BrowserEntry, anchor: HTMLElement): void;
-  isRelated(entry: BrowserEntry): boolean;
+  /** Relate the paper to items chosen in Zotero's Select Items dialog */
+  relate(entry: BrowserEntry, anchor: HTMLElement): void;
 }
 
 /** The name of a category or archive, if arXiv's table has it */
@@ -290,15 +289,8 @@ export class DetailPane {
     if (library.defaultTargetName() !== null) buttons.append(add(false));
     if (entry.listing.journalRef) buttons.append(add(true, true));
     buttons.append(
-      button(
-        doc,
-        getString(
-          library.isRelated(entry)
-            ? "arxiv-browser-unlink"
-            : "arxiv-browser-link",
-        ),
-        (event) =>
-          library.toggleLink(entry, event.currentTarget as HTMLElement),
+      button(doc, getString("arxiv-browser-link"), (event) =>
+        library.relate(entry, event.currentTarget as HTMLElement),
       ),
     );
     return buttons;

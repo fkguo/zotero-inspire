@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Adding the arXiv browser's papers to the library and relating them to the
-// relation target (relationTarget.ts).
+// Adding the arXiv browser's papers to the library and relating them to
+// items the user chooses (Zotero's Select Items dialog, relatedItemsDialog.ts).
 //
 // A paper is added where the user chooses (the save-target picker), or with
 // one key to the window's default target: the target chosen last in the
@@ -16,7 +16,6 @@ import { getPref, setPref } from "../../../utils/prefs";
 import { loadedItem } from "../../inspire/library/localStatus";
 import {
   linkItems,
-  unlinkItems,
   type RelationChange,
 } from "../../inspire/library/relatedItems";
 import type {
@@ -44,7 +43,6 @@ import { arxivAddRequest } from "../batchAdd";
 import type { NoticeAction, WindowReporter } from "./browserActions";
 import type { BrowserEntry } from "./browserList";
 import { reasonText } from "./browserText";
-import type { RelationTarget } from "./relationTarget";
 
 /** The window's default target (a picker row ID) */
 const TARGET_PREF = "arxiv_browser_save_target";
@@ -63,16 +61,17 @@ interface AddChoice {
   journalVersion?: boolean;
   withoutInspire?: boolean;
   notTheDoiItems?: boolean;
-  /**
-   * Relate it, once added, to this item: the relation target when the user
-   * asked (another item may be selected in the main window meanwhile)
-   */
-  link?: Zotero.Item;
+  /** Relate it, once added, to items the user chooses */
+  relate?: boolean;
 }
 
 export interface LibraryActionsOptions {
   reporter: WindowReporter;
-  relation: RelationTarget;
+  /**
+   * Asks for the items to relate a paper to, among those of `libraryID`
+   * (Zotero's Select Items dialog); none when the user chose none
+   */
+  pickRelated(libraryID: number): Promise<Zotero.Item[]>;
   /** The element the save-target picker covers, and the list it keeps */
   host: HTMLElement;
   list(): HTMLElement;
@@ -285,7 +284,7 @@ export class LibraryActions {
             );
           }
         });
-        if (choice.link) await this.link(entry, [outcome.item], choice.link);
+        if (choice.relate) await this.relateItems(entry, [outcome.item]);
         return;
       }
       case "inLibrary": {
@@ -316,11 +315,11 @@ export class LibraryActions {
           }),
           [this.showAction(itemIDs)],
         );
-        if (choice.link) {
+        if (choice.relate) {
           const items = itemIDs
             .map((itemID) => loadedItem(itemID))
             .filter((item): item is Zotero.Item => item !== null);
-          if (items.length) await this.link(entry, items, choice.link);
+          await this.relateItems(entry, items);
         }
         return;
       }
@@ -447,85 +446,60 @@ export class LibraryActions {
   // Relations
   // ───────────────────────────────────────────────────────────────────────────
 
-  /** The paper's items related to the relation target */
+  /** The items the paper's library items are related to */
   relatedItemsOf(entry: BrowserEntry): Zotero.Item[] {
-    const target = this.options.relation.item;
-    if (!target || !entry.localItemID) return [];
-    const related = target.relatedItems;
-    return (entry.localItemIDs ?? [entry.localItemID])
-      .map((itemID) => loadedItem(itemID))
-      .filter(
-        (item): item is Zotero.Item =>
-          item !== null &&
-          item.libraryID === target.libraryID &&
-          (related.includes(item.key) ||
-            related.includes(`${item.libraryID}/${item.key}`)),
-      );
+    if (!entry.localItemID) return [];
+    const related: Zotero.Item[] = [];
+    for (const itemID of entry.localItemIDs ?? [entry.localItemID]) {
+      const item = loadedItem(itemID);
+      for (const key of item?.relatedItems ?? []) {
+        const other = Zotero.Items.getByLibraryAndKey(item!.libraryID, key);
+        if (other && !related.includes(other)) related.push(other);
+      }
+    }
+    return related;
   }
 
   isRelated(entry: BrowserEntry): boolean {
-    return this.relatedItemsOf(entry).length > 0;
+    return (entry.localItemIDs ?? [entry.localItemID]).some(
+      (itemID) =>
+        itemID !== undefined &&
+        (loadedItem(itemID)?.relatedItems.length ?? 0) > 0,
+    );
   }
 
   /**
-   * Relate the paper to the relation target, or remove the relation when
-   * there is one; a paper not in the library is added first (the user
-   * chooses where)
+   * Relate the paper to items the user chooses in Zotero's Select Items
+   * dialog; a paper not in the library is added first (the user chooses
+   * where)
    */
-  async toggleLink(entry: BrowserEntry, anchor: HTMLElement): Promise<void> {
-    const target = this.options.relation.item;
-    if (!target) {
-      this.reporter.notify(getString("arxiv-browser-link-no-target"));
-      return;
-    }
+  async relate(entry: BrowserEntry, anchor: HTMLElement): Promise<void> {
     if (!entry.localItemID) {
-      await this.add(entry, { ask: true, anchor, link: target });
-      return;
-    }
-    const related = this.relatedItemsOf(entry);
-    if (related.length) {
-      this.tellRelation(
-        await unlinkItems(target, related),
-        target,
-        "arxiv-browser-unlinked",
-      );
-      this.options.onRelationChange(entry);
+      await this.add(entry, { ask: true, anchor, relate: true });
       return;
     }
     const items = (await Zotero.Items.getAsync(
       entry.localItemIDs ?? [entry.localItemID],
     )) as Zotero.Item[];
-    await this.link(entry, items, target);
+    await this.relateItems(entry, items);
   }
 
-  /** Relate the paper's item (in the target's library) to `target` */
-  private async link(
+  /** Relate the paper's first item to the items chosen in its library */
+  private async relateItems(
     entry: BrowserEntry,
     items: readonly Zotero.Item[],
-    target: Zotero.Item,
   ): Promise<void> {
-    // Deleted for good while the paper was added
-    if (!Zotero.Items.get(target.id)) {
-      this.reporter.notify(
-        getString("references-panel-toast-link-target-gone"),
-      );
-      return;
-    }
-    const item =
-      items.find((other) => other.libraryID === target.libraryID) ?? items[0];
+    const item = items[0];
     if (!item) return;
-    this.tellRelation(
-      await linkItems(target, [item]),
-      target,
-      "arxiv-browser-linked",
-    );
+    const chosen = await this.options.pickRelated(item.libraryID);
+    if (!chosen.length || this.disposed) return;
+    this.tellRelation(await linkItems(item, chosen), chosen);
     this.options.onRelationChange(entry);
   }
 
   private tellRelation(
     change: RelationChange,
-    target: Zotero.Item,
-    done: "arxiv-browser-linked" | "arxiv-browser-unlinked",
+    chosen: readonly Zotero.Item[],
   ): void {
     if (this.disposed) return;
     if (change.status === "otherLibrary") {
@@ -533,9 +507,14 @@ export class LibraryActions {
         getString("references-panel-toast-link-other-library"),
       );
     } else if (change.status === "changed") {
-      const text = getString(done, {
-        args: { title: target.getDisplayTitle() },
-      });
+      const text =
+        chosen.length === 1
+          ? getString("arxiv-browser-linked", {
+              args: { title: chosen[0].getDisplayTitle() },
+            })
+          : getString("arxiv-browser-linked-several", {
+              args: { count: chosen.length },
+            });
       // Zotero 10's Edit → Undo takes a relation back
       this.reporter.notify(
         (Zotero as any).UndoHistory

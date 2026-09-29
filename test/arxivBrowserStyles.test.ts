@@ -30,6 +30,22 @@ describe("arXiv window stylesheet", () => {
     );
   });
 
+  it("shows the rows' tick box, in-library mark and relate button as the References panel does", () => {
+    const hiding = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(
+      ([, selectors, body]) =>
+        /zinspire-ref-entry__(checkbox|dot|link)\b/.test(selectors) &&
+        /(display\s*:\s*none|visibility\s*:\s*hidden)/.test(body),
+    );
+    expect(hiding).toEqual([]);
+  });
+
+  it("hides the tick bar while nothing is ticked, although its class sets a display", () => {
+    expect(selectorsSetting("display")).toContain(".arxiv-browser__bar");
+    expect(css).toMatch(
+      /\.arxiv-browser__bar\[hidden\]\s*\{\s*display: none;\s*\}/,
+    );
+  });
+
   it("styles the References panel's row parts only inside the window's rows", () => {
     const panelParts = [...css.matchAll(/([^{}]+)\{/g)]
       .flatMap(([, selectors]) => selectors.split(","))

@@ -97,7 +97,7 @@ beforeEach(() => {
     launchURL: vi.fn(),
     getMainWindow: () => win,
     // Items the tests mark as in the library have no PDF
-    Items: { get: () => false },
+    Items: { get: () => false, getLibraryAndKeyFromID: () => false },
     Prefs: {
       get: (key: string) => prefs[key],
       set: (key: string, value: unknown) => {
@@ -1180,10 +1180,14 @@ describe("arXiv browser: read-only actions and keys", () => {
           }) as Record<string, string>
         )[name] ?? "",
       getAttachments: () => [],
+      relatedItems: [],
     };
     vi.stubGlobal("Zotero", {
       ...Zotero,
-      Items: { get: (id: number) => (id === 77 ? item : false) },
+      Items: {
+        get: (id: number) => (id === 77 ? item : false),
+        getLibraryAndKeyFromID: () => false,
+      },
     });
     const env = await loaded({ inLibrary: lookup });
     await flushPromises();
@@ -1593,10 +1597,14 @@ describe("arXiv browser: Copy INSPIRE link", () => {
             >
           )[name] ?? "",
         getAttachments: () => [],
+        relatedItems: [],
       };
       vi.stubGlobal("Zotero", {
         ...Zotero,
-        Items: { get: (id: number) => (id === 77 ? item : false) },
+        Items: {
+          get: (id: number) => (id === 77 ? item : false),
+          getLibraryAndKeyFromID: () => false,
+        },
       });
     }
     const env = environment();
@@ -2379,17 +2387,44 @@ describe("arXiv browser: adding and relating", () => {
     return item;
   }
 
-  async function loaded() {
+  /**
+   * `related`: the arXiv ID of a paper in the library, related to the item
+   * the Select Items dialog gives (`chosen`); `unloaded`: its library's items
+   * are not loaded until the library's waitForDataLoad
+   */
+  async function loaded({
+    related,
+    unloaded = false,
+  }: { related?: string; unloaded?: boolean } = {}) {
     const env = environment();
     subscribe(["hep-ph"]);
     serveHepPh(env.site);
     const items = new Map<number, ReturnType<typeof libraryItem>>();
-    const relationTarget = libraryItem(42);
-    items.set(42, relationTarget);
+    const chosen = libraryItem(42);
+    items.set(42, chosen);
+    if (related) {
+      const paper = libraryItem(77);
+      items.set(77, paper);
+      paper.addRelatedItem(chosen);
+      chosen.addRelatedItem(paper);
+    }
     const undo = vi.fn(async () => true);
+    const notLoaded = new Set(unloaded ? [77] : []);
+    const pickRelated = vi.fn(async () => [chosen] as unknown as Zotero.Item[]);
     Object.assign((globalThis as any).Zotero, {
       Items: {
-        get: (id: number) => items.get(id) ?? false,
+        get: (id: number) => {
+          if (notLoaded.has(id)) {
+            throw Object.assign(new Error("not loaded"), {
+              name: "UnloadedDataException",
+            });
+          }
+          return items.get(id) ?? false;
+        },
+        getLibraryAndKeyFromID: (id: number) =>
+          items.has(id) ? { libraryID: 1, key: `KEY${id}` } : false,
+        getByLibraryAndKey: (_libraryID: number, key: string) =>
+          [...items.values()].find((item) => item.key === key) ?? false,
         getAsync: async (ids: number | number[]) =>
           Array.isArray(ids)
             ? ids.map((id) => items.get(id)).filter(Boolean)
@@ -2400,7 +2435,7 @@ describe("arXiv browser: adding and relating", () => {
           libraryID,
           name: "My Library",
           editable: true,
-          waitForDataLoad: async () => undefined,
+          waitForDataLoad: async () => void notLoaded.clear(),
         }),
         getAll: () => [{ libraryID: 1, name: "My Library", editable: true }],
         userLibrary: { libraryID: 1 },
@@ -2409,7 +2444,6 @@ describe("arXiv browser: adding and relating", () => {
       DB: { executeTransaction: async (fn: () => Promise<unknown>) => fn() },
       UndoHistory: { undo, redo: vi.fn(), stageAction: vi.fn() },
     });
-    const main = { items: [relationTarget] as unknown[] };
     const added = new Map<string, ReturnType<typeof libraryItem>>();
     let nextID = 900;
     const addPapers = vi.fn(async (requests: { arxivId: string }[]) =>
@@ -2438,10 +2472,18 @@ describe("arXiv browser: adding and relating", () => {
       };
     });
     const view = env.open({
-      mainItems: () => main.items,
+      pickRelated,
       addPapers,
       pickTarget,
       batchImport: { canImport: () => true, importEntry },
+      ...(related
+        ? {
+            inLibrary: async (ids: readonly string[]) =>
+              new Map(
+                ids.filter((id) => id === related).map((id) => [id, [77]]),
+              ),
+          }
+        : {}),
     });
     await env.settle();
     const list = env.root.querySelector(".arxiv-browser__list")!;
@@ -2453,10 +2495,10 @@ describe("arXiv browser: adding and relating", () => {
       ...env,
       view,
       list,
-      main,
+      pickRelated,
       items,
       added,
-      relationTarget,
+      chosen,
       addPapers,
       pickTarget,
       importEntry,
@@ -2471,16 +2513,66 @@ describe("arXiv browser: adding and relating", () => {
   const linkState = (row: HTMLElement) =>
     row.querySelector<HTMLElement>(".zinspire-ref-entry__link")!.dataset.state;
 
-  it("names the relation target in the toolbar and reads it again when the window gets the focus", async () => {
-    const { root, main, libraryItem: newItem } = await loaded();
-    const line = () =>
-      root.querySelector(".arxiv-browser__relation")!.textContent ?? "";
-    expect(line()).toContain("Item 42");
-    expect(line()).toContain(msg("arxiv-browser-relation-main"));
-    main.items = [newItem(43)];
-    expect(line()).toContain("Item 42");
-    win.dispatchEvent(new win.FocusEvent("focus"));
-    expect(line()).toContain("Item 43");
+  it("draws the References panel's tick box, add mark and relate button on the rows, and a click on each does what it says", async () => {
+    const { root, view, chosen, added, addPapers, pickTarget, pickRelated } =
+      await loaded();
+    const row = () => rows(root)[0];
+    const part = <T extends HTMLElement>(name: string) =>
+      row().querySelector<T>(`.zinspire-ref-entry__${name}`)!;
+    // Not in the library: ⊕, a click adds it
+    expect([part("dot").textContent, part("dot").dataset.state]).toEqual([
+      "⊕",
+      "missing",
+    ]);
+    expect(part("dot").title).toBe(msg("arxiv-browser-dot-add"));
+    expect(part<HTMLInputElement>("checkbox").checked).toBe(false);
+    expect(part("checkbox").title).toBe(msg("arxiv-browser-row-tick"));
+    expect(part("link").dataset.state).toBe("unlinked");
+    expect(part("link").title).toBe(msg("arxiv-browser-row-link"));
+    // No relation target in the toolbar
+    expect(root.querySelector(".arxiv-browser__relation")).toBeNull();
+
+    // The tick box ticks the paper
+    part<HTMLInputElement>("checkbox").click();
+    expect([...view.batch.getSelectedEntryIDs()]).toEqual([
+      row().dataset.entryId,
+    ]);
+    expect(part<HTMLInputElement>("checkbox").checked).toBe(true);
+
+    // The mark adds the paper (asking where)
+    part("dot").click();
+    await vi.waitFor(() => expect(addPapers).toHaveBeenCalledTimes(1));
+    expect(pickTarget).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(part("dot").textContent).toBe("●"));
+    expect(part("dot").title).toBe(msg("arxiv-browser-dot-local"));
+
+    // The relate button asks for the items (Zotero's Select Items dialog,
+    // the paper's library) and relates the paper to them
+    part("link").click();
+    const item = added.get("2609.28538")!;
+    await vi.waitFor(() => expect(chosen.relatedItems).toEqual([item.key]));
+    expect(pickRelated).toHaveBeenCalledWith(win, 1);
+    await vi.waitFor(() => expect(part("link").dataset.state).toBe("linked"));
+    expect(part("link").title).toBe(
+      [msg("arxiv-browser-row-related", { count: 1 }), "• Item 42"].join("\n"),
+    );
+  });
+
+  it("shows a paper already related once Zotero has loaded its library's items", async () => {
+    const { root } = await loaded({ related: "2609.28538", unloaded: true });
+    const link = () =>
+      rows(root)[0].querySelector<HTMLElement>(".zinspire-ref-entry__link")!;
+    await vi.waitFor(() => expect(link().dataset.state).toBe("linked"));
+    expect(link().title).toContain("• Item 42");
+  });
+
+  it("shows a paper already related as related once the library marks arrive", async () => {
+    const { root } = await loaded({ related: "2609.28538" });
+    const part = (name: string) =>
+      rows(root)[0].querySelector<HTMLElement>(`.zinspire-ref-entry__${name}`)!;
+    await vi.waitFor(() => expect(part("dot").textContent).toBe("●"));
+    expect(part("link").dataset.state).toBe("linked");
+    expect(part("link").title).toContain("• Item 42");
   });
 
   it("adds the focused paper with t (asking where the first time) and with a, and shows it in the library", async () => {
@@ -2514,22 +2606,16 @@ describe("arXiv browser: adding and relating", () => {
     expect(pickTarget).toHaveBeenCalledTimes(2);
   });
 
-  it("relates the focused paper to the target with l, undoes that with Ctrl+Z, and draws the relate button", async () => {
-    const { root, list, relationTarget, added, undo } = await loaded();
+  it("relates the focused paper with l to the items chosen, undoes that with Ctrl+Z, and draws the relate button", async () => {
+    const { root, list, chosen, added, undo } = await loaded();
     key(list, "j");
     key(list, "l");
     // Not in the library: added first (asking where), then related
     await vi.waitFor(() => expect(added.size).toBe(1));
     const item = added.get("2609.28538")!;
-    await vi.waitFor(() =>
-      expect(relationTarget.relatedItems).toEqual([item.key]),
-    );
-    expect(item.relatedItems).toEqual([relationTarget.key]);
+    await vi.waitFor(() => expect(chosen.relatedItems).toEqual([item.key]));
+    expect(item.relatedItems).toEqual([chosen.key]);
     await vi.waitFor(() => expect(linkState(rows(root)[0])).toBe("linked"));
-    // l again: the relation is removed
-    key(list, "l");
-    await vi.waitFor(() => expect(relationTarget.relatedItems).toEqual([]));
-    await vi.waitFor(() => expect(linkState(rows(root)[0])).toBe("unlinked"));
     key(list, "z", { ctrlKey: true });
     expect(undo).toHaveBeenCalled();
   });
@@ -2537,7 +2623,7 @@ describe("arXiv browser: adding and relating", () => {
   it("ticks papers with x and the tick box, and adds the ticked papers in one batch import", async () => {
     const { root, list, importEntry, pickTarget, notices } = await loaded();
     const tickBar = () =>
-      root.querySelectorAll<HTMLElement>(".arxiv-browser__relation")[1];
+      root.querySelector<HTMLElement>(".arxiv-browser__tickbar")!;
     expect(tickBar().hidden).toBe(true);
     key(list, "j");
     key(list, "x");
@@ -2579,7 +2665,7 @@ describe("arXiv browser: adding and relating", () => {
     const button = (label: string) =>
       [
         ...root.querySelectorAll<HTMLButtonElement>(
-          ".arxiv-browser__relation button",
+          ".arxiv-browser__tickbar button",
         ),
       ].find((b) => b.textContent === label)!;
     key(root.querySelector(".arxiv-browser__list")!, "j");

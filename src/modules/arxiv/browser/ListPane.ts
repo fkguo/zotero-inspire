@@ -11,6 +11,10 @@
 
 import type { FluentMessageId } from "../../../../typings/i10n";
 import { getString } from "../../../utils/locale";
+import {
+  localItemCount,
+  localMarkState,
+} from "../../inspire/panel/localMarker";
 import { getPref } from "../../../utils/prefs";
 import { renderMathContent } from "../../inspire/mathRenderer";
 import {
@@ -94,10 +98,12 @@ export interface ListPaneOptions {
   onTick?(entry: BrowserEntry, event: MouseEvent): void;
   /** Add a paper not in the library (its mark was clicked) */
   onAdd?(entry: BrowserEntry, anchor: HTMLElement): void;
-  /** Relate the paper to the relation target, or undo that (its button) */
+  /** Relate the paper to items the user chooses (its button) */
   onLink?(entry: BrowserEntry, anchor: HTMLElement): void;
-  /** Whether the paper is related to the relation target */
+  /** Whether the paper's library item is related to other items */
   isRelated?(entry: BrowserEntry): boolean;
+  /** The titles of the items the paper is related to (the button's tooltip) */
+  relatedTitles?(entry: BrowserEntry): string[];
 }
 
 export class ListPane {
@@ -349,32 +355,34 @@ export class ListPane {
     if (this.focusedKey) this.toggleAbstract(this.focusedKey);
   }
 
-  /** The in-library marks of these papers changed: redraw their rows shown */
+  /**
+   * The in-library marks of these papers changed: redraw their rows shown,
+   * with the relate buttons (whether a paper is related depends on its
+   * library item)
+   */
   refreshLibraryMarks(entries: Iterable<BrowserEntry>): void {
     for (const entry of entries) {
       const row = this.rows.get(entry.id);
       if (!row) continue;
       this.renderer.updateLocalState(row, entry);
       this.renderer.updatePdfButton(row, entry, this.hasPdf(entry));
+      this.setDotTitle(row, entry);
+      this.drawLink(row, entry);
     }
   }
 
   /**
-   * The relation target, or its relations, changed: redraw the relation
-   * buttons of the papers shown (of `entries` only, when given)
+   * Relations changed: redraw the relate buttons of the papers shown (of
+   * `entries` only, when given)
    */
   refreshLinkStates(entries?: Iterable<BrowserEntry>): void {
-    const isRelated = this.options.isRelated;
-    if (!isRelated) return;
     const keys = entries
       ? [...entries].map((entry) => entry.id)
       : [...this.rowEntries.keys()];
     for (const key of keys) {
       const row = this.rows.get(key);
       const entry = this.rowEntries.get(key);
-      if (row && entry) {
-        this.renderer.updateLinkState(row, isRelated(entry));
-      }
+      if (row && entry) this.drawLink(row, entry);
     }
   }
 
@@ -665,6 +673,11 @@ export class ListPane {
       row.querySelector(".zinspire-ref-entry__checkbox")?.remove();
     }
     row.querySelector(".zinspire-ref-entry__texkey")?.remove();
+    row
+      .querySelector(".zinspire-ref-entry__checkbox")
+      ?.setAttribute("title", getString("arxiv-browser-row-tick"));
+    this.setDotTitle(row, entry);
+    this.setLinkTitle(row, entry);
     // The References panel's hint ("click to see the author's papers") does
     // not hold here: a click on a name does nothing
     row
@@ -676,6 +689,51 @@ export class ListPane {
     toggle.type = "button";
     abstract.before(toggle);
     this.applyAbstract(row, entry.id);
+  }
+
+  /**
+   * The in-library mark's tooltip: what a click does here. The References
+   * panel's text for several items and for a library not read fits; its
+   * "add this reference" and "item exists" do not.
+   */
+  private setDotTitle(row: HTMLElement, entry: BrowserEntry): void {
+    const dot = row.querySelector(".zinspire-ref-entry__dot");
+    const state = localMarkState(entry);
+    if (!dot || state === "unknown") return;
+    if (state === "missing") {
+      dot.setAttribute("title", getString("arxiv-browser-dot-add"));
+    } else if (localItemCount(entry) < 2) {
+      dot.setAttribute("title", getString("arxiv-browser-dot-local"));
+    }
+  }
+
+  /** The relate button's state and tooltip */
+  private drawLink(row: HTMLDivElement, entry: BrowserEntry): void {
+    const isRelated = this.options.isRelated;
+    if (!isRelated) return;
+    this.renderer.updateLinkState(row, isRelated(entry));
+    this.setLinkTitle(row, entry);
+  }
+
+  /**
+   * The relate button's tooltip: what a click does, and the items the paper
+   * is related to
+   */
+  private setLinkTitle(row: HTMLElement, entry: BrowserEntry): void {
+    const link = row.querySelector(".zinspire-ref-entry__link");
+    if (!link) return;
+    const titles = this.options.relatedTitles?.(entry) ?? [];
+    link.setAttribute(
+      "title",
+      titles.length
+        ? [
+            getString("arxiv-browser-row-related", {
+              args: { count: titles.length },
+            }),
+            ...titles.map((title) => `• ${title}`),
+          ].join("\n")
+        : getString("arxiv-browser-row-link"),
+    );
   }
 
   private isAbstractShown(key: string): boolean {

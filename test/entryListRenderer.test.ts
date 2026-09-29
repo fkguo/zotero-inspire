@@ -161,6 +161,14 @@ describe("References panel row", () => {
       part(row, "dot").textContent,
       part(row, "dot").dataset.state,
     ]).toEqual(["⊕", "missing"]);
+    // The panel's own tooltips (the arXiv window sets its own)
+    expect(part(row, "dot").getAttribute("title")).toBe(
+      msg("references-panel-dot-add"),
+    );
+    expect(part(row, "link").getAttribute("title")).toBe(
+      msg("references-panel-link-missing"),
+    );
+    expect(part(row, "checkbox").checked).toBe(false);
     expect(part(row, "pdf").dataset.state).toBe("disabled");
     expect(part(row, "pdf").disabled).toBe(true);
   });

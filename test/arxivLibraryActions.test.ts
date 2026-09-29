@@ -11,14 +11,13 @@ import {
   type BrowserEntry,
 } from "../src/modules/arxiv/browser/browserList";
 import { LibraryActions } from "../src/modules/arxiv/browser/libraryActions";
-import type { RelationTarget } from "../src/modules/arxiv/browser/relationTarget";
 import type { ArxivListingEntry } from "../src/modules/arxiv/listingTypes";
 import type { SaveTargetSelection } from "../src/modules/pickerUI";
 
 // Adding the arXiv browser's papers and relating them: where a paper goes
 // (the picker, or the window's default target with one key), what the user
-// is told of each outcome and offered next, and relations to the relation
-// target.
+// is told of each outcome and offered next, and relations to items chosen in
+// Zotero's Select Items dialog.
 
 const PREFIX = config.prefsPrefix;
 const TARGET_PREF = `${PREFIX}.arxiv_browser_save_target`;
@@ -95,6 +94,10 @@ beforeEach(() => {
     },
     Items: {
       get: (id: number) => items.get(id) ?? false,
+      getByLibraryAndKey: (libraryID: number, key: string) =>
+        [...items.values()].find(
+          (it) => it.libraryID === libraryID && it.key === key,
+        ) ?? false,
       getAsync: async (ids: number | number[]) =>
         Array.isArray(ids)
           ? ids.map((id) => items.get(id)).filter(Boolean)
@@ -176,7 +179,8 @@ const target: SaveTargetSelection = {
 function actions(
   outcomes: AddPaperOutcome[] = [],
   options: {
-    relation?: FakeItem | null;
+    /** The items chosen in the Select Items dialog */
+    related?: FakeItem[];
     pick?: SaveTargetSelection | null;
   } = {},
 ) {
@@ -192,12 +196,13 @@ function actions(
   const added: [BrowserEntry, number][] = [];
   const relationChanged: BrowserEntry[] = [];
   const shown: number[][] = [];
-  const relation = {
-    item: options.relation === undefined ? null : options.relation,
-  } as unknown as RelationTarget;
+  const pickRelated = vi.fn(
+    async (_libraryID: number) =>
+      (options.related ?? []) as unknown as Zotero.Item[],
+  );
   const library = new LibraryActions({
     reporter: report.window,
-    relation,
+    pickRelated,
     host: {} as HTMLElement,
     list: () => ({}) as HTMLElement,
     onAdded: (entry, it) => void added.push([entry, it.id]),
@@ -213,6 +218,7 @@ function actions(
     calls,
     addPapers,
     pickTarget,
+    pickRelated,
     added,
     relationChanged,
     shown,
@@ -425,97 +431,61 @@ describe("Adding a paper", () => {
   });
 });
 
-describe("Relating a paper to the relation target", () => {
-  it("says there is no target when there is none", async () => {
-    const { library, report } = actions([], { relation: null });
-    const entry = paper("2609.20001");
-    entry.localItemID = 901;
-    await library.toggleLink(entry, anchor);
-    expect(report.notes).toEqual([msg("arxiv-browser-link-no-target")]);
-  });
-
-  it("relates the paper's item in the target's library, and removes the relation again", async () => {
-    const target = item(42, 2);
-    const inUser = item(900, 1);
-    const inGroup = item(901, 2);
-    const { library, report, relationChanged } = actions([], {
-      relation: target,
+describe("Relating a paper to items chosen in Zotero's Select Items dialog", () => {
+  it("relates the paper's item to the items chosen among those of its library", async () => {
+    const paperItem = item(900, 2);
+    const chosen = item(42, 2);
+    const { library, report, pickRelated, relationChanged } = actions([], {
+      related: [chosen],
     });
     const entry = paper("2609.20001");
     entry.localItemID = 900;
-    entry.localItemIDs = [900, 901];
+    expect(library.isRelated(entry)).toBe(false);
 
-    await library.toggleLink(entry, anchor);
-    expect(target.relatedItems).toEqual([inGroup.key]);
-    expect(inGroup.relatedItems).toEqual([target.key]);
-    expect(inUser.relatedItems).toEqual([]);
+    await library.relate(entry, anchor);
+    expect(pickRelated).toHaveBeenCalledWith(2);
+    expect(paperItem.relatedItems).toEqual([chosen.key]);
+    expect(chosen.relatedItems).toEqual([paperItem.key]);
     expect(library.isRelated(entry)).toBe(true);
+    expect(library.relatedItemsOf(entry)).toEqual([chosen]);
     expect(report.notes[0]).toBe(
       msg("arxiv-browser-linked", { title: "Item 42" }),
     );
     expect(relationChanged).toEqual([entry]);
-
-    await library.toggleLink(entry, anchor);
-    expect(target.relatedItems).toEqual([]);
-    expect(inGroup.relatedItems).toEqual([]);
-    expect(library.isRelated(entry)).toBe(false);
   });
 
-  it("refuses to relate items of two libraries, and says so", async () => {
-    const target = item(42, 1);
-    const inGroup = item(901, 2);
-    const { library, report } = actions([], { relation: target });
+  it("relates it to several items at once, and does nothing when none was chosen", async () => {
+    const paperItem = item(900, 1);
+    const env = actions([], { related: [item(42), item(43)] });
     const entry = paper("2609.20001");
-    entry.localItemID = 901;
-    await library.toggleLink(entry, anchor);
-    expect(target.relatedItems).toEqual([]);
-    expect(inGroup.relatedItems).toEqual([]);
-    expect(report.notes).toEqual([
-      msg("references-panel-toast-link-other-library"),
-    ]);
+    entry.localItemID = 900;
+    await env.library.relate(entry, anchor);
+    expect(paperItem.relatedItems).toEqual(["KEY42", "KEY43"]);
+    expect(env.report.notes[0]).toBe(
+      msg("arxiv-browser-linked-several", { count: 2 }),
+    );
+
+    const none = actions([], { related: [] });
+    const other = paper("2609.20002");
+    other.localItemID = item(901).id;
+    await none.library.relate(other, anchor);
+    expect(none.pickRelated).toHaveBeenCalledTimes(1);
+    expect(none.report.notes).toEqual([]);
+    expect(none.relationChanged).toEqual([]);
   });
 
-  it("relates the paper to the item that was the target when l was pressed, whatever is selected during the add", async () => {
-    const target = item(42, 1);
-    const other = item(43, 1);
+  it("adds a paper not in the library (asking where), then asks for the items of its library to relate it to", async () => {
+    const chosen = item(42, 1);
     const added = item(901, 1);
-    const env = actions([addedOutcome(added)], { relation: target });
-    const relation = (env.library as any).options.relation;
-    env.addPapers.mockImplementationOnce(async () => {
-      // Another item is selected in the main window during the add
-      relation.item = other;
-      return [addedOutcome(added)];
-    });
-    await env.library.toggleLink(paper("2609.20001"), anchor);
-    expect(target.relatedItems).toEqual([added.key]);
-    expect(other.relatedItems).toEqual([]);
-  });
-
-  it("says so when the target was deleted during the add", async () => {
-    const target = item(42, 1);
-    const added = item(901, 1);
-    const env = actions([], { relation: target });
-    env.addPapers.mockImplementationOnce(async () => {
-      items.delete(42);
-      return [addedOutcome(added)];
-    });
-    await env.library.toggleLink(paper("2609.20001"), anchor);
-    expect(added.relatedItems).toEqual([]);
-    expect(env.report.notes).toEqual([
-      msg("references-panel-toast-link-target-gone"),
-    ]);
-  });
-
-  it("adds a paper not in the library (asking where), then relates it", async () => {
-    const target = item(42, 1);
-    const added = item(901, 1);
-    const { library, pickTarget } = actions([addedOutcome(added)], {
-      relation: target,
-    });
-    await library.toggleLink(paper("2609.20001"), anchor);
+    const { library, pickTarget, pickRelated } = actions(
+      [addedOutcome(added)],
+      { related: [chosen] },
+    );
+    await library.relate(paper("2609.20001"), anchor);
     expect(pickTarget).toHaveBeenCalled();
-    expect(target.relatedItems).toEqual([added.key]);
-    expect(added.relatedItems).toEqual([target.key]);
+    expect(pickRelated).toHaveBeenCalledWith(1);
+    expect(chosen.relatedItems).toEqual([added.key]);
+    expect(added.relatedItems).toEqual([chosen.key]);
   });
 });
 

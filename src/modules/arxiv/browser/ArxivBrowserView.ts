@@ -10,8 +10,8 @@
 // page, Space shows or hides the abstract, Enter opens the arXiv page,
 // Ctrl/Cmd+Shift+C copies the BibTeX, Escape clears the focus, Ctrl/Cmd+W
 // closes the window; a adds the focused paper (choosing where), t adds it to
-// the default target, l relates it to the relation target (or undoes that),
-// x ticks it for the batch import, Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z undo and
+// the default target, l relates it to items chosen in Zotero's Select Items
+// dialog, x ticks it for the batch import, Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z undo and
 // redo (Zotero's Edit → Undo: relations, not adding).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -66,7 +66,11 @@ import {
   showAbstractContextMenu,
   type ContextMenuItem,
 } from "../../inspire/panel/abstractContextMenu";
-import { writeMarks, type LocalPaper } from "../../inspire/library/localStatus";
+import {
+  loadedItem,
+  writeMarks,
+  type LocalPaper,
+} from "../../inspire/library/localStatus";
 import {
   BatchImportManager,
   type BatchImportManagerOptions,
@@ -74,11 +78,7 @@ import {
 import { arxivBatchImport } from "../batchAdd";
 import { LibraryActions, type LibraryActionsOptions } from "./libraryActions";
 import { CompletionLine, type CompletionLineOptions } from "./completionLine";
-import {
-  RelationTarget,
-  relationTargetLine,
-  type RelationTargetOptions,
-} from "./relationTarget";
+import { selectItemsDialog, type PickRelatedItems } from "./relatedItemsDialog";
 import {
   firstPdfAttachmentID,
   openLocalPdf,
@@ -150,10 +150,11 @@ export interface ArxivBrowserViewOptions {
   showInLibrary?: (itemID: number) => void;
   /** The days marked read (default: the plugin's, sharedReadingState) */
   readingState?: ReadingState;
-  /** The main window's current items (default: its ZoteroPane's) */
-  mainItems?: RelationTargetOptions["mainItems"];
-  /** Asks for a relation target (default: Zotero's Select Items dialog) */
-  pickItem?: RelationTargetOptions["pickItem"];
+  /**
+   * Asks for the items to relate a paper to (default: Zotero's Select Items
+   * dialog)
+   */
+  pickRelated?: PickRelatedItems;
   /** Adds papers (default: the router, addArxivPapers) */
   addPapers?: LibraryActionsOptions["addPapers"];
   /** Asks for a save target (default: the save-target picker) */
@@ -205,15 +206,12 @@ export class ArxivBrowserView {
   /** The days marked read, of every subscription */
   private readonly reading: ReadingState;
   readonly actions: BrowserActions;
-  /** The item papers are related to */
-  readonly relation: RelationTarget;
   /** Adding papers and relating them */
   readonly library: LibraryActions;
   /** The ticked papers and their batch import */
   readonly batch: BatchImportManager;
   /** The INSPIRE completion entry of the status area */
   private readonly completion: CompletionLine;
-  private readonly relationLine: { element: HTMLElement; render(): void };
   private readonly tickBar: HTMLElement;
   private readonly tickCount: HTMLElement;
   private readonly addTickedButton: HTMLButtonElement;
@@ -415,23 +413,10 @@ export class ArxivBrowserView {
       abstracts.label,
     );
 
-    // Relation target; the ticked papers and their import
-    const libraryBar = html(doc, "div", "arxiv-browser__bar");
-    this.relation = new RelationTarget({
-      mainItems: options.mainItems,
-      pickItem: options.pickItem,
-      onChange: () => this.onRelationTargetChange(),
-    });
-    this.relationLine = relationTargetLine(doc, this.relation, () => {
-      const win = doc.defaultView;
-      if (win) {
-        void this.relation.choose(
-          win as unknown as Window,
-          this.library.defaultTarget?.libraryID,
-        );
-      }
-    });
-    this.tickBar = html(doc, "span", "arxiv-browser__relation");
+    // The ticked papers and their import: a row shown only while papers
+    // are ticked
+    this.tickBar = html(doc, "div", "arxiv-browser__bar");
+    this.tickBar.classList.add("arxiv-browser__tickbar");
     this.tickBar.hidden = true;
     this.tickCount = html(doc, "span", "arxiv-browser__label");
     this.addTickedButton = button(
@@ -455,12 +440,11 @@ export class ArxivBrowserView {
         this.batch.clearSelection(),
       ),
     );
-    libraryBar.append(this.relationLine.element, this.tickBar);
     this.toolbar.append(
       this.subscriptions.element,
       daysBar,
       listBar,
-      libraryBar,
+      this.tickBar,
     );
 
     // List and detail, with a divider that sets their widths
@@ -519,7 +503,12 @@ export class ArxivBrowserView {
     };
     this.library = new LibraryActions({
       reporter: this.reporter,
-      relation: this.relation,
+      pickRelated: async (libraryID) => {
+        const win = doc.defaultView as unknown as Window | null;
+        return win
+          ? (options.pickRelated ?? selectItemsDialog)(win, libraryID)
+          : [];
+      },
       host: root,
       list: () => this.listPane.list,
       onAdded: (entry, item) => this.markAdded(entry.listing.id, item.id),
@@ -551,7 +540,6 @@ export class ArxivBrowserView {
       updateRowStatus: (entry) => {
         const row = entry as BrowserEntry;
         this.listPane.refreshLibraryMarks([row]);
-        this.listPane.refreshLinkStates([row]);
         if (this.detail.entry === row) this.detail.show(row);
       },
       onSelectionChange: (count) => this.showTicked(count),
@@ -566,9 +554,8 @@ export class ArxivBrowserView {
         entry: BrowserEntry,
         how: { ask: boolean; anchor: HTMLElement; journalVersion?: boolean },
       ) => void this.library.add(entry, how),
-      toggleLink: (entry: BrowserEntry, anchor: HTMLElement) =>
-        void this.library.toggleLink(entry, anchor),
-      isRelated: (entry: BrowserEntry) => this.library.isRelated(entry),
+      relate: (entry: BrowserEntry, anchor: HTMLElement) =>
+        void this.library.relate(entry, anchor),
     };
     this.detail = new DetailPane({
       container: detailContainer,
@@ -600,8 +587,12 @@ export class ArxivBrowserView {
       onTick: (entry, event) => this.batch.handleCheckboxClick(entry, event),
       onAdd: (entry, anchor) =>
         void this.library.add(entry, { ask: true, anchor }),
-      onLink: (entry, anchor) => void this.library.toggleLink(entry, anchor),
+      onLink: (entry, anchor) => void this.library.relate(entry, anchor),
       isRelated: (entry) => this.library.isRelated(entry),
+      relatedTitles: (entry) =>
+        this.library
+          .relatedItemsOf(entry)
+          .map((item) => item.getDisplayTitle() || `#${item.id}`),
     });
     this.showTicked(0);
 
@@ -621,7 +612,6 @@ export class ArxivBrowserView {
       // Relations may have been changed elsewhere
       this.listPane.refreshLinkStates();
     });
-    doc.defaultView?.addEventListener("focus", this.onWindowFocus);
 
     this.onSubscriptionChange(this.subscriptions.current);
 
@@ -656,7 +646,6 @@ export class ArxivBrowserView {
     this.disposed = true;
     this.doc.removeEventListener("keydown", this.onKeyDown);
     this.doc.removeEventListener("contextmenu", this.onContextMenu);
-    this.doc.defaultView?.removeEventListener("focus", this.onWindowFocus);
     this.batch.dispose();
     this.library.dispose();
     this.completion.dispose();
@@ -863,9 +852,36 @@ export class ArxivBrowserView {
     }
     if (!changed.size) return;
     this.listPane.refreshLibraryMarks(changed);
+    this.redrawWhenLoaded(changed);
     // The paper in the detail pane may have been chosen before
     const shown = this.detail.entry;
     if (shown && changed.has(shown)) this.detail.show(shown);
+  }
+
+  /**
+   * Papers found in a library whose items Zotero has not loaded yet (a group
+   * library not shown since Zotero started) show no relations and no PDF of
+   * the library: load it and redraw their marks and buttons
+   */
+  private redrawWhenLoaded(entries: Iterable<BrowserEntry>): void {
+    const waiting = new Map<number, BrowserEntry[]>();
+    for (const entry of entries) {
+      for (const itemID of entry.localItemIDs ?? []) {
+        if (loadedItem(itemID)) continue;
+        const libraryID = (
+          Zotero.Items.getLibraryAndKeyFromID(itemID) || undefined
+        )?.libraryID;
+        if (libraryID === undefined) continue;
+        waiting.set(libraryID, [...(waiting.get(libraryID) ?? []), entry]);
+      }
+    }
+    for (const [libraryID, papers] of waiting) {
+      const library = Zotero.Libraries.get(libraryID);
+      if (!library) continue;
+      void library.waitForDataLoad("item").then(() => {
+        if (!this.disposed) this.listPane.refreshLibraryMarks(papers);
+      });
+    }
   }
 
   /** The library changed, or a mark asked again: look up every day again */
@@ -901,26 +917,13 @@ export class ArxivBrowserView {
       }),
     );
     this.listPane.refreshLibraryMarks(changed);
-    this.listPane.refreshLinkStates(changed);
     const shown = this.detail.entry;
     if (shown && rows.includes(shown)) this.detail.show(shown);
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Relation target and ticked papers
+  // Ticked papers
   // ───────────────────────────────────────────────────────────────────────────
-
-  /** The window got the focus: the main window's item may be another now */
-  private readonly onWindowFocus = (): void => {
-    if (!this.disposed) this.relation.refresh();
-  };
-
-  private onRelationTargetChange(): void {
-    if (this.disposed) return;
-    this.relationLine.render();
-    this.listPane.refreshLinkStates();
-    if (this.detail.entry) this.detail.show(this.detail.entry);
-  }
 
   /** The tick bar shows when papers are ticked */
   private showTicked(count: number): void {
@@ -1218,7 +1221,7 @@ export class ArxivBrowserView {
         break;
       case "l":
         if (!focused) return;
-        void this.library.toggleLink(focused, anchor());
+        void this.library.relate(focused, anchor());
         break;
       case "x":
         if (!focused) return;

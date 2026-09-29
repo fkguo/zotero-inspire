@@ -75,7 +75,7 @@ beforeEach(() => {
     launchURL: vi.fn(),
     getMainWindow: () => win,
     // Items the tests mark as in the library have no PDF
-    Items: { get: () => false },
+    Items: { get: () => false, getLibraryAndKeyFromID: () => false },
     Libraries: { userLibraryID: 1 },
     DB: { valueQueryAsync: query },
     Prefs: {

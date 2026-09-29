@@ -261,7 +261,7 @@ describe("arXiv browser: in the library", () => {
       }),
     );
     expect(dotOf(root, "2609.28538").getAttribute("title")).toBe(
-      msg("references-panel-dot-local"),
+      msg("arxiv-browser-dot-local"),
     );
   });
 

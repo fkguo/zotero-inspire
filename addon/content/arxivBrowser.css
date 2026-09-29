@@ -541,16 +541,8 @@
   font-weight: normal;
 }
 
-/* Rows: the entry list's rows, read-only here */
-
-.arxiv-browser__row .zinspire-ref-entry__checkbox {
-  display: none;
-}
-
-/* The in-library mark only; papers not in the library show no mark */
-.arxiv-browser__row .zinspire-ref-entry__dot[data-state="missing"] {
-  visibility: hidden;
-}
+/* Rows: the References panel's rows, with its tick box, in-library mark and
+   relate button */
 
 /* Author names are not links here (a click does nothing; hovering shows
    the author card): the row's text colour, not the References panel's link
@@ -612,25 +604,9 @@
   margin-top: 6px;
 }
 
-/* Relation target and ticked papers */
-
-.arxiv-browser__relation {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.arxiv-browser__relation-target {
-  max-width: 40em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-
-.arxiv-browser__relation-note {
-  color: var(--fill-secondary, #6b7280);
+/* A toolbar row hidden (the tick bar while nothing is ticked) */
+.arxiv-browser__bar[hidden] {
+  display: none;
 }
 
 /* Detail pane of the focused paper */
