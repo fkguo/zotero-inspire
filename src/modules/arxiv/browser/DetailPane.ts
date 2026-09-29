@@ -46,7 +46,7 @@ export interface DetailPaneOptions {
   showInLibrary?(itemID: number): void;
   /**
    * Open the paper's PDF (default: arXiv's, in the web browser); `version`:
-   * the older version shown (absent: the newest)
+   * the version shown (the listing's for the newest, when known)
    */
   openPdf?(entry: BrowserEntry, version?: number): void;
   /**
@@ -303,7 +303,7 @@ export class DetailPane {
       }),
       button(doc, getString("arxiv-browser-open-pdf-button"), () =>
         this.options.openPdf
-          ? this.options.openPdf(entry, version)
+          ? this.options.openPdf(entry, version ?? listing.version)
           : actions.openPdf(listing.id, version),
       ),
     );

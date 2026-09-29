@@ -565,9 +565,11 @@ export class ArxivBrowserView {
         canCopyTexkey: () => false,
       },
     });
-    // A paper's PDF: the first PDF among its items in the library (the green
-    // button), otherwise arXiv's, in the web browser. An older version (the
-    // detail pane's choice): a PDF whose address names that version, else
+    // A paper's PDF: the first PDF among its items in the library (the rows'
+    // green button), otherwise arXiv's, in the web browser. The detail pane
+    // gives the version it shows: a PDF whose address names that version;
+    // for the newest also one whose address names no version (a journal's,
+    // an unversioned arXiv address), never one of another version; else
     // arXiv's of that version.
     const itemWithPdf = (entry: BrowserEntry) =>
       (entry.localItemIDs ?? []).find(
@@ -576,18 +578,23 @@ export class ArxivBrowserView {
     const hasPdf = (entry: BrowserEntry) => itemWithPdf(entry) !== undefined;
     const openPdf = (entry: BrowserEntry, version?: number) => {
       if (version !== undefined) {
-        for (const itemID of entry.localItemIDs ?? []) {
-          const attachmentID = firstAttachmentID(
-            itemID,
-            (attachment) =>
-              arxivPdfVersion(attachment, entry.listing.id) === version,
-          );
-          if (attachmentID !== null) {
-            void openAttachment(attachmentID);
-            return;
+        const newest = version === entry.listing.version;
+        const ofVersion = (attachment: Zotero.Item) =>
+          arxivPdfVersion(attachment, entry.listing.id) === version;
+        const unknown = (attachment: Zotero.Item) =>
+          !!attachment.isPDFAttachment?.() &&
+          arxivPdfVersion(attachment, entry.listing.id) === null;
+        for (const matches of newest ? [ofVersion, unknown] : [ofVersion]) {
+          for (const itemID of entry.localItemIDs ?? []) {
+            const attachmentID = firstAttachmentID(itemID, matches);
+            if (attachmentID !== null) {
+              void openAttachment(attachmentID);
+              return;
+            }
           }
         }
-        this.actions.openPdf(entry.listing.id, version);
+        // arXiv's newest version without a version number
+        this.actions.openPdf(entry.listing.id, newest ? undefined : version);
         return;
       }
       const itemID = itemWithPdf(entry);

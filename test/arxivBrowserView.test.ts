@@ -3106,6 +3106,47 @@ describe("arXiv browser: adding and relating", () => {
       expect(launch).toHaveBeenCalledTimes(1);
     });
 
+    it("opens for the newest version a library PDF of that version, else one of no known version, never one of another version", async () => {
+      const { root, items, pdf, launch, readerOpen, row } =
+        await atVersion2(ID);
+      // Only arXiv's version 2 in the library: arXiv's newest
+      attachPdf(items, 77, `http://arxiv.org/pdf/${ID}v2`, 6001);
+      const chooser = root.querySelector<HTMLSelectElement>(
+        ".arxiv-browser__detail .arxiv-browser__version",
+      )!;
+      chooser.value = "3";
+      chooser.dispatchEvent(new win.Event("change"));
+      await flushPromises();
+      pdf().click();
+      await flushPromises();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/pdf/${ID}`);
+      expect(readerOpen).not.toHaveBeenCalled();
+      // The row's green button opens the library's first PDF, as before
+      row()
+        .querySelector<HTMLButtonElement>(".zinspire-ref-entry__pdf")!
+        .click();
+      await flushPromises();
+      expect(readerOpen).toHaveBeenLastCalledWith(6001, undefined, {
+        allowDuplicate: false,
+      });
+      // As in the owner's library: then the journal's PDF (no address),
+      // which is opened rather than version 2
+      attachPdf(items, 77, "", 6002);
+      pdf().click();
+      await flushPromises();
+      expect(readerOpen).toHaveBeenLastCalledWith(6002, undefined, {
+        allowDuplicate: false,
+      });
+      // One of version 3 comes first
+      attachPdf(items, 77, `https://arxiv.org/pdf/${ID}v3`, 6003);
+      pdf().click();
+      await flushPromises();
+      expect(readerOpen).toHaveBeenLastCalledWith(6003, undefined, {
+        allowDuplicate: false,
+      });
+      expect(launch).toHaveBeenCalledTimes(1);
+    });
+
     it("saves the HTML version of that version, and then opens that snapshot", async () => {
       const { root, saveHtmlSnapshot, items, notices, readerOpen, launch } =
         await atVersion2(ID);
