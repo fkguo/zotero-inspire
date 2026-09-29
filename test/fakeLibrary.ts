@@ -184,6 +184,7 @@ export class FakeLibrary {
         },
         columnQueryAsync: async (sql: string, params?: unknown[]) =>
           run(sql, params).map((row) => Object.values(row)[0]),
+        executeTransaction: async (fn: () => Promise<unknown>) => fn(),
       },
       Items: {
         get: (ids: number | number[]) => {
@@ -216,6 +217,10 @@ export class FakeLibrary {
           libraryID,
           name:
             libraryID === USER_LIBRARY ? "My Library" : `Group ${libraryID}`,
+          // Its items can be read from now on
+          waitForDataLoad: async () => {
+            this.unloadedLibraries.delete(libraryID);
+          },
         }),
       },
       Notifier: {

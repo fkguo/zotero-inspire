@@ -267,6 +267,7 @@ import { createItemFromInspireMeta } from "./inspire/library/itemCreation";
 import { onLibraryIndexChange } from "./inspire/library/arxivIndex";
 import { loadedItem, refreshLocalState } from "./inspire/library/localStatus";
 import { firstPdfAttachmentID, openLocalPdf } from "./inspire/library/localPdf";
+import { linkItems, unlinkItems } from "./inspire/library/relatedItems";
 import { applyLocalMarker } from "./inspire/panel/localMarker";
 
 // Re-export for external use
@@ -15085,7 +15086,10 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       }
       return;
     }
-    await this.linkExistingReference(itemID, entry.localItemID);
+    await this.linkExistingReference(
+      itemID,
+      entry.localItemIDs ?? [entry.localItemID],
+    );
     if (!options?.skipRerender) {
       this.renderReferenceList();
     }
@@ -15129,7 +15133,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       // moved to the trash in the meantime
       const item = Zotero.Items.get(itemID);
       if (item && (!item.deleted || trashedAtClick)) {
-        await this.linkExistingReference(itemID, newItem.id);
+        await this.linkExistingReference(itemID, [newItem.id]);
       } else {
         this.showToast(getString("references-panel-toast-link-target-gone"));
       }
@@ -17168,28 +17172,31 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   /**
-   * Relate the library item `localItemID` to the item `itemID`, given by the
-   * caller rather than read from the current selection, which may have
-   * changed while the caller waited.
+   * Relate the paper's item (of `localItemIDs`, the first in the library of
+   * the item `itemID`) to the item `itemID`, given by the caller rather than
+   * read from the current selection, which may have changed while the caller
+   * waited. Items of two libraries are not related: the user is told.
    */
   private async linkExistingReference(
     itemID: number | undefined,
-    localItemID: number,
+    localItemIDs: number[],
   ) {
-    if (!itemID || localItemID === itemID) {
+    const item = itemID ? await Zotero.Items.getAsync(itemID) : false;
+    if (!item) {
       return;
     }
-    const item = Zotero.Items.get(itemID);
-    const targetItem = Zotero.Items.get(localItemID);
-    if (!item || !targetItem) {
+    const papers = (await Zotero.Items.getAsync(
+      localItemIDs.filter((id) => id !== itemID),
+    )) as Zotero.Item[];
+    if (!papers.length) {
       return;
     }
-    const updated = item.addRelatedItem(targetItem);
-    if (targetItem.addRelatedItem(item)) {
-      await targetItem.saveTx();
-    }
-    if (updated) {
-      await item.saveTx();
+    const paper =
+      papers.find((other) => other.libraryID === item.libraryID) ?? papers[0];
+    const change = await linkItems(item, [paper]);
+    if (change.status === "otherLibrary") {
+      this.showToast(getString("references-panel-toast-link-other-library"));
+    } else if (change.status === "changed") {
       this.showToast(getString("references-panel-toast-linked"));
     }
   }
@@ -17202,26 +17209,15 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     itemID: number | undefined,
     localItemIDs: number[],
   ) {
-    const item = itemID ? Zotero.Items.get(itemID) : undefined;
+    const item = itemID ? await Zotero.Items.getAsync(itemID) : false;
     if (!item) {
       return;
     }
-    let updated = false;
-    for (const localItemID of localItemIDs) {
-      const targetItem =
-        localItemID !== itemID ? Zotero.Items.get(localItemID) : undefined;
-      if (!targetItem) {
-        continue;
-      }
-      if (await item.removeRelatedItem(targetItem)) {
-        updated = true;
-      }
-      if (await targetItem.removeRelatedItem(item)) {
-        await targetItem.saveTx();
-      }
-    }
-    if (updated) {
-      await item.saveTx();
+    const papers = (await Zotero.Items.getAsync(
+      localItemIDs.filter((id) => id !== itemID),
+    )) as Zotero.Item[];
+    const change = await unlinkItems(item, papers);
+    if (change.status === "changed") {
       this.showToast(
         getString("references-panel-toast-unlinked") || "Related item unlinked",
       );

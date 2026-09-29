@@ -22,7 +22,11 @@ beforeEach(() => {
     // An empty library: a paper is looked up there before it is added
     ItemFields: { getID: () => 1 },
     ItemTypes: { getID: () => 2 },
-    DB: { queryAsync: async () => [] },
+    DB: {
+      queryAsync: async () => [],
+      executeTransaction: async (fn: () => Promise<unknown>) => fn(),
+    },
+    Libraries: { get: () => ({ waitForDataLoad: async () => undefined }) },
   });
   vi.stubGlobal("addon", {
     data: {
@@ -99,6 +103,8 @@ interface FakeItem {
   addRelatedItem(other: FakeItem): boolean;
   removeRelatedItem(other: FakeItem): boolean;
   saveTx(): Promise<void>;
+  save(options?: unknown): Promise<void>;
+  getField(name: string): string;
 }
 
 /** The library the panel sees through Zotero.Items.get. */
@@ -107,16 +113,26 @@ function fakeLibrary() {
   (globalThis as any).Zotero.Items = {
     // Zotero answers false for an item that no longer exists
     get: (id: number) => items.get(id) ?? false,
+    getAsync: async (ids: number | number[]) =>
+      Array.isArray(ids)
+        ? ids.map((id) => items.get(id)).filter(Boolean)
+        : (items.get(ids) ?? false),
   };
   return {
-    add(id: number): FakeItem {
+    add(id: number, libraryID = 1): FakeItem {
       const item: FakeItem = {
         id,
         key: `KEY${id}`,
-        libraryID: 1,
+        libraryID,
         deleted: false,
         relatedItems: [],
         addRelatedItem(other) {
+          // As Zotero: items of two libraries are never related
+          if (other.libraryID !== this.libraryID) {
+            throw new Error(
+              "Cannot relate item to an item in a different library",
+            );
+          }
           if (this.relatedItems.includes(other.key)) return false;
           this.relatedItems.push(other.key);
           return true;
@@ -128,6 +144,8 @@ function fakeLibrary() {
           return true;
         },
         saveTx: async () => undefined,
+        save: async () => undefined,
+        getField: () => `Item ${id}`,
       };
       items.set(id, item);
       return item;
@@ -413,5 +431,80 @@ describe("Link button on a paper already in the library", () => {
     expect(inLibrary.relatedItems).toEqual([]);
     expect(controller.isEntryRelated(entries[2])).toBe(false);
     expect(linkState(rows()[2])).toBe("unlinked");
+  });
+});
+
+describe("Link button on a paper in another library", () => {
+  let panel: ReturnType<typeof openPanel> | undefined;
+  afterEach(() => {
+    panel?.controller.destroy();
+    panel = undefined;
+  });
+
+  const clickLink = async (row: HTMLElement) => {
+    const link = vi.spyOn(panel!.controller, "handleLinkAction");
+    (row.querySelector(".zinspire-ref-entry__link") as HTMLElement).click();
+    await link.mock.results[link.mock.results.length - 1].value;
+  };
+
+  it("relates the paper's item in the library of the item shown", async () => {
+    const library = fakeLibrary();
+    const groupItem = library.add(42, 2);
+    const inUserLibrary = library.add(900, 1);
+    const inGroup = library.add(901, 2);
+    panel = openPanel(42);
+    const { rows, show } = panel;
+    // The row's first item is the one in My Library
+    await show([paper("A", 0, { localItemID: 900, localItemIDs: [900, 901] })]);
+
+    await clickLink(rows()[0]);
+
+    expect(groupItem.relatedItems).toEqual([inGroup.key]);
+    expect(inGroup.relatedItems).toEqual([groupItem.key]);
+    expect(inUserLibrary.relatedItems).toEqual([]);
+  });
+
+  it("relates nothing, and says why, when the paper is only in another library", async () => {
+    const library = fakeLibrary();
+    const itemA = library.add(42, 1);
+    const inGroup = library.add(901, 2);
+    panel = openPanel(42);
+    const { notices, rows, show } = panel;
+    await show([paper("A", 0, { localItemID: 901 })]);
+
+    await clickLink(rows()[0]);
+
+    expect(itemA.relatedItems).toEqual([]);
+    expect(inGroup.relatedItems).toEqual([]);
+    expect(notices).toHaveBeenCalledWith(
+      notice("references-panel-toast-link-other-library"),
+    );
+  });
+
+  it("adds the paper to the library chosen and says why it is not related when that is another library", async () => {
+    const library = fakeLibrary();
+    const itemA = library.add(42, 1);
+    panel = openPanel(42);
+    const { controller, notices, rows, show } = panel;
+    const entries = [paper("A", 0)];
+    await show(entries);
+    controller.promptForSaveTarget = vi.fn().mockResolvedValue({
+      libraryID: 2,
+      primaryRowID: "L2",
+      collectionIDs: [],
+      tags: [],
+      note: "",
+    });
+    const added = library.add(901, 2);
+    controller.importReference = vi.fn().mockResolvedValue(added);
+
+    await clickLink(rows()[0]);
+
+    expect(entries[0].localItemID).toBe(901);
+    expect(itemA.relatedItems).toEqual([]);
+    expect(added.relatedItems).toEqual([]);
+    expect(notices).toHaveBeenCalledWith(
+      notice("references-panel-toast-link-other-library"),
+    );
   });
 });

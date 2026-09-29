@@ -227,6 +227,7 @@ references-panel-related-badge-tooltip = 与当前论文共享 { $count } 条参
 references-panel-link-existing = 点击取消关联条目
 references-panel-link-missing = 关联为相关条目
 references-panel-toast-linked = 相关条目已关联
+references-panel-toast-link-other-library = 不同文库中的条目不能相互关联
 references-panel-toast-link-target-gone = 未关联：要关联的条目已被删除或移入回收站
 references-panel-toast-added = 引用已添加到文库
 references-panel-toast-missing = 未在 INSPIRE-HEP 中找到文献
