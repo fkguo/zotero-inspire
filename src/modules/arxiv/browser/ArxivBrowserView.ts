@@ -34,6 +34,7 @@ import {
   abstractPageUrl,
   BrowserActions,
   windowReporter,
+  type BrowserActionsOptions,
 } from "./browserActions";
 import {
   arrangeList,
@@ -101,6 +102,8 @@ export interface ArxivBrowserViewOptions {
   launch?: (url: string) => void;
   /** Copies text (default: the plugin's clipboard helper) */
   copy?: (text: string) => Promise<boolean>;
+  /** INSPIRE's BibTeX of a paper (default: from INSPIRE, inspireBibtexOf) */
+  inspireBibtex?: BrowserActionsOptions["inspireBibtex"];
   /**
    * The items with each of these arXiv identifiers, the one a click selects
    * first, for the "in library" marks (wired to the library index); null
@@ -207,6 +210,8 @@ export class ArxivBrowserView {
       scheduler: options.webScheduler,
       launch: options.launch,
       copy: options.copy,
+      inspireBibtex: options.inspireBibtex,
+      inLibrary: options.inLibrary,
     });
     this.loader = new ListingLoader(
       options.listing ?? new ListingService(),
@@ -354,8 +359,10 @@ export class ArxivBrowserView {
       container: root,
       callbacks: {
         onCopyBibtex: async (entry) => {
-          const id = (entry as BrowserEntry).listing?.id;
-          if (id) await this.actions.copyBibtex(id);
+          const listing = (entry as BrowserEntry).listing;
+          if (listing) {
+            await this.actions.copyBibtex(listing);
+          }
         },
         onSelectInLibrary: (entry) => {
           if (entry.localItemID) showInLibrary(entry.localItemID);
@@ -801,7 +808,7 @@ export class ArxivBrowserView {
         },
         {
           label: getString("arxiv-browser-copy-bibtex"),
-          run: () => void actions.copyBibtex(id),
+          run: () => void actions.copyBibtex(entry.listing),
         },
       );
     }
@@ -849,7 +856,7 @@ export class ArxivBrowserView {
     if (accel && event.shiftKey && !event.altKey && key.toLowerCase() === "c") {
       if (focused) {
         event.preventDefault();
-        void this.actions.copyBibtex(focused.listing.id);
+        void this.actions.copyBibtex(focused.listing);
       }
       return;
     }

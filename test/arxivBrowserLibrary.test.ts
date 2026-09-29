@@ -178,6 +178,7 @@ async function open(options: Partial<ArxivBrowserViewOptions> = {}) {
     launch: vi.fn(),
     copy: vi.fn(async () => true),
     confirm: () => true,
+    inspireBibtex: async () => ({ status: "notFound" as const }),
     // As browserWindow.ts gives them
     inLibrary: itemsWithArxivIds,
     followLibrary: onLibraryIndexChange,

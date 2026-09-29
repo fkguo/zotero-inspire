@@ -827,7 +827,7 @@ export class ListPane {
       actions.openAbstractPage(id);
     } else if (target.closest(".zinspire-ref-entry__bibtex")) {
       event.preventDefault();
-      void actions.copyBibtex(id);
+      void actions.copyBibtex(entry.listing);
     } else if (target.closest(".zinspire-ref-entry__pdf")) {
       event.preventDefault();
       if (this.options.openPdf) this.options.openPdf(entry);

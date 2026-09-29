@@ -2,6 +2,7 @@ import { JSDOM, type DOMWindow } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "../package.json";
 import { ArxivScheduler } from "../src/modules/arxiv/arxivFetch";
+import type { InspireBibtexAnswer } from "../src/modules/arxiv/inspireByArxiv";
 import { ListingService } from "../src/modules/arxiv/listingService";
 import { MemoryListingStore } from "../src/modules/arxiv/listingStore";
 import { ArxivBrowserView } from "../src/modules/arxiv/browser/ArxivBrowserView";
@@ -152,6 +153,13 @@ function environment() {
   });
   const launch = vi.fn();
   const copy = vi.fn(async () => true);
+  // INSPIRE's BibTeX: none by default (no request to INSPIRE)
+  const inspireBibtex = vi.fn(
+    async (
+      _id: string,
+      _recid: string | null,
+    ): Promise<InspireBibtexAnswer> => ({ status: "notFound" }),
+  );
   const root = win.document.getElementById("root")!;
   const open = (options: Record<string, unknown> = {}) => {
     view = new ArxivBrowserView(root, {
@@ -160,6 +168,7 @@ function environment() {
       clock,
       launch,
       copy,
+      inspireBibtex,
       confirm: () => true,
       ...options,
     });
@@ -180,6 +189,7 @@ function environment() {
     service,
     launch,
     copy,
+    inspireBibtex,
     root,
     open,
     settle,
@@ -221,6 +231,13 @@ const key = (target: EventTarget, key: string, init: KeyboardEventInit = {}) =>
   target.dispatchEvent(
     new win.KeyboardEvent("keydown", { key, bubbles: true, ...init }),
   );
+/**
+ * arXiv's BibTeX as copied for the first paper of 25 Sep (2609.28538, by
+ * D. Vattolo et al., "Spectral shaping ..."), in neither the library nor
+ * INSPIRE: with the key arxivCitationKey gives it
+ */
+const keyed = (bibtex: string) =>
+  bibtex.replace(/^@(\w+)\{[^,]*,/, "@$1{Vattolo:2026spectral,");
 /** The toolbar's lists: subscription, sort, page size */
 const TOOLBAR = ["subscription", "sort", "size"];
 const select = (root: HTMLElement, name: string) =>
@@ -1015,8 +1032,8 @@ describe("arXiv browser: read-only actions and keys", () => {
     }
   });
 
-  it("copies arXiv's BibTeX, asking arxiv.org once and in turn", async () => {
-    const { root, site, clock, copy } = await loaded();
+  it("copies arXiv's BibTeX when INSPIRE has no record, asking each once and arxiv.org in turn", async () => {
+    const { root, site, clock, copy, inspireBibtex } = await loaded();
     const bibtex =
       "@misc{pathak2026,\n  title={A paper},\n  eprint={2609.28538}\n}";
     site.html("https://arxiv.org/bibtex/2609.28538", `\n${bibtex}\n`);
@@ -1025,7 +1042,7 @@ describe("arXiv browser: read-only actions and keys", () => {
       .querySelector<HTMLButtonElement>(".zinspire-ref-entry__bibtex")!
       .click();
     await clock.advanceBy(20000);
-    expect(copy).toHaveBeenLastCalledWith(bibtex);
+    expect(copy).toHaveBeenLastCalledWith(keyed(bibtex));
     expect(site.count("https://arxiv.org/bibtex/2609.28538")).toBe(1);
     // Again with the keys: from memory
     key(root.querySelector(".arxiv-browser__list")!, "C", {
@@ -1039,7 +1056,184 @@ describe("arXiv browser: read-only actions and keys", () => {
       [...root.querySelectorAll(".arxiv-browser__notice")].map(
         (n) => n.textContent,
       ),
-    ).toContain(msg("arxiv-browser-bibtex-copied", { id: "2609.28538" }));
+    ).toContain(msg("arxiv-browser-bibtex-copied-arxiv", { id: "2609.28538" }));
+    expect(inspireBibtex).toHaveBeenCalledTimes(1);
+  });
+
+  const notices = (root: HTMLElement) =>
+    [...root.querySelectorAll(".arxiv-browser__notice")].map(
+      (n) => n.textContent,
+    );
+
+  it("copies INSPIRE's BibTeX when INSPIRE has the paper, asking arXiv nothing", async () => {
+    const { root, site, clock, copy, inspireBibtex } = await loaded();
+    const bibtex = '@article{Vattolo:2026omw,\n    eprint = "2609.28538"\n}';
+    inspireBibtex.mockResolvedValue({ status: "found", bibtex });
+    const button = rows(root)[0].querySelector<HTMLButtonElement>(
+      ".zinspire-ref-entry__bibtex",
+    )!;
+    button.click();
+    await clock.advanceBy(1000);
+    expect(copy).toHaveBeenLastCalledWith(bibtex);
+    expect(inspireBibtex.mock.calls[0].slice(0, 2)).toEqual([
+      "2609.28538",
+      null,
+    ]);
+    expect(site.count("https://arxiv.org/bibtex/2609.28538")).toBe(0);
+    expect(notices(root)).toContain(
+      msg("arxiv-browser-bibtex-copied-inspire", { id: "2609.28538" }),
+    );
+    // Again: from memory
+    button.click();
+    await flushPromises();
+    expect(copy).toHaveBeenCalledTimes(2);
+    expect(inspireBibtex).toHaveBeenCalledTimes(1);
+  });
+
+  it("copies arXiv's BibTeX when INSPIRE cannot be reached, saying so, and asks INSPIRE again the next time", async () => {
+    const { root, site, clock, copy, inspireBibtex } = await loaded();
+    inspireBibtex.mockResolvedValue({ status: "failed" });
+    const arxiv = "@misc{x,\n  eprint={2609.28538}\n}";
+    site.html("https://arxiv.org/bibtex/2609.28538", arxiv);
+    const button = rows(root)[0].querySelector<HTMLButtonElement>(
+      ".zinspire-ref-entry__bibtex",
+    )!;
+    button.click();
+    await clock.advanceBy(20000);
+    expect(copy).toHaveBeenLastCalledWith(keyed(arxiv));
+    expect(notices(root)).toContain(
+      msg("arxiv-browser-bibtex-copied-arxiv-unreachable", {
+        id: "2609.28538",
+      }),
+    );
+    expect(notices(root)).not.toContain(
+      msg("arxiv-browser-bibtex-copied-arxiv", { id: "2609.28538" }),
+    );
+    // INSPIRE answers now: its BibTeX; arXiv's is not asked again
+    inspireBibtex.mockResolvedValue({
+      status: "found",
+      bibtex: "@article{A,\n}",
+    });
+    button.click();
+    await clock.advanceBy(1000);
+    expect(copy).toHaveBeenLastCalledWith("@article{A,\n}");
+    expect(inspireBibtex).toHaveBeenCalledTimes(2);
+    expect(site.count("https://arxiv.org/bibtex/2609.28538")).toBe(1);
+  });
+
+  /** The library's answer: item 77 has the first paper */
+  const answerFor = (ids: readonly string[]) =>
+    new Map(ids.filter((id) => id === "2609.28538").map((id) => [id, [77]]));
+
+  /**
+   * The first paper in the library: item 77 with a recid and its own key.
+   * `lookup`: the library's lookup (default: answers at once).
+   */
+  async function inLibrary(
+    lookup = async (ids: readonly string[]) => answerFor(ids),
+  ) {
+    const item = {
+      getField: (name: string) =>
+        (
+          ({
+            archive: "INSPIRE",
+            archiveLocation: "3071234",
+            citationKey: "Vattolo:2026mine",
+          }) as Record<string, string>
+        )[name] ?? "",
+      getAttachments: () => [],
+    };
+    vi.stubGlobal("Zotero", {
+      ...Zotero,
+      Items: { get: (id: number) => (id === 77 ? item : false) },
+    });
+    const env = await loaded({ inLibrary: lookup });
+    await flushPromises();
+    const click = async () => {
+      rows(env.root)[0]
+        .querySelector<HTMLButtonElement>(".zinspire-ref-entry__bibtex")!
+        .click();
+      await env.clock.advanceBy(20000);
+    };
+    return { ...env, click };
+  }
+
+  it("asks INSPIRE by the recid of the paper's library item, and gives the BibTeX the item's key", async () => {
+    const { copy, inspireBibtex, click } = await inLibrary();
+    inspireBibtex.mockResolvedValue({
+      status: "found",
+      bibtex: '@article{Vattolo:2026omw,\n    eprint = "2609.28538"\n}',
+    });
+    await click();
+    expect(inspireBibtex.mock.calls[0].slice(0, 2)).toEqual([
+      "2609.28538",
+      "3071234",
+    ]);
+    expect(copy).toHaveBeenLastCalledWith(
+      '@article{Vattolo:2026mine,\n    eprint = "2609.28538"\n}',
+    );
+  });
+
+  it("uses the library item also when copied before the list's marks arrived", async () => {
+    const waiting: Array<() => void> = [];
+    const { root, clock, copy, inspireBibtex } = await inLibrary(
+      (ids) =>
+        new Promise((resolve) => waiting.push(() => resolve(answerFor(ids)))),
+    );
+    inspireBibtex.mockResolvedValue({
+      status: "found",
+      bibtex: '@article{Vattolo:2026omw,\n    eprint = "2609.28538"\n}',
+    });
+    const row = rows(root)[0];
+    expect(
+      row.querySelector(".zinspire-ref-entry__dot")?.getAttribute("data-state"),
+    ).not.toBe("local");
+    row
+      .querySelector<HTMLButtonElement>(".zinspire-ref-entry__bibtex")!
+      .click();
+    await flushPromises();
+    expect(copy).not.toHaveBeenCalled();
+    // The library answers
+    for (const answer of waiting.splice(0)) answer();
+    await clock.advanceBy(1000);
+    expect(inspireBibtex.mock.calls[0].slice(0, 2)).toEqual([
+      "2609.28538",
+      "3071234",
+    ]);
+    expect(copy).toHaveBeenLastCalledWith(
+      '@article{Vattolo:2026mine,\n    eprint = "2609.28538"\n}',
+    );
+  });
+
+  it("copies nothing when the window closed while the library was asked", async () => {
+    const waiting: Array<() => void> = [];
+    const { root, clock, copy, view, inspireBibtex } = await inLibrary(
+      (ids) =>
+        new Promise((resolve) => waiting.push(() => resolve(answerFor(ids)))),
+    );
+    inspireBibtex.mockResolvedValue({
+      status: "found",
+      bibtex: '@article{Vattolo:2026omw,\n    eprint = "2609.28538"\n}',
+    });
+    rows(root)[0]
+      .querySelector<HTMLButtonElement>(".zinspire-ref-entry__bibtex")!
+      .click();
+    view.dispose();
+    for (const answer of waiting.splice(0)) answer();
+    await clock.advanceBy(1000);
+    expect(copy).not.toHaveBeenCalled();
+  });
+
+  it("gives arXiv's BibTeX the key of the paper's library item", async () => {
+    const { site, copy, click } = await inLibrary();
+    site.html(
+      "https://arxiv.org/bibtex/2609.28538",
+      "@misc{vattolo2026spectral,\n  eprint={2609.28538}\n}",
+    );
+    await click();
+    expect(copy).toHaveBeenLastCalledWith(
+      "@misc{Vattolo:2026mine,\n  eprint={2609.28538}\n}",
+    );
   });
 
   it("fetches a BibTeX in turn with the listing's requests, 15 s apart", async () => {
@@ -1065,7 +1259,7 @@ describe("arXiv browser: read-only actions and keys", () => {
     for (let i = 1; i < starts.length; i++) {
       expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(15000);
     }
-    expect(env.copy).toHaveBeenCalledWith("@misc{x,\n}");
+    expect(env.copy).toHaveBeenCalledWith(keyed("@misc{x,\n}"));
   });
 
   it("asks arxiv.org once for a BibTeX clicked again while it waits", async () => {
@@ -1230,7 +1424,7 @@ describe("arXiv browser: the right-click menu and copying", () => {
     site.html("https://arxiv.org/bibtex/2609.28538", `\n${bibtex}\n`);
     menu.run(msg("arxiv-browser-copy-bibtex"));
     await clock.advanceBy(20000);
-    expect(copy).toHaveBeenLastCalledWith(bibtex);
+    expect(copy).toHaveBeenLastCalledWith(keyed(bibtex));
 
     menu.run(msg("arxiv-browser-menu-select-all"));
     const selection = win.getSelection()!;

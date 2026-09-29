@@ -159,6 +159,8 @@ async function loaded(
     launch,
     copy,
     confirm: () => true,
+    // INSPIRE has no record: the BibTeX is arXiv's (no request to INSPIRE)
+    inspireBibtex: async () => ({ status: "notFound" as const }),
     ...options,
   });
   for (let i = 0; i < 100 && view.loader.running; i++) {
@@ -519,7 +521,10 @@ describe("cards", () => {
       .find((b) => b.textContent === msg("references-panel-copy-bibtex"))!
       .click();
     await clock.advanceBy(20000);
-    expect(copy).toHaveBeenLastCalledWith(bibtex);
+    // The key is the one a paper in neither the library nor INSPIRE gets
+    expect(copy).toHaveBeenLastCalledWith(
+      bibtex.replace("x2026", "Vattolo:2026spectral"),
+    );
     expect(site.count("https://arxiv.org/bibtex/2609.28538")).toBe(1);
   });
 

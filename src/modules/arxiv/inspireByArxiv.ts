@@ -11,6 +11,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { cleanMathTitle } from "../../utils/mathTitle";
+import { INSPIRE_API_BASE } from "../inspire/constants";
+import { fetchBibTeX } from "../inspire/metadataService";
+import { inspireFetch } from "../inspire/rateLimiter";
 import { searchLiteratureInBatch } from "../inspire/referencesService";
 import { parseArxivId } from "./arxivId";
 
@@ -138,6 +141,66 @@ export async function lookupInspireByArxiv(
     Array.from({ length: Math.min(PARALLEL_BATCHES, batches.length) }, worker),
   );
   return answers;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BibTeX
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type InspireBibtexAnswer =
+  | { status: "found"; bibtex: string }
+  /** INSPIRE answered and has no record of the paper */
+  | { status: "notFound" }
+  /** INSPIRE could not be reached or answered with an error */
+  | { status: "failed" };
+
+const EPRINT = /\beprint\s*=\s*["{]\s*([^"}\s]+)\s*["}]/i;
+
+/** The arXiv identifier in the eprint field of a BibTeX entry, if any */
+export function bibtexEprint(entry: string): string | undefined {
+  return parseArxivId(EPRINT.exec(entry)?.[1])?.id;
+}
+
+/**
+ * INSPIRE's BibTeX of the paper with the arXiv identifier `id` (canonical,
+ * without version): a search for it answered as BibTeX, one request (empty
+ * when INSPIRE has no record). Its entry with `id` as eprint is the paper's.
+ * Only when the answer has entries but none with `id` (a record that lists
+ * `id` as a further arXiv identifier; its BibTeX names one) does a lookup of
+ * the record's identifiers decide, as in lookupInspireByArxiv, and the
+ * record's BibTeX is then fetched by its recid.
+ */
+export async function fetchInspireBibtexByArxiv(
+  id: string,
+  signal?: AbortSignal,
+): Promise<InspireBibtexAnswer> {
+  const query = encodeURIComponent(`arxiv:${id}`);
+  const url = `${INSPIRE_API_BASE}/literature?q=${query}&size=5&format=bibtex`;
+  let text: string;
+  try {
+    const response = await inspireFetch(url, { signal });
+    if (!response.ok) return { status: "failed" };
+    text = await response.text();
+  } catch {
+    return { status: "failed" };
+  }
+  const entries = text
+    .split(/\n(?=@)/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const entry = entries.find((part) => bibtexEprint(part) === id);
+  if (entry) return { status: "found", bibtex: entry };
+  if (!entries.length) return { status: "notFound" };
+  let answer: InspireArxivAnswer | undefined;
+  try {
+    answer = (await lookupInspireByArxiv([id], { signal })).get(id);
+  } catch {
+    return { status: "failed" };
+  }
+  if (answer?.status === "notFound") return { status: "notFound" };
+  if (answer?.status !== "found") return { status: "failed" };
+  const bibtex = await fetchBibTeX(answer.recid, signal);
+  return bibtex ? { status: "found", bibtex } : { status: "failed" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

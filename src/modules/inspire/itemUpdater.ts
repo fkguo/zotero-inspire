@@ -38,6 +38,7 @@ import {
   fetchReferencesEntries,
   enrichReferencesEntries,
 } from "./referencesService";
+import { itemCitationKey } from "./library/itemCitationKey";
 import { inspireFetch } from "./rateLimiter";
 import {
   resolveInspireItemType,
@@ -1304,18 +1305,7 @@ export class ZInspire {
     if (!items.length) return;
 
     const citationKeys = items
-      .map((item) => {
-        let key = (item.getField("citationKey") as string | undefined)?.trim();
-        if (key) return key;
-
-        const extra = item.getField("extra") as string | undefined;
-        if (extra) {
-          const match = extra.match(/^Citation\s+Key:\s*(\S+)/m);
-          if (match) return match[1];
-        }
-
-        return undefined;
-      })
+      .map(itemCitationKey)
       .filter((key): key is string => !!key);
 
     if (!citationKeys.length) {

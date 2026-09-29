@@ -14,8 +14,10 @@ vi.mock("../src/utils/prefs", () => ({ getPref: vi.fn() }));
 vi.mock("../src/utils/locale", () => ({ getString: (key: string) => key }));
 
 import { inspireFetch } from "../src/modules/inspire/rateLimiter";
+import { inspireBibtexOf } from "../src/modules/arxiv/browser/browserActions";
 import {
   clearNotFoundMemory,
+  fetchInspireBibtexByArxiv,
   identityMismatches,
   lookupInspireByArxiv,
   resolveInspireByArxiv,
@@ -448,5 +450,129 @@ describe("the identity check of an item's INSPIRE record", () => {
       }),
       { status: "notFound" },
     ]);
+  });
+});
+
+describe("INSPIRE's BibTeX of an arXiv paper", () => {
+  const entry = (key: string, eprint: string) =>
+    `@article{${key},\n    title = "{A paper}",\n    eprint = "${eprint}",\n    archivePrefix = "arXiv"\n}`;
+  /** INSPIRE as BibTeX: search answers by identifier, records by recid */
+  let search: Map<string, Response | string>;
+  let byRecid: Map<string, Response | string>;
+  const reply = (value: Response | string | undefined) =>
+    value instanceof Response
+      ? value
+      : new Response(value ?? "", {
+          status: value === undefined ? 404 : 200,
+        });
+  beforeEach(() => {
+    search = new Map();
+    byRecid = new Map();
+    fetchMock.mockImplementation(async (url) => {
+      const parsed = new URL(String(url));
+      if (parsed.searchParams.get("format") !== "bibtex") {
+        return answer(String(url));
+      }
+      const recid = parsed.pathname.match(/\/literature\/(\d+)$/)?.[1];
+      if (recid) return reply(byRecid.get(recid));
+      const id = parsed.searchParams.get("q")!.replace(/^arxiv:/, "");
+      return reply(search.get(id) ?? "");
+    });
+  });
+  const urls = () =>
+    fetchMock.mock.calls.map((call) => {
+      const url = new URL(String(call[0]));
+      return `${url.pathname}?${url.searchParams.get("q") ?? ""}${url.searchParams.get("format") ?? ""}`;
+    });
+
+  it("asks one search for the identifier as BibTeX and takes the entry of that identifier", async () => {
+    search.set(
+      "2609.28538",
+      `${entry("Other:2026a", "2609.2853")}\n\n${entry("Vattolo:2026omw", "2609.28538")}\n`,
+    );
+    expect(await fetchInspireBibtexByArxiv("2609.28538")).toEqual({
+      status: "found",
+      bibtex: entry("Vattolo:2026omw", "2609.28538"),
+    });
+    expect(urls()).toEqual(["/api/literature?arxiv:2609.28538bibtex"]);
+  });
+
+  it("reads old identifiers too", async () => {
+    search.set("hep-ph/0101001", entry("Old:2001", "hep-ph/0101001"));
+    expect(await fetchInspireBibtexByArxiv("hep-ph/0101001")).toMatchObject({
+      status: "found",
+    });
+  });
+
+  it("has no record when INSPIRE answers nothing, or only a similar number no record lists as this identifier", async () => {
+    expect(await fetchInspireBibtexByArxiv("2609.99999")).toEqual({
+      status: "notFound",
+    });
+    search.set("2609.28538", entry("Other:2026a", "2609.2853"));
+    expect(await fetchInspireBibtexByArxiv("2609.28538")).toEqual({
+      status: "notFound",
+    });
+  });
+
+  it("takes the record that lists the identifier as its second arXiv identifier", async () => {
+    // The record's BibTeX names its first identifier
+    record(3071234, "2609.11111", "2609.28538");
+    search.set("2609.28538", entry("Merged:2026x", "2609.11111"));
+    byRecid.set("3071234", entry("Merged:2026x", "2609.11111"));
+    expect(await fetchInspireBibtexByArxiv("2609.28538")).toEqual({
+      status: "found",
+      bibtex: entry("Merged:2026x", "2609.11111"),
+    });
+  });
+
+  it("fails, not 'no record', when INSPIRE cannot be reached or answers with an error", async () => {
+    search.set(
+      "2609.28538",
+      new Response("Service unavailable", { status: 503 }),
+    );
+    expect(await fetchInspireBibtexByArxiv("2609.28538")).toEqual({
+      status: "failed",
+    });
+    fetchMock.mockRejectedValue(new TypeError("NetworkError"));
+    expect(await fetchInspireBibtexByArxiv("2609.28538")).toEqual({
+      status: "failed",
+    });
+  });
+
+  it("asks for the library item's record by its recid when it is the paper's: one request", async () => {
+    byRecid.set("3071234", entry("Vattolo:2026omw", "2609.28538"));
+    expect(await inspireBibtexOf("2609.28538", "3071234")).toEqual({
+      status: "found",
+      bibtex: entry("Vattolo:2026omw", "2609.28538"),
+    });
+    expect(urls()).toEqual(["/api/literature/3071234?bibtex"]);
+  });
+
+  it("looks the paper up by its identifier when the item's recid is another paper's", async () => {
+    byRecid.set("111", entry("Wrong:2020abc", "2001.00001"));
+    search.set("2609.28538", entry("Vattolo:2026omw", "2609.28538"));
+    expect(await inspireBibtexOf("2609.28538", "111")).toEqual({
+      status: "found",
+      bibtex: entry("Vattolo:2026omw", "2609.28538"),
+    });
+  });
+
+  it("says 'no record', not 'unreachable', when the item's recid is gone and INSPIRE has no record", async () => {
+    // literature/222 answers 404
+    expect(await inspireBibtexOf("2609.28538", "222")).toEqual({
+      status: "notFound",
+    });
+    expect(urls()).toEqual([
+      "/api/literature/222?bibtex",
+      "/api/literature?arxiv:2609.28538bibtex",
+    ]);
+  });
+
+  it("fails when neither the record nor the search answers", async () => {
+    byRecid.set("3071234", new Response("error", { status: 502 }));
+    search.set("2609.28538", new Response("error", { status: 503 }));
+    expect(await inspireBibtexOf("2609.28538", "3071234")).toEqual({
+      status: "failed",
+    });
   });
 });
