@@ -250,7 +250,8 @@ export type QuickFilterType =
   | "preprintOnly"
   | "relatedOnly"
   | "localItems"
-  | "onlineItems";
+  | "onlineItems"
+  | "smallAuthorGroup";
 
 export const QUICK_FILTER_TYPES: QuickFilterType[] = [
   "highCitations",
@@ -262,6 +263,7 @@ export const QUICK_FILTER_TYPES: QuickFilterType[] = [
   "relatedOnly",
   "localItems",
   "onlineItems",
+  "smallAuthorGroup",
 ];
 
 export const QUICK_FILTER_PREF_KEY = "quick_filters_last_used";
@@ -372,6 +374,10 @@ export function buildFieldsParam(fields: string): string {
   return `&fields=${fields}`;
 }
 
+/**
+ * The quick filters the References panel's popup offers. "≤10 authors" is
+ * not among them: the panel has its own button for it next to the chart.
+ */
 export const QUICK_FILTER_CONFIGS: QuickFilterConfig[] = [
   {
     type: "highCitations",
@@ -428,3 +434,11 @@ export const QUICK_FILTER_CONFIGS: QuickFilterConfig[] = [
     tooltipKey: "references-panel-quick-filter-preprint-tooltip",
   },
 ];
+
+/** "≤10 authors" as a quick filter, for popups that offer it */
+export const SMALL_AUTHOR_GROUP_FILTER_CONFIG: QuickFilterConfig = {
+  type: "smallAuthorGroup",
+  emoji: "👥",
+  labelKey: "references-panel-chart-author-filter",
+  tooltipKey: "references-panel-chart-author-filter-tooltip",
+};

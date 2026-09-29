@@ -124,6 +124,8 @@ const JOURNAL_ENTRIES: JournalEntry[] = [
     names: [
       "Journal of High Energy Physics",
       "J. High Energy Phys.",
+      // Springer's form, in arXiv journal references
+      "J. High Energ. Phys.",
       "JHEP",
       "J High Energy Phys",
     ],

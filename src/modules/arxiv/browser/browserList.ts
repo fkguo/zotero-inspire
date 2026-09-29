@@ -11,8 +11,19 @@
 // that day and section then open the page again, marked as continued.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import type { FluentMessageId } from "../../../../typings/i10n";
+import { getJournalAbbreviations } from "../../../utils/journalAbbreviations";
 import { cleanMathTitle } from "../../../utils/mathTitle";
-import { ARXIV_ABS_URL } from "../../inspire/constants";
+import {
+  ARXIV_ABS_URL,
+  QUICK_FILTER_CONFIGS,
+  SMALL_AUTHOR_GROUP_FILTER_CONFIG,
+  SMALL_AUTHOR_GROUP_THRESHOLD,
+  type QuickFilterConfig,
+  type QuickFilterType,
+} from "../../inspire/constants";
+import { matchesLocalItems, matchesOnlineItems } from "../../inspire/filters";
+import { journalNameFromText } from "../../inspire/formatters";
 import {
   buildFilterTokenVariants,
   buildSearchIndexText,
@@ -84,14 +95,18 @@ const COLLAPSE = /[.\s]+/g;
 
 /**
  * What the text filter looks in: authors, title, identifier, categories,
- * comments, journal reference and abstract, normalised as the References
- * panel's filter does (accents, umlauts; short fields also without dots and
- * spaces, for quoted tokens like "Phys.Rev.D")
+ * comments, journal reference with its journal's abbreviations (PRL, JHEP)
+ * and abstract, normalised as the References panel's filter does (accents,
+ * umlauts; short fields also without dots and spaces, for quoted tokens like
+ * "Phys.Rev.D")
  */
 export function searchTextOf(entry: BrowserEntry): string {
   let text = searchTexts.get(entry);
   if (text === undefined) {
     const { listing } = entry;
+    const journal = listing.journalRef
+      ? journalNameFromText(listing.journalRef)
+      : undefined;
     const short = [
       entry.authorText,
       listing.title,
@@ -101,6 +116,7 @@ export function searchTextOf(entry: BrowserEntry): string {
       listing.categories.join(" "),
       listing.comments ?? "",
       listing.journalRef ?? "",
+      ...(journal ? getJournalAbbreviations(journal) : []),
     ];
     text = buildSearchIndexText(
       [
@@ -125,6 +141,90 @@ export function filterGroups(text: string): string[][] {
       buildFilterTokenVariants(token, { ignoreSpaceDot: quoted }),
     )
     .filter((variants) => variants.length > 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quick filters
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The References panel's quick filters whose data the listing has (the others
+ * need INSPIRE's citations, dates or document types), and "≤10 authors"
+ */
+const ARXIV_TOOLTIPS: Partial<Record<QuickFilterType, FluentMessageId>> = {
+  localItems: "arxiv-browser-quick-filter-local-tooltip",
+  onlineItems: "arxiv-browser-quick-filter-online-tooltip",
+  relatedOnly: "arxiv-browser-quick-filter-related-tooltip",
+};
+
+export const ARXIV_QUICK_FILTER_CONFIGS: readonly QuickFilterConfig[] = [
+  ...(["localItems", "onlineItems", "relatedOnly"] as const).map(
+    (type) => QUICK_FILTER_CONFIGS.find((config) => config.type === type)!,
+  ),
+  SMALL_AUTHOR_GROUP_FILTER_CONFIG,
+  ...(["publishedOnly", "preprintOnly"] as const).map(
+    (type) => QUICK_FILTER_CONFIGS.find((config) => config.type === type)!,
+  ),
+].map((config) => {
+  // In the window's words: papers, and related to any item (no item is
+  // shown here)
+  const tooltipKey = ARXIV_TOOLTIPS[config.type];
+  return tooltipKey ? { ...config, tooltipKey } : config;
+});
+
+/** A collaboration's name among the authors ("ALICE Collaboration") */
+const COLLABORATION = /\bcollaborations?\b/i;
+
+/**
+ * At most ten authors, a collaboration's name not counted: a paper signed
+ * "ALICE Collaboration" alone is a large group's, "BESIII Collaboration: M.
+ * Ablikim, …" lists its members, "T. Vami, for the CMS Collaboration" has
+ * one author
+ */
+function fewAuthors(entry: BrowserEntry): boolean {
+  const persons = entry.listing.authors.filter(
+    (author) => !COLLABORATION.test(author.display),
+  ).length;
+  return persons > 0 && persons <= SMALL_AUTHOR_GROUP_THRESHOLD;
+}
+
+/**
+ * Whether a paper passes the quick filters on; journal status is the
+ * listing's journal reference. `isRelated`: its item has related items.
+ */
+export function passesQuickFilters(
+  entry: BrowserEntry,
+  active: ReadonlySet<QuickFilterType>,
+  isRelated: (entry: BrowserEntry) => boolean,
+): boolean {
+  for (const type of active) {
+    let pass: boolean;
+    switch (type) {
+      case "localItems":
+        pass = matchesLocalItems(entry);
+        break;
+      case "onlineItems":
+        pass = matchesOnlineItems(entry);
+        break;
+      case "relatedOnly":
+        pass = isRelated(entry);
+        break;
+      case "smallAuthorGroup":
+        pass = fewAuthors(entry);
+        break;
+      case "publishedOnly":
+        pass = Boolean(entry.listing.journalRef);
+        break;
+      case "preprintOnly":
+        pass = !entry.listing.journalRef;
+        break;
+      default:
+        // Not offered here
+        pass = true;
+    }
+    if (!pass) return false;
+  }
+  return true;
 }
 
 function passes(entry: BrowserEntry, groups: readonly string[][]): boolean {
@@ -160,6 +260,8 @@ export interface ListOptions {
   sections: ReadonlySet<ListingSection>;
   /** From filterGroups; empty for no filter */
   filter: readonly string[][];
+  /** The quick filters: whether a paper passes them (default: all do) */
+  quick?: (entry: BrowserEntry) => boolean;
   /** The subscription's listing pages (categories, archives) in its order */
   specs: readonly string[];
   /**
@@ -186,7 +288,7 @@ export interface ListDay {
   groups: ListGroup[];
   /** Papers shown, in order */
   count: number;
-  /** Papers of the shown sections, before the text filter */
+  /** Papers of the shown sections, before the text and quick filters */
   inSections: number;
   /** Papers the chosen category pages list (all when none is chosen) */
   onChosenPages: number;
@@ -288,6 +390,7 @@ function arrangeDay(
     if (!section) continue;
     inSections++;
     if (!passes(entry, options.filter)) continue;
+    if (options.quick && !options.quick(entry)) continue;
     placed.push({
       entry,
       section,

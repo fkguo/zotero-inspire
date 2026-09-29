@@ -794,7 +794,7 @@ describe("arXiv browser: the list", () => {
     env.open();
     await env.settle();
     const filter = env.root.querySelector<HTMLInputElement>(
-      ".arxiv-browser__filter",
+      ".arxiv-browser__filter input",
     )!;
     filter.value = "nosuchwordanywhere";
     filter.dispatchEvent(new win.Event("input", { bubbles: true }));
@@ -842,7 +842,7 @@ describe("arXiv browser: the list", () => {
     expect(view.listPane.focused?.id).toBe(rows(root)[9].dataset.entryId);
     // Not while typing in the filter
     const filter = root.querySelector<HTMLInputElement>(
-      ".arxiv-browser__filter",
+      ".arxiv-browser__filter input",
     )!;
     key(filter, "n");
     expect(view.listPane.currentPage).toBe(0);
@@ -997,7 +997,7 @@ describe("arXiv browser: the list", () => {
   it("filters by the text typed, telling how many of the day's papers are shown", async () => {
     const { root, view } = await loaded(500);
     const filter = root.querySelector<HTMLInputElement>(
-      ".arxiv-browser__filter",
+      ".arxiv-browser__filter input",
     )!;
     filter.value = "hep-lat";
     filter.dispatchEvent(new win.Event("input"));
@@ -1566,7 +1566,7 @@ describe("arXiv browser: the right-click menu and copying", () => {
     expect(detail.contains(win.getSelection()!.anchorNode)).toBe(true);
     // In the filter box, Ctrl/Cmd+A is the box's own
     const filter = root.querySelector<HTMLInputElement>(
-      ".arxiv-browser__filter",
+      ".arxiv-browser__filter input",
     )!;
     const selectAll = new win.KeyboardEvent("keydown", {
       key: "a",
@@ -2391,12 +2391,18 @@ describe("arXiv browser: adding and relating", () => {
   /**
    * `related`: the arXiv ID of a paper in the library, related to the item
    * the Select Items dialog gives (`chosen`); `unloaded`: its library's items
-   * are not loaded until the library's waitForDataLoad
+   * are not loaded until the library's waitForDataLoad, which waits for
+   * `loadGate` when given
    */
   async function loaded({
     related,
     unloaded = false,
-  }: { related?: string; unloaded?: boolean } = {}) {
+    loadGate,
+  }: {
+    related?: string;
+    unloaded?: boolean;
+    loadGate?: Promise<void>;
+  } = {}) {
     const env = environment();
     subscribe(["hep-ph"]);
     serveHepPh(env.site);
@@ -2436,7 +2442,10 @@ describe("arXiv browser: adding and relating", () => {
           libraryID,
           name: "My Library",
           editable: true,
-          waitForDataLoad: async () => void notLoaded.clear(),
+          waitForDataLoad: async () => {
+            await loadGate;
+            notLoaded.clear();
+          },
         }),
         getAll: () => [{ libraryID: 1, name: "My Library", editable: true }],
         userLibrary: { libraryID: 1 },
@@ -2508,6 +2517,36 @@ describe("arXiv browser: adding and relating", () => {
       libraryItem,
     };
   }
+
+  it("shows a related paper under Related only once its library's items have loaded", async () => {
+    let load: () => void = () => undefined;
+    const loadGate = new Promise<void>((resolve) => {
+      load = resolve;
+    });
+    const { root, view } = await loaded({
+      related: "2609.28538",
+      unloaded: true,
+      loadGate,
+    });
+    root
+      .querySelector<HTMLButtonElement>(".zinspire-quick-filter-btn")!
+      .click();
+    const related = [
+      ...root.querySelectorAll<HTMLLabelElement>(".zinspire-quick-filter-item"),
+    ].find(
+      (label) =>
+        label.querySelector(".zinspire-quick-filter-item-label")!
+          .textContent === msg("references-panel-quick-filter-related"),
+    )!;
+    related.querySelector("input")!.click();
+    // Its relations are not known yet
+    expect(view.listPane.entries).toHaveLength(0);
+    load();
+    await flushPromises();
+    expect(view.listPane.entries.map((entry) => entry.listing.id)).toEqual([
+      "2609.28538",
+    ]);
+  });
 
   const dot = (row: HTMLElement) =>
     row.querySelector(".zinspire-ref-entry__dot")!.textContent;
@@ -2750,5 +2789,181 @@ describe("arXiv browser: adding and relating", () => {
     expect(view.batch.getSelectedEntryIDs().size).toBe(0);
     expect(checkboxes(root).some((box) => box.checked)).toBe(false);
     expect(batchToolbar(root).style.display).toBe("none");
+  });
+});
+
+describe("arXiv browser: quick filters and the filter history", () => {
+  const HISTORY = `${config.addonRef}.inspireFilterHistory`;
+
+  async function loaded(options: Record<string, unknown> = {}) {
+    const env = environment();
+    subscribe(["hep-ph"]);
+    serveHepPh(env.site);
+    // Every paper of the day on one page
+    prefs[`${PREFIX}.arxiv_browser_page_size`] = 100;
+    const view = env.open(options);
+    await env.settle();
+    return { ...env, view };
+  }
+
+  const quickButton = (root: HTMLElement) =>
+    root.querySelector<HTMLButtonElement>(".zinspire-quick-filter-btn")!;
+  const popup = (root: HTMLElement) =>
+    root.querySelector<HTMLElement>(".zinspire-quick-filter-popup")!;
+  const box = (root: HTMLElement, labelKey: string) =>
+    [...popup(root).querySelectorAll("label")]
+      .find(
+        (label) =>
+          label.querySelector(".zinspire-quick-filter-item-label")!
+            .textContent === msg(labelKey),
+      )!
+      .querySelector("input")!;
+  const toggle = (root: HTMLElement, labelKey: string) => {
+    const input = box(root, labelKey);
+    input.checked = !input.checked;
+    input.dispatchEvent(new win.Event("change", { bubbles: true }));
+  };
+  const filterBox = (root: HTMLElement) =>
+    root.querySelector<HTMLInputElement>(".arxiv-browser__filter input")!;
+  const typeFilter = async (root: HTMLElement, text: string) => {
+    filterBox(root).value = text;
+    filterBox(root).dispatchEvent(new win.Event("input"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  };
+  const shownIds = (view: ArxivBrowserView) =>
+    view.listPane.entries.map((entry) => entry.listing.id);
+
+  it("puts the References panel's quick-filter button left of the filter box, with the filters the listing has data for", async () => {
+    const { root } = await loaded();
+    const button = quickButton(root);
+    expect(button.textContent).toBe("⏳");
+    expect(
+      button.closest(".zinspire-quick-filters")!.nextElementSibling ===
+        filterBox(root).parentElement,
+    ).toBe(true);
+    expect(popup(root).hidden).toBe(true);
+
+    button.click();
+    expect(popup(root).hidden).toBe(false);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      [
+        ...popup(root).querySelectorAll(".zinspire-quick-filter-item-label"),
+      ].map((label) => label.textContent),
+    ).toEqual(
+      [
+        "references-panel-quick-filter-local-items",
+        "references-panel-quick-filter-online-items",
+        "references-panel-quick-filter-related",
+        "references-panel-chart-author-filter",
+        "references-panel-quick-filter-published",
+        "references-panel-quick-filter-preprint",
+      ].map((key) => msg(key)),
+    );
+    // Closed by the button, or by a click elsewhere
+    button.click();
+    expect(popup(root).hidden).toBe(true);
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows(root)[0].click();
+    expect(popup(root).hidden).toBe(true);
+  });
+
+  it("keeps the papers the filters on ask for, together with the text filter, and counts them on the button", async () => {
+    const { root, view } = await loaded();
+    const all = view.listPane.entries;
+    expect(all).toHaveLength(72);
+    const published = all
+      .filter((entry) => entry.listing.journalRef)
+      .map((entry) => entry.listing.id);
+    expect(published).toHaveLength(9);
+    const badge = root.querySelector(".zinspire-quick-filter-badge")!;
+    expect((badge as HTMLElement).hidden).toBe(true);
+
+    toggle(root, "references-panel-quick-filter-published");
+    expect(shownIds(view)).toEqual(published);
+    expect(badge.textContent).toBe("1");
+    expect(root.querySelector(".arxiv-browser__day-count")!.textContent).toBe(
+      msg("arxiv-browser-day-filtered", { shown: 9, count: 72 }),
+    );
+
+    // arXiv only excludes published
+    toggle(root, "references-panel-quick-filter-preprint");
+    expect(box(root, "references-panel-quick-filter-published").checked).toBe(
+      false,
+    );
+    expect(view.listPane.entries).toHaveLength(63);
+    expect(badge.textContent).toBe("1");
+
+    toggle(root, "references-panel-chart-author-filter");
+    const few = all.filter(
+      (entry) =>
+        !entry.listing.journalRef && entry.listing.authors.length <= 10,
+    );
+    expect(shownIds(view)).toEqual(few.map((entry) => entry.listing.id));
+    expect(badge.textContent).toBe("2");
+
+    await typeFilter(root, "hep-lat");
+    const both = few.filter((entry) =>
+      entry.listing.categories.includes("hep-lat"),
+    );
+    expect(both.length).toBeGreaterThan(0);
+    expect(shownIds(view)).toEqual(both.map((entry) => entry.listing.id));
+  });
+
+  it("shows papers entering the local and online filters as the library marks arrive", async () => {
+    let answer: (found: ReadonlyMap<string, readonly number[]>) => void = () =>
+      undefined;
+    const lookup = vi.fn(
+      () =>
+        new Promise<ReadonlyMap<string, readonly number[]>>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const { root, view } = await loaded({ inLibrary: lookup });
+    toggle(root, "references-panel-quick-filter-local-items");
+    expect(view.listPane.entries).toHaveLength(0);
+    answer(new Map([["2609.28538", [7]]]));
+    await flushPromises();
+    expect(shownIds(view)).toEqual(["2609.28538"]);
+    toggle(root, "references-panel-quick-filter-online-items");
+    expect(box(root, "references-panel-quick-filter-local-items").checked).toBe(
+      false,
+    );
+    expect(view.listPane.entries).toHaveLength(71);
+  });
+
+  it("keeps what was filtered for in the References panel's filter history and completes it", async () => {
+    prefs[HISTORY] = JSON.stringify([
+      { query: "neutrino mass", timestamp: Date.now() },
+    ]);
+    const { root, view } = await loaded();
+    const input = filterBox(root);
+    input.focus();
+    await typeFilter(root, "gluon");
+    // Typing does not keep it; Enter does
+    expect(JSON.parse(prefs[HISTORY] as string)).toHaveLength(1);
+    key(input, "Enter");
+    expect(
+      JSON.parse(prefs[HISTORY] as string).map(
+        (item: { query: string }) => item.query,
+      ),
+    ).toEqual(["gluon", "neutrino mass"]);
+
+    // The history's suggestion, taken with Tab
+    await typeFilter(root, "neu");
+    const hint = root.querySelector<HTMLElement>(
+      ".zinspire-filter-inline-hint",
+    )!;
+    expect(hint.textContent).toBe("trino\u00A0mass");
+    key(input, "Tab");
+    expect(input.value).toBe("neutrino mass");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(view.listPane.entries.length).toBeLessThan(72);
+    for (const entry of view.listPane.entries) {
+      expect(
+        `${entry.listing.title} ${entry.listing.abstract}`.toLowerCase(),
+      ).toMatch(/neutrino/);
+    }
   });
 });

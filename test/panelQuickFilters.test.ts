@@ -49,6 +49,7 @@ const ENTRIES: InspireReferenceEntry[] = [
     publicationInfo: { journal_title: "Phys. Lett. B" },
     arxivDetails: { id: "2602.00002", categories: ["hep-ph"] },
     year: "2026",
+    totalAuthors: 3,
     citationCount: 120,
     citationCountWithoutSelf: 30,
   }),
@@ -83,6 +84,8 @@ const EXPECTED: Record<QuickFilterType, string[]> = {
   relatedOnly: ["reviewByType"],
   localItems: ["reviewByType", "preprint"],
   onlineItems: ["reviewByJournal", "article", "bare", "oldPublished"],
+  // Not in the popup (the panel has its own button), but applied when on
+  smallAuthorGroup: ["article"],
 };
 
 function visibleIDs(

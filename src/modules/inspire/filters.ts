@@ -212,6 +212,8 @@ export function getQuickFilterPredicate(
       return matchesLocalItems;
     case "onlineItems":
       return matchesOnlineItems;
+    case "smallAuthorGroup":
+      return matchesSmallAuthorGroup;
     default:
       return undefined;
   }
@@ -261,6 +263,7 @@ export const QUICK_FILTER_EXCLUSIONS: Record<
   relatedOnly: [],
   localItems: ["onlineItems"],
   onlineItems: ["localItems"],
+  smallAuthorGroup: [],
 };
 
 /**

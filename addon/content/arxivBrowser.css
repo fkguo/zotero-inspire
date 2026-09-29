@@ -309,10 +309,12 @@
   gap: 8px;
 }
 
+/* The References panel's filter box: its size here (over the panel's inline
+   one) */
 .arxiv-browser__filter {
-  flex: 1 1 180px;
-  min-width: 120px;
-  max-width: 360px;
+  flex: 1 1 180px !important;
+  min-width: 120px !important;
+  max-width: 360px !important;
 }
 
 /* The date button and its calendar */

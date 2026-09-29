@@ -41,9 +41,11 @@ import {
   type WindowReporter,
 } from "./browserActions";
 import {
+  ARXIV_QUICK_FILTER_CONFIGS,
   arrangeList,
   filterGroups,
   LIST_SORTS,
+  passesQuickFilters,
   rowKey,
   toBrowserEntry,
   type BrowserEntry,
@@ -76,6 +78,10 @@ import {
   type BatchImportManagerOptions,
 } from "../../inspire/panel/BatchImportManager";
 import { BatchToolbar } from "../../inspire/panel/BatchToolbar";
+import { FilterHistoryInput } from "../../inspire/panel/FilterHistoryInput";
+import { QuickFiltersControl } from "../../inspire/panel/QuickFiltersControl";
+import type { QuickFilterType } from "../../inspire/constants";
+import { setQuickFilter } from "../../inspire/filters";
 import { arxivBatchImport } from "../batchAdd";
 import { LibraryActions, type LibraryActionsOptions } from "./libraryActions";
 import { CompletionLine, type CompletionLineOptions } from "./completionLine";
@@ -226,7 +232,11 @@ export class ArxivBrowserView {
   private readonly cancelButton: HTMLButtonElement;
   private readonly status: HTMLElement;
   private readonly sectionBoxes = new Map<ListingSection, HTMLInputElement>();
-  private readonly filterInput: HTMLInputElement;
+  /** The filter box, with the filter history */
+  private readonly filterBox: FilterHistoryInput;
+  /** The quick filters on (for this window only) */
+  private readonly quickFilters = new Set<QuickFilterType>();
+  private readonly quickFiltersControl: QuickFiltersControl;
   private subscription: ArxivSubscription | undefined;
   /** The subscription and categories the listing was loaded for */
   private loadedFor: string | null = null;
@@ -379,10 +389,21 @@ export class ArxivBrowserView {
       this.sectionBoxes.set(section, box.input);
       sections.append(box.label);
     }
-    this.filterInput = html(doc, "input", "arxiv-browser__filter");
-    this.filterInput.type = "search";
-    this.filterInput.placeholder = getString("arxiv-browser-filter");
-    this.filterInput.addEventListener("input", () => this.onFilterInput());
+    // The References panel's quick filters and filter box
+    this.quickFiltersControl = new QuickFiltersControl(root, {
+      configs: ARXIV_QUICK_FILTER_CONFIGS,
+      active: () => this.quickFilters,
+      onToggle: (type, enabled) => {
+        if (setQuickFilter(this.quickFilters, type, enabled)) {
+          this.arrange("focus");
+        }
+      },
+    });
+    this.filterBox = new FilterHistoryInput(doc, {
+      placeholder: getString("arxiv-browser-filter"),
+      onInput: () => this.onFilterInput(),
+    });
+    this.filterBox.wrapper.classList.add("arxiv-browser__filter");
     const pageSize = html(doc, "select", "arxiv-browser__select");
     const size = pageSizeSetting();
     for (const value of [...new Set([...PAGE_SIZES, size])].sort(
@@ -407,7 +428,8 @@ export class ArxivBrowserView {
     listBar.append(
       this.labelled("arxiv-browser-sort", sortSelect),
       sections,
-      this.filterInput,
+      this.quickFiltersControl.element,
+      this.filterBox.wrapper,
       this.labelled("arxiv-browser-page-size", pageSize),
       abstracts.label,
     );
@@ -484,6 +506,7 @@ export class ArxivBrowserView {
         if (this.detail.entry?.listing.id === entry.listing.id) {
           this.detail.show(this.detail.entry);
         }
+        this.rearrangeForMarks();
       },
       showInLibrary: (itemIDs) => showItemsInMainWindow(itemIDs),
       addPapers: options.addPapers,
@@ -573,6 +596,7 @@ export class ArxivBrowserView {
       this.listPane.refreshPdfButtons();
       // Relations may have been changed elsewhere
       this.listPane.refreshLinkStates();
+      this.rearrangeForMarks();
     });
 
     this.onSubscriptionChange(this.subscriptions.current);
@@ -622,6 +646,7 @@ export class ArxivBrowserView {
     this.dayPicker.dispose();
     this.listPane.dispose();
     this.subscriptions.dispose();
+    this.quickFiltersControl.dispose();
     this.authorCard.dispose();
     this.paperCard.dispose();
     this.divider.dispose();
@@ -741,6 +766,12 @@ export class ArxivBrowserView {
       sort: this.sort,
       sections: openSections(subscription),
       filter: filterGroups(this.filterText),
+      quick: this.quickFilters.size
+        ? (entry) =>
+            passesQuickFilters(entry, this.quickFilters, (paper) =>
+              this.library.isRelated(paper),
+            )
+        : undefined,
       specs: subscription.categories,
       categories: this.categories,
     });
@@ -768,7 +799,7 @@ export class ArxivBrowserView {
     if (this.filterTimer !== undefined) win?.clearTimeout(this.filterTimer);
     this.filterTimer = win?.setTimeout(() => {
       this.filterTimer = undefined;
-      this.filterText = this.filterInput.value;
+      this.filterText = this.filterBox.value;
       this.arrange("focus");
     }, FILTER_DELAY_MS);
   }
@@ -814,6 +845,7 @@ export class ArxivBrowserView {
     if (!changed.size) return;
     this.listPane.refreshLibraryMarks(changed);
     this.redrawWhenLoaded(changed);
+    this.rearrangeForMarks();
     // The paper in the detail pane may have been chosen before
     const shown = this.detail.entry;
     if (shown && changed.has(shown)) this.detail.show(shown);
@@ -840,7 +872,10 @@ export class ArxivBrowserView {
       const library = Zotero.Libraries.get(libraryID);
       if (!library) continue;
       void library.waitForDataLoad("item").then(() => {
-        if (!this.disposed) this.listPane.refreshLibraryMarks(papers);
+        if (this.disposed) return;
+        this.listPane.refreshLibraryMarks(papers);
+        // Their relations are known now
+        this.rearrangeForMarks();
       });
     }
   }
@@ -880,6 +915,21 @@ export class ArxivBrowserView {
     this.listPane.refreshLibraryMarks(changed);
     const shown = this.detail.entry;
     if (shown && rows.includes(shown)) this.detail.show(shown);
+    this.rearrangeForMarks();
+  }
+
+  /**
+   * Papers added, found in the library or related enter or leave the list
+   * when a quick filter on reads those marks
+   */
+  private rearrangeForMarks(): void {
+    if (
+      this.quickFilters.has("localItems") ||
+      this.quickFilters.has("onlineItems") ||
+      this.quickFilters.has("relatedOnly")
+    ) {
+      this.arrange("keep-page");
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────────────
