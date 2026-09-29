@@ -763,3 +763,94 @@ describe("this week", () => {
     ]);
   });
 });
+
+describe("days read", () => {
+  /** A loader that records the days it tells as read */
+  function reading(env: ReturnType<typeof setup>) {
+    const read: string[] = [];
+    const loader = new ListingLoader(
+      env.service,
+      () => undefined,
+      env.clock,
+      (subscription, days) =>
+        read.push(...days.map((date) => `${subscription.id} ${date}`)),
+    );
+    return { loader, read };
+  }
+
+  it("marks a day read once its listing arrived complete, not a day with a category missing", async () => {
+    const env = setup();
+    const { loader, read } = reading(env);
+    const twoCategories = { ...hepPh, categories: ["hep-ph", "hep-lat"] };
+    for (const date of DAYS) {
+      const html = catchupPageHtml(
+        "hep-lat",
+        date,
+        day("hep-lat"),
+        NEXT[date] ?? null,
+      );
+      env.site.page(CATCHUP_URL("hep-lat", date), (attempt) =>
+        date === "2026-09-23" && attempt === 1
+          ? { status: 500, text: "Server error" }
+          : { text: html },
+      );
+    }
+    env.site.html(
+      LIST_URL("hep-lat"),
+      newPageHtml("hep-lat", "2026-09-25", day("hep-lat")),
+    );
+    // The newest day is shown once hep-ph's /new has come, before hep-lat's
+    const done = loader.load(twoCategories, { kind: "recent" });
+    await env.clock.advanceBy(5000);
+    expect(dates(loader)).toEqual(["2026-09-25"]);
+    expect(read).toEqual([]);
+    await env.clock.run(done);
+    expect(read).toEqual([
+      "sub-1 2026-09-25",
+      "sub-1 2026-09-24",
+      "sub-1 2026-09-22",
+      "sub-1 2026-09-21",
+    ]);
+    // Complete once retried
+    await env.clock.run(loader.retryDay("2026-09-23"));
+    expect(read).toContain("sub-1 2026-09-23");
+  });
+
+  it("does not mark a day cut short by Cancel", async () => {
+    const env = setup();
+    const { loader, read } = reading(env);
+    env.site.html(
+      LIST_URL("hep-th"),
+      newPageHtml("hep-th", "2026-09-25", day("hep-th")),
+    );
+    const done = loader.load(
+      { ...hepPh, categories: ["hep-ph", "hep-th"] },
+      { kind: "newest" },
+    );
+    await env.clock.advanceBy(5000);
+    loader.cancel();
+    await env.clock.run(done);
+    expect(loader.days.map((d) => d.status)).toEqual(["incomplete"]);
+    expect(read).toEqual([]);
+    await env.clock.run(loader.retryDay("2026-09-25"));
+    expect(read).toEqual(["sub-1 2026-09-25"]);
+  });
+
+  it("marks a chosen day that had no announcement read", async () => {
+    const env = setup();
+    const { loader, read } = reading(env);
+    env.site.html(
+      CATCHUP_URL("hep-ph", "2026-09-16"),
+      catchupPageHtml("hep-ph", "2026-09-16", [], "2026-09-17"),
+    );
+    env.site.html(
+      "https://arxiv.org/catchup/math/2026-09-16?abs=False",
+      catchupPageHtml("math", "2026-09-16", [], "2026-09-17"),
+    );
+    await env.clock.run(
+      loader.load(hepPh, { kind: "days", dates: ["2026-09-16", "2026-09-17"] }),
+    );
+    expect(dates(loader)).toEqual(["2026-09-17"]);
+    expect(read.sort()).toEqual(["sub-1 2026-09-16", "sub-1 2026-09-17"]);
+  });
+});
