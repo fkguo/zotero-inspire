@@ -156,8 +156,13 @@ export interface ArxivListingEntry {
   streams: ListingStream[];
   /** Absent for a search result: the API does not give it */
   announceDate?: IsoDate;
-  /** Search results: submission of version 1 (ISO date-time, from the API) */
+  /**
+   * Search results: submission of version 1 (ISO date-time, from the API;
+   * arXiv sorts by it, the list groups the results by its month)
+   */
   submitted?: string;
+  /** Search results: submission of the version given (ISO date-time) */
+  versionSubmitted?: string;
 }
 
 /** Why a category's listing of a day could not be used */

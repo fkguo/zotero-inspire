@@ -80,6 +80,7 @@ export function searchResultEntry(entry: ArxivApiEntry): ArxivListingEntry {
     section: "search",
     streams: [],
     submitted: entry.published,
+    versionSubmitted: entry.updated,
   };
 }
 

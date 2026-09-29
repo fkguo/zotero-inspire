@@ -216,11 +216,12 @@ export class DetailPane {
         this.versionChooser(entry, listing.version, older?.version),
       );
     }
-    // A search result: the submission of its first version instead; an
-    // older version: its own submission
+    // A search result, and an older version: the submission of the version
+    // shown instead
     const date = older
       ? older.updated.slice(0, 10)
-      : (listing.announceDate ?? listing.submitted?.slice(0, 10));
+      : (listing.announceDate ??
+        (listing.versionSubmitted ?? listing.submitted)?.slice(0, 10));
     // While a chosen version is fetched: that instead of the date shown
     if (this.pending) {
       identity.append(

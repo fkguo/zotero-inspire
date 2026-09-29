@@ -3671,7 +3671,8 @@ describe("arXiv browser: searching arXiv", () => {
 
   /**
    * An answer of the API: `count` papers from `first` on (2609.3xxxx), of
-   * `total`, submitted one a day back from 29 September 2026
+   * `total`, submitted one a day back from 29 September 2026; the first
+   * (2609.30000) has a version 2, submitted on 30 September
    */
   function results(first: number, count: number, total: number): string {
     const entries = Array.from({ length: count }, (_, i) => {
@@ -3679,9 +3680,10 @@ describe("arXiv browser: searching arXiv", () => {
       const date = new Date(Date.parse("2026-09-29T12:00:00Z") - n * 86400000)
         .toISOString()
         .replace(/\.\d+Z$/, "Z");
-      return `<entry><id>http://arxiv.org/abs/2609.${30000 + n}v1</id>
+      const updated = n ? date : "2026-09-30T08:00:00Z";
+      return `<entry><id>http://arxiv.org/abs/2609.${30000 + n}v${n ? 1 : 2}</id>
         <title>Result ${n} on $m_\\pi$</title><summary>Abstract
-        ${n}</summary><published>${date}</published><updated>${date}</updated>
+        ${n}</summary><published>${date}</published><updated>${updated}</updated>
         <author><name>A. Author</name></author><author><name>Feng-Kun Guo</name></author>
         ${n % 2 ? "<arxiv:journal_ref>Phys. Rev. D 1 (2026) 1</arxiv:journal_ref>" : ""}
         <arxiv:primary_category term="hep-ph"/><category term="hep-ph"/></entry>`;
@@ -3766,10 +3768,11 @@ describe("arXiv browser: searching arXiv", () => {
     expect(launch).toHaveBeenLastCalledWith(
       "https://arxiv.org/html/2609.30000",
     );
-    // The detail pane gives the submission instead of an announcement
+    // The detail pane gives the submission of the version shown (2) instead
+    // of an announcement; the list groups by the first version's month
     const detail = root.querySelector(".arxiv-browser__detail")!.textContent;
     expect(detail).toContain(
-      msg("arxiv-browser-detail-submitted", { date: formatDay("2026-09-29") }),
+      msg("arxiv-browser-detail-submitted", { date: formatDay("2026-09-30") }),
     );
     expect(detail).not.toContain("arxiv-browser-detail-announced");
     // The order and sections are the days': hidden, as is the day index
