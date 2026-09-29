@@ -405,6 +405,39 @@
   color: var(--fill-quaternary, #c0c4cc);
 }
 
+/* A day not read yet: a blue dot at the top right of its cell */
+.arxiv-browser__daypicker-day--unread {
+  position: relative;
+}
+
+.arxiv-browser__daypicker-day--unread::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #0a6cff;
+}
+
+.arxiv-browser__daypicker-day--picked.arxiv-browser__daypicker-day--unread::after {
+  background: #fff;
+}
+
+/* The legend on its own line, the two buttons side by side below it */
+.arxiv-browser__daypicker-marks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+.arxiv-browser__daypicker-marks .arxiv-browser__daypicker-note {
+  flex: 1 0 100%;
+}
+
 .arxiv-browser__daypicker-footer {
   display: flex;
   align-items: center;
@@ -517,6 +550,13 @@
 /* The in-library mark only; papers not in the library show no mark */
 .arxiv-browser__row .zinspire-ref-entry__dot[data-state="missing"] {
   visibility: hidden;
+}
+
+/* Author names are not links here (a click does nothing; hovering shows
+   the author card): the row's text colour, not the References panel's link
+   blue, which the renderer sets inline */
+.arxiv-browser__row .zinspire-ref-entry__author-link {
+  color: inherit !important;
 }
 
 .arxiv-browser__row--collapsed .zinspire-ref-entry__abstract {

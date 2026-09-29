@@ -7,11 +7,19 @@ import { ListingService } from "../src/modules/arxiv/listingService";
 import { MemoryListingStore } from "../src/modules/arxiv/listingStore";
 import { ArxivBrowserView } from "../src/modules/arxiv/browser/ArxivBrowserView";
 import type { InspireRecidAnswer } from "../src/modules/arxiv/browser/browserActions";
+import {
+  ReadingState,
+  readingStateFile,
+} from "../src/modules/arxiv/browser/readingState";
 import { servedListingDays } from "../src/modules/arxiv/browser/DayPicker";
 import type { ArxivSubscription } from "../src/modules/arxiv/browser/subscriptions";
-import { formatShortDay } from "../src/modules/arxiv/browser/browserText";
+import {
+  formatDay,
+  formatShortDay,
+} from "../src/modules/arxiv/browser/browserText";
 import { invalidateDarkModeCache } from "../src/modules/inspire/styles";
 import { htmlDocument, readArxivFixture } from "./arxivFixtures";
+import { fakeFiles } from "./fakeFiles";
 import {
   CATCHUP_URL,
   catchupPageHtml,
@@ -168,6 +176,8 @@ function environment() {
     }),
   );
   const root = win.document.getElementById("root")!;
+  // Marks of this test only, in memory
+  const reading = new ReadingState(null, clock);
   const open = (options: Record<string, unknown> = {}) => {
     view = new ArxivBrowserView(root, {
       listing: service,
@@ -178,6 +188,7 @@ function environment() {
       inspireBibtex,
       inspireRecid,
       confirm: () => true,
+      readingState: reading,
       ...options,
     });
     return view;
@@ -200,6 +211,7 @@ function environment() {
     inspireBibtex,
     inspireRecid,
     root,
+    reading,
     open,
     settle,
   };
@@ -1894,19 +1906,6 @@ describe("arXiv browser: choosing the days", () => {
     expect(day(env.root, "2026-06-29")).not.toBeNull();
   });
 
-  it("shows the unread-days preset as not yet available", async () => {
-    const env = setupDays();
-    env.open();
-    await env.settle();
-    dayButton(env.root).click();
-    expect(
-      pickerButton(env.root, msg("arxiv-browser-days-unread")).disabled,
-    ).toBe(true);
-    expect(picker(env.root).textContent).toContain(
-      msg("arxiv-browser-days-unread-note"),
-    );
-  });
-
   it("closes on Escape and on a press outside, loading nothing", async () => {
     const env = setupDays();
     const view = env.open();
@@ -2004,6 +2003,325 @@ describe("arXiv browser: choosing the days", () => {
     await env.clock.advanceBy(120000);
     expect(env.site.sent.length).toBe(sent);
     expect(view.loader.days.length).toBeLessThan(5);
+  });
+});
+
+describe("arXiv browser: days read", () => {
+  /**
+   * hep-ph days 17 to 25 Sep, and a subscription made on Tuesday 22 Sep
+   * (its first listing: Tuesday's), or `sub-1` (any day)
+   */
+  function setupReading(made = true) {
+    const env = environment();
+    const id = made
+      ? `sub-${Date.parse("2026-09-22T12:00:00Z").toString(36)}-abcdef`
+      : "sub-1";
+    const subscription: ArxivSubscription = {
+      id,
+      name: "Daily",
+      categories: ["hep-ph"],
+      sections: { new: true, cross: true, replace: true },
+    };
+    prefs[`${PREFIX}.arxiv_subscriptions`] = JSON.stringify([subscription]);
+    serveHepPh(env.site);
+    for (const date of ["2026-09-17", "2026-09-18"]) {
+      env.site.html(
+        CATCHUP_URL("hep-ph", date),
+        catchupPageHtml(
+          "hep-ph",
+          date,
+          smallDay("hep-ph", 3),
+          date === "2026-09-17" ? "2026-09-18" : "2026-09-21",
+        ),
+      );
+    }
+    return { ...env, subscription };
+  }
+  const dayButton = (root: HTMLElement) =>
+    root.querySelector<HTMLButtonElement>(".arxiv-browser__days-button")!;
+  const picker = (root: HTMLElement) =>
+    root.querySelector<HTMLElement>(".arxiv-browser__daypicker")!;
+  const pickerButton = (root: HTMLElement, label: string) =>
+    [...picker(root).querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === label,
+    )!;
+  const day = (root: HTMLElement, date: string) =>
+    picker(root).querySelector<HTMLButtonElement>(`[data-date="${date}"]`)!;
+  const click = (target: Element, init: MouseEventInit = {}) =>
+    target.dispatchEvent(
+      new win.MouseEvent("click", { bubbles: true, ...init }),
+    );
+  /** The days with a blue dot in the month shown */
+  const dotted = (root: HTMLElement) =>
+    [
+      ...picker(root).querySelectorAll<HTMLElement>(
+        ".arxiv-browser__daypicker-day--unread",
+      ),
+    ].map((element) => element.dataset.date);
+  const markButton = (root: HTMLElement) =>
+    picker(root)
+      .querySelector<HTMLElement>(".arxiv-browser__daypicker-marks")!
+      .querySelectorAll("button")[0];
+
+  it("dots the listing days not read from the subscription's first day on; the newest day, loaded, is read", async () => {
+    const env = setupReading();
+    const view = env.open();
+    await env.settle();
+    expect(view.loader.days.map((item) => item.status)).toEqual(["complete"]);
+    dayButton(env.root).click();
+    // Days never fetched count by weekday; none before Tuesday 22
+    expect(dotted(env.root)).toEqual([
+      "2026-09-22",
+      "2026-09-23",
+      "2026-09-24",
+    ]);
+    expect(day(env.root, "2026-09-23").getAttribute("aria-label")).toBe(
+      msg("arxiv-browser-days-day-unread", {
+        date: formatDay("2026-09-23"),
+      }),
+    );
+    expect(env.reading.isRead(env.subscription.id, "2026-09-25")).toBe(true);
+  });
+
+  it("dots every listing day arXiv serves for a subscription whose first day is not known", async () => {
+    const env = setupReading(false);
+    env.open();
+    await env.settle();
+    dayButton(env.root).click();
+    const september = servedListingDays(env.clock.now()).filter(
+      (date) => date.startsWith("2026-09") && date !== "2026-09-25",
+    );
+    expect(dotted(env.root)).toEqual(september);
+  });
+
+  it("marks a day read once loaded completely; a day found without announcement too; a day not fetched completely stays unread", async () => {
+    const env = setupReading(false);
+    env.site.html(
+      CATCHUP_URL("hep-ph", "2026-09-16"),
+      catchupPageHtml("hep-ph", "2026-09-16", [], "2026-09-17"),
+    );
+    env.site.html(
+      "https://arxiv.org/catchup/math/2026-09-16?abs=False",
+      catchupPageHtml("math", "2026-09-16", [], "2026-09-17"),
+    );
+    env.site.page(CATCHUP_URL("hep-ph", "2026-09-22"), (attempt) =>
+      attempt === 1
+        ? { status: 500, text: "error" }
+        : {
+            text: catchupPageHtml(
+              "hep-ph",
+              "2026-09-22",
+              smallDay("hep-ph", 3),
+              "2026-09-23",
+            ),
+          },
+    );
+    const view = env.open();
+    await env.settle();
+    dayButton(env.root).click();
+    for (const date of ["2026-09-16", "2026-09-17", "2026-09-22"]) {
+      click(day(env.root, date), { metaKey: true });
+    }
+    pickerButton(env.root, msg("arxiv-browser-days-load")).click();
+    await env.settle();
+    expect(view.loader.days.map((item) => item.status)).toEqual([
+      "failed",
+      "complete",
+    ]);
+    dayButton(env.root).click();
+    expect(dotted(env.root)).not.toContain("2026-09-16");
+    expect(dotted(env.root)).not.toContain("2026-09-17");
+    expect(dotted(env.root)).toContain("2026-09-22");
+    dayButton(env.root).click();
+    env.root
+      .querySelector<HTMLButtonElement>(
+        '.arxiv-browser__day[data-date="2026-09-22"] .arxiv-browser__retry',
+      )!
+      .click();
+    await env.settle();
+    dayButton(env.root).click();
+    expect(dotted(env.root)).not.toContain("2026-09-22");
+  });
+
+  it("marks the picked days read, and unread again, by hand", async () => {
+    const env = setupReading();
+    env.open();
+    await env.settle();
+    const sent = env.site.sent.length;
+    dayButton(env.root).click();
+    expect(markButton(env.root).disabled).toBe(true);
+    click(day(env.root, "2026-09-23"));
+    expect(markButton(env.root).textContent).toBe(
+      msg("arxiv-browser-days-mark-read"),
+    );
+    markButton(env.root).click();
+    expect(dotted(env.root)).toEqual(["2026-09-22", "2026-09-24"]);
+    expect(env.reading.isRead(env.subscription.id, "2026-09-23")).toBe(true);
+    // The calendar stays open with the day picked
+    expect(picker(env.root).hidden).toBe(false);
+    expect(markButton(env.root).textContent).toBe(
+      msg("arxiv-browser-days-mark-unread"),
+    );
+    markButton(env.root).click();
+    expect(dotted(env.root)).toEqual([
+      "2026-09-22",
+      "2026-09-23",
+      "2026-09-24",
+    ]);
+    // A read day (the newest) picked with an unread one: both marked read
+    click(day(env.root, "2026-09-25"), { metaKey: true });
+    markButton(env.root).click();
+    expect(dotted(env.root)).toEqual(["2026-09-22", "2026-09-24"]);
+    await env.clock.advanceBy(60000);
+    expect(env.site.sent.length).toBe(sent);
+  });
+
+  it("marks all dotted days read without a request", async () => {
+    const env = setupReading(false);
+    env.open();
+    await env.settle();
+    const sent = env.site.sent.length;
+    dayButton(env.root).click();
+    pickerButton(env.root, msg("arxiv-browser-days-mark-all-read")).click();
+    // Every month, not only the one shown
+    for (const date of servedListingDays(env.clock.now())) {
+      expect(env.reading.isRead("sub-1", date)).toBe(true);
+    }
+    expect(dotted(env.root)).toEqual([]);
+    const unread = pickerButton(env.root, msg("arxiv-browser-days-unread"));
+    expect(unread.disabled).toBe(true);
+    expect(unread.title).toBe(msg("arxiv-browser-days-unread-none"));
+    expect(
+      pickerButton(env.root, msg("arxiv-browser-days-mark-all-read")).disabled,
+    ).toBe(true);
+    await env.clock.advanceBy(60000);
+    expect(env.site.sent.length).toBe(sent);
+  });
+
+  it("loads the unread days with the preset, telling what it costs, and marks them read", async () => {
+    const env = setupReading();
+    const view = env.open();
+    await env.settle();
+    dayButton(env.root).click();
+    const unread = pickerButton(env.root, msg("arxiv-browser-days-unread"));
+    expect(unread.disabled).toBe(false);
+    expect(unread.title).toBe(
+      msg("arxiv-browser-days-estimate", {
+        requests: 4,
+        time: msg("arxiv-browser-duration-seconds", { count: 45 }),
+      }),
+    );
+    unread.click();
+    expect(picker(env.root).hidden).toBe(true);
+    expect(view.days).toEqual({
+      kind: "days",
+      dates: ["2026-09-22", "2026-09-23", "2026-09-24"],
+    });
+    await env.settle();
+    expect(view.loader.days.map((item) => item.date)).toEqual([
+      "2026-09-24",
+      "2026-09-23",
+      "2026-09-22",
+    ]);
+    dayButton(env.root).click();
+    expect(dotted(env.root)).toEqual([]);
+  });
+
+  it("keeps a subscription's marks when its categories change, and those of two subscriptions apart", async () => {
+    const env = setupReading();
+    const other: ArxivSubscription = {
+      id: "sub-2",
+      name: "Other",
+      categories: ["hep-th"],
+      sections: { new: true, cross: true, replace: true },
+    };
+    prefs[`${PREFIX}.arxiv_subscriptions`] = JSON.stringify([
+      env.subscription,
+      other,
+    ]);
+    env.site.html(
+      LIST_URL("hep-th"),
+      newPageHtml("hep-th", "2026-09-25", smallDay("hep-th", 3)),
+    );
+    const view = env.open();
+    await env.settle();
+    dayButton(env.root).click();
+    click(day(env.root, "2026-09-23"));
+    markButton(env.root).click();
+    dayButton(env.root).click();
+
+    // Another subscription: its own marks (the newest day it loaded)
+    const choose = select(env.root, "subscription");
+    choose.value = "sub-2";
+    choose.dispatchEvent(new win.Event("change"));
+    await env.settle();
+    expect(view.loader.days.map((item) => item.date)).toEqual(["2026-09-25"]);
+    expect(env.reading.isRead("sub-2", "2026-09-23")).toBe(false);
+    expect(env.reading.isRead("sub-2", "2026-09-25")).toBe(true);
+    dayButton(env.root).click();
+    expect(dotted(env.root)).toContain("2026-09-23");
+    dayButton(env.root).click();
+
+    // Back, and hep-th added to the first
+    choose.value = env.subscription.id;
+    choose.dispatchEvent(new win.Event("change"));
+    await env.settle();
+    [...env.root.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === msg("arxiv-browser-subscription-edit"))!
+      .click();
+    [...env.root.querySelectorAll(".arxiv-browser__editor-row")]
+      .find((row) => row.textContent!.startsWith("hep-th"))!
+      .querySelector("input")!
+      .click();
+    [...env.root.querySelectorAll(".arxiv-browser__editor button")]
+      .find((b) => b.textContent === msg("arxiv-browser-editor-save"))!
+      .dispatchEvent(new win.MouseEvent("click"));
+    await env.settle();
+    expect(
+      JSON.parse(String(prefs[`${PREFIX}.arxiv_subscriptions`]))[0].categories,
+    ).toEqual(["hep-ph", "hep-th"]);
+    dayButton(env.root).click();
+    expect(dotted(env.root)).toEqual(["2026-09-22", "2026-09-24"]);
+  });
+
+  it("tells once that the file of the days read could not be read, and where it was kept", async () => {
+    const path = "/data/zoteroinspire/arxiv-reading.json";
+    const disk = fakeFiles({ [path]: "{not json" });
+    const env = setupReading();
+    const alert = vi.fn();
+    (Zotero as unknown as { alert: typeof alert }).alert = alert;
+    const reading = new ReadingState(readingStateFile(path), env.clock);
+    env.open({ readingState: reading });
+    await env.settle();
+    expect(alert).toHaveBeenCalledTimes(1);
+    const keptAs = [...disk.files.keys()].find((name) =>
+      name.includes("-unreadable-"),
+    )!;
+    expect(disk.files.get(keptAs)).toBe("{not json");
+    expect(alert.mock.calls[0][2]).toBe(
+      msg("arxiv-browser-reading-file-kept", { path: keptAs }),
+    );
+    // A second window does not tell it again
+    view!.dispose();
+    env.open({ readingState: reading });
+    await env.settle();
+    expect(alert).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells that the days marked will not be kept when the file cannot be read at all", async () => {
+    const path = "/data/zoteroinspire/arxiv-reading.json";
+    const disk = fakeFiles({ [path]: "{}" });
+    disk.unreadable(path);
+    const env = setupReading();
+    const alert = vi.fn();
+    (Zotero as unknown as { alert: typeof alert }).alert = alert;
+    env.open({
+      readingState: new ReadingState(readingStateFile(path), env.clock),
+    });
+    await env.settle();
+    expect(alert.mock.calls.map((call) => call[2])).toEqual([
+      msg("arxiv-browser-reading-file-unreadable", { path }),
+    ]);
   });
 });
 

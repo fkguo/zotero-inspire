@@ -87,6 +87,15 @@ export class ListingLoader {
     /** Called whenever days arrive or a run starts or ends */
     private readonly onChange: () => void,
     private readonly clock: Clock = systemClock,
+    /**
+     * Called with the days of a subscription that are read: a day whose
+     * listing arrived complete (all its categories fetched and checked) and
+     * is shown, or a chosen day found to have had no announcement
+     */
+    private readonly onRead?: (
+      subscription: ArxivSubscription,
+      dates: IsoDate[],
+    ) => void,
   ) {}
 
   get selection(): DaySelection {
@@ -288,6 +297,7 @@ export class ListingLoader {
       day,
     );
     this.partial = partial ? index : null;
+    if (!partial && day.status === "complete") this.markRead([day.date]);
     this.onChange();
   }
 
@@ -316,11 +326,24 @@ export class ListingLoader {
       };
       this.partial = null;
     }
-    for (const date of result?.noAnnouncementDays ?? []) {
-      this.withoutAnnouncement.add(date);
+    // A retry ends with the load's result again: its days are marked already
+    if (result && result !== this.report && result.noAnnouncementDays) {
+      for (const date of result.noAnnouncementDays) {
+        this.withoutAnnouncement.add(date);
+      }
+      this.markRead(result.noAnnouncementDays);
     }
     this.report = result;
     this.onChange();
+  }
+
+  private markRead(dates: IsoDate[]): void {
+    if (!this.subscription || !dates.length) return;
+    try {
+      this.onRead?.(this.subscription, dates);
+    } catch (error) {
+      Zotero.debug(`[${config.addonName}] arXiv reading marks: ${error}`);
+    }
   }
 
   /** The service reports failures in its result; anything thrown is a bug */

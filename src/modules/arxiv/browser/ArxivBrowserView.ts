@@ -71,6 +71,11 @@ import {
 import { countAuthorPapers } from "./authorCount";
 import { DetailPane } from "./DetailPane";
 import { PaneDivider } from "./PaneDivider";
+import {
+  firstUnreadDay,
+  sharedReadingState,
+  type ReadingState,
+} from "./readingState";
 import { SubscriptionBar } from "./SubscriptionBar";
 import { SECTION_LABELS } from "./SubscriptionEditor";
 import { openSections, type ArxivSubscription } from "./subscriptions";
@@ -128,6 +133,8 @@ export interface ArxivBrowserViewOptions {
   followItems?: (listener: () => void) => () => void;
   /** Show an item in the main window's library */
   showInLibrary?: (itemID: number) => void;
+  /** The days marked read (default: the plugin's, sharedReadingState) */
+  readingState?: ReadingState;
 }
 
 /** Page size from the settings, kept within 10–500 */
@@ -145,6 +152,10 @@ export function openingSetting(): OpeningSelection {
     : "newest";
 }
 
+/** What a loaded listing is for: the subscription and its categories */
+const loadedFor = (subscription: ArxivSubscription) =>
+  `${subscription.id} ${subscription.categories.join(" ")}`;
+
 /** The panes whose text can be selected and copied */
 const PANES = ".arxiv-browser__list, .arxiv-browser__detail";
 
@@ -161,6 +172,8 @@ export class ArxivBrowserView {
   /** Papers of authors in the library, by name, counted once per window */
   private readonly authorCounts = new Map<string, Promise<number>>();
   readonly loader: ListingLoader;
+  /** The days marked read, of every subscription */
+  private readonly reading: ReadingState;
   readonly actions: BrowserActions;
   /** The window's notices */
   private readonly reporter: Reporter;
@@ -175,8 +188,8 @@ export class ArxivBrowserView {
   private readonly sectionBoxes = new Map<ListingSection, HTMLInputElement>();
   private readonly filterInput: HTMLInputElement;
   private subscription: ArxivSubscription | undefined;
-  /** The categories the listing was loaded for */
-  private loadedCategories: string | null = null;
+  /** The subscription and categories the listing was loaded for */
+  private loadedFor: string | null = null;
   private sort: ListSort = "announcement";
   private filterText = "";
   /** Categories chosen with the subscription's chips (none: all) */
@@ -216,10 +229,15 @@ export class ArxivBrowserView {
       inspireRecid: options.inspireRecid,
       inLibrary: options.inLibrary,
     });
+    this.reading = options.readingState ?? sharedReadingState();
     this.loader = new ListingLoader(
       options.listing ?? new ListingService(),
       () => this.onLoaderChange(),
       this.clock,
+      (subscription, dates) => {
+        this.reading.setRead(subscription.id, dates, true);
+        this.dayPicker.refreshMarks();
+      },
     );
 
     // Subscription
@@ -255,6 +273,16 @@ export class ArxivBrowserView {
       clock: this.clock,
       specCount: () =>
         subscriptionPageSpecs(this.subscription?.categories ?? []).length,
+      marks: () => {
+        const subscription = this.subscription;
+        if (!subscription) return null;
+        return {
+          since: firstUnreadDay(subscription),
+          isRead: (date) => this.reading.isRead(subscription.id, date),
+          setRead: (dates, read) =>
+            this.reading.setRead(subscription.id, dates, read),
+        };
+      },
       onChoose: (selection) => {
         this.selection = selection;
         this.showSelection();
@@ -431,6 +459,26 @@ export class ArxivBrowserView {
     });
 
     this.onSubscriptionChange(this.subscriptions.current);
+
+    void this.reading.ready.then(() => {
+      if (this.disposed) return;
+      // Rare and not to be missed: a dialog rather than a passing notice
+      const notice = this.reading.takeFileNotice();
+      const win = this.doc.defaultView;
+      if (notice && win) {
+        Zotero.alert(
+          win as unknown as Window,
+          config.addonName,
+          getString(
+            notice.kind === "kept"
+              ? "arxiv-browser-reading-file-kept"
+              : "arxiv-browser-reading-file-unreadable",
+            { args: { path: notice.path } },
+          ),
+        );
+      }
+      this.dayPicker.refreshMarks();
+    });
   }
 
   /** The days listed: a preset or days picked in the calendar */
@@ -488,7 +536,7 @@ export class ArxivBrowserView {
     }
     if (!subscription) {
       this.loader.cancel();
-      this.loadedCategories = null;
+      this.loadedFor = null;
       this.listPane.showMessage(
         getString("arxiv-browser-empty"),
         button(this.doc, getString("arxiv-browser-subscription-new"), () =>
@@ -498,9 +546,9 @@ export class ArxivBrowserView {
       this.renderStatus();
       return;
     }
-    // Only the shown sections changed: the loaded listing stays
-    const categories = subscription.categories.join(" ");
-    if (categories === this.loadedCategories) {
+    // Only the shown sections changed: the loaded listing stays (another
+    // subscription loads its own, whose days are marked read for it)
+    if (loadedFor(subscription) === this.loadedFor) {
       this.arrange("focus");
       return;
     }
@@ -512,7 +560,7 @@ export class ArxivBrowserView {
     const subscription = this.subscription;
     if (!subscription) return;
     this.entryByKey.clear();
-    this.loadedCategories = subscription.categories.join(" ");
+    this.loadedFor = loadedFor(subscription);
     void this.loader.load(subscription, this.selection);
   }
 

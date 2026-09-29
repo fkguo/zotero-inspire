@@ -106,9 +106,15 @@ export function saveSubscriptions(
   setPref("arxiv_subscriptions", JSON.stringify(subscriptions));
 }
 
-/** A key for a new subscription */
+/** A key for a new subscription; it carries the time it was made */
 export function newSubscriptionId(): string {
   return `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** When a subscription was made (ms), from its key; undefined if not told */
+export function subscriptionCreatedMs(id: string): number | undefined {
+  const match = /^sub-([0-9a-z]+)-/.exec(id);
+  return match ? parseInt(match[1], 36) : undefined;
 }
 
 /**
