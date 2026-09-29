@@ -73,6 +73,7 @@ import {
 } from "../../inspire/panel/BatchImportManager";
 import { arxivBatchImport } from "../batchAdd";
 import { LibraryActions, type LibraryActionsOptions } from "./libraryActions";
+import { CompletionLine, type CompletionLineOptions } from "./completionLine";
 import {
   RelationTarget,
   relationTargetLine,
@@ -157,6 +158,8 @@ export interface ArxivBrowserViewOptions {
   addPapers?: LibraryActionsOptions["addPapers"];
   /** Asks for a save target (default: the save-target picker) */
   pickTarget?: LibraryActionsOptions["pickTarget"];
+  /** The INSPIRE completion entry's library, INSPIRE and dialog */
+  completion?: Omit<CompletionLineOptions, "reporter">;
   /** The batch import's callbacks (default: arxivBatchImport) */
   batchImport?: Pick<
     BatchImportManagerOptions,
@@ -208,6 +211,8 @@ export class ArxivBrowserView {
   readonly library: LibraryActions;
   /** The ticked papers and their batch import */
   readonly batch: BatchImportManager;
+  /** The INSPIRE completion entry of the status area */
+  private readonly completion: CompletionLine;
   private readonly relationLine: { element: HTMLElement; render(): void };
   private readonly tickBar: HTMLElement;
   private readonly tickCount: HTMLElement;
@@ -337,7 +342,17 @@ export class ArxivBrowserView {
     );
     this.status = html(doc, "span", "arxiv-browser__status");
     this.status.setAttribute("role", "status");
-    daysBar.append(days, this.reloadButton, this.cancelButton, this.status);
+    this.completion = new CompletionLine(doc, {
+      reporter: this.reporter,
+      ...options.completion,
+    });
+    daysBar.append(
+      days,
+      this.reloadButton,
+      this.cancelButton,
+      this.status,
+      this.completion.element,
+    );
 
     // Sort, sections, filter, page size, abstracts
     const listBar = html(doc, "div", "arxiv-browser__bar");
@@ -644,6 +659,7 @@ export class ArxivBrowserView {
     this.doc.defaultView?.removeEventListener("focus", this.onWindowFocus);
     this.batch.dispose();
     this.library.dispose();
+    this.completion.dispose();
     this.stopFollowing();
     this.stopFollowingLibrary?.();
     this.stopFollowingItems?.();
@@ -858,6 +874,7 @@ export class ArxivBrowserView {
     this.libraryChanges++;
     this.checkedDays = new WeakSet();
     void this.markLibraryPapers();
+    this.completion.recount();
   }
 
   /** The rows loaded that show the paper `id` (one per announcement day) */

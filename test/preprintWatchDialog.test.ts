@@ -516,6 +516,50 @@ function progressTexts(): string[] {
   return window ? window.lines.map((line) => line.text) : [];
 }
 
+describe("INSPIRE records asked for in the arXiv browser", () => {
+  it("lists them in the browser's window, without the preprint check's counts, and tells the outcome there", async () => {
+    const found = preprint("2409.20001");
+    const browser = new JSDOM("<!DOCTYPE html><html><body></body></html>", {
+      url: "https://example.org/",
+    });
+    const doc = browser.window.document;
+    const told: string[][] = [];
+    const run = new ZInspire().reviewInspireRecords(
+      [
+        {
+          itemID: found.id,
+          libraryID: 1,
+          arxivId: "2409.20001",
+          title: "Paper 2409.20001",
+          status: "found",
+          record: { recid: "301", title: "Paper 2409.20001" },
+          mismatches: [],
+          preselected: true,
+        },
+      ],
+      { document: doc, notify: (lines) => void told.push(lines) },
+    );
+    const shown = () =>
+      doc.getElementById("zinspire-preprint-results-overlay");
+    await vi.waitFor(() => expect(shown()).not.toBeNull());
+    // Not in the main window
+    expect(overlay()).toBeNull();
+    const text = shown()!.textContent;
+    expect(text).toContain(msg("preprint-found-records", { count: 1 }));
+    expect(text).not.toContain(msg("preprint-results-published"));
+    [...shown()!.querySelectorAll("button")]
+      .find((b) => b.textContent === msg("preprint-update-selected"))!
+      .click();
+    await run;
+    expect(mocks.writeInspireCompletion.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ itemID: found.id }),
+    ]);
+    expect(told).toEqual([[msg("preprint-records-written", { count: 1 })]]);
+    expect(notifications()).toEqual([]);
+    browser.window.close();
+  });
+});
+
 describe("the result of a check", () => {
   it("shows how many preprints had each outcome when none is published", async () => {
     // two requests: 50 papers answered, the 51st and 52nd not

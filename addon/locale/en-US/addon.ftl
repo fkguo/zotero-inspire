@@ -961,6 +961,18 @@ arxiv-browser-batch-added = Added { $added } of { $total } papers to { $target }
 arxiv-browser-batch-not-added = Not added:
 arxiv-browser-batch-none-added = None of the { $total } papers was added
 arxiv-browser-batch-pdf-failed = PDF not attached:
+arxiv-browser-completion = { $count ->
+        [one] 1 preprint added recently has no INSPIRE record yet
+       *[other] { $count } preprints added recently have no INSPIRE record yet
+    }
+arxiv-browser-completion-check = Check now
+arxiv-browser-completion-checking = Asking INSPIRE about the preprints added recently…
+arxiv-browser-completion-none-found = INSPIRE has none of them yet.
+arxiv-browser-completion-failed = INSPIRE could not be reached for { $count ->
+        [one] 1 preprint
+       *[other] { $count } preprints
+    }; check again later.
+arxiv-browser-completion-unreachable = INSPIRE could not be reached; check again later.
 arxiv-browser-batch-cancelled = Cancelled: { $count ->
         [one] 1 paper not added
        *[other] { $count } papers not added

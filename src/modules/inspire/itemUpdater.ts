@@ -178,6 +178,14 @@ interface UpdateRun extends CancellableRun {
  */
 type ItemRequestOutcome = "answered" | "failed" | "aborted";
 
+/** Where the preprint results dialog and its outcome are shown */
+export interface ReviewWindow {
+  /** The window's document (default: the main window's) */
+  document?: Document;
+  /** Tell the outcome (default: a popup by the main window) */
+  notify?: (lines: string[]) => void;
+}
+
 export class ZInspire {
   private closedProgressWindows = new WeakSet<ProgressWindowHelper>();
   /** Runs that have started and not ended yet */
@@ -1586,9 +1594,10 @@ export class ZInspire {
    */
   private async reviewPreprintResults(
     summary: PreprintCheckSummary,
+    where: ReviewWindow = {},
   ): Promise<void> {
     const { published, records, cancelled } =
-      await this.showPreprintCheckResultsDialog(summary);
+      await this.showPreprintCheckResultsDialog(summary, where.document);
     if (cancelled) return;
 
     const lines: string[] = [];
@@ -1632,12 +1641,36 @@ export class ZInspire {
       }
     }
     if (lines.length) {
-      this.showPreprintNotification(
-        lines,
-        failed ? "fail" : "success",
-        failed ? PREPRINT_SUMMARY_DISPLAY_MS : undefined,
-      );
+      if (where.notify) {
+        where.notify(lines);
+      } else {
+        this.showPreprintNotification(
+          lines,
+          failed ? "fail" : "success",
+          failed ? PREPRINT_SUMMARY_DISPLAY_MS : undefined,
+        );
+      }
     }
+  }
+
+  /**
+   * INSPIRE completion asked for in the arXiv browser: the items INSPIRE has
+   * a record of, in the results dialog shown in that window, where the user
+   * ticks what is written (as for "Check Preprint Status")
+   */
+  async reviewInspireRecords(
+    entries: CompletionEntry[],
+    where: Required<ReviewWindow>,
+  ): Promise<void> {
+    const results: PreprintCheckResult[] = entries.map((entry) => ({
+      itemID: entry.itemID,
+      arxivId: entry.arxivId,
+      title: entry.title,
+      status: "unpublished",
+      mismatches: entry.mismatches,
+      completion: entry,
+    }));
+    await this.reviewPreprintResults(buildCheckSummary(results), where);
   }
 
   /**
@@ -1914,19 +1947,19 @@ export class ZInspire {
    */
   private async showPreprintCheckResultsDialog(
     summary: PreprintCheckSummary,
+    hostDocument?: Document,
   ): Promise<{
     published: PreprintCheckResult[];
     records: CompletionEntry[];
     cancelled: boolean;
   }> {
     return new Promise((resolve) => {
-      const win = Zotero.getMainWindow();
-      if (!win) {
+      const doc = hostDocument ?? Zotero.getMainWindow()?.document;
+      if (!doc) {
         resolve({ published: [], records: [], cancelled: true });
         return;
       }
 
-      const doc = win.document;
       const publishedResults = summary.results.filter(
         (r) => r.status === "published" && r.publicationInfo,
       );
@@ -2011,7 +2044,8 @@ export class ZInspire {
         notInInspireSpan,
         errorsSpan,
       );
-      panel.appendChild(summaryBar);
+      // The counts are those of a preprint check (not of another window's)
+      if (!hostDocument) panel.appendChild(summaryBar);
 
       // List container
       const listContainer = doc.createElement("div");
