@@ -819,9 +819,11 @@ async function queryZoteroFieldCandidates(
   }
   if (nativeFieldID) {
     const placeholders = citationKeys.map(() => "?").join(",");
+    // Zotero.DB.queryAsync returns the rows only when the text starts with the
+    // word SELECT: it takes the first word with /^[^a-z]*[^ ]+/i, so with a
+    // line break before it the query returns nothing (db.js, queryAsync)
     const rows = await Zotero.DB.queryAsync(
-      `
-        SELECT itemID, value
+      `SELECT itemID, value
         FROM itemData
           JOIN itemDataValues USING(valueID)
         WHERE fieldID = ? AND value IN (${placeholders})
@@ -860,9 +862,9 @@ async function queryZoteroFieldCandidates(
     const conditions = patterns
       .map(() => "value LIKE ? ESCAPE '!'")
       .join(" OR ");
+    // Starts with SELECT for the same reason as the query above
     const rows = await Zotero.DB.queryAsync(
-      `
-        SELECT itemID, value
+      `SELECT itemID, value
         FROM itemData
           JOIN itemDataValues USING(valueID)
         WHERE fieldID = ? AND (${conditions})

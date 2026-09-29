@@ -246,7 +246,17 @@ beforeEach(() => {
     debug: vi.fn(),
     platformMajorVersion: 8,
     BetterBibTeX: undefined,
-    DB: { queryAsync: dbQueryAsync },
+    DB: {
+      // Zotero returns the rows only when the text starts with the word
+      // SELECT or PRAGMA: it takes the first word with /^[^a-z]*[^ ]+/i, so
+      // with anything before it (a line break, a space) the query runs and
+      // returns nothing (db.js, queryAsync)
+      queryAsync: async (sql: string, params?: unknown[]) => {
+        const rows = await dbQueryAsync(sql, params);
+        const op = sql.match(/^[^a-z]*[^ ]+/i)?.[0].toLowerCase();
+        return op === "select" || op === "pragma" ? rows : undefined;
+      },
+    },
     ItemFields: {
       getID: vi.fn((field: string) => {
         if (field === "citationKey") return 10;
@@ -651,6 +661,79 @@ describe("citation-key resolution", () => {
       citation_key_sources: ["zotero-native", "zotero-extra"],
     });
     expect(dbQueryAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it("fetches INSPIRE BibTeX for a native-field key when BBT is absent", async () => {
+    (Zotero as any).BetterBibTeX = undefined;
+    makeItem({ id: 7, key: "NATIVE", fields: inspireFields("700") });
+    dbQueryAsync.mockImplementation(async (_sql: string, params: unknown[]) =>
+      params[0] === 10 ? [{ itemID: 7, value: "NativeKey" }] : [],
+    );
+    mocks.inspireFetch.mockResolvedValue(bibtexResponse("Author:2026abc"));
+
+    const response = parse(
+      await dispatchInspireBibtexOp({
+        op: "fetch",
+        citation_keys: ["NativeKey"],
+      }),
+    );
+    expect(response).toMatchObject({
+      status: 200,
+      body: {
+        ok: true,
+        outcome: "ok",
+        resolver: { source: "zotero-fields", coverage: "complete" },
+        results: [
+          {
+            citation_key: "NativeKey",
+            status: "ok",
+            item: {
+              zotero_item_key: "NATIVE",
+              citation_key_sources: ["zotero-native"],
+            },
+            source: { provider: "INSPIRE-HEP", record_id: "700" },
+          },
+        ],
+        bibtex:
+          "@article{NativeKey,\n  title = {INSPIRE title},\n  year = {2026}\n}",
+      },
+    });
+    expect(mocks.inspireFetch).toHaveBeenCalledWith(
+      "https://inspirehep.net/api/literature/700?format=bibtex",
+      expect.anything(),
+    );
+  });
+
+  it("reports a native-field key held by two items as ambiguous when BBT is absent", async () => {
+    (Zotero as any).BetterBibTeX = undefined;
+    makeItem({ id: 7, key: "ORIGINAL", fields: inspireFields("700") });
+    makeItem({ id: 8, key: "DUPLICATE", fields: inspireFields("700") });
+    dbQueryAsync.mockImplementation(async (_sql: string, params: unknown[]) =>
+      params[0] === 10
+        ? [
+            { itemID: 7, value: "SharedKey" },
+            { itemID: 8, value: "SharedKey" },
+          ]
+        : [],
+    );
+
+    const batch = await buildInspireBibtexBatch(["SharedKey"]);
+    expect(batch.results[0]).toMatchObject({
+      citation_key: "SharedKey",
+      status: "error",
+      code: "CITATION_KEY_AMBIGUOUS",
+      candidates: [
+        {
+          zotero_item_key: "DUPLICATE",
+          citation_key_sources: ["zotero-native"],
+        },
+        {
+          zotero_item_key: "ORIGINAL",
+          citation_key_sources: ["zotero-native"],
+        },
+      ],
+    });
+    expect(mocks.inspireFetch).not.toHaveBeenCalled();
   });
 
   it("does not accept a stale Extra-only key when native coverage is complete", async () => {
