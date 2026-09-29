@@ -7,6 +7,12 @@
 // calendar telling how many requests a first load of them takes and how
 // long at least. Only listing days arXiv still serves can be picked: Monday
 // to Friday, up to the newest scheduled listing, about 90 days back.
+//
+// A blue dot marks each such day of the subscription not marked read, from
+// the subscription's first day on (days never fetched count as announcement
+// days by weekday). The preset "Unread days" picks them all; the picked days
+// can be marked read or unread, and "Mark all read" marks every dotted day
+// without fetching anything.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { FluentMessageId } from "../../../../typings/i10n";
@@ -41,6 +47,25 @@ export function servedListingDays(nowMs: number): IsoDate[] {
     if (weekday !== 0 && weekday !== 6) days.push(date);
   }
   return days;
+}
+
+/** The reading marks of the subscription shown */
+export interface DayMarks {
+  /** Its first day that can be unread; undefined: no such limit */
+  since: IsoDate | undefined;
+  isRead(date: IsoDate): boolean;
+  setRead(dates: readonly IsoDate[], read: boolean): void;
+}
+
+/** The days of `days` a blue dot marks: from `since` on, not read */
+export function unreadDays(
+  days: readonly IsoDate[],
+  marks: DayMarks | null,
+): IsoDate[] {
+  if (!marks) return [];
+  return days.filter(
+    (date) => (!marks.since || date >= marks.since) && !marks.isRead(date),
+  );
 }
 
 type Preset = "newest" | "recent" | "week";
@@ -85,6 +110,8 @@ export interface DayPickerOptions {
   clock: Clock;
   /** Categories and archives of the subscription: the requests per day */
   specCount(): number;
+  /** The reading marks of the subscription (null without one) */
+  marks(): DayMarks | null;
   /** Load a preset or the days picked */
   onChoose(selection: DaySelection): void;
 }
@@ -97,6 +124,8 @@ export class DayPicker {
   /** Days that can be picked, oldest first */
   private days: IsoDate[] = [];
   private served = new Set<IsoDate>();
+  /** The days with a blue dot, oldest first */
+  private unread: IsoDate[] = [];
   /** "YYYY-MM" of the month shown */
   private month = "";
   private readonly grid: HTMLElement;
@@ -106,6 +135,9 @@ export class DayPicker {
   private readonly summary: HTMLElement;
   private readonly loadButton: HTMLButtonElement;
   private readonly presetButtons = new Map<Preset, HTMLButtonElement>();
+  private readonly unreadButton: HTMLButtonElement;
+  private readonly markButton: HTMLButtonElement;
+  private readonly markAllButton: HTMLButtonElement;
 
   constructor(private readonly options: DayPickerOptions) {
     const doc = options.anchor.ownerDocument;
@@ -123,23 +155,12 @@ export class DayPicker {
       this.presetButtons.set(preset, choose);
       presets.append(choose);
     }
-    // The days not marked read: needs the reading state, which a later step
-    // adds
-    const unread = button(
+    this.unreadButton = button(
       doc,
       getString("arxiv-browser-days-unread"),
-      () => undefined,
+      () => this.choose({ kind: "days", dates: [...this.unread] }),
     );
-    unread.disabled = true;
-    presets.append(
-      unread,
-      html(
-        doc,
-        "span",
-        "arxiv-browser__daypicker-note",
-        getString("arxiv-browser-days-unread-note"),
-      ),
-    );
+    presets.append(this.unreadButton);
 
     const header = html(doc, "div", "arxiv-browser__daypicker-month");
     this.previous = button(doc, "‹", () => this.showMonth(-1));
@@ -158,6 +179,23 @@ export class DayPicker {
       "arxiv-browser__daypicker-note",
       getString("arxiv-browser-days-hint"),
     );
+    const marks = html(doc, "div", "arxiv-browser__daypicker-marks");
+    this.markButton = button(doc, "", () => this.markPicked());
+    this.markAllButton = button(
+      doc,
+      getString("arxiv-browser-days-mark-all-read"),
+      () => this.setRead(this.unread, true),
+    );
+    marks.append(
+      html(
+        doc,
+        "span",
+        "arxiv-browser__daypicker-note",
+        getString("arxiv-browser-days-unread-legend"),
+      ),
+      this.markButton,
+      this.markAllButton,
+    );
     const footer = html(doc, "div", "arxiv-browser__daypicker-footer");
     this.summary = html(doc, "span", "arxiv-browser__daypicker-summary");
     this.loadButton = button(doc, getString("arxiv-browser-days-load"), () =>
@@ -170,7 +208,7 @@ export class DayPicker {
       this.loadButton,
     );
 
-    this.element.append(presets, header, this.grid, hint, footer);
+    this.element.append(presets, header, this.grid, hint, marks, footer);
     this.element.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -233,6 +271,25 @@ export class DayPicker {
     this.element.remove();
   }
 
+  /** Show the reading marks again (they changed, or were read from disk) */
+  refreshMarks(): void {
+    if (this.isOpen) this.render();
+  }
+
+  private setRead(dates: readonly IsoDate[], read: boolean): void {
+    if (!dates.length) return;
+    this.options.marks()?.setRead(dates, read);
+    this.render();
+  }
+
+  /** Mark the picked days read, or unread when all of them are read */
+  private markPicked(): void {
+    const marks = this.options.marks();
+    const picked = [...this.selected];
+    if (!marks || !picked.length) return;
+    this.setRead(picked, !picked.every((date) => marks.isRead(date)));
+  }
+
   private choose(selection: DaySelection): void {
     if (selection.kind === "days" && !selection.dates.length) return;
     this.close();
@@ -256,6 +313,11 @@ export class DayPicker {
     }).format(new Date(isoDateToMs(first)));
     this.previous.disabled = this.month <= monthOf(this.days[0]);
     this.next.disabled = this.month >= monthOf(this.days[this.days.length - 1]);
+
+    const marks = this.options.marks();
+    this.unread = unreadDays(this.days, marks);
+    const unread = new Set(this.unread);
+    this.showUnreadPreset();
 
     const cells: HTMLElement[] = [];
     const weekdayName = new Intl.DateTimeFormat(locale(), {
@@ -289,7 +351,17 @@ export class DayPicker {
       const day = html(doc, "button", "arxiv-browser__daypicker-day", number);
       day.type = "button";
       day.dataset.date = date;
-      day.setAttribute("aria-label", formatDay(date));
+      if (unread.has(date)) {
+        day.classList.add("arxiv-browser__daypicker-day--unread");
+        day.setAttribute(
+          "aria-label",
+          getString("arxiv-browser-days-day-unread", {
+            args: { date: formatDay(date) },
+          }),
+        );
+      } else {
+        day.setAttribute("aria-label", formatDay(date));
+      }
       cells.push(day);
     }
     this.grid.replaceChildren(...cells);
@@ -306,6 +378,15 @@ export class DayPicker {
       });
     const count = this.selected.size;
     this.loadButton.disabled = count === 0;
+    const marks = this.options.marks();
+    const allRead =
+      count > 0 && [...this.selected].every((date) => marks?.isRead(date));
+    this.markButton.textContent = getString(
+      allRead
+        ? "arxiv-browser-days-mark-unread"
+        : "arxiv-browser-days-mark-read",
+    );
+    this.markButton.disabled = count === 0 || !marks;
     if (!count) {
       this.summary.textContent = getString("arxiv-browser-days-none");
       return;
@@ -322,6 +403,18 @@ export class DayPicker {
         time: formatDuration(estimate.minimumMs),
       },
     });
+  }
+
+  /** "Unread days" and "Mark all read": the dotted days, when there are some */
+  private showUnreadPreset(): void {
+    const count = this.unread.length;
+    this.unreadButton.disabled = count === 0;
+    this.markAllButton.disabled = count === 0;
+    this.unreadButton.title = count
+      ? this.estimateText(
+          estimateListingRequests("catchup", this.options.specCount(), count),
+        )
+      : getString("arxiv-browser-days-unread-none");
   }
 
   private estimateText(estimate: {
