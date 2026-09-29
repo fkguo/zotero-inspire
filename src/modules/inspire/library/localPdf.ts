@@ -10,14 +10,23 @@ import { loadedItem } from "./localStatus";
 
 /**
  * The ID of the item's first PDF attachment, or null (also for an item of a
- * library whose items are not loaded yet)
+ * library whose items are not loaded yet, or are being loaded: the item is
+ * there before its attachments are)
  */
 export function firstPdfAttachmentID(parentItemID: number): number | null {
   const parentItem = loadedItem(parentItemID);
   if (!parentItem) {
     return null;
   }
-  const attachmentIDs = parentItem.getAttachments?.() || [];
+  let attachmentIDs: number[];
+  try {
+    attachmentIDs = parentItem.getAttachments?.() || [];
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "UnloadedDataException") {
+      return null;
+    }
+    throw err;
+  }
   for (const id of attachmentIDs) {
     const attachment = Zotero.Items.get(id) as Zotero.Item | undefined;
     if (attachment?.isPDFAttachment?.()) {
