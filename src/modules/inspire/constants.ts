@@ -166,6 +166,7 @@ export const CITATION_RANGES = {
 export const SEARCH_HISTORY_MAX_ENTRIES = 50;
 export const SEARCH_HISTORY_PREF_KEY = "inspireSearchHistory";
 export const ACADEMIC_SEARCH_HISTORY_PREF_KEY = "academicAuthorSearchHistory";
+export const ARXIV_SEARCH_HISTORY_PREF_KEY = "arxivSearchHistory";
 export const SEARCH_HISTORY_DAYS_PREF_KEY = "search_history_days";
 export const SEARCH_HISTORY_DAYS_DEFAULT = 30;
 export const FILTER_HISTORY_MAX_ENTRIES = 50;

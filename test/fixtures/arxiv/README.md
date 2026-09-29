@@ -46,3 +46,11 @@ Changes made to keep the files small:
   first 3 entries; the section heading "showing last 274 of 735 entries" became
   "showing last 3 of 735 entries". The day's total (2274) and the paging links
   were left as received.
+
+Saved on 29 September 2026, 13:29–13:35 UTC, for the search of arXiv in the
+browser window (anonymous requests at least 3 s apart), as received:
+
+| File                                 | Request                                                                                                                                               |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api-search-hep-ph-tetraquark-3.xml` | `https://export.arxiv.org/api/query?search_query=cat%3Ahep-ph+AND+ti%3Atetraquark&sortBy=submittedDate&sortOrder=descending&start=0&max_results=3`    |
+| `api-search-error-400.xml`           | `https://export.arxiv.org/api/query?search_query=ti%3A%28&sortBy=submittedDate&sortOrder=descending&start=0&max_results=2` (HTTP 400, an error entry) |

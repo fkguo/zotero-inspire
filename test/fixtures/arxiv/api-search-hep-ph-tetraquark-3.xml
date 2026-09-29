@@ -1,0 +1,70 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/kjnUKbQ0HYy/b0VtBKp9sMdNPS8</id>
+  <title>arXiv Query: search_query=cat:hep-ph AND ti:tetraquark&amp;id_list=&amp;start=0&amp;max_results=3</title>
+  <updated>2026-09-29T13:34:51Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:hep-ph+AND+ti:tetraquark&amp;start=0&amp;max_results=3&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>3</opensearch:itemsPerPage>
+  <opensearch:totalResults>809</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2609.10822v2</id>
+    <title>A Colour-Casimir Adjacency Matrix Approach to Fully-Heavy Tetraquarks</title>
+    <updated>2026-09-15T20:56:17Z</updated>
+    <link href="https://arxiv.org/abs/2609.10822v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.10822v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We present a phenomenological framework for fully-heavy tetraquark spectroscopy based on spectral graph theory. The four valence partons are the vertices of \(K_4\), with edge weights fixed by the colour-Casimir factors of the two colour-singlet diquark--antidiquark channels, \(\bar3\otimes3\) and \(6\otimes\bar6\); a physical state is a coherent mixture of the two, controlled by one mixing angle. Unlike an earlier version, which passed the colour-weighted adjacency matrix through an absolute-degree graph Laplacian, here the spectrum is obtained by \emph{directly} diagonalising the adjacency matrix; we show analytically that the Laplacian step inverts the physical correspondence between colour attraction and mass ordering. Fixing the model's three parameters (mixing angle, energy scale, effective charm mass) against \(X(6900)\), \(X(7100)\), and the more tentative \(X(7200)\) gives \(α=0.740\), \(γ=23.2\,\mathrm{MeV}\), \(m_c=1.77\,\mathrm{GeV}\); with three parameters fixed by three inputs this has zero residual degrees of freedom and is not itself a statistical test. The framework's value rests instead on two genuinely predictive, zero-additional-parameter applications: the all-bottom ground state falls at \(18.7\)--\(18.9\,\mathrm{GeV}\) for standard \(m_b\), with no retuning; and for \(T_{cc}^+\) the same mechanism under-binds by \(\approx93\,\mathrm{MeV}\), a quantitative diagnostic of missing long-range (molecular) dynamics. We discuss the sensitivity to the tentative status of \(X(7200)\), the tension between this static colour-configuration picture and the diquark radial-excitation interpretation favoured by recent CMS data, and what further data would make the model falsifiable in a stronger sense.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="math-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-09T20:48:58Z</published>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>M. Monemzadeh</name>
+    </author>
+    <author>
+      <name>N. Tazimi</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.04628v1</id>
+    <title>QCD sum rule analysis of hidden strange $1^{++}$ tetraquark masses and radial excitations</title>
+    <updated>2026-09-04T02:01:37Z</updated>
+    <link href="https://arxiv.org/abs/2609.04628v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.04628v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We revisit the light tetraquark states with quantum numbers $J^{PC}=1^{++}$ using QCD sum rules, focusing on a complete set of derivative-free diquark-antidiquark interpolating currents. By calculating the operator product expansion up to dimension-eight condensates, we extract the ground-state mass of the hidden-strange $us\bar{u}\bar{s}$ tetraquark from both Laplace sum rules (LSR) and finite-energy sum rules (FESR). Our combined analysis yields $M_{us\bar{u}\bar{s}} = 1.45\pm0.11$~GeV, which agrees well with the mass of the $a_1(1420)$ resonance and supports its tetraquark interpretation. Furthermore, we perform Gaussian sum rule (GSR) analyses to probe radial excitations, adopting a two-resonance narrow-width model. The GSR fit reveals a heavier state with mass $m_2 = 1.86\pm0.12$~GeV and a relative coupling $r = 0.15\pm0.03$ for the lighter state, indicating that the $a_1(1930)$ is a promising candidate for a compact $1^{++}$ tetraquark. We also discuss the dominant decay modes of these tetraquark candidates, emphasizing hidden-strange channels such as $K^*K$ and $f_0(980)π$, which can be tested in future experiments.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-04T02:01:37Z</published>
+    <arxiv:comment>17 pages, 2 figures</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Zhuo-Ran Huang</name>
+    </author>
+    <author>
+      <name>Wei Chen</name>
+    </author>
+    <author>
+      <name>Jason Ho</name>
+    </author>
+    <author>
+      <name>Lei-Hua Liu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.04049v1</id>
+    <title>TQ4Q2.0 Fragmentation Functions for Fully Heavy Tetraquark Production</title>
+    <updated>2026-09-03T16:22:20Z</updated>
+    <link href="https://arxiv.org/abs/2609.04049v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.04049v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We investigate the fragmentation dynamics underlying the production of fully heavy tetraquarks by means of the TQ4Q2.0 collinear FF set, covering scalar ($0^{++}$), axial-vector ($1^{+-}$), and tensor ($2^{++}$) configurations. The fragmentation inputs are determined within NRQCD factorization for the complete set of relevant partonic channels and are subsequently evolved across heavy-flavor thresholds through the HF-NRevo scheme. Perturbative uncertainties associated with fragmentation-scale variations are consistently propagated together with nonperturbative effects encoded in color-composite long-distance matrix elements. Attention is devoted to the axial-vector sector, whose fragmentation pattern makes it especially sensitive to intrinsic-charm contributions at LHC and FCC energies. TQ4Q2.0 therefore provides an uncertainty-aware framework for exploring fully heavy tetraquark production over a broad kinematic range and for connecting exotic-hadron spectroscopy with the partonic structure of the proton.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="hep-ex" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="nucl-ex" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="nucl-th" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-03T16:22:20Z</published>
+    <arxiv:comment>7 pages, 1 figure. Proceedings of the 33rd International Workshop on Deep Inelastic Scattering and Related Subjects (DIS2026), 4-8 May 2026, Bologna, Italy</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Francesco Giovanni Celiberto</name>
+    </author>
+  </entry>
+</feed>

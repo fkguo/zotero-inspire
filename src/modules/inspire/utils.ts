@@ -2,6 +2,7 @@ import { config } from "../../../package.json";
 import {
   SEARCH_HISTORY_PREF_KEY,
   ACADEMIC_SEARCH_HISTORY_PREF_KEY,
+  ARXIV_SEARCH_HISTORY_PREF_KEY,
 } from "./constants";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,6 +300,11 @@ export function clearAllHistoryPrefs(): void {
     Zotero.debug(`[${config.addonName}] Search history cleared`);
     Zotero.Prefs.set(
       `${config.addonRef}.${ACADEMIC_SEARCH_HISTORY_PREF_KEY}`,
+      "[]",
+      true,
+    );
+    Zotero.Prefs.set(
+      `${config.addonRef}.${ARXIV_SEARCH_HISTORY_PREF_KEY}`,
       "[]",
       true,
     );

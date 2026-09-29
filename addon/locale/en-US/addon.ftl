@@ -865,6 +865,17 @@ arxiv-browser-sort-id-asc = arXiv ID ↑
 arxiv-browser-sort-id-desc = arXiv ID ↓
 arxiv-browser-sort-primary = Primary category
 arxiv-browser-filter = Filter: words or "phrases"
+arxiv-browser-search = Search arXiv
+arxiv-browser-search-tooltip = Search all of arXiv, newest submissions first (Enter). Words search all fields and must all match; arXiv’s syntax works too: au:witten, ti:tetraquark, abs:"chiral perturbation", cat:hep-ph, AND, OR, ANDNOT, ( ), submittedDate:[202601010000 TO 202612312359]
+arxiv-browser-search-clear = Clear the search and go back to the days listed
+arxiv-browser-search-running = Searching arXiv…
+arxiv-browser-search-none = arXiv found no papers.
+arxiv-browser-search-found = arXiv found { $total ->
+        [one] 1 paper
+       *[other] { $total } papers
+    }; { $fetched } fetched.
+arxiv-browser-search-limit = arXiv gives the first { $limit } only.
+arxiv-browser-search-refused = arXiv did not accept the search: { $message }
 arxiv-browser-quick-filter-local-tooltip = Show papers already in your Zotero library
 arxiv-browser-quick-filter-online-tooltip = Show papers not yet in your Zotero library
 arxiv-browser-quick-filter-related-tooltip = Show papers whose Zotero item has related items
@@ -897,6 +908,7 @@ arxiv-browser-detail-section-replace = { $category }: replacement
 arxiv-browser-detail-authors-limit = arXiv’s listing names at most 100 authors; the arXiv page has them all.
 arxiv-browser-detail-version = version { $version }
 arxiv-browser-detail-announced = announced { $date }
+arxiv-browser-detail-submitted = submitted { $date }
 arxiv-browser-detail-comments = Comments:
 arxiv-browser-detail-journal-ref = Journal reference:
 arxiv-browser-detail-in-library = ✓ In your library

@@ -50,10 +50,11 @@ export interface BrowserEntry extends InspireReferenceEntry {
 
 /**
  * Key of a paper's row: a paper announced on two days (a new version) has a
- * row on each, which the entry list keeps apart by this key
+ * row on each, which the entry list keeps apart by this key; a search result
+ * (no announcement day) has its own
  */
-export function rowKey(id: string, date: IsoDate): string {
-  return `arxiv-${id}-${date}`;
+export function rowKey(id: string, date: IsoDate | undefined): string {
+  return `arxiv-${id}-${date ?? "search"}`;
 }
 
 /** "Family, Given" as the entry list and author cards read names */
@@ -173,7 +174,7 @@ export const ARXIV_QUICK_FILTER_CONFIGS: readonly QuickFilterConfig[] = [
 });
 
 /** A collaboration's name among the authors ("ALICE Collaboration") */
-const COLLABORATION = /\bcollaborations?\b/i;
+export const COLLABORATION = /\bcollaborations?\b/i;
 
 /**
  * At most ten authors, a collaboration's name not counted: a paper signed
@@ -285,6 +286,11 @@ export interface ListGroup {
 
 export interface ListDay {
   listing: DayListing;
+  /**
+   * Search results: the month of submission ("2026-09") whose papers these
+   * are; `listing` then stands in for a day (its date is the month's first)
+   */
+  month?: string;
   groups: ListGroup[];
   /** Papers shown, in order */
   count: number;
@@ -472,6 +478,51 @@ export function arrangeList(
     entries: arranged.flatMap((day) =>
       day.groups.flatMap((group) => group.entries),
     ),
+  };
+}
+
+/**
+ * The results of a search as a list: in arXiv's order (newest submission
+ * first) under the months of their submission, through the text and quick
+ * filters as the days are; months without a paper shown are left out
+ */
+export function arrangeResults(
+  entries: readonly BrowserEntry[],
+  options: Pick<ListOptions, "filter" | "quick">,
+): ArrangedList {
+  const months = new Map<string, { all: number; shown: BrowserEntry[] }>();
+  for (const entry of entries) {
+    const month = (entry.listing.submitted ?? "").slice(0, 7);
+    let group = months.get(month);
+    if (!group) months.set(month, (group = { all: 0, shown: [] }));
+    group.all++;
+    if (!passes(entry, options.filter)) continue;
+    if (options.quick && !options.quick(entry)) continue;
+    group.shown.push(entry);
+  }
+  const days: ListDay[] = [];
+  for (const [month, { all, shown }] of months) {
+    if (!shown.length) continue;
+    days.push({
+      listing: {
+        date: `${month}-01`,
+        status: "complete",
+        entries: [],
+        specs: [],
+        latest: false,
+      },
+      month,
+      groups: [{ kind: "all", key: "all", entries: shown }],
+      count: shown.length,
+      inSections: all,
+      onChosenPages: all,
+      pagesFetched: true,
+    });
+  }
+  return {
+    days,
+    sectionOf: new Map(),
+    entries: days.flatMap((day) => day.groups[0].entries),
   };
 }
 

@@ -1,9 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ArxivBrowserView: the content of the arXiv browser window, built into one
 // container element of the window's document: the subscription, the days
-// listed (chosen in a calendar) with the loading status, the list's
-// controls, the list and the detail pane. It keeps no reference to the main
-// window, so the same view could be placed elsewhere.
+// listed (chosen in a calendar) with the loading status, the search of
+// arXiv, the list's controls, the list and the detail pane. A search's
+// results take the days' place in the list (the same rows and controls,
+// under the months of their submission) until the search is cleared. It
+// keeps no reference to the main window, so the same view could be placed
+// elsewhere.
 //
 // Keys (outside text fields): j / k or ↓ / ↑ move between papers across page
 // boundaries, n / p turn pages, Home / End go to the first / last paper of the
@@ -19,7 +22,9 @@ import { config } from "../../../../package.json";
 import type { FluentMessageId } from "../../../../typings/i10n";
 import { getString } from "../../../utils/locale";
 import { getPref, setPref } from "../../../utils/prefs";
+import { arxivSearchQuery, SEARCH_RESULT_LIMIT } from "../arxivApi";
 import {
+  getArxivApiScheduler,
   getArxivWebScheduler,
   systemClock,
   type ArxivScheduler,
@@ -30,6 +35,7 @@ import { subscriptionPageSpecs } from "../arxivCategories";
 import { ListingService } from "../listingService";
 import {
   LISTING_SECTIONS,
+  type ArxivListingEntry,
   type DayListing,
   type ListingSection,
 } from "../listingTypes";
@@ -43,6 +49,7 @@ import {
 import {
   ARXIV_QUICK_FILTER_CONFIGS,
   arrangeList,
+  arrangeResults,
   filterGroups,
   LIST_SORTS,
   passesQuickFilters,
@@ -60,7 +67,8 @@ import {
   type DaySelection,
   type OpeningSelection,
 } from "./ListingLoader";
-import { ListPane, type ListUpdate } from "./ListPane";
+import { ListPane, type ListPosition, type ListUpdate } from "./ListPane";
+import { SearchLoader, type FetchSearchPage } from "./SearchLoader";
 import { AuthorPreviewController } from "../../inspire/panel/AuthorPreviewController";
 import { HoverPreviewController } from "../../inspire/panel/HoverPreviewController";
 import {
@@ -79,6 +87,7 @@ import {
 } from "../../inspire/panel/BatchImportManager";
 import { BatchToolbar } from "../../inspire/panel/BatchToolbar";
 import { FilterHistoryInput } from "../../inspire/panel/FilterHistoryInput";
+import { arxivSearchHistory } from "../../inspire/searchHistory";
 import { QuickFiltersControl } from "../../inspire/panel/QuickFiltersControl";
 import type { QuickFilterType } from "../../inspire/constants";
 import { setQuickFilter } from "../../inspire/filters";
@@ -123,6 +132,10 @@ export interface ArxivBrowserViewOptions {
   listing?: ListingService;
   /** The arxiv.org scheduler whose waits the status line shows */
   webScheduler?: ArxivScheduler;
+  /** The API scheduler whose waits the status line shows while searching */
+  apiScheduler?: ArxivScheduler;
+  /** Searches arXiv (default: its API, through the plugin's API scheduler) */
+  searchArxiv?: FetchSearchPage;
   /** Time for the status line's countdown */
   clock?: Clock;
   /** Opens a page in the system's web browser (default: Zotero.launchURL) */
@@ -213,6 +226,25 @@ export class ArxivBrowserView {
   /** Papers of authors in the library, by name, counted once per window */
   private readonly authorCounts = new Map<string, Promise<number>>();
   readonly loader: ListingLoader;
+  /** The search of arXiv whose results the list shows instead of the days */
+  readonly search: SearchLoader;
+  /** The search box, with the search history */
+  private readonly searchBox: FilterHistoryInput;
+  private readonly searchClear: HTMLButtonElement;
+  /** The results the list shows (null: the days) */
+  private shownResults: readonly ArxivListingEntry[] | null = null;
+  /** The rows of search results, by result */
+  private readonly entryOfResult = new WeakMap<
+    ArxivListingEntry,
+    BrowserEntry
+  >();
+  /** Where the reader was in the days when the search began */
+  private daysPosition: ListPosition | null = null;
+  /**
+   * Next past the results fetched: the place in the list of the first
+   * paper to come, whose page is shown once they arrive
+   */
+  private wantedIndex: number | null = null;
   /** The days marked read, of every subscription */
   private readonly reading: ReadingState;
   readonly actions: BrowserActions;
@@ -234,6 +266,7 @@ export class ArxivBrowserView {
   private readonly reloadButton: HTMLButtonElement;
   private readonly cancelButton: HTMLButtonElement;
   private readonly status: HTMLElement;
+  private readonly sortSelect: HTMLSelectElement;
   private readonly sectionBoxes = new Map<ListingSection, HTMLInputElement>();
   /** The filter box, with the filter history */
   private readonly filterBox: FilterHistoryInput;
@@ -249,13 +282,17 @@ export class ArxivBrowserView {
   private categories: ReadonlySet<string> = new Set();
   private filterTimer: number | undefined;
   private schedulerStatus: ArxivSchedulerStatus | null = null;
+  private apiStatus: ArxivSchedulerStatus | null = null;
   private countdown: number | undefined;
   private readonly stopFollowing: () => void;
+  private readonly stopFollowingApi: () => void;
   private readonly entriesOfDay = new WeakMap<DayListing, BrowserEntry[]>();
-  /** The papers of the listing loaded, by row key */
+  /** The papers of the listing loaded and of the search, by row key */
   private readonly entryByKey = new Map<string, BrowserEntry>();
   /** Days whose papers were looked up in the library since it last changed */
   private checkedDays = new WeakSet<DayListing>();
+  /** Search results looked up in the library since it last changed */
+  private checkedResults = new WeakSet<BrowserEntry>();
   /** Counts the library's changes: a lookup older than one is not written */
   private libraryChanges = 0;
   private readonly stopFollowingLibrary: (() => void) | undefined;
@@ -343,13 +380,36 @@ export class ArxivBrowserView {
       },
     });
     this.showSelection();
+    // Searching arXiv: its results take the days' place until cleared
+    this.search = new SearchLoader(
+      () => this.onSearchChange(),
+      options.searchArxiv,
+    );
+    this.searchBox = new FilterHistoryInput(doc, {
+      placeholder: getString("arxiv-browser-search"),
+      store: arxivSearchHistory,
+      onInput: () => this.showSearchClear(),
+      onSubmit: (text) => this.runSearch(text),
+    });
+    this.searchBox.wrapper.classList.add("arxiv-browser__search");
+    this.searchBox.input.title = getString("arxiv-browser-search-tooltip");
+    this.searchClear = button(
+      doc,
+      "×",
+      () => this.endSearch(),
+      "arxiv-browser__search-clear",
+    );
+    this.searchClear.title = getString("arxiv-browser-search-clear");
+    this.searchClear.hidden = true;
     this.reloadButton = button(doc, getString("arxiv-browser-reload"), () => {
-      void this.loader.refresh();
+      if (this.search.active) void this.search.refresh(this.listPane.size);
+      else void this.loader.refresh();
     });
     this.reloadButton.title = getString("arxiv-browser-reload-tooltip");
-    this.cancelButton = button(doc, getString("arxiv-browser-cancel"), () =>
-      this.loader.cancel(),
-    );
+    this.cancelButton = button(doc, getString("arxiv-browser-cancel"), () => {
+      if (this.search.active) this.search.cancel();
+      else this.loader.cancel();
+    });
     this.status = html(doc, "span", "arxiv-browser__status");
     this.status.setAttribute("role", "status");
     this.completion = new CompletionLine(doc, {
@@ -358,6 +418,8 @@ export class ArxivBrowserView {
     });
     daysBar.append(
       days,
+      this.searchBox.wrapper,
+      this.searchClear,
       this.reloadButton,
       this.cancelButton,
       this.status,
@@ -367,6 +429,7 @@ export class ArxivBrowserView {
     // Sort, sections, filter, page size, abstracts
     const listBar = html(doc, "div", "arxiv-browser__bar");
     const sortSelect = html(doc, "select", "arxiv-browser__select");
+    this.sortSelect = sortSelect;
     for (const sort of LIST_SORTS) {
       const option = html(
         doc,
@@ -587,6 +650,7 @@ export class ArxivBrowserView {
       onLink: (entry, anchor) => void this.library.relate(entry, anchor),
       isRelated: (entry) => this.library.isRelated(entry),
       headerTools: this.batchToolbar.element,
+      onMore: () => this.fetchMoreResults(),
       relatedTitles: (entry) =>
         this.library
           .relatedItemsOf(entry)
@@ -597,6 +661,12 @@ export class ArxivBrowserView {
     this.stopFollowing = scheduler.onStatus((status) => {
       this.schedulerStatus = status;
       this.renderStatus();
+    });
+    this.stopFollowingApi = (
+      options.apiScheduler ?? getArxivApiScheduler()
+    ).onStatus((status) => {
+      this.apiStatus = status;
+      if (this.search.running) this.renderStatus();
     });
     doc.addEventListener("keydown", this.onKeyDown);
     doc.addEventListener("contextmenu", this.onContextMenu);
@@ -648,12 +718,14 @@ export class ArxivBrowserView {
     this.library.dispose();
     this.completion.dispose();
     this.stopFollowing();
+    this.stopFollowingApi();
     this.stopFollowingLibrary?.();
     this.stopFollowingItems?.();
     this.stopCountdown();
     const win = this.doc.defaultView;
     if (this.filterTimer !== undefined) win?.clearTimeout(this.filterTimer);
     this.loader.dispose();
+    this.search.dispose();
     this.actions.dispose();
     this.dayPicker.dispose();
     this.listPane.dispose();
@@ -696,17 +768,13 @@ export class ArxivBrowserView {
     this.categories = this.subscriptions.chosenCategories;
     for (const [section, box] of this.sectionBoxes) {
       box.checked = subscription?.sections[section] ?? true;
-      box.disabled = !subscription;
     }
+    this.enableListControls();
     if (!subscription) {
+      this.leaveSearch();
       this.loader.cancel();
       this.loadedFor = null;
-      this.listPane.showMessage(
-        getString("arxiv-browser-empty"),
-        button(this.doc, getString("arxiv-browser-subscription-new"), () =>
-          this.subscriptions.openEditor(undefined),
-        ),
-      );
+      this.showNoSubscription();
       this.renderStatus();
       return;
     }
@@ -719,10 +787,21 @@ export class ArxivBrowserView {
     this.load();
   }
 
+  /** No subscription: the list offers to make one */
+  private showNoSubscription(): void {
+    this.listPane.showMessage(
+      getString("arxiv-browser-empty"),
+      button(this.doc, getString("arxiv-browser-subscription-new"), () =>
+        this.subscriptions.openEditor(undefined),
+      ),
+    );
+  }
+
   /** Load the chosen days of the chosen subscription from scratch */
   private load(): void {
     const subscription = this.subscription;
     if (!subscription) return;
+    this.leaveSearch();
     this.entryByKey.clear();
     // The selection is of the rows of the listing loaded before
     this.batch.clearSelection();
@@ -737,7 +816,8 @@ export class ArxivBrowserView {
 
   private onLoaderChange(): void {
     if (this.disposed) return;
-    this.arrange("keep-page");
+    // Days loading behind a search's results wait to be shown
+    if (!this.search.active) this.arrange("keep-page");
     this.renderStatus();
     this.listPane.setRetryEnabled(!this.loader.running);
     void this.markLibraryPapers();
@@ -768,9 +848,21 @@ export class ArxivBrowserView {
     return entries;
   };
 
-  private arrange(update: ListUpdate): void {
+  /**
+   * Show the list again: the days, or the results of the search. `position`:
+   * the days, where the reader was (back from a search).
+   */
+  private arrange(update: ListUpdate, position?: ListPosition): void {
+    if (this.search.active) {
+      this.arrangeResults(update);
+      return;
+    }
     const subscription = this.subscription;
-    if (!subscription) return;
+    if (!subscription) {
+      // Back from a search's results
+      this.showNoSubscription();
+      return;
+    }
     if (!this.loader.days.length) {
       this.listPane.showMessage(
         getString(
@@ -785,20 +877,173 @@ export class ArxivBrowserView {
       sort: this.sort,
       sections: openSections(subscription),
       filter: filterGroups(this.filterText),
-      quick: this.quickFilters.size
-        ? (entry) =>
-            passesQuickFilters(entry, this.quickFilters, (paper) =>
-              this.library.isRelated(paper),
-            )
-        : undefined,
+      quick: this.quickFilter(),
       specs: subscription.categories,
       categories: this.categories,
     });
-    this.listPane.setList(list, this.sort, update);
+    if (position) this.listPane.restore(list, this.sort, position);
+    else this.listPane.setList(list, this.sort, update);
+    this.showFocused();
+  }
+
+  /** The quick filters on, as a test of a paper (none: undefined) */
+  private quickFilter(): ((entry: BrowserEntry) => boolean) | undefined {
+    return this.quickFilters.size
+      ? (entry) =>
+          passesQuickFilters(entry, this.quickFilters, (paper) =>
+            this.library.isRelated(paper),
+          )
+      : undefined;
+  }
+
+  /** The detail pane follows the focused paper */
+  private showFocused(): void {
     const focused = this.listPane.focused;
     if (focused && focused !== this.detail.entry) this.detail.show(focused);
     // More of the day's categories may list the paper shown
     else this.detail.refreshSections();
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Searching arXiv
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** Enter in the search box: search, or back to the days when it is empty */
+  private runSearch(text: string): void {
+    if (!arxivSearchQuery(text)) {
+      this.endSearch();
+      return;
+    }
+    if (!this.search.active) this.daysPosition = this.listPane.position;
+    // The selection is of the rows shown before
+    this.batch.clearSelection();
+    this.wantedIndex = null;
+    void this.search.search(text, this.listPane.size).then(() => {
+      const failure = this.search.failure;
+      if (failure?.reason === "query" && !this.disposed) {
+        this.reporter.notify(this.searchFailureText());
+      }
+    });
+  }
+
+  /** The clear control: back to the days, where the reader was */
+  private endSearch(): void {
+    this.searchBox.clear();
+    this.showSearchClear();
+    this.search.clear();
+  }
+
+  /** Leave the search without going back to the reader's place (a load) */
+  private leaveSearch(): void {
+    this.daysPosition = null;
+    if (this.search.active) this.endSearch();
+  }
+
+  /** Next past the last page of the results: fetch the page after them */
+  private fetchMoreResults(): void {
+    this.wantedIndex = this.listPane.entries.length;
+    void this.search.more(this.listPane.size);
+  }
+
+  private showSearchClear(): void {
+    this.searchClear.hidden = !this.search.active && !this.searchBox.value;
+  }
+
+  private onSearchChange(): void {
+    if (this.disposed) return;
+    this.showSearchClear();
+    this.enableListControls();
+    if (this.search.active) {
+      this.arrange("keep-page");
+    } else if (this.shownResults) {
+      // Back to the days
+      this.shownResults = null;
+      this.wantedIndex = null;
+      this.listPane.setMore("none");
+      this.batch.clearSelection();
+      const position = this.daysPosition ?? undefined;
+      this.daysPosition = null;
+      this.arrange("focus", position);
+    }
+    this.renderStatus();
+    void this.markLibraryPapers();
+  }
+
+  /** The row of a search result, built once */
+  private resultEntry = (listing: ArxivListingEntry): BrowserEntry => {
+    let entry = this.entryOfResult.get(listing);
+    if (!entry) {
+      entry = toBrowserEntry(listing);
+      this.entryOfResult.set(listing, entry);
+    }
+    this.entryByKey.set(entry.id, entry);
+    return entry;
+  };
+
+  private arrangeResults(update: ListUpdate): void {
+    const search = this.search;
+    const results = search.entries;
+    if (results !== this.shownResults) {
+      // Another search, or this one fetched again: from its first paper
+      this.shownResults = results;
+      this.listPane.clearFocus();
+      update = "focus";
+    }
+    this.listPane.setMore(
+      search.canFetchMore ? (search.running ? "loading" : "available") : "none",
+    );
+    if (!results.length) {
+      this.listPane.showMessage(
+        search.running
+          ? getString("arxiv-browser-search-running")
+          : search.failure
+            ? this.searchFailureText()
+            : getString("arxiv-browser-search-none"),
+      );
+      return;
+    }
+    const list = arrangeResults(results.map(this.resultEntry), {
+      filter: filterGroups(this.filterText),
+      quick: this.quickFilter(),
+    });
+    this.listPane.setList(list, this.sort, update);
+    const wanted = this.wantedIndex;
+    if (wanted !== null && !search.running) {
+      this.wantedIndex = null;
+      if (wanted < list.entries.length) {
+        this.listPane.goToPage(Math.floor(wanted / this.listPane.size));
+      }
+    }
+    this.showFocused();
+  }
+
+  /** Why the search's last request failed, in words */
+  private searchFailureText(): string {
+    const failure = this.search.failure;
+    if (!failure) return "";
+    if (failure.reason === "query") {
+      return getString("arxiv-browser-search-refused", {
+        args: { message: failure.message },
+      });
+    }
+    if (failure.reason === "cancelled") {
+      return getString("arxiv-browser-status-cancelled");
+    }
+    return getString("arxiv-browser-status-stopped", {
+      args: { reason: reasonText(failure.reason) },
+    });
+  }
+
+  /**
+   * The order and sections are the days' (results come newest first and
+   * belong to no section)
+   */
+  private enableListControls(): void {
+    const searching = this.search.active;
+    this.sortSelect.disabled = searching;
+    for (const box of this.sectionBoxes.values()) {
+      box.disabled = searching || !this.subscription;
+    }
   }
 
   private setSection(section: ListingSection, shown: boolean): void {
@@ -831,9 +1076,13 @@ export class ArxivBrowserView {
     const lookup = this.options.inLibrary;
     if (!lookup || this.disposed) return;
     const days = this.loader.days.filter((day) => !this.checkedDays.has(day));
-    if (!days.length) return;
+    const results = this.search.entries
+      .map(this.resultEntry)
+      .filter((entry) => !this.checkedResults.has(entry));
+    if (!days.length && !results.length) return;
     for (const day of days) this.checkedDays.add(day);
-    const entries = days.flatMap((day) => this.entriesOf(day));
+    for (const entry of results) this.checkedResults.add(entry);
+    const entries = [...days.flatMap((day) => this.entriesOf(day)), ...results];
     const changes = this.libraryChanges;
     let found: ReadonlyMap<string, readonly number[]> | null;
     try {
@@ -899,11 +1148,15 @@ export class ArxivBrowserView {
     }
   }
 
-  /** The library changed, or a mark asked again: look up every day again */
+  /**
+   * The library changed, or a mark asked again: look up every paper loaded
+   * again
+   */
   private recheckLibrary(): void {
     if (this.disposed) return;
     this.libraryChanges++;
     this.checkedDays = new WeakSet();
+    this.checkedResults = new WeakSet();
     void this.markLibraryPapers();
     this.completion.recount();
   }
@@ -959,15 +1212,44 @@ export class ArxivBrowserView {
     if (this.disposed) return;
     const doc = this.doc;
     const loader = this.loader;
-    this.cancelButton.hidden = !loader.running;
-    this.reloadButton.disabled = loader.running || !this.subscription;
+    const search = this.search;
+    const searching = search.active;
+    this.cancelButton.hidden = !(searching ? search.running : loader.running);
+    this.reloadButton.disabled = searching
+      ? search.running
+      : loader.running || !this.subscription;
     const parts: Array<string | HTMLElement> = [];
 
-    const waiting = this.schedulerStatus?.state.kind;
+    const scheduler = searching ? this.apiStatus : this.schedulerStatus;
+    const waiting = scheduler?.state.kind;
     if (waiting === "waiting" || waiting === "paused") this.startCountdown();
     else this.stopCountdown();
 
-    if (loader.running) {
+    if (searching) {
+      const total = search.total;
+      if (search.running) {
+        parts.push(
+          (scheduler && schedulerText(scheduler, this.clock.now())) ||
+            getString("arxiv-browser-search-running"),
+        );
+      } else if (total !== undefined) {
+        parts.push(
+          getString("arxiv-browser-search-found", {
+            args: { total, fetched: search.entries.length },
+          }),
+        );
+        if (total > SEARCH_RESULT_LIMIT) {
+          parts.push(
+            getString("arxiv-browser-search-limit", {
+              args: { limit: SEARCH_RESULT_LIMIT },
+            }),
+          );
+        }
+      }
+      if (search.failure && search.entries.length) {
+        parts.push(this.searchFailureText());
+      }
+    } else if (loader.running) {
       parts.push(
         (this.schedulerStatus &&
           schedulerText(this.schedulerStatus, this.clock.now())) ||

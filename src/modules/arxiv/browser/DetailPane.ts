@@ -133,8 +133,12 @@ export class DetailPane {
       name.addEventListener("mouseleave", () => this.options.onAuthorLeave());
       authors.append(name);
     });
-    // arXiv's listing pages name at most the first 100 authors
-    if (listing.authors.length >= LISTED_AUTHORS) {
+    // arXiv's listing pages name at most the first 100 authors (the API
+    // names all)
+    if (
+      listing.section !== "search" &&
+      listing.authors.length >= LISTED_AUTHORS
+    ) {
       authors.append(
         html(
           doc,
@@ -162,13 +166,20 @@ export class DetailPane {
         ),
       );
     }
-    identity.append(
-      doc.createTextNode(
-        ` · ${getString("arxiv-browser-detail-announced", {
-          args: { date: formatDay(listing.announceDate) },
-        })}`,
-      ),
-    );
+    // A search result: the submission of its first version instead
+    const date = listing.announceDate ?? listing.submitted?.slice(0, 10);
+    if (date) {
+      identity.append(
+        doc.createTextNode(
+          ` · ${getString(
+            listing.announceDate
+              ? "arxiv-browser-detail-announced"
+              : "arxiv-browser-detail-submitted",
+            { args: { date: formatDay(date) } },
+          )}`,
+        ),
+      );
+    }
 
     const categories = html(doc, "div", "arxiv-browser__detail-line");
     listing.categories.forEach((category, index) => {
@@ -194,7 +205,9 @@ export class DetailPane {
     );
     this.sections = where;
 
-    const parts: HTMLElement[] = [title, authors, identity, categories, where];
+    const parts: HTMLElement[] = [title, authors, identity, categories];
+    // A search result was announced in no listing we know of
+    if (listing.streams.length) parts.push(where);
     if (listing.comments) {
       parts.push(
         this.labelled("arxiv-browser-detail-comments", listing.comments),

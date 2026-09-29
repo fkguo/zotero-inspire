@@ -317,6 +317,26 @@
   max-width: 360px !important;
 }
 
+/* The search box (the filter box's kind), and its clear control */
+.arxiv-browser__search {
+  flex: 0 1 260px !important;
+  min-width: 140px !important;
+}
+
+.arxiv-browser__search-clear {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--fill-secondary, #6b7280);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.arxiv-browser__search-clear:hover {
+  color: var(--fill-primary, #111827);
+}
+
 /* The date button and its calendar */
 
 .arxiv-browser__day-choice {

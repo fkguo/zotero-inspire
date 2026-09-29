@@ -2,6 +2,7 @@ import { config } from "../../../package.json";
 import {
   SEARCH_HISTORY_PREF_KEY,
   ACADEMIC_SEARCH_HISTORY_PREF_KEY,
+  ARXIV_SEARCH_HISTORY_PREF_KEY,
   SEARCH_HISTORY_MAX_ENTRIES,
   SEARCH_HISTORY_DAYS_PREF_KEY,
   SEARCH_HISTORY_DAYS_DEFAULT,
@@ -106,6 +107,10 @@ export const literatureSearchHistory = new SearchHistoryStore(
 );
 export const academicSearchHistory = new SearchHistoryStore(
   ACADEMIC_SEARCH_HISTORY_PREF_KEY,
+);
+/** The arXiv browser window's searches of arXiv */
+export const arxivSearchHistory = new SearchHistoryStore(
+  ARXIV_SEARCH_HISTORY_PREF_KEY,
 );
 /**
  * The filter boxes' history: the References panel's and the arXiv browser

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ARXIV_QUICK_FILTER_CONFIGS,
   arrangeList,
+  arrangeResults,
   filterGroups,
   passesQuickFilters,
   pageBlocks,
@@ -25,7 +26,13 @@ import {
   type ListingSection,
 } from "../src/modules/arxiv/listingTypes";
 import type { QuickFilterType } from "../src/modules/inspire/constants";
-import { htmlDocument, readArxivFixture } from "./arxivFixtures";
+import { parseSearchFeed } from "../src/modules/arxiv/arxivApi";
+import {
+  apiAuthor,
+  searchResultEntry,
+} from "../src/modules/arxiv/browser/SearchLoader";
+import { arxivCitationKey } from "../src/modules/arxiv/citationKey";
+import { htmlDocument, readArxivFixture, xmlDocument } from "./arxivFixtures";
 import { LIST_URL, SimulatedArxiv } from "./arxivSite";
 import { VirtualClock } from "./virtualClock";
 
@@ -695,5 +702,121 @@ describe("pages", () => {
     expect(pageCount(list, 10)).toBe(11);
     expect(pageCount(list, 500)).toBe(1);
     expect(describePage(list, 0, 500)).toHaveLength(102 + 5);
+  });
+});
+
+describe("arrangeResults", () => {
+  const result = (id: string, submitted: string, title = `Paper ${id}`) =>
+    toBrowserEntry({
+      ...paper(id, "", [], { title }),
+      section: "search",
+      announceDate: undefined,
+      submitted,
+    });
+
+  it("keeps arXiv's order under the months of submission", () => {
+    const entries = [
+      result("2609.00003", "2026-09-02T10:00:00Z"),
+      result("2608.00002", "2026-08-30T10:00:00Z"),
+      result("2608.00001", "2026-08-01T10:00:00Z"),
+    ];
+    const list = arrangeResults(entries, { filter: [] });
+    expect(list.days.map((day) => [day.month, day.listing.date])).toEqual([
+      ["2026-09", "2026-09-01"],
+      ["2026-08", "2026-08-01"],
+    ]);
+    expect(list.entries).toEqual(entries);
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "arxiv-2609.00003-search",
+      "arxiv-2608.00002-search",
+      "arxiv-2608.00001-search",
+    ]);
+    // No section or group headers: one group per month
+    expect(
+      pageBlocks(list, 0, 50)
+        .filter((block) => block.kind !== "entry")
+        .map((block) => block.kind),
+    ).toEqual(["day", "day"]);
+  });
+
+  it("filters as the days are, leaving out months without a paper shown", () => {
+    const entries = [
+      result("2609.00003", "2026-09-02T10:00:00Z", "Pion mass"),
+      result("2608.00002", "2026-08-30T10:00:00Z"),
+      result("2608.00001", "2026-08-01T10:00:00Z", "Kaon mass"),
+    ];
+    const list = arrangeResults(entries, {
+      filter: filterGroups("mass"),
+      quick: (entry) => entry.listing.id !== "2609.00003",
+    });
+    expect(
+      list.days.map((day) => [day.month, day.count, day.inSections]),
+    ).toEqual([["2026-08", 1, 2]]);
+    expect(list.entries.map((entry) => entry.listing.id)).toEqual([
+      "2608.00001",
+    ]);
+  });
+
+  it("takes a real search answer as rows of the list", () => {
+    const answer = parseSearchFeed(
+      xmlDocument(readArxivFixture("api-search-hep-ph-tetraquark-3.xml")),
+    );
+    if (!answer.ok) throw new Error(answer.message);
+    const listing = searchResultEntry(answer.entries[1]);
+    expect(listing).toMatchObject({
+      id: "2609.04628",
+      version: 1,
+      section: "search",
+      streams: [],
+      submitted: "2026-09-04T02:01:37Z",
+      primaryCategory: "hep-ph",
+    });
+    expect(listing.announceDate).toBeUndefined();
+    expect(listing.html).toBeUndefined();
+    expect(listing.abstract).not.toMatch(/\n/);
+    expect(listing.authors[0]).toEqual({
+      display: answer.entries[1].authors[0],
+      family: answer.entries[1].authors[0].split(" ").at(-1),
+      given: answer.entries[1].authors[0].split(" ").slice(0, -1).join(" "),
+    });
+    expect(toBrowserEntry(listing).id).toBe("arxiv-2609.04628-search");
+  });
+
+  it("splits the API's whole names as BibTeX reads First von Last", () => {
+    expect(apiAuthor("Feng-Kun Guo")).toEqual({
+      display: "Feng-Kun Guo",
+      family: "Guo",
+      given: "Feng-Kun",
+    });
+    expect(apiAuthor("Ids van der Werf")).toEqual({
+      display: "Ids van der Werf",
+      family: "van der Werf",
+      given: "Ids",
+    });
+    expect(apiAuthor("M. N. Achasov")).toMatchObject({
+      family: "Achasov",
+      given: "M. N.",
+    });
+    // Kept whole
+    expect(apiAuthor("ATLAS Collaboration")).toEqual({
+      display: "ATLAS Collaboration",
+    });
+    expect(apiAuthor("Planck")).toEqual({ display: "Planck" });
+    // As the list, the author card and the citation key read names
+    const entry = toBrowserEntry(
+      searchResultEntry({
+        id: "2609.29961",
+        version: 1,
+        title: "Contraction of tensor networks",
+        abstract: "",
+        authors: ["Ids van der Werf", "Feng-Kun Guo"],
+        published: "2026-09-25T10:00:00Z",
+        updated: "2026-09-25T10:00:00Z",
+        primaryCategory: "quant-ph",
+        categories: ["quant-ph"],
+      }),
+    );
+    expect(entry.authors).toEqual(["van der Werf, Ids", "Guo, Feng-Kun"]);
+    expect(arxivCitationKey(entry.listing)).toBe("vanderWerf:2026contraction");
   });
 });
