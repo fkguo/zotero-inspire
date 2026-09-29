@@ -1,9 +1,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // The number of papers an author has in the user's personal library, for the
-// local form of the author card: items (not in the trash) with a creator of
-// the same surname whose first name starts with the same letter ("Pathak,
-// Krishna Kingkar" counts "Pathak, K." and "Pathak, Krishna"), also when
-// Zotero keeps the name in one field ("Krishna Kingkar Pathak", "K. K.
+// author card ("N papers in your library"): items (not in the trash) with a
+// creator of the same surname whose first name starts with the same letter
+// ("Pathak, Krishna Kingkar" counts "Pathak, K." and "Pathak, Krishna"), also
+// when Zotero keeps the name in one field ("Krishna Kingkar Pathak", "K. K.
 // Pathak"). A simple query; the relevance stage computes the design's author
 // count.
 // ─────────────────────────────────────────────────────────────────────────────

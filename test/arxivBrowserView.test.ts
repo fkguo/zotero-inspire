@@ -7,7 +7,7 @@ import type { InspireBibtexAnswer } from "../src/modules/arxiv/inspireByArxiv";
 import { ListingService } from "../src/modules/arxiv/listingService";
 import { MemoryListingStore } from "../src/modules/arxiv/listingStore";
 import { ArxivBrowserView } from "../src/modules/arxiv/browser/ArxivBrowserView";
-import type { InspireRecidAnswer } from "../src/modules/arxiv/browser/browserActions";
+import type { InspireRecordAnswer } from "../src/modules/arxiv/browser/browserActions";
 import {
   ReadingState,
   readingStateFile,
@@ -180,9 +180,9 @@ function environment() {
       _recid: string | null,
     ): Promise<InspireBibtexAnswer> => ({ status: "notFound" }),
   );
-  // INSPIRE's recid: none by default (no request to INSPIRE)
-  const inspireRecid = vi.fn(
-    async (_id: string): Promise<InspireRecidAnswer> => ({
+  // INSPIRE's recid and authors: none by default (no request to INSPIRE)
+  const inspireRecord = vi.fn(
+    async (_id: string): Promise<InspireRecordAnswer> => ({
       status: "notFound",
     }),
   );
@@ -197,7 +197,7 @@ function environment() {
       launch,
       copy,
       inspireBibtex,
-      inspireRecid,
+      inspireRecord,
       confirm: () => true,
       readingState: reading,
       ...options,
@@ -220,7 +220,7 @@ function environment() {
     launch,
     copy,
     inspireBibtex,
-    inspireRecid,
+    inspireRecord,
     root,
     reading,
     open,
@@ -1735,25 +1735,29 @@ describe("arXiv browser: Copy INSPIRE link", () => {
   }
 
   it("copies the link of the library item's recid at once, asking INSPIRE nothing", async () => {
-    const { copy, inspireRecid, inspireBibtex, copyLink, notices } =
+    const { copy, inspireRecord, inspireBibtex, copyLink, notices } =
       await loaded("3071234");
     await copyLink();
     expect(copy).toHaveBeenLastCalledWith(`${LINK}3071234`);
     expect(notices()).toContain(msg("copy-success-inspire-link"));
-    expect(inspireRecid).not.toHaveBeenCalled();
+    expect(inspireRecord).not.toHaveBeenCalled();
     expect(inspireBibtex).not.toHaveBeenCalled();
   });
 
   it("asks INSPIRE once by the arXiv ID, then copies from memory; Copy BibTeX asks by that recid", async () => {
-    const { copy, inspireRecid, inspireBibtex, copyLink, copyBibtex } =
+    const { copy, inspireRecord, inspireBibtex, copyLink, copyBibtex } =
       await loaded();
-    inspireRecid.mockResolvedValue({ status: "found", recid: "3071234" });
+    inspireRecord.mockResolvedValue({
+      status: "found",
+      recid: "3071234",
+      authors: [],
+    });
     await copyLink();
-    expect(inspireRecid.mock.calls[0][0]).toBe(ID);
+    expect(inspireRecord.mock.calls[0][0]).toBe(ID);
     expect(copy).toHaveBeenLastCalledWith(`${LINK}3071234`);
     await copyLink();
     expect(copy).toHaveBeenCalledTimes(2);
-    expect(inspireRecid).toHaveBeenCalledTimes(1);
+    expect(inspireRecord).toHaveBeenCalledTimes(1);
 
     const bibtex = `@article{Vattolo:2026omw,\n    eprint = "${ID}"\n}`;
     inspireBibtex.mockResolvedValue({ status: "found", bibtex });
@@ -1763,49 +1767,57 @@ describe("arXiv browser: Copy INSPIRE link", () => {
     // Both known: neither copy asks again
     await copyLink();
     await copyBibtex();
-    expect(inspireRecid).toHaveBeenCalledTimes(1);
+    expect(inspireRecord).toHaveBeenCalledTimes(1);
     expect(inspireBibtex).toHaveBeenCalledTimes(1);
   });
 
   it("copies the link from the detail pane too", async () => {
-    const { root, copy, inspireRecid, copyLink } = await loaded();
-    inspireRecid.mockResolvedValue({ status: "found", recid: "3071234" });
+    const { root, copy, inspireRecord, copyLink } = await loaded();
+    inspireRecord.mockResolvedValue({
+      status: "found",
+      recid: "3071234",
+      authors: [],
+    });
     rows(root)[0].click();
     const detail = root.querySelector(".arxiv-browser__detail")!;
     expect(detail.textContent).toContain(ID);
     await copyLink(detail);
-    expect(inspireRecid.mock.calls[0][0]).toBe(ID);
+    expect(inspireRecord.mock.calls[0][0]).toBe(ID);
     expect(copy).toHaveBeenLastCalledWith(`${LINK}3071234`);
   });
 
   it("keeps INSPIRE's BibTeX when the link's lookup adds the recid", async () => {
-    const { copy, inspireRecid, inspireBibtex, copyLink, copyBibtex } =
+    const { copy, inspireRecord, inspireBibtex, copyLink, copyBibtex } =
       await loaded();
     const bibtex = `@article{Vattolo:2026omw,\n    eprint = "${ID}"\n}`;
     inspireBibtex.mockResolvedValue({ status: "found", bibtex });
     await copyBibtex();
-    inspireRecid.mockResolvedValue({ status: "found", recid: "3071234" });
+    inspireRecord.mockResolvedValue({
+      status: "found",
+      recid: "3071234",
+      authors: [],
+    });
     await copyLink();
     expect(copy).toHaveBeenLastCalledWith(`${LINK}3071234`);
     await copyBibtex();
     expect(copy).toHaveBeenLastCalledWith(bibtex);
     expect(inspireBibtex).toHaveBeenCalledTimes(1);
-    expect(inspireRecid).toHaveBeenCalledTimes(1);
+    expect(inspireRecord).toHaveBeenCalledTimes(1);
   });
 
   it("copies nothing when INSPIRE has no record, saying so, and does not ask again", async () => {
-    const { copy, inspireRecid, copyLink, notices } = await loaded();
+    const { copy, inspireRecord, copyLink, notices } = await loaded();
     await copyLink();
     expect(copy).not.toHaveBeenCalled();
     expect(notices()).toContain(
       msg("arxiv-browser-inspire-link-not-found", { id: ID }),
     );
     await copyLink();
-    expect(inspireRecid).toHaveBeenCalledTimes(1);
+    expect(inspireRecord).toHaveBeenCalledTimes(1);
   });
 
   it("takes Copy BibTeX's answer that INSPIRE has no record", async () => {
-    const { site, copy, inspireRecid, copyLink, copyBibtex, notices } =
+    const { site, copy, inspireRecord, copyLink, copyBibtex, notices } =
       await loaded();
     site.html(
       `https://arxiv.org/bibtex/${ID}`,
@@ -1814,7 +1826,7 @@ describe("arXiv browser: Copy INSPIRE link", () => {
     await copyBibtex();
     copy.mockClear();
     await copyLink();
-    expect(inspireRecid).not.toHaveBeenCalled();
+    expect(inspireRecord).not.toHaveBeenCalled();
     expect(copy).not.toHaveBeenCalled();
     expect(notices()).toContain(
       msg("arxiv-browser-inspire-link-not-found", { id: ID }),
@@ -1822,8 +1834,8 @@ describe("arXiv browser: Copy INSPIRE link", () => {
   });
 
   it("says INSPIRE could not be reached, never that it has no record, and asks again the next time", async () => {
-    const { copy, inspireRecid, copyLink, notices } = await loaded();
-    inspireRecid.mockResolvedValue({ status: "failed" });
+    const { copy, inspireRecord, copyLink, notices } = await loaded();
+    inspireRecord.mockResolvedValue({ status: "failed" });
     await copyLink();
     expect(copy).not.toHaveBeenCalled();
     expect(notices()).toContain(
@@ -1832,9 +1844,13 @@ describe("arXiv browser: Copy INSPIRE link", () => {
     expect(notices()).not.toContain(
       msg("arxiv-browser-inspire-link-not-found", { id: ID }),
     );
-    inspireRecid.mockResolvedValue({ status: "found", recid: "42" });
+    inspireRecord.mockResolvedValue({
+      status: "found",
+      recid: "42",
+      authors: [],
+    });
     await copyLink();
-    expect(inspireRecid).toHaveBeenCalledTimes(2);
+    expect(inspireRecord).toHaveBeenCalledTimes(2);
     expect(copy).toHaveBeenLastCalledWith(`${LINK}42`);
   });
 });

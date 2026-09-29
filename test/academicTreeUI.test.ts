@@ -1123,6 +1123,22 @@ describe("Academic Tree window interactions", () => {
     expect(doc.querySelectorAll('[role="dialog"]')).toHaveLength(1);
   });
   it("hovering a name uses the existing author preview card with its normal actions", async () => {
+    // The papers in the library, counted by the name in "Family, Given" form
+    const original = fixture.profile.getMockImplementation()!;
+    fixture.profile.mockImplementation(async (id, signal) =>
+      id === "2"
+        ? {
+            recid: "2",
+            name: "Mentor Author",
+            canonicalName: "Author, Mentor",
+            bai: "Mentor.Author.1",
+            advisors: [],
+          }
+        : original(id, signal),
+    );
+    const count = vi.fn(async () => 4);
+    (Zotero as any).DB = { valueQueryAsync: count };
+    (Zotero as any).Libraries = { userLibraryID: 1 };
     open();
     await vi.waitFor(() => expect(nameElement("2")).toBeTruthy());
     await waitLoaded();
@@ -1137,7 +1153,16 @@ describe("Academic Tree window interactions", () => {
         "references-panel-author-preview-view-papers",
       );
       expect(card?.textContent).toContain("☆");
+      expect(card?.textContent).toContain(
+        "references-panel-author-library-count",
+      );
     });
+    expect((count.mock.calls[0] as unknown[])[1]).toEqual([
+      1,
+      "Author",
+      "M%",
+      "M% Author",
+    ]);
     dialog!.dispose();
     dialog = undefined;
     expect(doc.querySelector(".zinspire-author-preview-card")).toBeNull();

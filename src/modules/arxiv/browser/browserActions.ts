@@ -11,8 +11,10 @@
 // one in the form of the owner's Better BibTeX fallback (arxivCitationKey).
 // The INSPIRE link needs the record's recid: its library item's, else one
 // search of INSPIRE by the arXiv identifier (INSPIRE's BibTeX does not name
-// the recid). Both copies keep what INSPIRE answered in one memory per
-// window, so either copy spares the other a request where it can.
+// the recid). That search also gives the record's authors with their INSPIRE
+// identities, which the author card matches to the listing's authors. The
+// copies and the author card keep what INSPIRE answered in one memory per
+// window, so each spares the others a request where it can.
 //
 // Notices go to the window's own notice area (windowReporter).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,11 +22,14 @@
 import { config } from "../../../../package.json";
 import { getString } from "../../../utils/locale";
 import { copyToClipboard, inspireLiteratureUrl } from "../../inspire/apiUtils";
+import { authorSearchInfo } from "../../inspire/authorUtils";
 import { rewriteSingleBibtexEntryKey } from "../../inspireBibtexApi";
 import { itemCitationKey } from "../../inspire/library/itemCitationKey";
 import { resolveItemRecid } from "../../inspire/library/itemRecid";
 import { loadedItem } from "../../inspire/library/localStatus";
 import { fetchBibTeX } from "../../inspire/metadataService";
+import { pairAuthors, type AnyCreator } from "../../inspire/smartUpdate";
+import type { AuthorSearchInfo } from "../../inspire/types";
 import { createAbortController } from "../../inspire/utils";
 import type { ProgressDisplay, Reporter } from "../../inspire/panel/reporter";
 import {
@@ -84,26 +89,36 @@ export async function inspireBibtexOf(
   return fetchInspireBibtexByArxiv(id, signal);
 }
 
-export type InspireRecidAnswer =
-  | { status: "found"; recid: string }
+export type InspireRecordAnswer =
+  | { status: "found"; recid: string; authors: AuthorSearchInfo[] }
   /** INSPIRE answered and has no record of the paper */
   | { status: "notFound" }
   /** INSPIRE could not be reached or answered with an error */
   | { status: "failed" };
 
+/** The authors' names and INSPIRE identities (BAI, author record) */
+const AUTHOR_FIELDS = ["authors.full_name", "authors.ids", "authors.record"];
+
 /**
- * The recid of INSPIRE's record of an arXiv paper: one search by its arXiv
- * identifier (lookupInspireByArxiv, which takes a record only when one of
- * its eprints is the identifier)
+ * The recid of INSPIRE's record of an arXiv paper and the record's authors:
+ * one search by its arXiv identifier (lookupInspireByArxiv, which takes a
+ * record only when one of its eprints is the identifier)
  */
-export async function inspireRecidOf(
+export async function inspireRecordOf(
   id: string,
   signal?: AbortSignal,
-): Promise<InspireRecidAnswer> {
+): Promise<InspireRecordAnswer> {
   try {
-    const answer = (await lookupInspireByArxiv([id], { signal })).get(id);
+    const answer = (
+      await lookupInspireByArxiv([id], { fields: AUTHOR_FIELDS, signal })
+    ).get(id);
     if (answer?.status === "found") {
-      return { status: "found", recid: answer.recid };
+      const authors: unknown[] = answer.metadata?.authors ?? [];
+      return {
+        status: "found",
+        recid: answer.recid,
+        authors: authors.map(authorSearchInfo),
+      };
     }
     return { status: answer?.status === "notFound" ? "notFound" : "failed" };
   } catch {
@@ -115,6 +130,43 @@ export async function inspireRecidOf(
 interface InspireRecord {
   recid?: string;
   bibtex?: string;
+  /** The record's authors (with its recid, from the search by arXiv ID) */
+  authors?: readonly AuthorSearchInfo[];
+  /** The record's author for each author of the listing, once asked */
+  matched?: readonly (AuthorSearchInfo | undefined)[];
+}
+
+/**
+ * The record's author each author of the listing is: each paired with a
+ * different one of the same family name and compatible given names, as the
+ * update from INSPIRE checks that no author is lost (pairAuthors); none for
+ * a name INSPIRE does not list (a collaboration, a list INSPIRE cut short)
+ */
+export function matchListingAuthors(
+  listing: readonly ListingAuthor[],
+  inspire: readonly AuthorSearchInfo[],
+): (AuthorSearchInfo | undefined)[] {
+  const author = (lastName: string, firstName = "") =>
+    ({ lastName, firstName, creatorType: "author" }) as AnyCreator;
+  const { localOf } = pairAuthors(
+    listing.map(({ family, given, display }) =>
+      author(family ?? display, given),
+    ),
+    inspire.map(({ fullName }) => {
+      const comma = fullName.indexOf(",");
+      return comma < 0
+        ? author(fullName)
+        : author(
+            fullName.slice(0, comma).trim(),
+            fullName.slice(comma + 1).trim(),
+          );
+    }),
+  );
+  const matched = new Array<AuthorSearchInfo | undefined>(listing.length);
+  localOf.forEach((index, j) => {
+    if (index >= 0) matched[index] = inspire[j];
+  });
+  return matched;
 }
 
 /** The first answer of `read` for these library items (not loaded: none) */
@@ -156,8 +208,8 @@ export interface BrowserActionsOptions {
   copy?: (text: string) => Promise<boolean>;
   /** INSPIRE's BibTeX of a paper (default: inspireBibtexOf) */
   inspireBibtex?: typeof inspireBibtexOf;
-  /** INSPIRE's recid of a paper (default: inspireRecidOf) */
-  inspireRecid?: typeof inspireRecidOf;
+  /** INSPIRE's recid and authors of a paper (default: inspireRecordOf) */
+  inspireRecord?: typeof inspireRecordOf;
   /**
    * The library's items with each of these arXiv identifiers (the view's
    * lookup); none when absent or when the library cannot be read
@@ -173,14 +225,19 @@ export class BrowserActions {
   private readonly launch: (url: string) => void;
   private readonly copy: (text: string) => Promise<boolean>;
   private readonly inspireBibtex: typeof inspireBibtexOf;
-  private readonly inspireRecid: typeof inspireRecidOf;
+  private readonly inspireRecord: typeof inspireRecordOf;
   private readonly inLibrary: BrowserActionsOptions["inLibrary"];
   /**
    * INSPIRE's answers in this window, by arXiv identifier: the record's
-   * recid and BibTeX as far as asked, or null when INSPIRE has no record (a
-   * failure is asked again)
+   * recid, authors and BibTeX as far as asked, or null when INSPIRE has no
+   * record (a failure is asked again)
    */
   private readonly inspire = new Map<string, InspireRecord | null>();
+  /** Searches for a record's recid and authors being answered */
+  private readonly asking = new Map<
+    string,
+    Promise<InspireRecord | null | undefined>
+  >();
   /** arXiv's BibTeX already fetched in this window, by arXiv identifier */
   private readonly arxiv = new Map<string, string>();
   /** Copies being fetched ("bibtex <id>", "link <id>") */
@@ -195,7 +252,7 @@ export class BrowserActions {
     this.launch = options.launch ?? ((url) => Zotero.launchURL(url));
     this.copy = options.copy ?? copyToClipboard;
     this.inspireBibtex = options.inspireBibtex ?? inspireBibtexOf;
-    this.inspireRecid = options.inspireRecid ?? inspireRecidOf;
+    this.inspireRecord = options.inspireRecord ?? inspireRecordOf;
     this.inLibrary = options.inLibrary;
     this.controller = createAbortController();
   }
@@ -344,16 +401,9 @@ export class BrowserActions {
       fromLibrary(await this.libraryItems(id), resolveItemRecid) ??
       this.inspire.get(id)?.recid;
     if (known) return known;
-    let status: "notFound" | "failed" = "notFound";
-    if (this.inspire.get(id) !== null) {
-      const answer = await this.inspireRecid(id, this.controller?.signal);
-      if (answer.status === "found") {
-        this.inspire.set(id, { ...this.inspire.get(id), recid: answer.recid });
-        return answer.recid;
-      }
-      if (answer.status === "notFound") this.inspire.set(id, null);
-      status = answer.status;
-    }
+    const record = await this.recordOf(id);
+    if (record?.recid) return record.recid;
+    const status = record === null ? "notFound" : "failed";
     if (!this.disposed) {
       this.reporter.notify(
         getString(
@@ -365,6 +415,54 @@ export class BrowserActions {
       );
     }
     return undefined;
+  }
+
+  /**
+   * The paper's INSPIRE record with its recid and authors: from memory, else
+   * one search by the arXiv identifier, shared by all who ask meanwhile;
+   * null when INSPIRE has no record, nothing when it cannot be reached
+   */
+  private recordOf(id: string): Promise<InspireRecord | null | undefined> {
+    const known = this.inspire.get(id);
+    if (known === null || known?.authors) return Promise.resolve(known);
+    let asking = this.asking.get(id);
+    if (!asking) {
+      asking = this.inspireRecord(id, this.controller?.signal)
+        .then((answer) => {
+          if (answer.status === "failed") return undefined;
+          const record =
+            answer.status === "found"
+              ? {
+                  ...this.inspire.get(id),
+                  recid: answer.recid,
+                  authors: answer.authors,
+                }
+              : null;
+          this.inspire.set(id, record);
+          return record;
+        })
+        .finally(() => this.asking.delete(id));
+      this.asking.set(id, asking);
+    }
+    return asking;
+  }
+
+  /**
+   * The INSPIRE identity of the paper's author at `index` of its listing,
+   * for the author card: the record's author matched to that name, when it
+   * has an INSPIRE author record; none when INSPIRE has no record of the
+   * paper, cannot be reached, or lists no such author. Never a search by
+   * name.
+   */
+  async inspireAuthor(
+    paper: { id: string; authors: readonly ListingAuthor[] },
+    index: number,
+  ): Promise<AuthorSearchInfo | null> {
+    const record = await this.recordOf(paper.id);
+    if (!record?.authors) return null;
+    record.matched ??= matchListingAuthors(paper.authors, record.authors);
+    const author = record.matched[index];
+    return author?.recid ? author : null;
   }
 
   /** arXiv's BibTeX of the paper, or nothing (the user was told why) */

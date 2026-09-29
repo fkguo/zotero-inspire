@@ -28,7 +28,7 @@ export interface DetailPaneOptions {
   container: HTMLElement;
   actions: BrowserActions;
   /** Hover on an author's name: show the author's card */
-  onAuthorHover(fullName: string, anchor: HTMLElement): void;
+  onAuthorHover(entry: BrowserEntry, index: number, anchor: HTMLElement): void;
   onAuthorLeave(): void;
   /** Show a paper that is in the library there */
   showInLibrary?(itemID: number): void;
@@ -128,7 +128,7 @@ export class DetailPane {
       if (index) authors.append(doc.createTextNode(", "));
       const name = html(doc, "span", "arxiv-browser__author", author.display);
       name.addEventListener("mouseenter", () =>
-        this.options.onAuthorHover(entry.authors[index], name),
+        this.options.onAuthorHover(entry, index, name),
       );
       name.addEventListener("mouseleave", () => this.options.onAuthorLeave());
       authors.append(name);

@@ -23,6 +23,7 @@ import {
 } from "../index";
 import { applyMetaLinkStyle } from "../../pickerUI";
 import { applyAuthorPreviewCardStyle, positionFloatingElement } from "../../pickerUI";
+import { countAuthorPapers } from "../library/authorCount";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -59,6 +60,11 @@ export interface AuthorPreviewControllerOptions {
   showDelay?: number;
   /** Hide delay in ms (default: 120) */
   hideDelay?: number;
+  /**
+   * The author's papers in the library, shown on the card (default:
+   * countAuthorPapers by the name as the paper gives it)
+   */
+  countInLibrary?: (authorInfo: AuthorSearchInfo) => Promise<number>;
 }
 
 /**
@@ -123,12 +129,17 @@ export class AuthorPreviewController {
   // Timing configuration
   private readonly showDelay: number;
   private readonly hideDelay: number;
+  private readonly countInLibrary: (
+    authorInfo: AuthorSearchInfo,
+  ) => Promise<number>;
 
   // Preview card element
   private card?: HTMLDivElement;
 
   // State
   private currentKey?: string;
+  /** Counts the cards shown: an answer for an earlier one is not shown */
+  private shown = 0;
   private anchor?: Element;
 
   // Timers
@@ -148,6 +159,9 @@ export class AuthorPreviewController {
     this.callbacks = options.callbacks ?? {};
     this.showDelay = options.showDelay ?? 300;
     this.hideDelay = options.hideDelay ?? 120;
+    this.countInLibrary =
+      options.countInLibrary ??
+      ((authorInfo) => countAuthorPapers(authorInfo.fullName));
     this.strings = getCachedStrings();
   }
 
@@ -182,21 +196,22 @@ export class AuthorPreviewController {
   }
 
   /**
-   * Schedule the card's local form, which requests nothing from INSPIRE: the
-   * author's name, the number of their papers in the library (from
-   * `countInLibrary`), and author searches on arXiv and INSPIRE that open in
-   * the system browser.
+   * Schedule the card's local form: the author's name, the number of their
+   * papers in the library, and author searches on arXiv and INSPIRE that
+   * open in the system browser. `identify`, asked when the card shows, may
+   * name the author's INSPIRE identity (never found by name); the card then
+   * becomes the INSPIRE card, else it stays local.
    */
   scheduleLocalAuthor(
     authorInfo: AuthorSearchInfo,
     anchor: Element,
-    countInLibrary: (authorInfo: AuthorSearchInfo) => Promise<number>,
+    identify?: () => Promise<AuthorSearchInfo | null>,
   ): void {
     this.cancelShow();
     this.cancelHide();
     this.anchor = anchor;
     this.showTimeout = setTimeout(() => {
-      this.showLocalAuthor(authorInfo, anchor, countInLibrary);
+      this.showLocalAuthor(authorInfo, anchor, identify);
     }, this.showDelay);
   }
 
@@ -276,11 +291,22 @@ export class AuthorPreviewController {
     const card = this.getCard();
     this.currentKey = key;
 
-    // Render initial state (loading)
-    this.renderCard(card, authorInfo, undefined);
-    this.positionCard(card, anchor);
+    // Render initial state (loading); the profile and the library count are
+    // added as they arrive
+    let profile: InspireAuthorProfile | null | undefined;
+    let libraryCount: number | undefined;
+    const render = () => {
+      this.renderCard(card, authorInfo, profile, libraryCount);
+      this.positionCard(card, anchor);
+    };
+    render();
 
     this.callbacks.onShow?.(authorInfo);
+
+    this.countFor(authorInfo, key, (count) => {
+      libraryCount = count;
+      render();
+    });
 
     // Fetch profile
     this.abortController?.abort();
@@ -288,47 +314,74 @@ export class AuthorPreviewController {
     const signal = this.abortController?.signal;
 
     loadProfile(authorInfo, signal)
-      .then((profile) => {
+      .then((loaded) => {
         if (this.currentKey !== key) {
           return;
         }
-        this.renderCard(card, authorInfo, profile);
-        this.positionCard(card, anchor);
+        profile = loaded;
+        render();
       })
       .catch((err) => {
         if ((err as Error).name === "AbortError") {
           return;
         }
         if (this.currentKey === key) {
-          this.renderCard(card, authorInfo, null);
+          profile = null;
+          this.renderCard(card, authorInfo, profile, libraryCount);
         }
       });
   }
 
   /**
-   * Show the local form of the card; the count is added once it is known.
+   * Show the local form of the card; the count is added once it is known,
+   * and the INSPIRE card replaces it once `identify` names the author.
    */
   private showLocalAuthor(
     authorInfo: AuthorSearchInfo,
     anchor: Element,
-    countInLibrary: (authorInfo: AuthorSearchInfo) => Promise<number>,
+    identify?: () => Promise<AuthorSearchInfo | null>,
   ): void {
     const key = `local:${this.getAuthorKey(authorInfo)}`;
     const card = this.getCard();
     this.currentKey = key;
+    // The same name may be hovered again, on another paper, before the first
+    // identity arrives
+    const shown = ++this.shown;
 
     this.renderLocalCard(card, authorInfo);
     this.positionCard(card, anchor);
 
     this.callbacks.onShow?.(authorInfo);
 
-    countInLibrary(authorInfo).then(
-      (count) => {
-        if (this.currentKey !== key) {
-          return;
+    this.countFor(authorInfo, key, (count) => {
+      this.renderLocalCard(card, authorInfo, count);
+      this.positionCard(card, anchor);
+    });
+
+    identify?.().then(
+      (identified) => {
+        if (identified && this.currentKey === key && this.shown === shown) {
+          this.showAuthor(identified, anchor);
         }
-        this.renderLocalCard(card, authorInfo, count);
-        this.positionCard(card, anchor);
+      },
+      (err) => {
+        // The card stays local
+        Zotero.debug(
+          `[${config.addonName}] [AuthorPreviewController] Author identity failed: ${err}`,
+        );
+      },
+    );
+  }
+
+  /** Count the author's papers in the library; `show` it while the card is `key`'s */
+  private countFor(
+    authorInfo: AuthorSearchInfo,
+    key: string,
+    show: (count: number) => void,
+  ): void {
+    this.countInLibrary(authorInfo).then(
+      (count) => {
+        if (this.currentKey === key) show(count);
       },
       (err) => {
         // The card stays without a count
@@ -408,6 +461,7 @@ export class AuthorPreviewController {
     card: HTMLDivElement,
     authorInfo: AuthorSearchInfo,
     profile: InspireAuthorProfile | null | undefined,
+    libraryCount?: number,
   ): void {
     const doc = card.ownerDocument;
     card.replaceChildren();
@@ -469,6 +523,10 @@ export class AuthorPreviewController {
         advisors.textContent = `${getString("references-panel-author-advisors")}: ${advisorNames}`;
         card.appendChild(advisors);
       }
+    }
+
+    if (libraryCount !== undefined) {
+      card.appendChild(this.libraryCountLine(doc, libraryCount));
     }
 
     // Action links
@@ -537,17 +595,24 @@ export class AuthorPreviewController {
       actions.appendChild(homepageLink);
     }
 
+    // The author's papers on arXiv, searched by the name as the paper gives it
+    if (authorInfo.fullName.trim()) {
+      actions.appendChild(this.arxivSearchLink(doc, authorInfo, dark));
+    }
+
     // View Papers link
-    const viewLink = doc.createElement("a");
-    applyMetaLinkStyle(viewLink, dark);
-    viewLink.href = "#";
-    viewLink.textContent = getString("references-panel-author-preview-view-papers");
-    viewLink.addEventListener("click", (event) => {
-      event.preventDefault();
-      this.hide();
-      this.callbacks.onViewPapers?.(authorInfo);
-    });
-    actions.appendChild(viewLink);
+    if (this.callbacks.onViewPapers) {
+      const viewLink = doc.createElement("a");
+      applyMetaLinkStyle(viewLink, dark);
+      viewLink.href = "#";
+      viewLink.textContent = getString("references-panel-author-preview-view-papers");
+      viewLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        this.hide();
+        this.callbacks.onViewPapers?.(authorInfo);
+      });
+      actions.appendChild(viewLink);
+    }
 
     if (this.callbacks.onAcademicTree) {
       const treeLink = doc.createElement("a");
@@ -587,7 +652,7 @@ export class AuthorPreviewController {
         e.stopPropagation();
         this.callbacks.toggleFavorite?.(authorInfo);
         // Re-render to update button state
-        this.renderCard(card, authorInfo, profile);
+        this.renderCard(card, authorInfo, profile, libraryCount);
       });
       actions.appendChild(favBtn);
     }
@@ -619,12 +684,7 @@ export class AuthorPreviewController {
     card.appendChild(title);
 
     if (libraryCount !== undefined) {
-      const count = doc.createElement("div");
-      count.style.color = "var(--fill-secondary, #64748b)";
-      count.textContent = getString("references-panel-author-library-count", {
-        args: { count: libraryCount },
-      });
-      card.appendChild(count);
+      card.appendChild(this.libraryCountLine(doc, libraryCount));
     }
 
     const actions = doc.createElement("div");
@@ -632,30 +692,64 @@ export class AuthorPreviewController {
     actions.style.flexWrap = "wrap";
     actions.style.gap = "8px";
     actions.style.marginTop = "6px";
-    const urls = authorSearchUrls(authorInfo.fullName);
-    const searches = [
-      ["arXiv", urls.arxiv, getString("references-panel-author-search-arxiv")],
-      [
+    actions.append(
+      this.arxivSearchLink(doc, authorInfo, dark),
+      this.searchLink(
+        doc,
         "INSPIRE",
-        urls.inspire,
+        authorSearchUrls(authorInfo.fullName).inspire,
         getString("references-panel-author-search-inspire"),
-      ],
-    ];
-    for (const [label, url, tooltip] of searches) {
-      const link = doc.createElement("a");
-      applyMetaLinkStyle(link, dark);
-      link.href = url;
-      link.textContent = label;
-      link.title = tooltip;
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        Zotero.launchURL(url);
-      });
-      actions.appendChild(link);
-    }
+        dark,
+      ),
+    );
     card.appendChild(actions);
 
     card.style.display = "block";
+  }
+
+  /** "N papers in your library" */
+  private libraryCountLine(doc: Document, libraryCount: number): HTMLElement {
+    const count = doc.createElement("div");
+    count.style.color = "var(--fill-secondary, #64748b)";
+    count.textContent = getString("references-panel-author-library-count", {
+      args: { count: libraryCount },
+    });
+    return count;
+  }
+
+  /** The author search on arXiv by the name as the paper gives it */
+  private arxivSearchLink(
+    doc: Document,
+    authorInfo: AuthorSearchInfo,
+    dark: boolean,
+  ): HTMLAnchorElement {
+    return this.searchLink(
+      doc,
+      "arXiv",
+      authorSearchUrls(authorInfo.fullName).arxiv,
+      getString("references-panel-author-search-arxiv"),
+      dark,
+    );
+  }
+
+  /** A link that opens in the system browser */
+  private searchLink(
+    doc: Document,
+    label: string,
+    url: string,
+    tooltip: string,
+    dark: boolean,
+  ): HTMLAnchorElement {
+    const link = doc.createElement("a");
+    applyMetaLinkStyle(link, dark);
+    link.href = url;
+    link.textContent = label;
+    link.title = tooltip;
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      Zotero.launchURL(url);
+    });
+    return link;
   }
 
   /**

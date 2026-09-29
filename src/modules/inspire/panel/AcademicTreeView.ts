@@ -284,7 +284,8 @@ export class AcademicTreeView {
       (node, anchor) => {
         if (!node.recid) return;
         this.authorPreview.scheduleAuthor(
-          { recid: node.recid, fullName: node.name },
+          // "Family, Given" where known, for the library count
+          { recid: node.recid, fullName: node.canonicalName || node.name },
           anchor,
           (author, signal) =>
             signal

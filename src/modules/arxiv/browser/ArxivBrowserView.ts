@@ -90,7 +90,7 @@ import {
   firstPdfAttachmentID,
   openLocalPdf,
 } from "../../inspire/library/localPdf";
-import { countAuthorPapers } from "./authorCount";
+import { countAuthorPapers } from "../../inspire/library/authorCount";
 import { DetailPane } from "./DetailPane";
 import { PaneDivider } from "./PaneDivider";
 import {
@@ -131,8 +131,11 @@ export interface ArxivBrowserViewOptions {
   copy?: (text: string) => Promise<boolean>;
   /** INSPIRE's BibTeX of a paper (default: from INSPIRE, inspireBibtexOf) */
   inspireBibtex?: BrowserActionsOptions["inspireBibtex"];
-  /** INSPIRE's recid of a paper (default: from INSPIRE, inspireRecidOf) */
-  inspireRecid?: BrowserActionsOptions["inspireRecid"];
+  /**
+   * INSPIRE's recid and authors of a paper (default: from INSPIRE,
+   * inspireRecordOf)
+   */
+  inspireRecord?: BrowserActionsOptions["inspireRecord"];
   /**
    * The items with each of these arXiv identifiers, the one a click selects
    * first, for the "in library" marks (wired to the library index); null
@@ -276,7 +279,7 @@ export class ArxivBrowserView {
       launch: options.launch,
       copy: options.copy,
       inspireBibtex: options.inspireBibtex,
-      inspireRecid: options.inspireRecid,
+      inspireRecord: options.inspireRecord,
       inLibrary: options.inLibrary,
     });
     this.reading = options.readingState ?? sharedReadingState();
@@ -451,12 +454,21 @@ export class ArxivBrowserView {
     main.append(listContainer, this.divider.element, detailContainer);
     root.append(this.toolbar, main, notices);
 
-    // Cards: the author's local card (no INSPIRE request), and the paper's
-    // card on its title when the row does not show the abstract
+    // Cards: the author's card (INSPIRE's when the paper's record names the
+    // author, else the local one), and the paper's card on its title when the
+    // row does not show the abstract
     const showInLibrary = options.showInLibrary ?? showInMainWindow;
     this.authorCard = new AuthorPreviewController({
       document: doc,
       container: root,
+      countInLibrary: ({ fullName }) => {
+        let count = this.authorCounts.get(fullName);
+        if (!count) {
+          count = countAuthorPapers(fullName);
+          this.authorCounts.set(fullName, count);
+        }
+        return count;
+      },
     });
     this.paperCard = new HoverPreviewController({
       document: doc,
@@ -546,8 +558,8 @@ export class ArxivBrowserView {
     this.detail = new DetailPane({
       container: detailContainer,
       actions: this.actions,
-      onAuthorHover: (fullName, anchor) =>
-        this.showAuthorCard(fullName, anchor),
+      onAuthorHover: (entry, index, anchor) =>
+        this.showAuthorCard(entry, index, anchor),
       onAuthorLeave: () => this.authorCard.scheduleHide(),
       showInLibrary,
       openPdf,
@@ -565,7 +577,7 @@ export class ArxivBrowserView {
       hasPdf,
       openPdf,
       onAuthorHover: (entry, index, anchor) =>
-        this.showAuthorCard(entry.authors[index], anchor),
+        this.showAuthorCard(entry, index, anchor),
       onAuthorLeave: () => this.authorCard.scheduleHide(),
       onTitleHover: (entry, row) => this.paperCard.scheduleShow(entry, row),
       onTitleLeave: () => this.paperCard.scheduleHide(),
@@ -652,16 +664,23 @@ export class ArxivBrowserView {
     this.divider.dispose();
   }
 
-  /** The local card of an author: name, papers in the library, searches */
-  private showAuthorCard(fullName: string | undefined, anchor: Element): void {
+  /**
+   * The card of the paper's author at `index`: the local card (name, papers
+   * in the library, searches) until the paper's INSPIRE record, asked once
+   * per paper when a card first shows, names the author; then the INSPIRE
+   * card as in the References panel
+   */
+  private showAuthorCard(
+    entry: BrowserEntry,
+    index: number,
+    anchor: Element,
+  ): void {
+    const fullName = entry.authors[index];
     if (!fullName) return;
-    this.authorCard.scheduleLocalAuthor({ fullName }, anchor, (author) => {
-      let count = this.authorCounts.get(author.fullName);
-      if (!count) {
-        count = countAuthorPapers(author.fullName);
-        this.authorCounts.set(author.fullName, count);
-      }
-      return count;
+    this.authorCard.scheduleLocalAuthor({ fullName }, anchor, async () => {
+      const author = await this.actions.inspireAuthor(entry.listing, index);
+      // The name as the listing gives it, for the count and the arXiv search
+      return author && { ...author, fullName };
     });
   }
 

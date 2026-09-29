@@ -14,7 +14,7 @@ import {
   type ArxivBrowserViewOptions,
 } from "../src/modules/arxiv/browser/ArxivBrowserView";
 import { OPENING_SELECTIONS } from "../src/modules/arxiv/browser/ListingLoader";
-import { countAuthorPapers } from "../src/modules/arxiv/browser/authorCount";
+import { countAuthorPapers } from "../src/modules/inspire/library/authorCount";
 import { initArxivBrowserPrefs } from "../src/modules/arxiv/browser/browserPrefs";
 import {
   notePaint,
@@ -40,6 +40,17 @@ vi.mock("../src/modules/inspire/rateLimiter", async (importOriginal) => ({
   >()),
   ...inspire,
 }));
+// INSPIRE author profiles, as the References panel's author card asks
+const profiles = vi.hoisted(() => ({ fetchAuthorProfile: vi.fn() }));
+vi.mock(
+  "../src/modules/inspire/authorProfileService",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../src/modules/inspire/authorProfileService")
+    >()),
+    ...profiles,
+  }),
+);
 
 // These tests draw pages of up to 200 rows in jsdom and let minutes of arXiv
 // requests pass on the simulated clock: a second or two each, more when the
@@ -98,6 +109,7 @@ beforeEach(() => {
     },
   });
   inspire.inspireFetch.mockReset();
+  profiles.fetchAuthorProfile.mockReset();
 });
 
 afterEach(() => {
@@ -159,8 +171,10 @@ async function loaded(
     launch,
     copy,
     confirm: () => true,
-    // INSPIRE has no record: the BibTeX is arXiv's (no request to INSPIRE)
+    // INSPIRE has no record: the BibTeX is arXiv's, the author cards are
+    // local (no request to INSPIRE)
     inspireBibtex: async () => ({ status: "notFound" as const }),
+    inspireRecord: async () => ({ status: "notFound" as const }),
     ...options,
   });
   for (let i = 0; i < 100 && view.loader.running; i++) {
@@ -407,6 +421,216 @@ describe("cards", () => {
     );
     expect(query).toHaveBeenCalledTimes(1);
     expect(inspire.inspireFetch).not.toHaveBeenCalled();
+  });
+
+  describe("the INSPIRE card when INSPIRE's record of the paper names the author", () => {
+    const ID = "2609.28538";
+    const RECID = "3071234";
+    /** INSPIRE's search by arXiv ID: the record, its authors as the listing's */
+    function inspireRecord(
+      authors: Array<{ full_name: string; record?: { $ref: string } }>,
+    ) {
+      inspire.inspireFetch.mockImplementation(async (url: string) => {
+        const query = new URL(url).searchParams.get("q");
+        expect(query).toBe(`arxiv:${ID}`);
+        return new Response(
+          JSON.stringify({
+            hits: {
+              total: 1,
+              hits: [
+                {
+                  id: RECID,
+                  metadata: {
+                    control_number: Number(RECID),
+                    arxiv_eprints: [{ value: ID }],
+                    authors,
+                  },
+                },
+              ],
+            },
+          }),
+          { status: 200 },
+        );
+      });
+    }
+    /** INSPIRE's record with an author record for each author of the listing */
+    const named = (listing: { authors: readonly any[] }) =>
+      listing.authors.map((author, i) => ({
+        full_name: author.family
+          ? `${author.family}, ${author.given}`
+          : author.display,
+        record: { $ref: `https://inspirehep.net/api/authors/${900 + i}` },
+      }));
+    const hover = (element: Element) =>
+      element.dispatchEvent(new win.MouseEvent("mouseover", { bubbles: true }));
+    const leave = (element: Element) =>
+      element.dispatchEvent(new win.MouseEvent("mouseout", { bubbles: true }));
+
+    async function opened() {
+      const inspireBibtex = vi.fn(async () => ({
+        status: "found" as const,
+        bibtex: `@article{Key:2026abc,\n    eprint = "${ID}"\n}`,
+      }));
+      // The real search by arXiv ID, through the mocked inspireFetch
+      const env = await loaded({ inspireRecord: undefined, inspireBibtex });
+      const row = rows(env.root)[0];
+      const entry = env.view.listPane.entryOf(row)!;
+      expect(entry.listing.id).toBe(ID);
+      const authors = [
+        ...row.querySelectorAll(".zinspire-ref-entry__author-link"),
+      ];
+      const card = () =>
+        env.root.querySelector(
+          ".zinspire-author-preview-card",
+        ) as HTMLElement | null;
+      const lines = () =>
+        [...card()!.children].map((child) => child.textContent);
+      return { ...env, entry, authors, card, lines, inspireBibtex };
+    }
+
+    it("shows the INSPIRE card with the extras, from one search shared with Copy INSPIRE link and Copy BibTeX", async () => {
+      const { view, entry, authors, card, lines, copy, inspireBibtex } =
+        await opened();
+      inspireRecord(named(entry.listing));
+      profiles.fetchAuthorProfile.mockImplementation(async (info) => ({
+        recid: info.recid,
+        name: "Profile Name",
+        currentPosition: { institution: "ITP, Beijing" },
+      }));
+
+      hover(authors[1]);
+      await vi.waitFor(() =>
+        expect(lines()).toEqual([
+          "Profile Name",
+          "ITP, Beijing",
+          msg("references-panel-author-library-count", { count: 7 }),
+          "INSPIREarXiv",
+        ]),
+      );
+      // The author record of the listing's second author, never a name search
+      expect(profiles.fetchAuthorProfile).toHaveBeenCalledTimes(1);
+      expect(profiles.fetchAuthorProfile.mock.calls[0][0]).toEqual({
+        fullName: entry.authors[1],
+        bai: undefined,
+        recid: "901",
+      });
+      const links = [...card()!.querySelectorAll("a")] as HTMLAnchorElement[];
+      expect(links[0].href).toBe("https://inspirehep.net/authors/901");
+      links[1].dispatchEvent(new win.MouseEvent("click", { cancelable: true }));
+      expect((Zotero as any).launchURL).toHaveBeenCalledWith(
+        `https://arxiv.org/search/?searchtype=author&query=${encodeURIComponent(entry.authors[1])}`,
+      );
+      expect(inspire.inspireFetch).toHaveBeenCalledTimes(1);
+      expect(
+        new URL(inspire.inspireFetch.mock.calls[0][0]).searchParams.get(
+          "fields",
+        ),
+      ).toBe(
+        "control_number,arxiv_eprints,authors.full_name,authors.ids,authors.record",
+      );
+
+      // Another author of the paper: no second search
+      leave(authors[1]);
+      await vi.waitFor(() => expect(card()!.style.display).toBe("none"));
+      hover(authors[0]);
+      await vi.waitFor(() =>
+        expect(profiles.fetchAuthorProfile).toHaveBeenCalledTimes(2),
+      );
+      expect(profiles.fetchAuthorProfile.mock.calls[1][0].recid).toBe("900");
+
+      // The copies take the recid from the same answer
+      await view.actions.copyInspireLink(ID);
+      expect(copy).toHaveBeenLastCalledWith(
+        `https://inspirehep.net/literature/${RECID}`,
+      );
+      await view.actions.copyBibtex(entry.listing);
+      expect((inspireBibtex.mock.calls[0] as unknown[]).slice(0, 2)).toEqual([
+        ID,
+        RECID,
+      ]);
+      expect(inspire.inspireFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("asks once for authors hovered while the search runs, and takes Copy INSPIRE link's search", async () => {
+      const { root, view, entry, authors, lines } = await opened();
+      inspireRecord(named(entry.listing));
+      profiles.fetchAuthorProfile.mockResolvedValue(null);
+      // Copy INSPIRE link first: the author card needs no search of its own
+      await view.actions.copyInspireLink(ID);
+      expect(inspire.inspireFetch).toHaveBeenCalledTimes(1);
+      hover(authors[0]);
+      await vi.waitFor(() =>
+        expect(profiles.fetchAuthorProfile).toHaveBeenCalledTimes(1),
+      );
+      // INSPIRE has no profile to show: the panel's card says so
+      await vi.waitFor(() =>
+        expect(lines()).toContain(
+          msg("references-panel-author-profile-unavailable"),
+        ),
+      );
+      expect(inspire.inspireFetch).toHaveBeenCalledTimes(1);
+
+      // A second paper, two of its authors hovered before INSPIRE answers
+      const second = rows(root)[1];
+      const other = view.listPane.entryOf(second)!;
+      let answer!: () => void;
+      inspire.inspireFetch.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            answer = () =>
+              resolve(
+                new Response(JSON.stringify({ hits: { total: 0, hits: [] } }), {
+                  status: 200,
+                }),
+              );
+          }),
+      );
+      const secondAuthors = [
+        ...second.querySelectorAll(".zinspire-ref-entry__author-link"),
+      ];
+      hover(secondAuthors[0]);
+      await vi.waitFor(() =>
+        expect(inspire.inspireFetch).toHaveBeenCalledTimes(2),
+      );
+      leave(secondAuthors[0]);
+      hover(secondAuthors[1] ?? secondAuthors[0]);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(lines()[0]).toBe(other.authors[secondAuthors[1] ? 1 : 0]);
+      answer();
+      await flushPromises();
+      expect(inspire.inspireFetch).toHaveBeenCalledTimes(2);
+      // INSPIRE has no record: the local card stays
+      expect(lines()).toEqual([
+        other.authors[secondAuthors[1] ? 1 : 0],
+        msg("references-panel-author-library-count", { count: 7 }),
+        "arXivINSPIRE",
+      ]);
+      expect(profiles.fetchAuthorProfile).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the local card for an author INSPIRE's record does not name", async () => {
+      const { entry, authors, lines } = await opened();
+      // INSPIRE names the other authors only, one without an author record
+      const record = named(entry.listing);
+      record[0] = { full_name: "Somebody, Else" };
+      delete record[1].record;
+      inspireRecord(record);
+
+      for (const index of [0, 1]) {
+        hover(authors[index]);
+        await vi.waitFor(() =>
+          expect(lines()).toEqual([
+            entry.authors[index],
+            msg("references-panel-author-library-count", { count: 7 }),
+            "arXivINSPIRE",
+          ]),
+        );
+        leave(authors[index]);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(inspire.inspireFetch).toHaveBeenCalledTimes(1);
+      expect(profiles.fetchAuthorProfile).not.toHaveBeenCalled();
+    });
   });
 
   it.skipIf(!sqlite)(

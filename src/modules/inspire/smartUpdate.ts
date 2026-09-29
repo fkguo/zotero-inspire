@@ -379,7 +379,7 @@ export function findProtectedCreatorNames(
   return found;
 }
 
-type AnyCreator = _ZoteroTypes.Item.Creator & {
+export type AnyCreator = _ZoteroTypes.Item.Creator & {
   name?: string;
   creatorType?: string;
   creatorTypeID?: number;
@@ -455,21 +455,13 @@ function isOthers(creator: AnyCreator): boolean {
   );
 }
 
-function samePerson(a: AnyCreator, b: AnyCreator): boolean {
-  const keysA = familyKeys(a);
-  const keysB = familyKeys(b);
-  if (!keysA.some((key, i) => key === keysB[i])) return false;
-  if (roleOf(a) !== roleOf(b)) return false;
-  return sameGivenNames(a, b);
-}
-
 /**
  * The author of `local` each author of `incoming` stands for (its index, or
  * -1), each local author paired with a different incoming one as far as
  * possible (a bipartite matching: two authors of the same name need two);
  * and whether every local author has one. "others" takes no part.
  */
-function pairAuthors(
+export function pairAuthors(
   local: readonly AnyCreator[],
   incoming: readonly AnyCreator[],
 ): { localOf: number[]; allPaired: boolean } {
@@ -479,18 +471,39 @@ function pairAuthors(
     stripDiacritics(c.firstName || "")
       .toLowerCase()
       .trim();
-  const candidates = local.map((a, i) =>
-    isOthers(a)
-      ? []
-      : incoming
-          .flatMap((b, j) => (!isOthers(b) && samePerson(a, b) ? [j] : []))
-          .sort(
-            (j, k) =>
-              Number(given(incoming[j]) !== given(a)) -
-                Number(given(incoming[k]) !== given(a)) ||
-              Math.abs(j - i) - Math.abs(k - i),
-          ),
-  );
+  // The incoming authors by each form of their family name, so that each
+  // local author is compared with those of the same name only (a paper of
+  // thousands of authors)
+  const byFamily = [0, 1, 2].map(() => new Map<string, number[]>());
+  incoming.forEach((b, j) => {
+    if (isOthers(b)) return;
+    familyKeys(b).forEach((key, form) => {
+      const same = byFamily[form].get(key);
+      if (same) same.push(j);
+      else byFamily[form].set(key, [j]);
+    });
+  });
+  // The same person: a form of the family name, the role and the given names
+  // agree
+  const candidates = local.map((a, i) => {
+    if (isOthers(a)) return [];
+    const sameFamily = new Set<number>();
+    familyKeys(a).forEach((key, form) =>
+      byFamily[form].get(key)?.forEach((j) => sameFamily.add(j)),
+    );
+    return [...sameFamily]
+      .sort((j, k) => j - k)
+      .filter(
+        (j) =>
+          roleOf(a) === roleOf(incoming[j]) && sameGivenNames(a, incoming[j]),
+      )
+      .sort(
+        (j, k) =>
+          Number(given(incoming[j]) !== given(a)) -
+            Number(given(incoming[k]) !== given(a)) ||
+          Math.abs(j - i) - Math.abs(k - i),
+      );
+  });
   const assign = (i: number, seen: Set<number>): boolean => {
     for (const j of candidates[i]) {
       if (seen.has(j)) continue;

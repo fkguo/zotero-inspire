@@ -16,7 +16,8 @@ vi.mock("../src/utils/locale", () => ({ getString: (key: string) => key }));
 import { inspireFetch } from "../src/modules/inspire/rateLimiter";
 import {
   inspireBibtexOf,
-  inspireRecidOf,
+  inspireRecordOf,
+  matchListingAuthors,
 } from "../src/modules/arxiv/browser/browserActions";
 import {
   clearNotFoundMemory,
@@ -479,27 +480,83 @@ describe("the identity check of an item's INSPIRE record", () => {
   });
 });
 
-describe("INSPIRE's recid of an arXiv paper (Copy INSPIRE link)", () => {
-  it("is the record that lists the identifier, from one search", async () => {
-    record(3071234, "2609.11111", "2609.28538");
-    expect(await inspireRecidOf("2609.28538")).toEqual({
+describe("INSPIRE's recid and authors of an arXiv paper (Copy INSPIRE link, author card)", () => {
+  it("is the record that lists the identifier, with its authors' identities, from one search", async () => {
+    const metadata: any = record(3071234, "2609.11111", "2609.28538");
+    metadata.authors = [
+      {
+        full_name: "Guo, Feng-Kun",
+        ids: [{ schema: "INSPIRE BAI", value: "Feng.Kun.Guo.1" }],
+        record: { $ref: "https://inspirehep.net/api/authors/1011" },
+      },
+      { full_name: "Doe, Jane" },
+    ];
+    expect(await inspireRecordOf("2609.28538")).toEqual({
       status: "found",
       recid: "3071234",
+      authors: [
+        { fullName: "Guo, Feng-Kun", bai: "Feng.Kun.Guo.1", recid: "1011" },
+        { fullName: "Doe, Jane", bai: undefined, recid: undefined },
+      ],
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("fields"),
+    ).toBe(
+      "control_number,arxiv_eprints,authors.full_name,authors.ids,authors.record",
+    );
   });
 
   it("is none when INSPIRE has no record", async () => {
-    expect(await inspireRecidOf("2609.99999")).toEqual({
+    expect(await inspireRecordOf("2609.99999")).toEqual({
       status: "notFound",
     });
   });
 
   it("fails, not 'no record', when INSPIRE answers with an error or cannot be reached", async () => {
     fetchMock.mockResolvedValue(new Response("", { status: 503 }));
-    expect(await inspireRecidOf("2609.28538")).toEqual({ status: "failed" });
+    expect(await inspireRecordOf("2609.28538")).toEqual({ status: "failed" });
     fetchMock.mockRejectedValue(new TypeError("NetworkError"));
-    expect(await inspireRecidOf("2609.28538")).toEqual({ status: "failed" });
+    expect(await inspireRecordOf("2609.28538")).toEqual({ status: "failed" });
+  });
+});
+
+describe("the listing's authors matched to INSPIRE's (author card)", () => {
+  const inspire = (...names: string[]) =>
+    names.map((fullName, i) => ({ fullName, recid: String(100 + i) }));
+
+  it("pairs each name with a different INSPIRE author of the same family and given names", () => {
+    const matched = matchListingAuthors(
+      [
+        { display: "Feng-Kun Guo", family: "Guo", given: "Feng-Kun" },
+        { display: "J. Wang", family: "Wang", given: "J." },
+        { display: "Jun Wang", family: "Wang", given: "Jun" },
+        { display: "Jörg Müller", family: "Müller", given: "Jörg" },
+      ],
+      inspire("Wang, Jun", "Mueller, Jörg", "Guo, Feng-Kun", "Wang, Jing"),
+    );
+    expect(matched.map((author) => author?.recid)).toEqual([
+      "102",
+      "103",
+      "100",
+      "101",
+    ]);
+  });
+
+  it("matches no one for a collaboration, a name INSPIRE does not list or another given name", () => {
+    const matched = matchListingAuthors(
+      [
+        { display: "CMS Collaboration" },
+        { display: "Jun Wang", family: "Wang", given: "Jun" },
+        { display: "A. Tumasyan", family: "Tumasyan", given: "A." },
+      ],
+      inspire("Tumasyan, Armen", "Wang, Jing"),
+    );
+    expect(matched.map((author) => author?.recid)).toEqual([
+      undefined,
+      undefined,
+      "100",
+    ]);
   });
 });
 

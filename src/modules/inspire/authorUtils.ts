@@ -145,45 +145,50 @@ export function extractAuthorSearchInfos(
   const result: AuthorSearchInfo[] = [];
   const maxToProcess = Math.min(authors.length, effectiveLimit);
   for (let i = 0; i < maxToProcess; i++) {
-    const author = authors[i];
-    const fullName = author?.full_name || author?.full_name_unicode_normalized;
-
-    // FTR-AUTHOR-PROFILE-FIX: Always push an entry to maintain index alignment
-    // with entry.authors array. Even if fullName is missing, push a placeholder
-    // so that authorSearchInfos[i] corresponds to authors[i].
-    if (!fullName) {
-      // Push placeholder with empty fullName to maintain index alignment
-      result.push({ fullName: "" });
-      continue;
-    }
-
-    // Extract BAI from ids array (most reliable for author search)
-    // Validate BAI format to avoid false positives
-    let bai: string | undefined;
-    if (Array.isArray(author.ids)) {
-      for (const id of author.ids) {
-        if (id?.schema === "INSPIRE BAI" && id?.value && isValidBAI(id.value)) {
-          bai = id.value;
-          break;
-        }
-      }
-    }
-
-    // Extract recid for direct /api/authors/{recid} lookup (highest priority)
-    let recid: string | undefined;
-    if (author.recid) {
-      recid = String(author.recid);
-    } else if (author.record?.$ref) {
-      // Allow trailing query/fragment when extracting recid (some APIs append params)
-      const match = author.record.$ref.match(/\/authors\/(\d+)/);
-      if (match) {
-        recid = match[1];
-      }
-    }
-
-    result.push({ fullName, bai, recid });
+    result.push(authorSearchInfo(authors[i]));
   }
   return result.length > 0 ? result : undefined;
+}
+
+/**
+ * The search info (fullName + BAI + recid) of one author of an INSPIRE
+ * record's authors array
+ */
+export function authorSearchInfo(author: any): AuthorSearchInfo {
+  const fullName = author?.full_name || author?.full_name_unicode_normalized;
+
+  // FTR-AUTHOR-PROFILE-FIX: An author without a name still gives an entry,
+  // to maintain index alignment with entry.authors array: authorSearchInfos[i]
+  // corresponds to authors[i].
+  if (!fullName) {
+    return { fullName: "" };
+  }
+
+  // Extract BAI from ids array (most reliable for author search)
+  // Validate BAI format to avoid false positives
+  let bai: string | undefined;
+  if (Array.isArray(author.ids)) {
+    for (const id of author.ids) {
+      if (id?.schema === "INSPIRE BAI" && id?.value && isValidBAI(id.value)) {
+        bai = id.value;
+        break;
+      }
+    }
+  }
+
+  // Extract recid for direct /api/authors/{recid} lookup (highest priority)
+  let recid: string | undefined;
+  if (author.recid) {
+    recid = String(author.recid);
+  } else if (author.record?.$ref) {
+    // Allow trailing query/fragment when extracting recid (some APIs append params)
+    const match = author.record.$ref.match(/\/authors\/(\d+)/);
+    if (match) {
+      recid = match[1];
+    }
+  }
+
+  return { fullName, bai, recid };
 }
 
 // Re-export AUTHOR_IDS_EXTRACT_LIMIT for convenience

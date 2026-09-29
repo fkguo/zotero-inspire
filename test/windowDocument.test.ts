@@ -464,8 +464,11 @@ describe("notices of the References panel", () => {
 });
 
 describe("author card of the References panel", () => {
-  it("shows the INSPIRE profile, its links coloured by the main window's theme", async () => {
+  it("shows the INSPIRE profile, the papers in the library and an arXiv search, its links coloured by the main window's theme", async () => {
     setTheme(main, "dark");
+    const count = vi.fn(async () => 5);
+    (Zotero as any).DB.valueQueryAsync = count;
+    (Zotero as any).Libraries.userLibraryID = 1;
     profiles.fetchAuthorProfile.mockResolvedValue({
       recid: "1011",
       name: "Feng-Kun Guo",
@@ -501,14 +504,46 @@ describe("author card of the References panel", () => {
         bai: "F.K.Guo.1",
         recid: undefined,
       });
-      expect(card().textContent).toContain("Feng-Kun Guo (F.K.Guo.1)");
+      expect(profiles.fetchAuthorProfile).toHaveBeenCalledTimes(1);
+      // The library's papers of the name as the paper gives it
+      await vi.waitFor(() =>
+        expect([...card().children].map((child) => child.textContent)).toEqual([
+          "Feng-Kun Guo (F.K.Guo.1)",
+          `${msg("references-panel-author-library-count")} {"count":5}`,
+          `INSPIREarXiv${msg("references-panel-author-preview-view-papers")}`,
+        ]),
+      );
+      expect((count.mock.calls[0] as unknown[])[1]).toEqual([
+        1,
+        "Guo",
+        "F%",
+        "F% Guo",
+      ]);
       const links = [...card().querySelectorAll("a")] as HTMLAnchorElement[];
-      expect(links.map((a) => a.textContent)).toEqual([
-        "INSPIRE",
-        msg("references-panel-author-preview-view-papers"),
+      expect(links.map((a) => [a.textContent, a.title])).toEqual([
+        ["INSPIRE", msg("references-panel-author-inspire-tooltip")],
+        ["arXiv", msg("references-panel-author-search-arxiv")],
+        [msg("references-panel-author-preview-view-papers"), ""],
       ]);
       expect(links[0].href).toBe("https://inspirehep.net/authors/1011");
       expect(links[0].style.color).toBe(css(main, "#60a5fa"));
+      expect(links[1].style.color).toBe(css(main, "#60a5fa"));
+      links[1].dispatchEvent(
+        new main.MouseEvent("click", { cancelable: true }),
+      );
+      expect((Zotero as any).launchURL).toHaveBeenCalledWith(
+        "https://arxiv.org/search/?searchtype=author&query=Guo%2C%20Feng-Kun",
+      );
+      // The card stays as it is
+      links[2].dispatchEvent(
+        new main.MouseEvent("click", { cancelable: true }),
+      );
+      expect(onViewPapers).toHaveBeenCalledWith({
+        fullName: "Guo, Feng-Kun",
+        bai: "F.K.Guo.1",
+        recid: undefined,
+      });
+      expect(network.inspireFetch).not.toHaveBeenCalled();
     } finally {
       author.dispose();
     }
@@ -785,26 +820,23 @@ describe("local form of the author card", () => {
     const second = newWindow();
     setTheme(main, "light");
     setTheme(second, "dark");
+    let counted: (count: number) => void = () => {};
+    const countInLibrary = vi.fn(
+      () => new Promise<number>((resolve) => (counted = resolve)),
+    );
     const author = new AuthorPreviewController({
       document: second.document,
       container: second.document.body,
       showDelay: 0,
       callbacks: { onViewPapers: vi.fn(), onAcademicTree: vi.fn() },
+      countInLibrary,
     });
     try {
       const anchor = second.document.createElement("a");
       second.document.body.appendChild(anchor);
       placeAt(anchor, { left: 100, top: 50, width: 60, height: 14 });
-      let counted: (count: number) => void = () => {};
-      const countInLibrary = vi.fn(
-        () => new Promise<number>((resolve) => (counted = resolve)),
-      );
 
-      author.scheduleLocalAuthor(
-        { fullName: "Feng-Kun Guo" },
-        anchor,
-        countInLibrary,
-      );
+      author.scheduleLocalAuthor({ fullName: "Feng-Kun Guo" }, anchor);
 
       const card = () =>
         second.document.querySelector(
@@ -847,25 +879,135 @@ describe("local form of the author card", () => {
     }
   });
 
-  it("keeps the card without a count when counting fails", async () => {
+  it("becomes the INSPIRE card once the author's INSPIRE identity is known, else stays local", async () => {
+    profiles.fetchAuthorProfile.mockResolvedValue({
+      recid: "1011",
+      name: "Feng-Kun Guo",
+      institution: undefined,
+    });
+    const countInLibrary = vi.fn(async () => 3);
     const author = new AuthorPreviewController({
       document: main.document,
       container: main.document.body,
       showDelay: 0,
+      countInLibrary,
     });
     try {
       const anchor = main.document.createElement("a");
       main.document.body.appendChild(anchor);
       placeAt(anchor, { left: 100, top: 50, width: 60, height: 14 });
-      const countInLibrary = vi.fn(async () => {
-        throw new Error("database is busy");
-      });
+      const card = () =>
+        main.document.querySelector(
+          ".zinspire-author-preview-card",
+        ) as HTMLElement;
+      const lines = () =>
+        [...card().children].map((child) => child.textContent);
+      const countLine = `${msg("references-panel-author-library-count")} {"count":3}`;
 
+      // Identified: the local card until then, the INSPIRE card after
+      let identified: (info: any) => void = () => {};
       author.scheduleLocalAuthor(
-        { fullName: "A. Author" },
+        { fullName: "Guo, Feng-Kun" },
         anchor,
-        countInLibrary,
+        () => new Promise((resolve) => (identified = resolve)),
       );
+      await vi.waitFor(() =>
+        expect(lines()).toEqual(["Guo, Feng-Kun", countLine, "arXivINSPIRE"]),
+      );
+      identified({ fullName: "Guo, Feng-Kun", recid: "1011" });
+      await vi.waitFor(() =>
+        expect(lines()).toEqual(["Feng-Kun Guo", countLine, "INSPIREarXiv"]),
+      );
+      expect(profiles.fetchAuthorProfile.mock.calls[0][0]).toEqual({
+        fullName: "Guo, Feng-Kun",
+        recid: "1011",
+      });
+      // No View Papers without its action
+      expect(card().querySelector("a[href='#']")).toBeNull();
+
+      // Not identified, or the identity could not be asked: the local card
+      author.hide();
+      author.scheduleLocalAuthor(
+        { fullName: "Doe, Jane" },
+        anchor,
+        async () => null,
+      );
+      await vi.waitFor(() =>
+        expect(lines()).toEqual(["Doe, Jane", countLine, "arXivINSPIRE"]),
+      );
+      author.hide();
+      author.scheduleLocalAuthor(
+        { fullName: "Roe, Rick" },
+        anchor,
+        async () => {
+          throw new Error("offline");
+        },
+      );
+      await vi.waitFor(() =>
+        expect(lines()).toEqual(["Roe, Rick", countLine, "arXivINSPIRE"]),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(lines()[0]).toBe("Roe, Rick");
+
+      // The same name hovered again (another paper) before the first
+      // identity arrived: only the second one's is shown
+      author.hide();
+      let first: (info: any) => void = () => {};
+      let second: (info: any) => void = () => {};
+      author.scheduleLocalAuthor(
+        { fullName: "Wang, J." },
+        anchor,
+        () => new Promise((resolve) => (first = resolve)),
+      );
+      await vi.waitFor(() => expect(lines()[0]).toBe("Wang, J."));
+      author.scheduleLocalAuthor(
+        { fullName: "Wang, J." },
+        anchor,
+        () => new Promise((resolve) => (second = resolve)),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      first({ fullName: "Wang, J.", recid: "111" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(lines()[0]).toBe("Wang, J.");
+      second({ fullName: "Wang, J.", recid: "222" });
+      await vi.waitFor(() =>
+        expect(profiles.fetchAuthorProfile).toHaveBeenCalledTimes(2),
+      );
+      expect(profiles.fetchAuthorProfile.mock.calls[1][0].recid).toBe("222");
+
+      // Identified after the card was hidden: nothing shows
+      author.scheduleLocalAuthor(
+        { fullName: "Guo, Feng-Kun" },
+        anchor,
+        () => new Promise((resolve) => (identified = resolve)),
+      );
+      await vi.waitFor(() => expect(lines()[0]).toBe("Guo, Feng-Kun"));
+      author.hide();
+      identified({ fullName: "Guo, Feng-Kun", recid: "1011" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(card().style.display).toBe("none");
+      expect(profiles.fetchAuthorProfile).toHaveBeenCalledTimes(2);
+    } finally {
+      author.dispose();
+    }
+  });
+
+  it("keeps the card without a count when counting fails", async () => {
+    const countInLibrary = vi.fn(async () => {
+      throw new Error("database is busy");
+    });
+    const author = new AuthorPreviewController({
+      document: main.document,
+      container: main.document.body,
+      showDelay: 0,
+      countInLibrary,
+    });
+    try {
+      const anchor = main.document.createElement("a");
+      main.document.body.appendChild(anchor);
+      placeAt(anchor, { left: 100, top: 50, width: 60, height: 14 });
+
+      author.scheduleLocalAuthor({ fullName: "A. Author" }, anchor);
 
       await vi.waitFor(() => expect(countInLibrary).toHaveBeenCalled());
       await new Promise((resolve) => setTimeout(resolve, 0));
