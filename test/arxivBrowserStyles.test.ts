@@ -26,8 +26,19 @@ describe("arXiv window stylesheet", () => {
       ".arxiv-browser__row .zinspire-ref-entry__author-link",
     ]);
     expect(css).toMatch(
-      /\.arxiv-browser__row \.zinspire-ref-entry__author-link\s*\{\s*color: inherit !important;\s*\}/,
+      /\.arxiv-browser__row \.zinspire-ref-entry__author-link\s*\{\s*color: inherit !important;/,
     );
+  });
+
+  it("underlines the rows' author names with dots, as the detail pane does", () => {
+    const underline = (selector: string) =>
+      new RegExp(
+        `${selector.replace(/[.]/g, "\\.")}\\s*\\{[^}]*border-bottom: 1px dotted`,
+      );
+    expect(css).toMatch(
+      underline(".arxiv-browser__row .zinspire-ref-entry__author-link"),
+    );
+    expect(css).toMatch(underline(".arxiv-browser__author"));
   });
 
   it("shows the rows' tick box, in-library mark and relate button as the References panel does", () => {

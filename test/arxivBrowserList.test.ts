@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARXIV_QUICK_FILTER_CONFIGS,
   arrangeList,
   filterGroups,
+  passesQuickFilters,
   pageBlocks,
   pageCount,
   pageOfDay,
@@ -22,6 +24,7 @@ import {
   type DayListing,
   type ListingSection,
 } from "../src/modules/arxiv/listingTypes";
+import type { QuickFilterType } from "../src/modules/inspire/constants";
 import { htmlDocument, readArxivFixture } from "./arxivFixtures";
 import { LIST_URL, SimulatedArxiv } from "./arxivSite";
 import { VirtualClock } from "./virtualClock";
@@ -446,12 +449,112 @@ describe("text filter", () => {
     expect(filtered('"near thresholds"')).toEqual(["2609.00002"]);
   });
 
+  it("takes a journal's shorthand as the References panel's filter does", () => {
+    const refs = [
+      paper("2609.00011", date, [["hep-ph", "new", 0]], {
+        journalRef: "J. High Energ. Phys. 2026, 4 (2026)",
+      }),
+      paper("2609.00012", date, [["hep-ph", "new", 1]], {
+        journalRef: "JHEP 09 (2026) 182",
+      }),
+      paper("2609.00013", date, [["hep-ph", "new", 2]], {
+        journalRef: "Phys. Rev. Lett. 137 (2026) 131801",
+      }),
+    ];
+    const found = (text: string) =>
+      ids(
+        arrange([day(date, [...entries, ...refs])], {
+          filter: filterGroups(text),
+        }).entries,
+      );
+    // Springer's and INSPIRE's forms of the Journal of High Energy Physics
+    expect(found("jhep")).toEqual(["2609.00011", "2609.00012"]);
+    expect(found("PRL")).toEqual(["2609.00013"]);
+    expect(found("prd")).toEqual(["2609.00001"]);
+    expect(found('"Phys.Rev.Lett"')).toEqual(["2609.00013"]);
+  });
+
   it("keeps a day whose papers all fail the filter, with none shown", () => {
     const list = arrange([day(date, entries)], {
       filter: filterGroups("nothing-like-this"),
     });
     expect(list.days).toHaveLength(1);
     expect(list.days[0]).toMatchObject({ count: 0, inSections: 3 });
+  });
+});
+
+describe("quick filters", () => {
+  const date = "2026-09-25";
+  const person = (name: string) => ({ display: name, family: name });
+  const entries = [
+    // Signed by the collaboration alone: a large group
+    paper("2609.00021", date, [["hep-ex", "new", 0]], {
+      authors: [{ display: "ALICE Collaboration" }],
+      journalRef: "Phys. Rev. C 114 (2026) 034005",
+    }),
+    // The collaboration with its members: counted by its members
+    paper("2609.00022", date, [["hep-ex", "new", 1]], {
+      authors: [
+        { display: "BESIII Collaboration" },
+        ...Array.from({ length: 11 }, (_, i) => person(`M${i}`)),
+      ],
+    }),
+    // One author speaking for a collaboration
+    paper("2609.00023", date, [["hep-ex", "new", 2]], {
+      authors: [person("T. Vami"), { display: "CMS Collaboration" }],
+    }),
+    paper("2609.00024", date, [["hep-ex", "new", 3]], {
+      authors: Array.from({ length: 10 }, (_, i) => person(`A${i}`)),
+      journalRef: "JHEP 09 (2026) 182",
+    }),
+  ];
+  const built = entries.map(toBrowserEntry);
+  // 2609.00021 is in the library, related to another item; the library
+  // state of 2609.00024 is unknown
+  Object.assign(built[0], { localItemID: 5, localItemIDs: [5] });
+  Object.assign(built[3], { localStatusUnknown: true });
+  const related = (entry: BrowserEntry) => entry === built[0];
+  const kept = (...types: QuickFilterType[]) =>
+    built
+      .filter((entry) => passesQuickFilters(entry, new Set(types), related))
+      .map((entry) => entry.listing.id);
+
+  it("offers the References panel's filters whose data the listing has, and ≤10 authors", () => {
+    expect(ARXIV_QUICK_FILTER_CONFIGS.map((config) => config.type)).toEqual([
+      "localItems",
+      "onlineItems",
+      "relatedOnly",
+      "smallAuthorGroup",
+      "publishedOnly",
+      "preprintOnly",
+    ]);
+  });
+
+  it("keeps the papers each filter asks for, all of them when several are on", () => {
+    expect(kept()).toHaveLength(4);
+    expect(kept("localItems")).toEqual(["2609.00021"]);
+    // Not a paper whose library state is unknown
+    expect(kept("onlineItems")).toEqual(["2609.00022", "2609.00023"]);
+    expect(kept("relatedOnly")).toEqual(["2609.00021"]);
+    expect(kept("smallAuthorGroup")).toEqual(["2609.00023", "2609.00024"]);
+    // From the journal reference
+    expect(kept("publishedOnly")).toEqual(["2609.00021", "2609.00024"]);
+    expect(kept("preprintOnly")).toEqual(["2609.00022", "2609.00023"]);
+    expect(kept("smallAuthorGroup", "publishedOnly")).toEqual(["2609.00024"]);
+  });
+
+  it("apply together with the text filter", () => {
+    const list = arrangeList([day(date, entries)], () => built, {
+      sort: "announcement",
+      sections: ALL,
+      filter: filterGroups("vami"),
+      specs: ["hep-ex"],
+      quick: (entry) =>
+        passesQuickFilters(entry, new Set(["preprintOnly"]), related),
+    });
+    expect(ids(list.entries)).toEqual(["2609.00023"]);
+    // The day's count before the text and quick filters
+    expect(list.days[0]).toMatchObject({ count: 1, inSections: 4 });
   });
 });
 

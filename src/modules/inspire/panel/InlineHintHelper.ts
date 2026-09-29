@@ -1,5 +1,31 @@
 import type { SearchHistoryItem } from "../types";
 
+/** Shared input styles for inline hint inputs (Filter & Search) */
+export const INLINE_HINT_INPUT_STYLE = `
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--zotero-gray-4, #d1d1d5);
+  border-radius: 4px;
+  font-size: 12px;
+  background-color: transparent !important;
+  background: transparent !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  position: relative;
+  z-index: 2;
+  font-family: system-ui, -apple-system, sans-serif;
+`;
+
+/** Shared wrapper styles for inline hint containers */
+export const INLINE_HINT_WRAPPER_STYLE = `
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  background: var(--material-background, #ffffff);
+  border-radius: 4px;
+`;
+
 /** Configure input element for inline hint usage (disable browser autocomplete) */
 export function configureInlineHintInput(input: HTMLInputElement): void {
   input.setAttribute("autocomplete", "off");

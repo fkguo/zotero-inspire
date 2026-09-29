@@ -111,7 +111,9 @@ describe("References panel request-queue indicator", () => {
     expect(indicator.hidden).toBe(false);
     expect(indicator.textContent).toBe("🚦 INSPIRE queue: 3");
 
-    const filterButton = controller.quickFiltersButton as HTMLButtonElement;
+    const filterButton = controller.quickFiltersControl.element.querySelector(
+      ".zinspire-quick-filter-btn",
+    ) as HTMLButtonElement;
     expect(filterButton.firstChild?.textContent).toBe("⏳");
 
     controller.updateRateLimiterStatus({

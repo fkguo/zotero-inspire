@@ -530,13 +530,20 @@ export function extractJournalName(
   if (info?.journal_title_abbrev) {
     return info.journal_title_abbrev.replace(/\.\s|\./g, ". ");
   }
-  if (entry.summary) {
-    const match = entry.summary.match(/^([^0-9(]+?)(?:\s+\d+|\(|$)/);
-    if (match) {
-      const journal = match[1].trim();
-      if (journal.length > 2) {
-        return journal;
-      }
+  return entry.summary ? journalNameFromText(entry.summary) : undefined;
+}
+
+/**
+ * The journal's name at the start of a reference text ("Phys. Rev. D 114
+ * (2026) 032002" → "Phys. Rev. D"), as the filter's journal abbreviations
+ * look it up
+ */
+export function journalNameFromText(text: string): string | undefined {
+  const match = text.match(/^([^0-9(]+?)(?:\s+\d+|\(|$)/);
+  if (match) {
+    const journal = match[1].trim();
+    if (journal.length > 2) {
+      return journal;
     }
   }
   return undefined;

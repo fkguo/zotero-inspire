@@ -309,10 +309,12 @@
   gap: 8px;
 }
 
+/* The References panel's filter box: its size here (over the panel's inline
+   one) */
 .arxiv-browser__filter {
-  flex: 1 1 180px;
-  min-width: 120px;
-  max-width: 360px;
+  flex: 1 1 180px !important;
+  min-width: 120px !important;
+  max-width: 360px !important;
 }
 
 /* The date button and its calendar */
@@ -513,6 +515,15 @@
   font-weight: 700;
 }
 
+/* The batch import's toolbar, while papers are selected: at the right of the
+   page's first day header */
+.arxiv-browser__day .zinspire-batch-toolbar {
+  margin-left: auto;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
 .arxiv-browser__day-count,
 .arxiv-browser__continued {
   color: var(--fill-secondary, #6b7280);
@@ -546,9 +557,12 @@
 
 /* Author names are not links here (a click does nothing; hovering shows
    the author card): the row's text colour, not the References panel's link
-   blue, which the renderer sets inline */
+   blue, which the renderer sets inline, underlined with dots as in the
+   detail pane */
 .arxiv-browser__row .zinspire-ref-entry__author-link {
   color: inherit !important;
+  cursor: default !important;
+  border-bottom: 1px dotted var(--fill-tertiary, #9ca3af);
 }
 
 .arxiv-browser__row--collapsed .zinspire-ref-entry__abstract {

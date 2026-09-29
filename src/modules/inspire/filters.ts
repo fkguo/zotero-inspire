@@ -212,6 +212,8 @@ export function getQuickFilterPredicate(
       return matchesLocalItems;
     case "onlineItems":
       return matchesOnlineItems;
+    case "smallAuthorGroup":
+      return matchesSmallAuthorGroup;
     default:
       return undefined;
   }
@@ -261,7 +263,31 @@ export const QUICK_FILTER_EXCLUSIONS: Record<
   relatedOnly: [],
   localItems: ["onlineItems"],
   onlineItems: ["localItems"],
+  smallAuthorGroup: [],
 };
+
+/**
+ * Switch a quick filter on or off in `active`; switching one on switches off
+ * those it excludes. Returns whether `active` changed.
+ */
+export function setQuickFilter(
+  active: Set<QuickFilterType>,
+  filterType: QuickFilterType,
+  enabled: boolean,
+): boolean {
+  if (active.has(filterType) === enabled) {
+    return false;
+  }
+  if (enabled) {
+    active.add(filterType);
+    for (const excluded of getExcludedFilters(filterType)) {
+      active.delete(excluded);
+    }
+  } else {
+    active.delete(filterType);
+  }
+  return true;
+}
 
 /**
  * Enforce mutual exclusivity constraints when enabling a filter.

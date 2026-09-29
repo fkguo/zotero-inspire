@@ -2,10 +2,15 @@ import { config } from "../../package.json";
 import {
   InlineHintHelper,
   configureInlineHintInput,
+  INLINE_HINT_INPUT_STYLE,
+  INLINE_HINT_WRAPPER_STYLE,
 } from "./inspire/panel/InlineHintHelper";
 import { showAbstractContextMenu as showAbstractCopyMenu } from "./inspire/panel/abstractContextMenu";
 import { popupReporter } from "./inspire/panel/reporter";
 import { literatureSearchHistory } from "./inspire/searchHistory";
+import { FilterHistoryInput } from "./inspire/panel/FilterHistoryInput";
+import { QuickFiltersControl } from "./inspire/panel/QuickFiltersControl";
+import { setQuickFilter } from "./inspire/filters";
 import { cleanMathTitle } from "../utils/mathTitle";
 import { getJournalAbbreviations } from "../utils/journalAbbreviations";
 import { getLocaleID, getString } from "../utils/locale";
@@ -74,8 +79,6 @@ import {
   isReferenceSortOption,
   isInspireSortOption,
   isRelatedSortOption,
-  FILTER_HISTORY_PREF_KEY,
-  FILTER_HISTORY_MAX_ENTRIES,
   AUTHOR_IDS_EXTRACT_LIMIT,
   // New constants for magic number replacement
   FILTER_DEBOUNCE_MS,
@@ -268,37 +271,6 @@ import { BatchToolbar } from "./inspire/panel/BatchToolbar";
 
 // Re-export for external use
 export { ZInsUtils, ZInsMenu, ZInspire };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// InlineHintHelper: Reusable inline hint for input autocomplete
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Shared input styles for inline hint inputs (Filter & Search) */
-const INLINE_HINT_INPUT_STYLE = `
-  width: 100%;
-  padding: 4px 8px;
-  border: 1px solid var(--zotero-gray-4, #d1d1d5);
-  border-radius: 4px;
-  font-size: 12px;
-  background-color: transparent !important;
-  background: transparent !important;
-  -moz-appearance: none !important;
-  appearance: none !important;
-  position: relative;
-  z-index: 2;
-  font-family: system-ui, -apple-system, sans-serif;
-`;
-
-/** Shared wrapper styles for inline hint containers */
-const INLINE_HINT_WRAPPER_STYLE = `
-  position: relative;
-  flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  background: var(--material-background, #ffffff);
-  border-radius: 4px;
-`;
-
 
 let missingItemPaneSectionLogged = false;
 
@@ -1617,8 +1589,7 @@ export class InspireReferencePanelController {
   private statusEl: HTMLSpanElement;
   private listEl: HTMLDivElement;
   private filterInput: HTMLInputElement;
-  private filterInlineHint?: InlineHintHelper;
-  private filterHistory: SearchHistoryItem[] = [];
+  private filterBox?: FilterHistoryInput;
   private sortSelect!: HTMLSelectElement;
   private filterRow?: HTMLElement; // Row 3: filter + navigation
   private sortRow?: HTMLElement; // Row 4: sort + cache indicator
@@ -1789,15 +1760,7 @@ export class InspireReferencePanelController {
 
   // Quick filters dropdown state
   private quickFilters = new Set<QuickFilterType>();
-  private quickFiltersButton?: HTMLButtonElement;
-  private quickFiltersBadge?: HTMLSpanElement;
-  private quickFiltersPopup?: HTMLDivElement;
-  private quickFiltersPopupVisible = false;
-  private quickFiltersWrapper?: HTMLDivElement;
-  private quickFilterCheckboxes = new Map<QuickFilterType, HTMLInputElement>();
-  // PERF-FIX-6: Track outside click handler and timeout for cleanup
-  private quickFiltersOutsideClickHandler?: (e: MouseEvent) => void;
-  private quickFiltersTimeoutId?: ReturnType<typeof setTimeout>;
+  private quickFiltersControl?: QuickFiltersControl;
 
   // PERF-FIX-2: Track AbortController for cancellable exports
   private exportAbort?: AbortController;
@@ -2166,76 +2129,13 @@ export class InspireReferencePanelController {
 
     this.createQuickFiltersControls(filterGroup);
 
-    // Create wrapper using NATIVE DOM (not ztoolkit) - same pattern as Search
-    // Critical: wrapper stays DETACHED until all setup is complete
-    const filterDoc = filterGroup.ownerDocument;
-    const filterInputWrapper = filterDoc.createElement("div");
-    filterInputWrapper.className = "zinspire-filter-input-wrapper";
-    filterInputWrapper.style.cssText =
-      INLINE_HINT_WRAPPER_STYLE +
-      `min-width: 0; flex: 1 1 120px; max-width: 100%;`;
-
-    // Create filter input using native DOM
-    this.filterInput = filterDoc.createElement("input");
-    this.filterInput.type = "text";
-    this.filterInput.className = "zinspire-ref-panel__filter";
-    this.filterInput.placeholder = getString(
-      "references-panel-filter-placeholder",
-    );
-    configureInlineHintInput(this.filterInput);
-    this.filterInput.style.cssText = INLINE_HINT_INPUT_STYLE;
-
-    // Create inline hint helper (wrapper is still DETACHED from DOM)
-    const filterHint = new InlineHintHelper({
-      input: this.filterInput,
-      wrapper: filterInputWrapper,
-      history: this.filterHistory,
-      getHistory: () => this.filterHistory,
+    const filterBox = new FilterHistoryInput(filterGroup.ownerDocument, {
+      placeholder: getString("references-panel-filter-placeholder"),
+      onInput: (value) => this.handleFilterInputChange(value),
     });
-    filterHint.getElement().classList.add("zinspire-filter-inline-hint");
-    this.filterInlineHint = filterHint;
-
-    // Add event listeners BEFORE appending input (same order as Search)
-    this.filterInput.addEventListener("keydown", (event: KeyboardEvent) => {
-      if (
-        (event.key === "Tab" || event.key === "ArrowRight") &&
-        filterHint.currentHintText
-      ) {
-        const input = event.target as HTMLInputElement;
-        const cursorAtEnd = input.selectionStart === input.value.length;
-        if (cursorAtEnd && filterHint.accept()) {
-          event.preventDefault();
-          this.handleFilterInputChange(input.value);
-          this.addToFilterHistory(input.value);
-        }
-      } else if (event.key === "Escape") {
-        filterHint.hide();
-      } else if (event.key === "Enter") {
-        this.addToFilterHistory((event.target as HTMLInputElement).value);
-        filterHint.hide();
-      }
-    });
-
-    this.filterInput.addEventListener("input", (event: Event) => {
-      const target = event.target as HTMLInputElement;
-      this.handleFilterInputChange(target.value);
-      filterHint.update();
-    });
-
-    this.filterInput.addEventListener("focus", () => {
-      filterHint.update();
-    });
-
-    this.filterInput.addEventListener("blur", () => {
-      this.addToFilterHistory(this.filterInput?.value || "");
-      setTimeout(() => filterHint.hide(), 150);
-    });
-
-    // Append input to wrapper AFTER all event listeners (same order as Search)
-    filterInputWrapper.appendChild(this.filterInput);
-
-    // NOW attach wrapper to DOM (after all setup is complete)
-    filterGroup.appendChild(filterInputWrapper);
+    this.filterInput = filterBox.input;
+    this.filterBox = filterBox;
+    filterGroup.appendChild(filterBox.wrapper);
 
     // Navigation group (immediately after filter, no margin-left: auto)
     const navGroup = body.ownerDocument.createElement("div");
@@ -2339,7 +2239,6 @@ export class InspireReferencePanelController {
 
     // Load search & filter history from preferences
     this.loadSearchHistory();
-    this.loadFilterHistory();
 
     // Create chart container (between toolbar and list)
     const chartContainer = this.createChartContainer();
@@ -5639,46 +5538,18 @@ export class InspireReferencePanelController {
     return [];
   }
 
-  private enforceQuickFilterConstraints(newlyEnabled?: QuickFilterType): void {
-    // publishedOnly and preprintOnly are mutually exclusive
-    if (
-      this.quickFilters.has("publishedOnly") &&
-      this.quickFilters.has("preprintOnly")
-    ) {
-      if (newlyEnabled === "preprintOnly") {
-        this.quickFilters.delete("publishedOnly");
-      } else if (newlyEnabled === "publishedOnly") {
-        this.quickFilters.delete("preprintOnly");
-      } else {
-        this.quickFilters.delete("preprintOnly");
-      }
-    }
-
-    // recent1Year and recent5Years are mutually exclusive
-    if (
-      this.quickFilters.has("recent1Year") &&
-      this.quickFilters.has("recent5Years")
-    ) {
-      if (newlyEnabled === "recent1Year") {
-        this.quickFilters.delete("recent5Years");
-      } else if (newlyEnabled === "recent5Years") {
-        this.quickFilters.delete("recent1Year");
-      } else {
-        this.quickFilters.delete("recent5Years");
-      }
-    }
-
-    // localItems and onlineItems are mutually exclusive
-    if (
-      this.quickFilters.has("localItems") &&
-      this.quickFilters.has("onlineItems")
-    ) {
-      if (newlyEnabled === "onlineItems") {
-        this.quickFilters.delete("localItems");
-      } else if (newlyEnabled === "localItems") {
-        this.quickFilters.delete("onlineItems");
-      } else {
-        this.quickFilters.delete("onlineItems");
+  /**
+   * Filters that exclude each other, both read from the preferences: the
+   * first of each pair stays
+   */
+  private enforceQuickFilterConstraints(): void {
+    for (const [kept, dropped] of [
+      ["publishedOnly", "preprintOnly"],
+      ["recent1Year", "recent5Years"],
+      ["localItems", "onlineItems"],
+    ] as const) {
+      if (this.quickFilters.has(kept) && this.quickFilters.has(dropped)) {
+        this.quickFilters.delete(dropped);
       }
     }
   }
@@ -5703,16 +5574,8 @@ export class InspireReferencePanelController {
     enabled: boolean,
     options?: { suppressRender?: boolean; skipPersist?: boolean },
   ): void {
-    const currentlyEnabled = this.quickFilters.has(type);
-    if (enabled === currentlyEnabled) {
+    if (!setQuickFilter(this.quickFilters, type, enabled)) {
       return;
-    }
-
-    if (enabled) {
-      this.quickFilters.add(type);
-      this.enforceQuickFilterConstraints(type);
-    } else {
-      this.quickFilters.delete(type);
     }
 
     this.updatePublishedOnlyStateFromQuickFilters();
@@ -5721,9 +5584,8 @@ export class InspireReferencePanelController {
       this.persistQuickFiltersToPrefs();
     }
 
-    this.updateQuickFiltersButtonState();
+    this.quickFiltersControl?.refresh();
     this.updatePublishedOnlyButtonStyle();
-    this.updateQuickFilterCheckboxStates();
     this.updateChartClearButton();
 
     if (!options?.suppressRender) {
@@ -5746,21 +5608,6 @@ export class InspireReferencePanelController {
   ): void {
     const shouldEnable = !this.quickFilters.has(type);
     this.setQuickFilterState(type, shouldEnable, options);
-  }
-
-  private updateQuickFiltersButtonState(): void {
-    if (!this.quickFiltersButton) {
-      return;
-    }
-
-    const activeCount = this.quickFilters.size;
-    this.quickFiltersButton.classList.toggle("active", activeCount > 0);
-
-    if (this.quickFiltersBadge) {
-      this.quickFiltersBadge.textContent =
-        activeCount > 0 ? `${activeCount}` : "";
-      this.quickFiltersBadge.hidden = activeCount === 0;
-    }
   }
 
   private updatePublishedOnlyButtonStyle(): void {
@@ -5805,7 +5652,7 @@ export class InspireReferencePanelController {
       if (this.filterInput) {
         this.filterInput.value = "";
       }
-      this.filterInlineHint?.hide();
+      this.filterBox?.hideHint();
       if (this.filterDebounceTimer) {
         clearTimeout(this.filterDebounceTimer);
         this.filterDebounceTimer = undefined;
@@ -5829,8 +5676,7 @@ export class InspireReferencePanelController {
       this.quickFilters.clear();
       this.persistQuickFiltersToPrefs();
       this.updatePublishedOnlyStateFromQuickFilters();
-      this.updateQuickFiltersButtonState();
-      this.updateQuickFilterCheckboxStates();
+      this.quickFiltersControl?.refresh();
       this.updatePublishedOnlyButtonStyle();
       didChange = true;
     }
@@ -5877,261 +5723,15 @@ export class InspireReferencePanelController {
     }, this.filterDebounceDelay);
   }
 
-  private getOwnerDocument(element?: Element | null): Document {
-    return (
-      element?.ownerDocument ||
-      this.body.ownerDocument ||
-      Zotero.getMainWindow().document
-    );
-  }
-
   private createQuickFiltersControls(toolbar: HTMLDivElement): void {
-    const doc = this.getOwnerDocument(toolbar);
-    const wrapper = doc.createElement("div");
-    wrapper.className = "zinspire-quick-filters";
-    // Inline styles to ensure proper flex behavior in Zotero's XUL environment
-    wrapper.style.display = "inline-flex";
-    wrapper.style.flexShrink = "0";
-    wrapper.style.position = "relative";
-    toolbar.appendChild(wrapper);
-    this.quickFiltersWrapper = wrapper as HTMLDivElement;
-
-    const button = doc.createElement("button");
-    button.className = "zinspire-quick-filter-btn";
-    button.type = "button";
-    button.setAttribute("aria-haspopup", "true");
-    button.setAttribute("aria-expanded", "false");
-    const filtersLabel = getString("references-panel-quick-filters");
-    const filtersEmoji = "⏳";
-    button.textContent = filtersEmoji;
-    button.setAttribute("aria-label", filtersLabel);
-    button.setAttribute("title", filtersLabel);
-    // Apply button styling
-    button.style.cssText = `
-      padding: 4px 8px;
-      font-size: 14px;
-      border: 1px solid var(--fill-quinary, #d1d5db);
-      border-radius: 4px;
-      background: var(--material-background, #fff);
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    `;
-    button.onclick = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      Zotero.debug(
-        `[${config.addonName}] Quick filter button clicked, popup visible: ${this.quickFiltersPopupVisible}`,
-      );
-      this.toggleQuickFiltersPopup();
-    };
-
-    const badge = doc.createElement("span");
-    badge.className = "zinspire-quick-filter-badge";
-    badge.hidden = true;
-    button.appendChild(badge);
-
-    wrapper.appendChild(button);
-    this.quickFiltersButton = button as HTMLButtonElement;
-    this.quickFiltersBadge = badge as HTMLSpanElement;
-
-    // Create popup as fixed positioned dropdown overlay
-    // FIX-OVERFLOW-CLIP: Append to this.body to avoid clipping from parent overflow:hidden
-    const popup = doc.createElement("div");
-    popup.className = "zinspire-quick-filter-popup";
-    popup.hidden = true;
-    // Fixed positioned dropdown overlay - single column
-    // Position will be calculated dynamically in openQuickFiltersPopup
-    // FIX-DARK-MODE: Use solid background for better visibility
-    popup.style.cssText = `
-      display: none;
-      flex-direction: column;
-      position: fixed;
-      z-index: 10000;
-      background: var(--material-background, #fff);
-      border: 1px solid var(--fill-quinary, #d1d5db);
-      border-radius: 6px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-      padding: 6px 4px;
-      gap: 2px;
-      min-width: 160px;
-    `;
-    // FIX-OVERFLOW-CLIP: Append to body instead of wrapper to avoid clipping
-    this.body.appendChild(popup);
-    this.quickFiltersPopup = popup as HTMLDivElement;
-
-    this.renderQuickFilterItems(popup as HTMLDivElement);
-    this.updateQuickFiltersButtonState();
-    this.updateQuickFilterCheckboxStates();
-    this.updateQuickFiltersButtonExpandedState();
-    // Note: No outside click handler - popup only closes via button toggle
-  }
-
-  private renderQuickFilterItems(container: HTMLDivElement): void {
-    this.quickFilterCheckboxes.clear();
-    container.replaceChildren();
-    const doc = this.getOwnerDocument(container);
-
-    for (const config of QUICK_FILTER_CONFIGS) {
-      const item = doc.createElement("label");
-      item.className = "zinspire-quick-filter-item";
-      // Compact row style with hover effect - use CSS variables for dark mode
-      item.style.cssText = `
-        display: flex;
-        align-items: center;
-        white-space: nowrap;
-        gap: 6px;
-        padding: 4px 8px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-        color: var(--fill-primary, #1e293b);
-        transition: background-color 0.1s ease;
-      `;
-      const labelText = getString(config.labelKey);
-      if (config.tooltipKey) {
-        item.title = getString(config.tooltipKey);
-      } else {
-        item.title = labelText;
-      }
-
-      // Hover effect - use CSS variable for dark mode support
-      item.addEventListener("mouseenter", () => {
-        item.style.backgroundColor = "var(--fill-quinary, rgba(0, 0, 0, 0.05))";
-      });
-      item.addEventListener("mouseleave", () => {
-        item.style.backgroundColor = "";
-      });
-
-      const checkbox = doc.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = this.quickFilters.has(config.type);
-      checkbox.addEventListener("click", (event) => event.stopPropagation());
-      checkbox.addEventListener("change", (event) => {
-        event.stopPropagation();
-        this.setQuickFilterState(config.type, checkbox.checked);
-      });
-
-      const emojiSpan = doc.createElement("span");
-      emojiSpan.className = "zinspire-quick-filter-item-emoji";
-      emojiSpan.textContent = config.emoji;
-
-      const labelSpan = doc.createElement("span");
-      labelSpan.className = "zinspire-quick-filter-item-label";
-      labelSpan.textContent = labelText;
-
-      item.appendChild(checkbox);
-      item.appendChild(emojiSpan);
-      item.appendChild(labelSpan);
-
-      container.appendChild(item);
-      this.quickFilterCheckboxes.set(config.type, checkbox as HTMLInputElement);
-    }
-  }
-
-  private updateQuickFilterCheckboxStates(): void {
-    for (const [type, checkbox] of this.quickFilterCheckboxes.entries()) {
-      checkbox.checked = this.quickFilters.has(type);
-    }
-  }
-
-  private toggleQuickFiltersPopup(): void {
-    if (this.quickFiltersPopupVisible) {
-      this.closeQuickFiltersPopup();
-    } else {
-      this.openQuickFiltersPopup();
-    }
-  }
-
-  private openQuickFiltersPopup(): void {
-    Zotero.debug(
-      `[${config.addonName}] openQuickFiltersPopup called, popup exists: ${!!this.quickFiltersPopup}`,
-    );
-    if (!this.quickFiltersPopup) {
-      Zotero.debug(
-        `[${config.addonName}] quickFiltersPopup is null/undefined, returning early`,
-      );
-      return;
-    }
-
-    // FIX-OVERFLOW-CLIP: Calculate fixed position based on button's bounding rect
-    if (this.quickFiltersButton) {
-      const buttonRect = this.quickFiltersButton.getBoundingClientRect();
-      this.quickFiltersPopup.style.top = `${buttonRect.bottom + 4}px`;
-      this.quickFiltersPopup.style.left = `${buttonRect.left}px`;
-    }
-
-    this.quickFiltersPopup.hidden = false;
-    this.quickFiltersPopup.style.display = "flex";
-    this.quickFiltersPopupVisible = true;
-    this.updateQuickFiltersButtonExpandedState();
-    this.updateQuickFilterCheckboxStates();
-
-    // PERF-FIX-6: Clean up any existing handler before creating new one
-    this.cleanupQuickFiltersHandler();
-
-    // PERF-FIX-6: Create tracked outside click handler
-    this.quickFiltersOutsideClickHandler = (event: MouseEvent) => {
-      // Early exit if controller is destroyed
-      if (!this.body?.ownerDocument) {
-        this.cleanupQuickFiltersHandler();
-        return;
-      }
-
-      const target = event.target as Node;
-      const isInsidePopup = this.quickFiltersPopup?.contains(target);
-      const isInsideButton = this.quickFiltersButton?.contains(target);
-      if (!isInsidePopup && !isInsideButton) {
-        this.closeQuickFiltersPopup();
-      }
-    };
-
-    // PERF-FIX-6: Track timeout ID for cleanup
-    this.quickFiltersTimeoutId = setTimeout(() => {
-      this.quickFiltersTimeoutId = undefined;
-      if (this.quickFiltersOutsideClickHandler) {
-        this.body.ownerDocument?.addEventListener(
-          "click",
-          this.quickFiltersOutsideClickHandler,
-          true,
-        );
-      }
-    }, 0);
-  }
-
-  private closeQuickFiltersPopup(): void {
-    // PERF-FIX-6: Clean up handler when closing
-    this.cleanupQuickFiltersHandler();
-
-    if (!this.quickFiltersPopup) {
-      this.quickFiltersPopupVisible = false;
-      this.updateQuickFiltersButtonExpandedState();
-      return;
-    }
-    this.quickFiltersPopup.hidden = true;
-    this.quickFiltersPopup.style.display = "none";
-    this.quickFiltersPopupVisible = false;
-    this.updateQuickFiltersButtonExpandedState();
-  }
-
-  /**
-   * PERF-FIX-6: Clean up quick filters outside click handler and timeout.
-   * Called when closing popup or destroying controller.
-   */
-  private cleanupQuickFiltersHandler(): void {
-    if (this.quickFiltersTimeoutId) {
-      clearTimeout(this.quickFiltersTimeoutId);
-      this.quickFiltersTimeoutId = undefined;
-    }
-    if (this.quickFiltersOutsideClickHandler) {
-      this.body.ownerDocument?.removeEventListener(
-        "click",
-        this.quickFiltersOutsideClickHandler,
-        true,
-      );
-      this.quickFiltersOutsideClickHandler = undefined;
-    }
+    // FIX-OVERFLOW-CLIP: the popup goes into this.body, clear of the
+    // toolbar's overflow:hidden
+    this.quickFiltersControl = new QuickFiltersControl(this.body, {
+      configs: QUICK_FILTER_CONFIGS,
+      active: () => this.quickFilters,
+      onToggle: (type, enabled) => this.setQuickFilterState(type, enabled),
+    });
+    toolbar.appendChild(this.quickFiltersControl.element);
   }
 
   /**
@@ -6144,16 +5744,6 @@ export class InspireReferencePanelController {
       this.exportAbort = undefined;
       Zotero.debug(`[${config.addonName}] Export operation cancelled`);
     }
-  }
-
-  private updateQuickFiltersButtonExpandedState(): void {
-    if (!this.quickFiltersButton) {
-      return;
-    }
-    this.quickFiltersButton.setAttribute(
-      "aria-expanded",
-      this.quickFiltersPopupVisible ? "true" : "false",
-    );
   }
 
   private applyQuickFilters(
@@ -8189,6 +7779,7 @@ export class InspireReferencePanelController {
     this.pendingVisibleItemSwitchID = undefined;
     // PERF-FIX-2: Cancel any ongoing export operations
     this.cancelExport();
+    this.quickFiltersControl?.dispose();
     // FTR-CITATION-GRAPH: Cleanup citation graph dialog
     this.citationGraphDialog?.dispose();
     this.citationGraphDialog = undefined;
@@ -9801,7 +9392,7 @@ export class InspireReferencePanelController {
           if (this.filterInput) {
             this.filterInput.value = "";
           }
-          this.filterInlineHint?.hide();
+          this.filterBox?.hideHint();
         } else {
           // Search mode: preserve search results but still restore scroll position
           // when navigating back (e.g., after clicking green dot to jump to a local item).
@@ -13913,79 +13504,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
 
   private addToSearchHistory(query: string) {
     this.searchHistory = literatureSearchHistory.add(query);
-  }
-
-
-  private loadFilterHistory() {
-    try {
-      const stored = Zotero.Prefs.get(
-        `${config.addonRef}.${FILTER_HISTORY_PREF_KEY}`,
-        true,
-      ) as string | undefined;
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (
-          Array.isArray(parsed) &&
-          parsed.length > 0 &&
-          typeof parsed[0] === "string"
-        ) {
-          this.filterHistory = (parsed as unknown as string[]).map((query) => ({
-            query,
-            timestamp: Date.now(),
-          }));
-          this.saveFilterHistory();
-        } else if (Array.isArray(parsed)) {
-          this.filterHistory = parsed as SearchHistoryItem[];
-        } else {
-          this.filterHistory = [];
-        }
-      } else {
-        this.filterHistory = [];
-      }
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] Failed to load filter history: ${err}`,
-      );
-      this.filterHistory = [];
-    }
-  }
-
-  private saveFilterHistory() {
-    try {
-      Zotero.Prefs.set(
-        `${config.addonRef}.${FILTER_HISTORY_PREF_KEY}`,
-        JSON.stringify(this.filterHistory),
-        true,
-      );
-    } catch (err) {
-      Zotero.debug(
-        `[${config.addonName}] Failed to save filter history: ${err}`,
-      );
-    }
-  }
-
-  private addToFilterHistory(query: string) {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      return;
-    }
-    const existingIndex = this.filterHistory.findIndex(
-      (item) => item.query === trimmed,
-    );
-    if (existingIndex !== -1) {
-      this.filterHistory.splice(existingIndex, 1);
-    }
-    this.filterHistory.unshift({
-      query: trimmed,
-      timestamp: Date.now(),
-    });
-    if (this.filterHistory.length > FILTER_HISTORY_MAX_ENTRIES) {
-      this.filterHistory = this.filterHistory.slice(
-        0,
-        FILTER_HISTORY_MAX_ENTRIES,
-      );
-    }
-    this.saveFilterHistory();
   }
 
   /**
