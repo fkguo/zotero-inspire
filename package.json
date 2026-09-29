@@ -1,7 +1,7 @@
 {
   "name": "zotero-inspire",
   "version": "4.0.0",
-  "description": "A Zotero plugin with a Zotero-tailored arXiv browser and deep integration of INSPIRE-HEP into Zotero",
+  "description": "Zotero plugin with a Zotero-tailored arXiv browser and deep integration of INSPIRE-HEP",
   "config": {
     "addonName": "zotero-inspire",
     "addonID": "zoteroinspire@itp.ac.cn",

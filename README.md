@@ -4,7 +4,7 @@
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 [![GitHub downloads, all releases](https://img.shields.io/github/downloads/fkguo/zotero-inspire/total?style=flat-square&logo=github&label=downloads)](https://github.com/fkguo/zotero-inspire/releases)
 
-A Zotero plugin with a Zotero-tailored arXiv browser and deep integration of [INSPIRE-HEP](https://inspirehep.net) into Zotero.
+Zotero plugin with a Zotero-tailored arXiv browser and deep integration of [INSPIRE-HEP](https://inspirehep.net).
 
 The **arXiv browser** works for every arXiv category, from mathematics and computer science to biology, economics and physics: read the daily listings in a Zotero window, then add papers to your library or relate them to items you already have. The **INSPIRE integration** serves high energy physics and related fields: browse references, citations, author papers and academic lineages directly in Zotero without leaving your library.
 
