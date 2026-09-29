@@ -25,6 +25,7 @@ import {
   LibraryIndexError,
   stopLibraryIndex,
 } from "../src/modules/inspire/library/arxivIndex";
+import { findDuplicates } from "../src/modules/inspire/library/localStatus";
 import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 import { FakeLibrary, GROUP_LIBRARY } from "./fakeLibrary";
 
@@ -384,16 +385,21 @@ describe("batch import: duplicate check against the library", () => {
     const byArxiv = lib.put({ fields: { extra: "arXiv:2302.00002" } });
     const byDOI = lib.put({ fields: { DOI: "10.1/C" } });
     const m = manager();
-    const duplicates = await (m as any).detectDuplicates([
+    const duplicates = await findDuplicates([
       entry("100"),
       entry("200", { arxivDetails: { id: "2302.00002" } }),
       entry("300", { doi: "10.1/c" }),
       entry("400", { arxivDetails: { id: "2304.00004" }, doi: "10.1/d" }),
     ]);
+    const found = (item: { id: number }, hasRecid: boolean, by: string) => ({
+      localItemID: item.id,
+      matchType: by,
+      hits: [{ itemID: item.id, libraryID: 1, hasRecid, by: [by] }],
+    });
     expect(Object.fromEntries(duplicates)).toEqual({
-      e100: { localItemID: byRecid.id, matchType: "recid" },
-      e200: { localItemID: byArxiv.id, matchType: "arxiv" },
-      e300: { localItemID: byDOI.id, matchType: "doi" },
+      e100: found(byRecid, true, "recid"),
+      e200: found(byArxiv, false, "arxiv"),
+      e300: found(byDOI, false, "doi"),
     });
     m.dispose();
   });
@@ -414,7 +420,7 @@ describe("batch import: duplicate check against the library", () => {
     async (_name, _before, after, fields: Record<string, string>, deleted) => {
       const item = lib.put({ fields, deleted });
       const m = manager();
-      const duplicates = await (m as any).detectDuplicates([
+      const duplicates = await findDuplicates([
         entry("100", { arxivDetails: { id: "2301.12345" } }),
       ]);
       expect(duplicates.get("e100")?.matchType ?? null).toBe(after);
@@ -428,13 +434,22 @@ describe("batch import: duplicate check against the library", () => {
     const withRecid = lib.put({ fields: pluginFields("999") });
     await lib.edit(withRecid, { extra: "arXiv:2301.12345" });
     const m = manager();
-    const duplicates = await (m as any).detectDuplicates([
+    const duplicates = await findDuplicates([
       entry("100", { arxivDetails: { id: "2301.12345" } }),
     ]);
     // The item with a recid comes first
     expect(duplicates.get("e100")).toEqual({
       localItemID: withRecid.id,
       matchType: "arxiv",
+      hits: [
+        { itemID: withRecid.id, libraryID: 1, hasRecid: true, by: ["arxiv"] },
+        {
+          itemID: withoutRecid.id,
+          libraryID: 1,
+          hasRecid: false,
+          by: ["arxiv"],
+        },
+      ],
     });
     expect(withoutRecid.id).toBeLessThan(withRecid.id);
     m.dispose();

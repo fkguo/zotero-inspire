@@ -6,6 +6,7 @@ import {
   type BatchImportManagerOptions,
 } from "../src/modules/inspire/panel/BatchImportManager";
 import { EntryListRenderer } from "../src/modules/inspire/panel/EntryListRenderer";
+import { findDuplicates } from "../src/modules/inspire/library/localStatus";
 import {
   popupReporter,
   type Reporter,
@@ -21,11 +22,15 @@ import { InspireReferencePanelController } from "../src/modules/zinspire";
 
 // The library: the item it has for each recid, arXiv ID and DOI, looked up
 // through the library index (libraryLookup)
+// (an item ID, or the hits of several items)
+type Hits = number | { itemID: number; libraryID: number; hasRecid: boolean }[];
 const library = vi.hoisted(() => ({
-  recids: new Map<string, number>(),
-  arxivIds: new Map<string, number>(),
-  dois: new Map<string, number>(),
+  recids: new Map<string, Hits>(),
+  arxivIds: new Map<string, Hits>(),
+  dois: new Map<string, Hits>(),
   libraryLookup: vi.fn(),
+  // The user's libraries (My Library alone unless a test adds a group)
+  libraries: [] as { libraryID: number; libraryType: string }[],
 }));
 vi.mock(
   "../src/modules/inspire/library/arxivIndex",
@@ -91,8 +96,12 @@ function msg(key: string, args?: Record<string, unknown>): string {
 
 /** Lookups in the library as it is when they run */
 function lookupNow() {
-  const hits = (itemID: number | undefined) =>
-    itemID === undefined ? [] : [{ itemID, libraryID: 1, hasRecid: true }];
+  const hits = (found: Hits | undefined) =>
+    found === undefined
+      ? []
+      : typeof found === "number"
+        ? [{ itemID: found, libraryID: 1, hasRecid: true }]
+        : found;
   return {
     byRecid: vi.fn((recid: string) => hits(library.recids.get(recid))),
     byArxiv: vi.fn((id: string) => hits(library.arxivIds.get(id))),
@@ -105,12 +114,18 @@ beforeEach(() => {
   library.recids.clear();
   library.arxivIds.clear();
   library.dois.clear();
+  library.libraries = [{ libraryID: 1, libraryType: "user" }];
   library.libraryLookup.mockReset().mockImplementation(async () => lookupNow());
   clipboard.copyToClipboard.mockReset().mockResolvedValue(true);
   network.inspireFetch.mockReset();
   vi.stubGlobal("Zotero", {
     debug: vi.fn(),
     Prefs: { get: () => undefined },
+    Libraries: {
+      userLibraryID: 1,
+      get: (id: number) => ({ name: id === 1 ? "My Library" : `Group ${id}` }),
+      getAll: () => library.libraries,
+    },
   });
   // Toast-style progress windows opened through the global toolkit
   vi.stubGlobal("ztoolkit", {
@@ -465,15 +480,56 @@ describe("duplicate detection", () => {
     library.recids.set("2", 21).set("5", 25);
     library.arxivIds.set("2403.00003", 23).set("2405.00005", 26);
     library.dois.set("10.1/c", 24).set("10.1/d", 27);
-    const { manager } = setUpManager(entries);
+    const duplicates = await findDuplicates(entries);
 
-    const duplicates = await (manager as any).detectDuplicates(entries);
-
+    const hit = (itemID: number, ...by: string[]) => ({
+      itemID,
+      libraryID: 1,
+      hasRecid: true,
+      by,
+    });
     expect(Object.fromEntries(duplicates)).toEqual({
-      byRecid: { localItemID: 21, matchType: "recid" },
-      byArxiv: { localItemID: 23, matchType: "arxiv" },
-      byDoi: { localItemID: 27, matchType: "doi" },
-      recidFirst: { localItemID: 25, matchType: "recid" },
+      byRecid: { localItemID: 21, matchType: "recid", hits: [hit(21, "recid")] },
+      byArxiv: {
+        localItemID: 23,
+        matchType: "arxiv",
+        hits: [hit(23, "arxiv"), hit(24, "doi")],
+      },
+      byDoi: { localItemID: 27, matchType: "doi", hits: [hit(27, "doi")] },
+      recidFirst: {
+        localItemID: 25,
+        matchType: "recid",
+        hits: [hit(25, "recid"), hit(26, "arxiv")],
+      },
+    });
+  });
+
+  // Intentional change: every item that has the paper is kept, not only the
+  // first found by each identifier
+  it("keeps every item found, those with a recid first, then by item ID", async () => {
+    library.arxivIds.set("2401.00001", [
+      { itemID: 40, libraryID: 1, hasRecid: true },
+      { itemID: 31, libraryID: 2, hasRecid: false },
+      { itemID: 35, libraryID: 1, hasRecid: false },
+    ]);
+    library.dois.set("10.1/a", [
+      { itemID: 31, libraryID: 2, hasRecid: false },
+      { itemID: 50, libraryID: 1, hasRecid: false },
+    ]);
+
+    const duplicates = await findDuplicates([
+      entry("a", { arxivDetails: { id: "arXiv:2401.00001v2" }, doi: "10.1/a" }),
+    ]);
+
+    expect(duplicates.get("a")).toEqual({
+      localItemID: 40,
+      matchType: "arxiv",
+      hits: [
+        { itemID: 40, libraryID: 1, hasRecid: true, by: ["arxiv"] },
+        { itemID: 31, libraryID: 2, hasRecid: false, by: ["arxiv", "doi"] },
+        { itemID: 35, libraryID: 1, hasRecid: false, by: ["arxiv"] },
+        { itemID: 50, libraryID: 1, hasRecid: false, by: ["doi"] },
+      ],
     });
   });
 
@@ -486,12 +542,14 @@ describe("duplicate detection", () => {
       // Marked, but its item is no longer in the library
       entry("b", { localItemID: 2 }),
     ];
-    const { manager } = setUpManager(entries);
-
-    const duplicates = await (manager as any).detectDuplicates(entries);
+    const duplicates = await findDuplicates(entries);
 
     expect(Object.fromEntries(duplicates)).toEqual({
-      a: { localItemID: 1, matchType: "recid" },
+      a: {
+        localItemID: 1,
+        matchType: "recid",
+        hits: [{ itemID: 1, libraryID: 1, hasRecid: true, by: ["recid"] }],
+      },
     });
     expect(library.libraryLookup).toHaveBeenCalledOnce();
   });
@@ -724,6 +782,25 @@ describe("duplicate dialog", () => {
     expect(panel.options.importReference).toHaveBeenCalledWith("rec-a", TARGET);
   });
 
+  it("names the library of each duplicate when the user has group libraries", async () => {
+    library.libraries.push({ libraryID: 2, libraryType: "group" });
+    const panel = setUpManager([localEntry("a", 1)]);
+    panel.manager.selectAll();
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    const dialog = await panel.dialog();
+    expect(
+      dialog.querySelector(".zinspire-duplicate-dialog__item")!.textContent,
+    ).toBe(
+      `Paper a${msg("references-panel-batch-duplicate-match-recid")} ${msg(
+        "references-panel-batch-duplicate-libraries",
+        { libraries: "My Library" },
+      )}`,
+    );
+    buttonIn(dialog, "references-panel-batch-duplicate-cancel").click();
+    expect(await run).toBeNull();
+  });
+
   it("has nothing to import when every duplicate is skipped", async () => {
     const panel = setUpManager([localEntry("a", 1)]);
     panel.manager.selectAll();
@@ -737,6 +814,106 @@ describe("duplicate dialog", () => {
       msg("references-panel-batch-no-selection"),
     );
     expect(panel.options.promptForSaveTarget).not.toHaveBeenCalled();
+  });
+});
+
+describe("one paper on several rows", () => {
+  /** A row of the arXiv browser: the paper announced on `day` */
+  function dayRow(
+    arxivId: string,
+    day: string,
+    fields: Partial<InspireReferenceEntry> = {},
+  ) {
+    return entry(`arxiv-${arxivId}-${day}`, {
+      arxivDetails: { id: arxivId },
+      recid: `rec-${arxivId}`,
+      title: `Paper ${arxivId}`,
+      ...fields,
+    });
+  }
+
+  // Intentional change: before, each row was imported, so a paper shown on
+  // two rows was added twice
+  it("imports a paper shown on two rows once and marks every row showing it", async () => {
+    const first = dayRow("2609.00001", "2026-09-24");
+    const second = dayRow("2609.00001", "2026-09-25");
+    // Not selected: a third day's row of the same paper
+    const third = dayRow("2609.00001", "2026-09-28", { recid: undefined });
+    const other = dayRow("2609.00002", "2026-09-24");
+    const panel = setUpManager([first, second, third, other]);
+    panel.options.importReference.mockImplementation(async (recid) =>
+      recid === "rec-2609.00001" ? ({ id: 70 } as any) : ({ id: 71 } as any),
+    );
+    panel.click(first.id);
+    panel.click(second.id);
+    panel.click(other.id);
+
+    const result = await panel.manager.handleBatchImport(panel.anchor);
+
+    expect(
+      panel.options.importReference.mock.calls.map(([recid]) => recid),
+    ).toEqual(["rec-2609.00001", "rec-2609.00002"]);
+    expect(result).toMatchObject({ success: 2, failed: 0, cancelled: false });
+    expect([first, second, third, other].map((e) => e.localItemID)).toEqual([
+      70, 70, 70, 71,
+    ]);
+    expect(
+      panel.options.updateRowStatus.mock.calls.map(([e]) => e.id).sort(),
+    ).toEqual([first.id, second.id, third.id, other.id].sort());
+    expect(panel.selected()).toEqual([]);
+    expect(progressWindows[0].lines.at(-1)!.text).toBe(
+      msg("references-panel-batch-importing", { done: 2, total: 2 }),
+    );
+  });
+
+  it("imports a reference the list shows twice once", async () => {
+    const entries = [
+      entry("x1", { recid: "rec-x" }),
+      entry("x2", { recid: "rec-x" }),
+    ];
+    const panel = setUpManager(entries);
+    panel.options.importReference.mockResolvedValue({ id: 80 } as any);
+    panel.manager.selectAll();
+
+    await panel.manager.handleBatchImport(panel.anchor);
+
+    expect(panel.options.importReference).toHaveBeenCalledOnce();
+    expect(entries.map((e) => e.localItemID)).toEqual([80, 80]);
+  });
+
+  it("lists a paper shown on two rows once in the duplicate dialog, with the number of items", async () => {
+    library.libraries.push({ libraryID: 2, libraryType: "group" });
+    library.arxivIds.set("2609.00003", [
+      { itemID: 5, libraryID: 1, hasRecid: true },
+      { itemID: 6, libraryID: 2, hasRecid: false },
+    ]);
+    const panel = setUpManager([
+      dayRow("2609.00003", "2026-09-24"),
+      dayRow("2609.00003", "2026-09-25"),
+    ]);
+    panel.manager.selectAll();
+
+    const run = panel.manager.handleBatchImport(panel.anchor);
+    const dialog = await panel.dialog();
+
+    expect(
+      dialog.querySelector(".zinspire-duplicate-dialog__message")!.textContent,
+    ).toBe(msg("references-panel-batch-duplicate-message", { count: 1 }));
+    const items = [
+      ...dialog.querySelectorAll(".zinspire-duplicate-dialog__item"),
+    ];
+    expect(items.map((item) => item.textContent)).toEqual([
+      `Paper 2609.00003${msg("references-panel-batch-duplicate-match-arxiv")} ${msg(
+        "references-panel-batch-duplicate-items",
+        { count: 2 },
+      )} ${msg("references-panel-batch-duplicate-libraries", {
+        libraries: "My Library, Group 2",
+      })}`,
+    ]);
+    buttonIn(dialog, "references-panel-batch-duplicate-import-all").click();
+    buttonIn(dialog, "references-panel-batch-duplicate-confirm").click();
+    await run;
+    expect(panel.options.importReference).toHaveBeenCalledOnce();
   });
 });
 

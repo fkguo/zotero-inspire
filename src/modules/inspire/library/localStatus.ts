@@ -11,8 +11,13 @@
 // works it out when it draws.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { parseArxivId } from "../../arxiv/arxivId";
 import type { InspireReferenceEntry } from "../types";
-import { LibraryIndexError, libraryLookup } from "./arxivIndex";
+import {
+  LibraryIndexError,
+  libraryLookup,
+  type LibraryHit,
+} from "./arxivIndex";
 
 /** A paper whose marks are shown: a list entry or a citation graph node */
 export interface LocalPaper {
@@ -134,18 +139,74 @@ export function writeMarks(paper: LocalPaper, next: LocalPaper): boolean {
 // Duplicate check of the batch import
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** A paper already in the library, and the identifier it was found by */
+/** The identifiers a paper is looked up by, strongest first */
+export type DuplicateMatch = "recid" | "arxiv" | "doi";
+
+/** An item that has a paper, and the identifiers it was found by */
+export interface DuplicateHit extends LibraryHit {
+  by: DuplicateMatch[];
+}
+
+/** A paper already in the library */
 export interface DuplicateInfo {
+  /** The item of the first hit */
   localItemID: number;
-  matchType: "recid" | "arxiv" | "doi";
+  /** The strongest identifier an item was found by */
+  matchType: DuplicateMatch;
+  /** Every item that has the paper: those with a recid first, then by item ID */
+  hits: DuplicateHit[];
+}
+
+/**
+ * Merge `hits` into one list per item, in the order of the panel's marks:
+ * items with a recid first, then by item ID
+ */
+export function mergeHits(hits: readonly DuplicateHit[]): DuplicateHit[] {
+  const byItem = new Map<number, DuplicateHit>();
+  for (const hit of hits) {
+    const known = byItem.get(hit.itemID);
+    if (!known) {
+      byItem.set(hit.itemID, { ...hit, by: [...hit.by] });
+    } else {
+      for (const kind of hit.by) {
+        if (!known.by.includes(kind)) known.by.push(kind);
+      }
+    }
+  }
+  const order: DuplicateMatch[] = ["recid", "arxiv", "doi"];
+  for (const hit of byItem.values()) {
+    hit.by.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  }
+  return [...byItem.values()].sort(
+    (a, b) => Number(b.hasRecid) - Number(a.hasRecid) || a.itemID - b.itemID,
+  );
+}
+
+/** The duplicate info of a paper with `hits` (merged), or null for none */
+export function duplicateInfo(
+  hits: readonly DuplicateHit[],
+): DuplicateInfo | null {
+  if (!hits.length) return null;
+  const kinds = new Set(hits.flatMap((hit) => hit.by));
+  const matchType = (["recid", "arxiv", "doi"] as const).find((kind) =>
+    kinds.has(kind),
+  )!;
+  return { localItemID: hits[0].itemID, matchType, hits: [...hits] };
+}
+
+/** The canonical arXiv identifier of a list entry's paper, if it has one */
+export function entryArxivId(entry: InspireReferenceEntry): string | undefined {
+  const details = entry.arxivDetails;
+  const id = typeof details === "string" ? details : details?.id;
+  return parseArxivId(id)?.id;
 }
 
 /**
  * The papers of `entries` that have an item in the library (any library,
- * items in the trash left out), found by recid, else by arXiv ID, else by
- * DOI; of several items, the first (with a recid first, then by item ID).
- * Keyed by entry ID. Rejects with LibraryIndexError when the library cannot
- * be read: without the check, papers already there would be added again.
+ * items in the trash left out), found by recid, arXiv ID or DOI, with every
+ * item found. Keyed by entry ID. Rejects with LibraryIndexError when the
+ * library cannot be read: without the check, papers already there would be
+ * added again.
  */
 export async function findDuplicates(
   entries: readonly InspireReferenceEntry[],
@@ -154,22 +215,20 @@ export async function findDuplicates(
   if (!entries.length) return duplicates;
   const lookup = await libraryLookup();
   for (const entry of entries) {
-    const arxivId =
-      typeof entry.arxivDetails === "object"
-        ? entry.arxivDetails?.id
-        : undefined;
-    const matches: [DuplicateInfo["matchType"], number | undefined][] = [
-      [
-        "recid",
-        entry.recid ? lookup.byRecid(entry.recid)[0]?.itemID : undefined,
-      ],
-      ["arxiv", arxivId ? lookup.byArxiv(arxivId)[0]?.itemID : undefined],
-      ["doi", entry.doi ? lookup.byDOI(entry.doi)[0]?.itemID : undefined],
+    const arxivId = entryArxivId(entry);
+    const found: [DuplicateMatch, LibraryHit[]][] = [
+      ["recid", entry.recid ? lookup.byRecid(entry.recid) : []],
+      ["arxiv", arxivId ? lookup.byArxiv(arxivId) : []],
+      ["doi", entry.doi ? lookup.byDOI(entry.doi) : []],
     ];
-    const match = matches.find(([, itemID]) => itemID !== undefined);
-    if (match) {
-      duplicates.set(entry.id, { localItemID: match[1]!, matchType: match[0] });
-    }
+    const info = duplicateInfo(
+      mergeHits(
+        found.flatMap(([kind, hits]) =>
+          hits.map((hit) => ({ ...hit, by: [kind] })),
+        ),
+      ),
+    );
+    if (info) duplicates.set(entry.id, info);
   }
   return duplicates;
 }

@@ -514,6 +514,8 @@ export type FluentMessageId =
   | 'references-panel-batch-duplicate-check-failed'
   | 'references-panel-batch-duplicate-confirm'
   | 'references-panel-batch-duplicate-import-all'
+  | 'references-panel-batch-duplicate-items'
+  | 'references-panel-batch-duplicate-libraries'
   | 'references-panel-batch-duplicate-match-arxiv'
   | 'references-panel-batch-duplicate-match-doi'
   | 'references-panel-batch-duplicate-match-recid'
