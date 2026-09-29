@@ -8342,7 +8342,10 @@ export class InspireReferencePanelController {
     if (!this.rateLimiterStatusEl) return;
 
     if (status.isThrottling && status.queuedCount > 0) {
-      this.rateLimiterStatusEl.textContent = `⏳ ${status.queuedCount}`;
+      this.rateLimiterStatusEl.textContent = `🚦 ${getString(
+        "references-panel-rate-limit-label",
+        { args: { count: status.queuedCount } },
+      )}`;
       this.rateLimiterStatusEl.hidden = false;
       this.rateLimiterStatusEl.title = getString(
         "references-panel-rate-limit-queued",
