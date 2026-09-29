@@ -104,6 +104,11 @@ export interface ListPaneOptions {
   isRelated?(entry: BrowserEntry): boolean;
   /** The titles of the items the paper is related to (the button's tooltip) */
   relatedTitles?(entry: BrowserEntry): string[];
+  /**
+   * Shown at the right of the page's first day header (the batch import's
+   * toolbar)
+   */
+  headerTools?: HTMLElement;
 }
 
 export class ListPane {
@@ -489,6 +494,14 @@ export class ListPane {
       fragment.append(next);
     }
     this.list.replaceChildren(fragment);
+    const tools = this.options.headerTools;
+    const header = this.list.querySelector(".arxiv-browser__day");
+    if (tools && header) {
+      header.insertBefore(
+        tools,
+        header.querySelector(".arxiv-browser__day-notes"),
+      );
+    }
     this.renderPager();
     this.renderDayIndex();
     this.observeAbstracts(

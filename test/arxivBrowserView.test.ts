@@ -2713,6 +2713,11 @@ describe("arXiv browser: adding and relating", () => {
     expect(shown(batchToolbar(root))).toBe(false);
     checkbox.click();
     expect(shown(batchToolbar(root))).toBe(true);
+    // At the right of the page's first day header
+    expect(
+      batchToolbar(root).parentElement ===
+        root.querySelector(".arxiv-browser__list .arxiv-browser__day"),
+    ).toBe(true);
     expect(
       batchToolbar(root).querySelector(".zinspire-batch-toolbar__badge")!
         .textContent,
@@ -2965,5 +2970,27 @@ describe("arXiv browser: quick filters and the filter history", () => {
         `${entry.listing.title} ${entry.listing.abstract}`.toLowerCase(),
       ).toMatch(/neutrino/);
     }
+  });
+
+  it("keeps the batch toolbar in the first day header of the page shown", async () => {
+    const env = environment();
+    subscribe(["hep-ph"]);
+    serveHepPh(env.site, 30);
+    prefs[`${PREFIX}.arxiv_browser_open_days`] = "recent";
+    prefs[`${PREFIX}.arxiv_browser_page_size`] = 50;
+    const view = env.open();
+    await env.settle();
+    const toolbar = env.root.querySelector<HTMLElement>(
+      ".zinspire-batch-toolbar",
+    )!;
+    rows(env.root)[0]
+      .querySelector<HTMLInputElement>(".zinspire-ref-entry__checkbox")!
+      .click();
+    const firstHeader = () =>
+      env.root.querySelector(".arxiv-browser__list .arxiv-browser__day");
+    expect(toolbar.parentElement === firstHeader()).toBe(true);
+    view.listPane.goToPage(1);
+    expect(toolbar.parentElement === firstHeader()).toBe(true);
+    expect(toolbar.style.display).toBe("flex");
   });
 });

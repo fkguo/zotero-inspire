@@ -535,7 +535,6 @@ export class ArxivBrowserView {
         this.batchToolbar.setImportInProgress(inProgress),
     });
     this.batchToolbar = new BatchToolbar(doc, this.batch);
-    this.toolbar.append(this.batchToolbar.element);
     const libraryButtons = {
       add: (
         entry: BrowserEntry,
@@ -575,6 +574,7 @@ export class ArxivBrowserView {
       onAdd: (entry, anchor) => void this.library.add(entry, { anchor }),
       onLink: (entry, anchor) => void this.library.relate(entry, anchor),
       isRelated: (entry) => this.library.isRelated(entry),
+      headerTools: this.batchToolbar.element,
       relatedTitles: (entry) =>
         this.library
           .relatedItemsOf(entry)
