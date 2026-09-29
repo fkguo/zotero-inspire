@@ -46,6 +46,11 @@ export interface AddPaperRequest {
   arxivId: string;
   /** The authors as the browsed listing shows them (their split is kept) */
   listingAuthors?: readonly ListingAuthor[];
+  /**
+   * INSPIRE's answer from the list's lookup: used when it is recent and, for a
+   * found record, asked for the record's DOIs; asked again otherwise
+   */
+  inspire?: InspireArxivAnswer;
   /** Add the journal version when INSPIRE has no record and there is a DOI */
   journalVersion?: boolean;
   /** INSPIRE did not answer: add from arXiv data all the same */
@@ -107,6 +112,24 @@ export interface AddOptions {
    * option when absent)
    */
   attachPdf?: boolean;
+}
+
+/**
+ * How long an INSPIRE answer from the list stands in for asking again when
+ * adding. INSPIRE harvests a day's papers hours after the announcement, so
+ * an answer from minutes ago is still INSPIRE's answer; one from the morning
+ * is asked again.
+ */
+export const INSPIRE_ANSWER_FRESH_MS = 10 * 60 * 1000;
+
+/** A list's INSPIRE answer that can be used as it is */
+function usableAnswer(
+  answer: InspireArxivAnswer | undefined,
+  now: number,
+): answer is Exclude<InspireArxivAnswer, { status: "failed" }> {
+  if (!answer || answer.status === "failed") return false;
+  if (now - answer.at >= INSPIRE_ANSWER_FRESH_MS) return false;
+  return answer.status === "notFound" || answer.withDois;
 }
 
 /** The step "final check, then create" running in each library */
@@ -201,12 +224,26 @@ export async function addArxivPapers(
   let inspire: Map<string, InspireArxivAnswer>;
   let api: Awaited<ReturnType<typeof fetchArxivApiEntries>>;
   try {
-    // Asked afresh when adding: INSPIRE may have the paper by now, and its
-    // DOIs (every one, not only the first) find an item saved under them
-    inspire = await lookupInspireByArxiv(ids, {
-      fields: ["dois.value"],
-      signal,
-    });
+    // Asked again unless the list's answer is recent: INSPIRE may have the
+    // paper by now, and its DOIs (every one, not only the first) find an
+    // item saved under them
+    const now = Date.now();
+    inspire = new Map();
+    const toAsk: string[] = [];
+    for (const request of requests) {
+      if (usableAnswer(request.inspire, now)) {
+        inspire.set(request.arxivId, request.inspire);
+      } else {
+        toAsk.push(request.arxivId);
+      }
+    }
+    if (toAsk.length) {
+      const asked = await lookupInspireByArxiv(toAsk, {
+        fields: ["dois.value"],
+        signal,
+      });
+      for (const [id, answer] of asked) inspire.set(id, answer);
+    }
     api = await fetchArxivApiEntries(ids, { signal });
   } catch (err) {
     if ((err as { name?: string })?.name === "AbortError") return cancelled();

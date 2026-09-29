@@ -341,6 +341,93 @@ describe("the route of each paper", () => {
     expect(outcome).toMatchObject({ status: "added", route: "arxiv" });
   });
 
+  it("uses a recent INSPIRE answer from the list instead of asking again", async () => {
+    api([apiEntry("2609.00008"), apiEntry("2609.00009")]);
+    const now = Date.now();
+    const outcomes = await addArxivPapers(
+      [
+        {
+          arxivId: "2609.00008",
+          inspire: {
+            status: "found",
+            recid: "3000008",
+            metadata: { dois: [] },
+            at: now - 60_000,
+            withDois: true,
+          },
+        },
+        { arxivId: "2609.00009", inspire: { status: "notFound", at: now } },
+      ],
+      TARGET,
+    );
+    expect(mocks.lookupInspire).not.toHaveBeenCalled();
+    expect(outcomes.map((o) => (o as any).route)).toEqual(["inspire", "arxiv"]);
+  });
+
+  it("asks again about a list answer from more than 10 minutes ago, or one without the DOIs", async () => {
+    inspire({});
+    api([apiEntry("2609.00010"), apiEntry("2609.00011")]);
+    const now = Date.now();
+    await addArxivPapers(
+      [
+        {
+          arxivId: "2609.00010",
+          inspire: { status: "notFound", at: now - 11 * 60_000 },
+        },
+        {
+          arxivId: "2609.00011",
+          inspire: {
+            status: "found",
+            recid: "3000011",
+            metadata: {},
+            at: now,
+            withDois: false,
+          },
+        },
+      ],
+      TARGET,
+    );
+    expect(mocks.lookupInspire).toHaveBeenCalledOnce();
+    expect(mocks.lookupInspire.mock.calls[0][0]).toEqual([
+      "2609.00010",
+      "2609.00011",
+    ]);
+  });
+
+  it("asks INSPIRE once for a mixed add, and per paper only for the record it imports", async () => {
+    inspire({
+      "2609.00012": { status: "found", recid: "3000012", metadata: {} },
+    });
+    api([
+      apiEntry("2609.00012"),
+      apiEntry("2609.00013"),
+      apiEntry("2609.00014", { doi: "10.1103/x14" }),
+    ]);
+    mocks.lookUpJournal.mockResolvedValue({
+      status: "same",
+      data: { itemType: "journalArticle", DOI: "10.1103/x14" },
+    });
+    const outcomes = await addArxivPapers(
+      [
+        { arxivId: "2609.00012" },
+        { arxivId: "2609.00013" },
+        { arxivId: "2609.00014", journalVersion: true },
+      ],
+      TARGET,
+    );
+    expect(outcomes.map((o) => (o as any).route)).toEqual([
+      "inspire",
+      "arxiv",
+      "journal",
+    ]);
+    // INSPIRE: one batch for all three, then the record of the one it has
+    expect(mocks.lookupInspire).toHaveBeenCalledOnce();
+    expect(mocks.fetchMeta).toHaveBeenCalledOnce();
+    // arXiv API: one batch; the DOI lookup only for the journal version
+    expect(mocks.fetchApi).toHaveBeenCalledOnce();
+    expect(mocks.lookUpJournal).toHaveBeenCalledOnce();
+  });
+
   it("asks INSPIRE afresh when adding, with the record's DOIs", async () => {
     inspire({
       "2609.00007": { status: "found", recid: "3000007", metadata: {} },

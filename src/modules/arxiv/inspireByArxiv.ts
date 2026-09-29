@@ -27,7 +27,15 @@ const PARALLEL_BATCHES = 4;
 export const NOT_FOUND_RECHECK_MS = 60 * 60 * 1000;
 
 export type InspireArxivAnswer =
-  | { status: "found"; recid: string; metadata: any }
+  | {
+      status: "found";
+      recid: string;
+      metadata: any;
+      /** When INSPIRE answered (ms since the epoch) */
+      at: number;
+      /** The record's DOIs were asked for (metadata.dois lists them all) */
+      withDois: boolean;
+    }
   /** INSPIRE answered and has no record (at `at`, ms since the epoch) */
   | { status: "notFound"; at: number }
   /** INSPIRE did not answer */
@@ -98,6 +106,8 @@ export async function lookupInspireByArxiv(
       );
       const failed = new Set(failedTerms.map((t) => t.slice("arxiv:".length)));
       const asked = new Set(batch);
+      const answeredAt = Date.now();
+      const withDois = /(^|,)dois(\.value)?(,|$)/.test(fields);
       for (const metadata of hits) {
         for (const eprint of metadata.arxiv_eprints ?? []) {
           const id = parseArxivId(eprint?.value)?.id;
@@ -106,11 +116,12 @@ export async function lookupInspireByArxiv(
               status: "found",
               recid: String(metadata.control_number),
               metadata,
+              at: answeredAt,
+              withDois,
             });
           }
         }
       }
-      const answeredAt = Date.now();
       for (const id of batch) {
         if (answers.has(id)) {
           notFoundAt.delete(id);

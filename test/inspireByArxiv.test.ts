@@ -95,6 +95,19 @@ describe("INSPIRE lookup by arXiv identifier", () => {
     expect([...answers.values()].every((a) => a.status === "found")).toBe(true);
   });
 
+  it("says when INSPIRE answered and whether the record's DOIs were asked for", async () => {
+    record(51, "2609.60001");
+    const withDois = await lookupInspireByArxiv(["2609.60001"], {
+      fields: ["dois.value"],
+    });
+    const without = await lookupInspireByArxiv(["2609.60001"]);
+    expect(withDois.get("2609.60001")).toMatchObject({
+      withDois: true,
+      at: expect.any(Number),
+    });
+    expect(without.get("2609.60001")).toMatchObject({ withDois: false });
+  });
+
   it("takes a record only for an identifier it lists exactly", async () => {
     // A search hit that lists another paper (an old-style number with a
     // subject class, a version) counts only for what it really lists
