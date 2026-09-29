@@ -42,7 +42,13 @@ import {
   type ListGroup,
   type ListSort,
 } from "./browserList";
-import { formatDay, formatShortDay, reasonText } from "./browserText";
+import {
+  formatDay,
+  formatMonth,
+  formatShortDay,
+  formatShortMonth,
+  reasonText,
+} from "./browserText";
 import { notePaint, noteFormulas, type PaintTime } from "./paintTimes";
 import type { HtmlButtonActions } from "./DetailPane";
 import { button, html } from "./dom";
@@ -54,11 +60,26 @@ interface RowInView {
   offset: number;
 }
 
-const SECTION_TAGS: Record<ListingSection, FluentMessageId | null> = {
-  new: null,
-  cross: "arxiv-browser-section-tag-cross",
-  replace: "arxiv-browser-section-tag-replace",
-};
+const SECTION_TAGS: Record<ListingSection | "search", FluentMessageId | null> =
+  {
+    new: null,
+    cross: "arxiv-browser-section-tag-cross",
+    replace: "arxiv-browser-section-tag-replace",
+    search: null,
+  };
+
+/** Where the reader is in a list: its page, focused paper and scroll */
+export interface ListPosition {
+  page: number;
+  focused: string | null;
+  scrollTop: number;
+}
+
+/**
+ * Search results: whether papers after those fetched can be fetched (Next on
+ * the last page asks for them), and whether they are being fetched
+ */
+export type MoreResults = "none" | "available" | "loading";
 
 /** How the page is placed after the list changed */
 export type ListUpdate =
@@ -119,6 +140,8 @@ export interface ListPaneOptions {
    * toolbar)
    */
   headerTools?: HTMLElement;
+  /** Fetch the search results after those fetched (Next on the last page) */
+  onMore?(): void;
 }
 
 export class ListPane {
@@ -146,6 +169,7 @@ export class ListPane {
   private observer: IntersectionObserver | null = null;
   private retryEnabled = true;
   private message: string | null = null;
+  private more: MoreResults = "none";
 
   constructor(private readonly options: ListPaneOptions) {
     const doc = options.container.ownerDocument;
@@ -199,6 +223,18 @@ export class ListPane {
 
   get currentPage(): number {
     return this.page;
+  }
+
+  get size(): number {
+    return this.pageSize;
+  }
+
+  get position(): ListPosition {
+    return {
+      page: this.page,
+      focused: this.focusedKey,
+      scrollTop: this.list.scrollTop,
+    };
   }
 
   get pages(): number {
@@ -255,6 +291,40 @@ export class ListPane {
     this.render(update === "focus" ? "focus" : "keep", anchor);
   }
 
+  /**
+   * Show the arranged list where the reader was (`position`, kept before):
+   * back from the search results to the days
+   */
+  restore(
+    arranged: ArrangedList,
+    sort: ListSort,
+    position: ListPosition,
+  ): void {
+    this.message = null;
+    this.arranged = arranged;
+    this.sort = sort;
+    this.page = Math.min(position.page, this.pages - 1);
+    this.setFocus(null, false);
+    this.render("top");
+    this.list.scrollTop = position.scrollTop;
+    const focused = position.focused;
+    if (focused && arranged.entries.some((entry) => entry.id === focused)) {
+      this.setFocus(focused, false);
+    }
+  }
+
+  /** Whether more search results can be fetched after the last page */
+  setMore(more: MoreResults): void {
+    if (more === this.more) return;
+    this.more = more;
+    if (this.message) return;
+    this.renderPager();
+    this.list.querySelector(".arxiv-browser__next-page")?.remove();
+    if (this.page < this.pages - 1 || more !== "none") {
+      this.list.append(this.nextPageButton());
+    }
+  }
+
   setPageSize(size: number): void {
     this.pageSize = size;
     const page = this.focusedKey
@@ -285,6 +355,10 @@ export class ListPane {
   }
 
   goToPage(page: number): void {
+    if (page >= this.pages && this.more === "available" && !this.message) {
+      this.options.onMore?.();
+      return;
+    }
     const target = Math.max(0, Math.min(page, this.pages - 1));
     if (target === this.page || this.message) return;
     const hadFocus = this.focusedKey !== null;
@@ -311,15 +385,15 @@ export class ListPane {
     }
     if (this.focusedKey !== null) {
       let start = 0;
+      let count = 0;
       for (const day of this.arranged.days) {
-        if (day.listing.date === date) break;
+        if (day.listing.date === date) {
+          count = day.count;
+          break;
+        }
         start += day.count;
       }
-      const first = this.arranged.entries[start];
-      this.setFocus(
-        first?.listing.announceDate === date ? first.id : null,
-        false,
-      );
+      this.setFocus(count ? this.arranged.entries[start].id : null, false);
     }
     this.list
       .querySelector(`.arxiv-browser__day[data-date="${date}"]`)
@@ -503,12 +577,8 @@ export class ListPane {
         fragment.append(row);
       }
     }
-    if (this.page < this.pages - 1) {
-      const next = button(doc, getString("arxiv-browser-page-next"), () =>
-        this.goToPage(this.page + 1),
-      );
-      next.classList.add("arxiv-browser__next-page");
-      fragment.append(next);
+    if (this.page < this.pages - 1 || this.more !== "none") {
+      fragment.append(this.nextPageButton());
     }
     this.list.replaceChildren(fragment);
     const tools = this.options.headerTools;
@@ -545,6 +615,16 @@ export class ListPane {
     }
   }
 
+  /** The button below the page's last paper that turns to the next page */
+  private nextPageButton(): HTMLButtonElement {
+    const next = button(this.doc, getString("arxiv-browser-page-next"), () =>
+      this.goToPage(this.page + 1),
+    );
+    next.classList.add("arxiv-browser__next-page");
+    next.disabled = this.page === this.pages - 1 && this.more === "loading";
+    return next;
+  }
+
   /**
    * The paper row the reader is at, with its distance from the list's top
    * edge: the focused paper's when it is in view, else the first in view;
@@ -573,7 +653,7 @@ export class ListPane {
         doc,
         "span",
         "arxiv-browser__day-title",
-        formatDay(day.listing.date),
+        day.month ? formatMonth(day.month) : formatDay(day.listing.date),
       ),
     );
     const count =
@@ -945,7 +1025,7 @@ export class ListPane {
     const next = button(doc, getString("arxiv-browser-page-next"), () =>
       this.goToPage(this.page + 1),
     );
-    next.disabled = this.page >= pages - 1;
+    next.disabled = this.page >= pages - 1 && this.more !== "available";
     this.pager.append(
       next,
       html(
@@ -966,11 +1046,11 @@ export class ListPane {
       const date = day.listing.date;
       const chip = button(
         doc,
-        `${formatShortDay(date)} · ${day.count}`,
+        `${day.month ? formatShortMonth(day.month) : formatShortDay(date)} · ${day.count}`,
         () => this.goToDay(date),
         "arxiv-browser__day-chip",
       );
-      chip.title = formatDay(date);
+      chip.title = day.month ? formatMonth(day.month) : formatDay(date);
       if (day.listing.specs.some(({ state }) => state.state === "loading")) {
         chip.textContent = `${chip.textContent} …`;
       } else if (day.listing.status !== "complete") {

@@ -2,6 +2,11 @@ import { JSDOM, type DOMWindow } from "jsdom";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "../package.json";
+import {
+  arxivSearchQuery,
+  searchArxiv,
+  searchUrl,
+} from "../src/modules/arxiv/arxivApi";
 import { ArxivScheduler } from "../src/modules/arxiv/arxivFetch";
 import type { InspireBibtexAnswer } from "../src/modules/arxiv/inspireByArxiv";
 import { ListingService } from "../src/modules/arxiv/listingService";
@@ -16,10 +21,12 @@ import { servedListingDays } from "../src/modules/arxiv/browser/DayPicker";
 import type { ArxivSubscription } from "../src/modules/arxiv/browser/subscriptions";
 import {
   formatDay,
+  formatMonth,
   formatShortDay,
+  formatShortMonth,
 } from "../src/modules/arxiv/browser/browserText";
 import { invalidateDarkModeCache } from "../src/modules/inspire/styles";
-import { htmlDocument, readArxivFixture } from "./arxivFixtures";
+import { htmlDocument, readArxivFixture, xmlDocument } from "./arxivFixtures";
 import { fakeFiles } from "./fakeFiles";
 import {
   CATCHUP_URL,
@@ -2491,17 +2498,14 @@ describe("arXiv browser: adding and relating", () => {
   /**
    * `related`: the arXiv ID of a paper in the library, related to the item
    * the Select Items dialog gives (`chosen`); `unloaded`: its library's items
-   * are not loaded until the library's waitForDataLoad, which waits for
-   * `loadGate` when given
+   * are not loaded until the library's waitForDataLoad
    */
   async function loaded({
     related,
     unloaded = false,
-    loadGate,
   }: {
     related?: string;
     unloaded?: boolean;
-    loadGate?: Promise<void>;
   } = {}) {
     const env = environment();
     subscribe(["hep-ph"]);
@@ -2544,7 +2548,6 @@ describe("arXiv browser: adding and relating", () => {
           name: "My Library",
           editable: true,
           waitForDataLoad: async () => {
-            await loadGate;
             notLoaded.clear();
           },
         }),
@@ -2814,36 +2817,6 @@ describe("arXiv browser: adding and relating", () => {
     htmlParts(rows(root)[0]).open.click();
     expect(readerOpen).toHaveBeenCalledTimes(1);
     expect(launch).not.toHaveBeenCalled();
-  });
-
-  it("shows a related paper under Related only once its library's items have loaded", async () => {
-    let load: () => void = () => undefined;
-    const loadGate = new Promise<void>((resolve) => {
-      load = resolve;
-    });
-    const { root, view } = await loaded({
-      related: "2609.28538",
-      unloaded: true,
-      loadGate,
-    });
-    root
-      .querySelector<HTMLButtonElement>(".zinspire-quick-filter-btn")!
-      .click();
-    const related = [
-      ...root.querySelectorAll<HTMLLabelElement>(".zinspire-quick-filter-item"),
-    ].find(
-      (label) =>
-        label.querySelector(".zinspire-quick-filter-item-label")!
-          .textContent === msg("references-panel-quick-filter-related"),
-    )!;
-    related.querySelector("input")!.click();
-    // Its relations are not known yet
-    expect(view.listPane.entries).toHaveLength(0);
-    load();
-    await flushPromises();
-    expect(view.listPane.entries.map((entry) => entry.listing.id)).toEqual([
-      "2609.28538",
-    ]);
   });
 
   const dot = (row: HTMLElement) =>
@@ -3157,7 +3130,6 @@ describe("arXiv browser: quick filters and the filter history", () => {
       [
         "references-panel-quick-filter-local-items",
         "references-panel-quick-filter-online-items",
-        "references-panel-quick-filter-related",
         "references-panel-chart-author-filter",
         "references-panel-quick-filter-published",
         "references-panel-quick-filter-preprint",
@@ -3256,7 +3228,7 @@ describe("arXiv browser: quick filters and the filter history", () => {
     // The history's suggestion, taken with Tab
     await typeFilter(root, "neu");
     const hint = root.querySelector<HTMLElement>(
-      ".zinspire-filter-inline-hint",
+      ".arxiv-browser__filter .zinspire-filter-inline-hint",
     )!;
     expect(hint.textContent).toBe("trino\u00A0mass");
     key(input, "Tab");
@@ -3290,5 +3262,449 @@ describe("arXiv browser: quick filters and the filter history", () => {
     view.listPane.goToPage(1);
     expect(toolbar.parentElement === firstHeader()).toBe(true);
     expect(toolbar.style.display).toBe("flex");
+  });
+});
+
+describe("arXiv browser: searching arXiv", () => {
+  /** The window on the hep-ph day, searching through an API scheduler */
+  async function searching(options: Record<string, unknown> = {}) {
+    const env = environment();
+    subscribe(["hep-ph"]);
+    serveHepPh(env.site);
+    const api = new ArxivScheduler({
+      host: "export.arxiv.org",
+      minIntervalMs: 3000,
+      timeoutMs: 30000,
+      transport: env.site.transport,
+      clock: env.clock,
+    });
+    const setRead = vi.spyOn(env.reading, "setRead");
+    const view = env.open({
+      apiScheduler: api,
+      searchArxiv: (
+        query: string,
+        start: number,
+        count: number,
+        signal?: AbortSignal,
+      ) =>
+        searchArxiv(query, start, count, {
+          scheduler: api,
+          parseXml: xmlDocument,
+          signal,
+        }),
+      ...options,
+    });
+    await env.settle();
+    setRead.mockClear();
+    /** Let the search's request run until it ends */
+    const settleSearch = async () => {
+      for (let i = 0; i < 60 && view.search.running; i++) {
+        await env.clock.advanceBy(1000);
+      }
+      await flushPromises();
+    };
+    return { ...env, view, api, setRead, settleSearch };
+  }
+
+  /**
+   * An answer of the API: `count` papers from `first` on (2609.3xxxx), of
+   * `total`, submitted one a day back from 29 September 2026
+   */
+  function results(first: number, count: number, total: number): string {
+    const entries = Array.from({ length: count }, (_, i) => {
+      const n = first + i;
+      const date = new Date(Date.parse("2026-09-29T12:00:00Z") - n * 86400000)
+        .toISOString()
+        .replace(/\.\d+Z$/, "Z");
+      return `<entry><id>http://arxiv.org/abs/2609.${30000 + n}v1</id>
+        <title>Result ${n} on $m_\\pi$</title><summary>Abstract
+        ${n}</summary><published>${date}</published><updated>${date}</updated>
+        <author><name>A. Author</name></author><author><name>Feng-Kun Guo</name></author>
+        ${n % 2 ? "<arxiv:journal_ref>Phys. Rev. D 1 (2026) 1</arxiv:journal_ref>" : ""}
+        <arxiv:primary_category term="hep-ph"/><category term="hep-ph"/></entry>`;
+    }).join("");
+    return `<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+<opensearch:totalResults>${total}</opensearch:totalResults>${entries}</feed>`;
+  }
+
+  const searchBox = (root: HTMLElement) =>
+    root.querySelector<HTMLInputElement>(".arxiv-browser__search input")!;
+  const clearButton = (root: HTMLElement) =>
+    root.querySelector<HTMLButtonElement>(".arxiv-browser__search-clear")!;
+  const runSearch = (root: HTMLElement, text: string) => {
+    const input = searchBox(root);
+    input.focus();
+    input.value = text;
+    input.dispatchEvent(new win.Event("input"));
+    key(input, "Enter");
+  };
+  /** A button of the bar of the date button and the search box */
+  const barButton = (root: HTMLElement, label: string) =>
+    [...clearButton(root).parentElement!.children].find(
+      (element) => element.textContent === msg(label),
+    ) as HTMLButtonElement;
+  const apiRequests = (site: SimulatedArxiv) =>
+    site.sent.filter((request) => request.url.includes("export.arxiv.org"));
+
+  it("searches arXiv from the box next to the date button and lists the results with the row controls", async () => {
+    const { root, site, view, settleSearch, launch } = await searching();
+    const box = searchBox(root);
+    expect(
+      root.querySelector(".arxiv-browser__day-choice")!.nextElementSibling ===
+        box.parentElement,
+    ).toBe(true);
+    expect(clearButton(root).hidden).toBe(true);
+
+    site.html(searchUrl("all:pion AND all:mass", 0, 50), results(0, 3, 3));
+    runSearch(root, "pion mass");
+    expect(view.search.active).toBe(true);
+    // The API scheduler's state, as for the days
+    expect(statusText(root)).toBe(msg("arxiv-browser-status-sending"));
+    expect(root.querySelector(".arxiv-browser__list")!.textContent).toBe(
+      msg("arxiv-browser-search-running"),
+    );
+    await settleSearch();
+
+    expect(apiRequests(site).map((request) => request.url)).toEqual([
+      searchUrl("all:pion AND all:mass", 0, 50),
+    ]);
+    expect(rows(root).map((row) => row.dataset.entryId)).toEqual([
+      "arxiv-2609.30000-search",
+      "arxiv-2609.30001-search",
+      "arxiv-2609.30002-search",
+    ]);
+    // Under the months of their submission (29 September and back)
+    expect(headers(root)).toEqual(["# 2026-09-01"]);
+    expect(
+      root.querySelector(".arxiv-browser__list .arxiv-browser__day-title")!
+        .textContent,
+    ).toBe(formatMonth("2026-09"));
+    expect(statusText(root)).toBe(
+      msg("arxiv-browser-search-found", { total: 3, fetched: 3 }),
+    );
+    expect(clearButton(root).hidden).toBe(false);
+
+    const row = rows(root)[0];
+    for (const control of [
+      ".zinspire-ref-entry__checkbox",
+      ".zinspire-ref-entry__dot",
+      ".zinspire-ref-entry__link",
+      ".zinspire-ref-entry__bibtex",
+      ".zinspire-ref-entry__pdf",
+      ".arxiv-browser__abstract-toggle",
+    ]) {
+      expect(row.querySelector(control), control).not.toBeNull();
+    }
+    // Whether arXiv has an HTML version is not known: the button is there
+    row
+      .querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!
+      .click();
+    expect(launch).toHaveBeenLastCalledWith(
+      "https://arxiv.org/html/2609.30000",
+    );
+    // The detail pane gives the submission instead of an announcement
+    const detail = root.querySelector(".arxiv-browser__detail")!.textContent;
+    expect(detail).toContain(
+      msg("arxiv-browser-detail-submitted", { date: formatDay("2026-09-29") }),
+    );
+    expect(detail).not.toContain("arxiv-browser-detail-announced");
+    // The order and sections are the days'
+    expect(select(root, "sort").disabled).toBe(true);
+  });
+
+  it("fetches the next page only when the reader turns past the results fetched", async () => {
+    const { root, site, view, settleSearch } = await searching();
+    const query = "au:guo";
+    site.html(searchUrl(query, 0, 50), results(0, 50, 120));
+    site.html(searchUrl(query, 50, 50), results(50, 50, 120));
+    site.html(searchUrl(query, 100, 50), results(100, 20, 120));
+    runSearch(root, query);
+    await settleSearch();
+    expect(apiRequests(site)).toHaveLength(1);
+    expect(view.listPane.pages).toBe(1);
+    expect(statusText(root)).toBe(
+      msg("arxiv-browser-search-found", { total: 120, fetched: 50 }),
+    );
+    // Next is offered on the last page fetched
+    const next = () =>
+      [
+        ...root.querySelectorAll<HTMLButtonElement>(
+          ".arxiv-browser__pager button",
+        ),
+      ].at(-1)!;
+    expect(next().disabled).toBe(false);
+
+    next().click();
+    expect(view.listPane.currentPage).toBe(0);
+    await settleSearch();
+    expect(apiRequests(site).map((request) => request.url)).toEqual([
+      searchUrl(query, 0, 50),
+      searchUrl(query, 50, 50),
+    ]);
+    // At arXiv's interval, and on the page turned to
+    const [first, second] = apiRequests(site);
+    expect(second.start - first.end!).toBeGreaterThanOrEqual(3000);
+    expect(view.listPane.currentPage).toBe(1);
+    expect(rows(root)[0].dataset.entryId).toBe("arxiv-2609.30050-search");
+
+    // Going back and forth asks for nothing
+    key(root.querySelector(".arxiv-browser__list")!, "p");
+    key(root.querySelector(".arxiv-browser__list")!, "n");
+    await settleSearch();
+    expect(apiRequests(site)).toHaveLength(2);
+
+    // The last 20
+    key(root.querySelector(".arxiv-browser__list")!, "n");
+    await settleSearch();
+    expect(apiRequests(site)).toHaveLength(3);
+    expect(view.listPane.currentPage).toBe(2);
+    expect(view.listPane.entries).toHaveLength(120);
+    expect(next().disabled).toBe(true);
+    expect(root.querySelector(".arxiv-browser__next-page")).toBeNull();
+    // Months, newest first
+    expect(
+      [...root.querySelectorAll(".arxiv-browser__day-chip")].map(
+        (chip) => chip.textContent,
+      ),
+    ).toEqual([
+      `${formatShortMonth("2026-09")} · 29`,
+      `${formatShortMonth("2026-08")} · 31`,
+      `${formatShortMonth("2026-07")} · 31`,
+      `${formatShortMonth("2026-06")} · 29`,
+    ]);
+  });
+
+  it("after a change of page size, shows the page of the first paper fetched", async () => {
+    const { root, site, view, settleSearch } = await searching();
+    const query = "au:guo";
+    site.html(searchUrl(query, 0, 50), results(0, 50, 300));
+    site.html(searchUrl(query, 50, 100), results(50, 100, 300));
+    runSearch(root, query);
+    // Enter again while the first page is on its way: no second request
+    key(searchBox(root), "Enter");
+    await settleSearch();
+    expect(apiRequests(site)).toHaveLength(1);
+    const size = select(root, "size");
+    size.value = "100";
+    size.dispatchEvent(new win.Event("change"));
+    view.listPane.goToPage(1);
+    await settleSearch();
+    expect(apiRequests(site).map((request) => request.url)).toEqual([
+      searchUrl(query, 0, 50),
+      searchUrl(query, 50, 100),
+    ]);
+    // Papers 51-100 are on the first page of 100: it is shown
+    expect(view.listPane.currentPage).toBe(0);
+    expect(rows(root)[50].dataset.entryId).toBe("arxiv-2609.30050-search");
+  });
+
+  it("goes back to the offer to make a subscription when there is none", async () => {
+    const env = environment();
+    const api = new ArxivScheduler({
+      host: "export.arxiv.org",
+      minIntervalMs: 3000,
+      timeoutMs: 30000,
+      transport: env.site.transport,
+      clock: env.clock,
+    });
+    const view = env.open({
+      apiScheduler: api,
+      searchArxiv: (q: string, s: number, c: number, signal?: AbortSignal) =>
+        searchArxiv(q, s, c, { scheduler: api, parseXml: xmlDocument, signal }),
+    });
+    env.site.html(searchUrl("all:pion", 0, 50), results(0, 3, 3));
+    runSearch(env.root, "pion");
+    for (let i = 0; i < 10 && view.search.running; i++) {
+      await env.clock.advanceBy(1000);
+    }
+    await flushPromises();
+    expect(rows(env.root).length).toBe(3);
+    clearButton(env.root).click();
+    expect(rows(env.root).length).toBe(0);
+    expect(
+      env.root.querySelector(".arxiv-browser__list")!.textContent,
+    ).toContain(msg("arxiv-browser-empty"));
+  });
+
+  it("returns to the day listing where the reader was, and leaves the reading state alone", async () => {
+    const { root, site, view, settleSearch, setRead } = await searching();
+    // 72 papers of 25 September: page 2 of 2, its third paper focused
+    view.listPane.goToPage(1);
+    const list = root.querySelector(".arxiv-browser__list")!;
+    key(list, "j");
+    key(list, "j");
+    key(list, "j");
+    const focused = view.listPane.focused!.id;
+    const day = view.loader.days[0];
+
+    site.html(searchUrl("all:pion", 0, 50), results(0, 3, 3));
+    runSearch(root, "pion");
+    await settleSearch();
+    expect(view.listPane.focused).toBeNull();
+    key(list, "j");
+    expect(view.listPane.focused!.id).toBe("arxiv-2609.30000-search");
+
+    clearButton(root).click();
+    expect(view.search.active).toBe(false);
+    expect(searchBox(root).value).toBe("");
+    expect(clearButton(root).hidden).toBe(true);
+    expect(view.loader.days[0]).toBe(day);
+    expect(view.listPane.currentPage).toBe(1);
+    expect(view.listPane.focused!.id).toBe(focused);
+    expect(view.detail.entry!.id).toBe(focused);
+    expect(statusText(root)).toBe(
+      msg("arxiv-browser-status-loaded", { days: 1, papers: 72 }),
+    );
+    expect(select(root, "sort").disabled).toBe(false);
+    // Only the day listing's own requests went to arxiv.org
+    expect(apiRequests(site)).toHaveLength(1);
+    expect(setRead).not.toHaveBeenCalled();
+
+    // Enter in the empty box leaves a search too
+    runSearch(root, "pion");
+    await settleSearch();
+    expect(view.search.active).toBe(true);
+    runSearch(root, "  ");
+    expect(view.search.active).toBe(false);
+    expect(view.listPane.focused!.id).toBe(focused);
+  });
+
+  it("keeps each search's results for the window's session; Reload fetches them again", async () => {
+    const { root, site, view, settleSearch } = await searching();
+    site.html(searchUrl("all:pion", 0, 50), results(0, 3, 3));
+    site.html(searchUrl("all:kaon", 0, 50), results(10, 2, 2));
+    runSearch(root, "pion");
+    await settleSearch();
+    runSearch(root, "kaon");
+    await settleSearch();
+    expect(rows(root)).toHaveLength(2);
+    runSearch(root, "pion");
+    // At once, without a request
+    expect(rows(root)).toHaveLength(3);
+    expect(apiRequests(site)).toHaveLength(2);
+
+    barButton(root, "arxiv-browser-reload").click();
+    // The results stay shown until the new ones arrive
+    expect(rows(root)).toHaveLength(3);
+    await settleSearch();
+    expect(apiRequests(site)).toHaveLength(3);
+    expect(rows(root)).toHaveLength(3);
+  });
+
+  it("can be cancelled, and a search arXiv refuses gives a notice", async () => {
+    const { root, site, view, settleSearch, clock } = await searching();
+    site.html(searchUrl("all:pion", 0, 50), results(0, 3, 3));
+    runSearch(root, "pion");
+    const cancel = barButton(root, "arxiv-browser-cancel");
+    expect(cancel.hidden).toBe(false);
+    cancel.click();
+    await flushPromises();
+    await clock.advanceBy(5000);
+    expect(view.search.running).toBe(false);
+    expect(rows(root).length).toBe(0);
+    expect(statusText(root)).toBe("");
+    expect(root.querySelector(".arxiv-browser__list")!.textContent).toBe(
+      msg("arxiv-browser-status-cancelled"),
+    );
+    expect(cancel.hidden).toBe(true);
+
+    // arXiv's answer to a query it cannot read
+    site.page(searchUrl(arxivSearchQuery("ti:("), 0, 50), {
+      status: 400,
+      text: readArxivFixture("api-search-error-400.xml"),
+    });
+    runSearch(root, "ti:(");
+    await settleSearch();
+    const refused = msg("arxiv-browser-search-refused", {
+      message: "Invalid query string: '('",
+    });
+    expect(
+      [...root.querySelectorAll(".arxiv-browser__notice")].map(
+        (notice) => notice.textContent,
+      ),
+    ).toEqual([refused]);
+    expect(root.querySelector(".arxiv-browser__list")!.textContent).toBe(
+      refused,
+    );
+  });
+
+  it("filters, quick-filters, selects and adds the results as it does the days", async () => {
+    const { root, site, view, settleSearch } = await searching();
+    site.html(searchUrl("all:pion", 0, 50), results(0, 6, 6));
+    runSearch(root, "pion");
+    await settleSearch();
+    // Papers with a journal reference: the odd ones
+    root
+      .querySelector<HTMLButtonElement>(".zinspire-quick-filter-btn")!
+      .click();
+    const published = [
+      ...root.querySelectorAll<HTMLLabelElement>(
+        ".zinspire-quick-filter-popup label",
+      ),
+    ]
+      .find(
+        (label) =>
+          label.querySelector(".zinspire-quick-filter-item-label")!
+            .textContent === msg("references-panel-quick-filter-published"),
+      )!
+      .querySelector("input")!;
+    published.checked = true;
+    published.dispatchEvent(new win.Event("change", { bubbles: true }));
+    expect(view.listPane.entries.map((entry) => entry.listing.id)).toEqual([
+      "2609.30001",
+      "2609.30003",
+      "2609.30005",
+    ]);
+    const filter = root.querySelector<HTMLInputElement>(
+      ".arxiv-browser__filter input",
+    )!;
+    filter.value = '"Result 3"';
+    filter.dispatchEvent(new win.Event("input"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(view.listPane.entries.map((entry) => entry.listing.id)).toEqual([
+      "2609.30003",
+    ]);
+
+    rows(root)[0]
+      .querySelector<HTMLInputElement>(".zinspire-ref-entry__checkbox")!
+      .click();
+    expect([...view.batch.getSelectedEntryIDs()]).toEqual([
+      "arxiv-2609.30003-search",
+    ]);
+    // Leaving the results drops their selection
+    clearButton(root).click();
+    expect(view.batch.getSelectedEntryIDs().size).toBe(0);
+  });
+
+  it("keeps what was searched for in its own history, with the search histories' age limit", async () => {
+    const { root, site, settleSearch } = await searching();
+    prefs[`${config.addonRef}.arxivSearchHistory`] = JSON.stringify([
+      { query: "au:witten", timestamp: Date.now() },
+      { query: "cat:hep-lat", timestamp: Date.now() - 40 * 86400000 },
+    ]);
+    const input = searchBox(root);
+    input.focus();
+    input.value = "au:w";
+    input.dispatchEvent(new win.Event("input"));
+    const hint = root.querySelector<HTMLElement>(
+      ".arxiv-browser__search .zinspire-filter-inline-hint",
+    )!;
+    expect(hint.textContent).toBe("itten");
+    // Typed and left: not kept
+    input.value = "gluon";
+    input.dispatchEvent(new win.Event("blur"));
+    const kept = () =>
+      JSON.parse(prefs[`${config.addonRef}.arxivSearchHistory`] as string).map(
+        (item: { query: string }) => item.query,
+      );
+    expect(kept()).toEqual(["au:witten"]);
+
+    site.html(searchUrl("all:pion", 0, 50), results(0, 3, 3));
+    runSearch(root, "pion");
+    await settleSearch();
+    expect(kept()).toEqual(["pion", "au:witten"]);
+    // Not in the filter boxes' history
+    expect(prefs[`${config.addonRef}.inspireFilterHistory`]).toBeUndefined();
   });
 });

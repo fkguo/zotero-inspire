@@ -3,7 +3,8 @@
 // document. Its text filters the list as it is typed; the filter history
 // completes it inline (Tab or → takes the suggestion) and keeps what was
 // filtered for: on Enter, when a suggestion is taken and when the box is
-// left.
+// left. As a search box (onSubmit), Enter runs the search and the history
+// keeps what was searched for, on Enter only.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { filterHistory, type SearchHistoryStore } from "../searchHistory";
@@ -20,6 +21,8 @@ export interface FilterHistoryInputOptions {
   onInput: (value: string) => void;
   /** Where the history is kept (default: the filter boxes' history) */
   store?: SearchHistoryStore;
+  /** Enter: search for the text (the box is a search box) */
+  onSubmit?: (value: string) => void;
 }
 
 export class FilterHistoryInput {
@@ -32,6 +35,8 @@ export class FilterHistoryInput {
   constructor(doc: Document, options: FilterHistoryInputOptions) {
     const store = options.store ?? filterHistory;
     this.store = store;
+    // A search box keeps only what was searched for
+    const keepTyped = !options.onSubmit;
     // The wrapper stays detached until the box is set up
     const wrapper = doc.createElement("div");
     wrapper.className = "zinspire-filter-input-wrapper";
@@ -66,13 +71,14 @@ export class FilterHistoryInput {
         if (cursorAtEnd && hint.accept()) {
           event.preventDefault();
           options.onInput(input.value);
-          this.remember();
+          if (keepTyped) this.remember();
         }
       } else if (event.key === "Escape") {
         hint.hide();
       } else if (event.key === "Enter") {
         this.remember();
         hint.hide();
+        options.onSubmit?.(input.value);
       }
     });
     input.addEventListener("input", () => {
@@ -81,7 +87,7 @@ export class FilterHistoryInput {
     });
     input.addEventListener("focus", () => hint.update());
     input.addEventListener("blur", () => {
-      this.remember();
+      if (keepTyped) this.remember();
       setTimeout(() => hint.hide(), 150);
     });
 

@@ -145,15 +145,19 @@ export interface ArxivListingEntry {
   matchedCategories: string[];
   /**
    * Section the merged view shows the paper in when all sections are open;
-   * `displaySection` gives it for other choices
+   * `displaySection` gives it for other choices. "search": a result of a
+   * search of arXiv, in no listing (no streams, no announcement day).
    */
-  section: ListingSection;
+  section: ListingSection | "search";
   /**
    * Every (category, section) the paper appears in, in the subscription's
    * order of the categories
    */
   streams: ListingStream[];
-  announceDate: IsoDate;
+  /** Absent for a search result: the API does not give it */
+  announceDate?: IsoDate;
+  /** Search results: submission of version 1 (ISO date-time, from the API) */
+  submitted?: string;
 }
 
 /** Why a category's listing of a day could not be used */
