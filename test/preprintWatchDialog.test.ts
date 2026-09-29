@@ -89,7 +89,7 @@ import {
   inspireAnswers,
   inspireResponse,
   publishedRecord,
-  requestedArxivId,
+  requestedArxivIds,
   unpublishedRecord,
   type InspireMetadata,
 } from "./preprintWatchFakes";
@@ -150,6 +150,13 @@ function preprint(arxivId: string, libraryID = 1) {
     "preprint",
     { extra: `arXiv:${arxivId} [hep-ph]`, title: `Paper ${arxivId}` },
     { libraryID },
+  );
+}
+
+/** Preprints of `count` papers from `first` on (2410.00001, ...) */
+function preprints(count: number, prefix = "2410", first = 1) {
+  return Array.from({ length: count }, (_, i) =>
+    preprint(`${prefix}.${String(first + i).padStart(5, "0")}`),
   );
 }
 
@@ -246,12 +253,12 @@ describe("checking the selected items", () => {
   });
 
   it("stops when Escape is pressed during the check", async () => {
-    zotero.selectedItems = [preprint("2403.00006"), preprint("2403.00007")];
+    zotero.selectedItems = preprints(51, "2403", 6);
     const pending = new Map<string, ReturnType<typeof deferred<Response>>>();
     mocks.fetch.mockImplementation(
       (url: string, options?: { signal?: AbortSignal }) => {
         const request = deferred<Response>();
-        pending.set(requestedArxivId(url), request);
+        pending.set(requestedArxivIds(url)[0], request);
         options?.signal?.addEventListener("abort", () =>
           request.reject(abortError()),
         );
@@ -291,18 +298,12 @@ function progressTexts(): string[] {
 
 describe("the result of a check", () => {
   it("shows how many preprints had each outcome when none is published", async () => {
-    zotero.selectedItems = [
-      preprint("2410.00001"),
-      preprint("2410.00002"),
-      preprint("2410.00003"),
-      preprint("2410.00004"),
-      preprint("2410.00005"),
-    ];
+    // two requests: 50 papers answered, the 51st and 52nd not
+    zotero.selectedItems = preprints(52);
     answers.set("2410.00001", [unpublishedRecord("2410.00001", 1)]);
     answers.set("2410.00002", [unpublishedRecord("2410.00002", 2)]);
-    answers.set("2410.00003", []);
-    answers.set("2410.00004", 502);
-    answers.set("2410.00005", new TypeError("NetworkError"));
+    answers.set("2410.00051", 502);
+    answers.set("2410.00052", 502);
 
     await new ZInspire().checkSelectedItemsPreprints();
 
@@ -310,10 +311,10 @@ describe("the result of a check", () => {
     expect(notifications()).toEqual([
       expect.objectContaining({
         text: msg("preprint-check-summary", {
-          total: 5,
+          total: 52,
           published: 0,
           unpublished: 2,
-          notInInspire: 1,
+          notInInspire: 48,
           errors: 2,
         }),
         type: "fail",
@@ -346,16 +347,11 @@ describe("the result of a check", () => {
   });
 
   it("shows the counts of all four outcomes above the published preprints", async () => {
-    zotero.selectedItems = [
-      preprint("2410.00008"),
-      preprint("2410.00009"),
-      preprint("2410.00010"),
-      preprint("2410.00011"),
-    ];
+    // two requests: 50 papers answered, the 51st not
+    zotero.selectedItems = preprints(51, "2410", 8);
     answers.set("2410.00008", [publishedRecord("2410.00008", 8)]);
     answers.set("2410.00009", [unpublishedRecord("2410.00009", 9)]);
-    answers.set("2410.00010", []);
-    answers.set("2410.00011", 503);
+    answers.set("2410.00058", 503);
 
     const run = new ZInspire().checkSelectedItemsPreprints();
     await vi.waitFor(() => expect(overlay()).not.toBeNull());
@@ -368,7 +364,7 @@ describe("the result of a check", () => {
     expect(counts).toEqual([
       `${msg("preprint-results-published")}: 1`,
       `${msg("preprint-results-unpublished")}: 1`,
-      `${msg("preprint-results-not-in-inspire")}: 1`,
+      `${msg("preprint-results-not-in-inspire")}: 48`,
       `${msg("preprint-results-errors")}: 1`,
     ]);
   });
@@ -418,7 +414,7 @@ describe("checking all preprints", () => {
     await run;
 
     expect(
-      mocks.fetch.mock.calls.map(([url]) => requestedArxivId(url)).sort(),
+      mocks.fetch.mock.calls.flatMap(([url]) => requestedArxivIds(url)).sort(),
     ).toEqual(["2411.00001", "2411.00002", "2411.00003"]);
     expect(boxes.map((box) => Number(box.dataset.itemId))).toEqual([
       cached.id,

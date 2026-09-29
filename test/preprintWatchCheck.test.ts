@@ -27,6 +27,7 @@ vi.mock("../src/utils/prefs", () => ({
 import {
   batchCheckPublicationStatus,
   beginManualCheck,
+  buildCheckSummary,
   clearPreprintCache,
   findUnpublishedPreprints,
   runBackgroundCheck,
@@ -41,9 +42,10 @@ import {
   abortError,
   deferred,
   inspireAnswers,
+  inspireRecord,
   inspireResponse,
   publishedRecord,
-  requestedArxivId,
+  requestedArxivIds,
   unpublishedRecord,
   type InspireMetadata,
 } from "./preprintWatchFakes";
@@ -83,8 +85,18 @@ function preprint(arxivId: string, title = `Paper ${arxivId}`, libraryID = 1) {
   );
 }
 
-const requestedIds = () =>
-  mocks.fetch.mock.calls.map(([url]) => requestedArxivId(url as string));
+/** The arXiv IDs asked about, request by request */
+const requests = () =>
+  mocks.fetch.mock.calls.map(([url]) => requestedArxivIds(url as string));
+const requestedIds = () => requests().flat();
+
+/** `count` arXiv IDs from `first` on (2408.00001, 2408.00002, ...) */
+function arxivIds(count: number, prefix = "2408", first = 1): string[] {
+  return Array.from(
+    { length: count },
+    (_, i) => `${prefix}.${String(first + i).padStart(5, "0")}`,
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // What INSPIRE's record says (kept by the fix)
@@ -92,11 +104,9 @@ const requestedIds = () =>
 
 describe("reading INSPIRE's record of a preprint", () => {
   it("reads the journal publication of a published paper", async () => {
-    const item = preprint("2401.00001", "Paper A");
+    const item = preprint("2401.00001");
     answers.set("2401.00001", [
-      {
-        control_number: 2765432,
-        arxiv_eprints: [{ value: "2401.00001" }],
+      inspireRecord("2401.00001", 2765432, {
         // free-text entry first, structured journal entry second
         publication_info: [
           { pubinfo_freetext: "Phys. Rev. D 110 (2025) 014001" },
@@ -112,20 +122,24 @@ describe("reading INSPIRE's record of a preprint", () => {
           { value: "10.1103/PhysRevD.110.014001" },
         ],
         preprint_date: "2024-01-02",
-      },
+      }),
     ]);
 
     const results = await batchCheckPublicationStatus([item as any]);
 
-    expect(mocks.fetch.mock.calls[0][0]).toBe(
-      "https://inspirehep.net/api/literature?q=eprint:2401.00001&fields=control_number,publication_info,dois,preprint_date",
+    const url = new URL(mocks.fetch.mock.calls[0][0]);
+    expect(url.searchParams.get("q")).toBe("arxiv:2401.00001");
+    expect(url.searchParams.get("size")).toBe("1");
+    expect(url.searchParams.get("fields")).toBe(
+      "control_number,arxiv_eprints,titles.title,first_author.full_name,first_author.last_name,collaborations.value,publication_info,dois,preprint_date,texkeys,citation_count,citation_count_without_self_citations",
     );
     expect(results).toEqual([
       {
         itemID: item.id,
         arxivId: "2401.00001",
-        title: "Paper A",
+        title: "Paper 2401.00001",
         status: "published",
+        mismatches: [],
         publicationInfo: {
           journalTitle: "Phys. Rev. D",
           volume: "110",
@@ -142,8 +156,7 @@ describe("reading INSPIRE's record of a preprint", () => {
   it("takes the first page as the page and skips an erratum", async () => {
     const item = preprint("2401.00002");
     answers.set("2401.00002", [
-      {
-        control_number: 11,
+      inspireRecord("2401.00002", 11, {
         publication_info: [
           {
             journal_title: "Phys.Lett.B",
@@ -158,7 +171,7 @@ describe("reading INSPIRE's record of a preprint", () => {
             year: 2024,
           },
         ],
-      },
+      }),
     ]);
 
     const [result] = await batchCheckPublicationStatus([item as any]);
@@ -177,12 +190,11 @@ describe("reading INSPIRE's record of a preprint", () => {
   it("does not count an erratum alone as the publication", async () => {
     const item = preprint("2401.00003");
     answers.set("2401.00003", [
-      {
-        control_number: 12,
+      inspireRecord("2401.00003", 12, {
         publication_info: [
           { journal_title: "Phys.Rev.D", material: "erratum" },
         ],
-      },
+      }),
     ]);
 
     const [result] = await batchCheckPublicationStatus([item as any]);
@@ -195,11 +207,10 @@ describe("reading INSPIRE's record of a preprint", () => {
     const items = [preprint("2401.00004"), preprint("2401.00005")];
     answers.set("2401.00004", [unpublishedRecord("2401.00004", 13)]);
     answers.set("2401.00005", [
-      {
-        control_number: 14,
+      inspireRecord("2401.00005", 14, {
         // conference record only, no journal
         publication_info: [{ cnum: "C23-12-13.2" }],
-      },
+      }),
     ]);
 
     const results = await batchCheckPublicationStatus(items as any);
@@ -317,6 +328,150 @@ const PUBLICATION = {
   recid: "9",
 };
 
+describe("the record of the item's paper", () => {
+  it("takes only a record that lists the item's arXiv ID itself", async () => {
+    const item = preprint("2403.00001");
+    // a search hit for another paper (e.g. INSPIRE matching a similar number)
+    answers.set("2403.00001", [publishedRecord("2403.00011", 81)]);
+
+    const [result] = await batchCheckPublicationStatus([item as any]);
+
+    expect(result.status).toBe("not_in_inspire");
+  });
+
+  it("lists a record whose title or first author differs with the reasons, not as missing from INSPIRE", async () => {
+    const wrongPaper = preprint("2403.00002", "Sneaky Sneutrino Scattering");
+    wrongPaper.creators = [{ firstName: "P. S.", lastName: "Bhupal Dev" }];
+    const published = preprint("2403.00003", "Another paper altogether");
+    answers.set("2403.00002", [unpublishedRecord("2403.00002", 82)]);
+    answers.set("2403.00003", [publishedRecord("2403.00003", 83)]);
+
+    const results = await batchCheckPublicationStatus([
+      wrongPaper,
+      published,
+    ] as any);
+
+    expect(results.map((r) => [r.status, r.mismatches])).toEqual([
+      ["unpublished", ["title", "firstAuthor"]],
+      ["published", ["title"]],
+    ]);
+    expect(results[0].completion).toMatchObject({
+      status: "found",
+      record: { recid: "82" },
+      mismatches: ["title", "firstAuthor"],
+      preselected: false,
+    });
+  });
+  it("takes the record an item names by its recid as the item's paper, whatever its title", async () => {
+    const named = zotero.addItem("preprint", {
+      title: "A title changed by the journal",
+      extra: "arXiv:2403.00009 [hep-ph]",
+      archive: "INSPIRE",
+      archiveLocation: "89",
+    });
+    // INSPIRE merged the item's record into another one
+    const merged = zotero.addItem("preprint", {
+      title: "A title changed by the journal",
+      extra: "arXiv:2403.00010 [hep-ph]",
+      archive: "INSPIRE",
+      archiveLocation: "80",
+    });
+    answers.set("2403.00009", [publishedRecord("2403.00009", 89)]);
+    answers.set("2403.00010", [publishedRecord("2403.00010", 90)]);
+
+    const results = await batchCheckPublicationStatus([named, merged] as any);
+
+    expect(results.map((r) => r.mismatches)).toEqual([[], ["title"]]);
+  });
+});
+
+describe("an unpublished record of an item without a recid", () => {
+  it("carries what writing the INSPIRE record writes, for items without a recid only", async () => {
+    const plain = preprint("2403.00004");
+    const withRecid = zotero.addItem("preprint", {
+      title: "Paper 2403.00005",
+      extra: "arXiv:2403.00005 [hep-ph]",
+      archive: "INSPIRE",
+      archiveLocation: "85",
+    });
+    const withLink = zotero.addItem("preprint", {
+      title: "Paper 2403.00006",
+      extra: "arXiv:2403.00006 [hep-ph]",
+      url: "https://inspirehep.net/literature/86",
+    });
+    const published = preprint("2403.00007");
+    answers.set("2403.00004", [
+      inspireRecord("2403.00004", 84, {
+        texkeys: ["Pathak:2024abc"],
+        citation_count: 7,
+        citation_count_without_self_citations: 5,
+      }),
+    ]);
+    answers.set("2403.00005", [unpublishedRecord("2403.00005", 85)]);
+    answers.set("2403.00006", [unpublishedRecord("2403.00006", 86)]);
+    answers.set("2403.00007", [publishedRecord("2403.00007", 87)]);
+
+    const results = await batchCheckPublicationStatus([
+      plain,
+      withRecid,
+      withLink,
+      published,
+    ] as any);
+
+    expect(results.map((r) => [r.status, !!r.completion])).toEqual([
+      ["unpublished", true],
+      ["unpublished", false],
+      ["unpublished", false],
+      ["published", false],
+    ]);
+    expect(results[0].completion).toEqual({
+      itemID: plain.id,
+      libraryID: 1,
+      arxivId: "2403.00004",
+      title: "Paper 2403.00004",
+      firstAuthor: { lastName: "Pathak", firstName: "Rahul" },
+      status: "found",
+      record: {
+        recid: "84",
+        title: "Paper 2403.00004",
+        firstAuthor: "Pathak, Rahul",
+        texkey: "Pathak:2024abc",
+        citationCount: 7,
+        citationCountWithoutSelf: 5,
+      },
+      mismatches: [],
+      preselected: true,
+    });
+    expect(buildCheckSummary(results).withoutRecid).toBe(1);
+  });
+
+  it("gives each item of a paper in two libraries its own entry", async () => {
+    zotero.libraries.push({
+      libraryID: 2,
+      libraryType: "group",
+      editable: true,
+      name: "Group",
+    });
+    const mine = preprint("2403.00008");
+    const group = preprint("2403.00008", "Paper 2403.00008", 2);
+    answers.set("2403.00008", [unpublishedRecord("2403.00008", 88)]);
+
+    const results = await batchCheckPublicationStatus([mine, group] as any);
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(
+      results.map((r) => [
+        r.completion?.itemID,
+        r.completion?.libraryID,
+        r.completion?.record?.recid,
+      ]),
+    ).toEqual([
+      [mine.id, 1, "88"],
+      [group.id, 2, "88"],
+    ]);
+  });
+});
+
 describe("the four outcomes of a check", () => {
   it("tells a paper INSPIRE has no record of from an unpublished one", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -353,15 +508,15 @@ describe("the four outcomes of a check", () => {
       preprint("2404.00005"),
     ];
     answers.set("2404.00003", 502);
-    answers.set("2404.00004", new TypeError("NetworkError"));
-    answers.set("2404.00005", 429);
+    answers.set("2404.00004", 502);
+    answers.set("2404.00005", 502);
 
     const results = await batchCheckPublicationStatus(items as any);
 
     expect(results.map((r) => [r.status, r.error])).toEqual([
-      ["error", "INSPIRE HTTP 502"],
-      ["error", "NetworkError"],
-      ["error", "INSPIRE HTTP 429"],
+      ["error", "INSPIRE did not answer"],
+      ["error", "INSPIRE did not answer"],
+      ["error", "INSPIRE did not answer"],
     ]);
     expect(zotero.files.get(CACHE_FILE)).toEqual({
       version: 2,
@@ -393,7 +548,7 @@ describe("the four outcomes of a check", () => {
 
     expect(result).toMatchObject({
       status: "error",
-      error: "Unexpected INSPIRE response",
+      error: "INSPIRE did not answer",
     });
   });
 });
@@ -421,11 +576,9 @@ describe("a manual check", () => {
 
     expect(first.map((r) => r.status)).toEqual(["published", "unpublished"]);
     expect(second.map((r) => r.status)).toEqual(["published", "published"]);
-    expect(requestedIds()).toEqual([
-      "2405.00001",
-      "2405.00002",
-      "2405.00001",
-      "2405.00002",
+    expect(requests()).toEqual([
+      ["2405.00001", "2405.00002"],
+      ["2405.00001", "2405.00002"],
     ]);
     expect(storedEntry("2405.00002")).toMatchObject({
       status: "published",
@@ -453,9 +606,33 @@ describe("a manual check", () => {
     ]);
   });
 
+  it("asks about 50 papers per request, at most 3 requests at a time", async () => {
+    const items = arxivIds(160).map((id) => preprint(id));
+    const pending: Array<ReturnType<typeof deferred<Response>>> = [];
+    mocks.fetch.mockImplementation(() => {
+      const request = deferred<Response>();
+      pending.push(request);
+      return request.promise;
+    });
+
+    const run = batchCheckPublicationStatus(items as any);
+    await vi.waitFor(() => expect(pending).toHaveLength(3));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pending).toHaveLength(3);
+    for (let i = 0; i < 4; i++) {
+      await vi.waitFor(() => expect(pending.length).toBeGreaterThan(i));
+      pending[i].resolve(inspireResponse([]));
+    }
+    await run;
+
+    expect(requests().map((ids) => ids.length)).toEqual([50, 50, 50, 10]);
+    expect(new Set(requestedIds())).toEqual(new Set(arxivIds(160)));
+  });
+
   it("counts the items answered in its progress", async () => {
+    const first = arxivIds(50);
     const items = [
-      preprint("2405.00004"),
+      ...first.map((id) => preprint(id)),
       preprint("2405.00005"),
       preprint("2405.00005", "Same paper, second item"),
       zotero.addItem("journalArticle", { journalAbbreviation: "arXiv:x" }),
@@ -463,7 +640,7 @@ describe("a manual check", () => {
     const pending = new Map<string, ReturnType<typeof deferred<Response>>>();
     mocks.fetch.mockImplementation((url: string) => {
       const request = deferred<Response>();
-      pending.set(requestedArxivId(url), request);
+      pending.set(requestedArxivIds(url)[0], request);
       return request.promise;
     });
     const progress: Array<[number, number]> = [];
@@ -472,40 +649,34 @@ describe("a manual check", () => {
       onProgress: (done, total) => progress.push([done, total]),
     });
     await vi.waitFor(() => expect(pending.size).toBe(2));
-    expect(progress).toEqual([[1, 4]]);
+    expect(progress).toEqual([[1, 53]]);
     pending
       .get("2405.00005")!
       .resolve(inspireResponse([unpublishedRecord("2405.00005", 35)]));
     await vi.waitFor(() => expect(progress).toHaveLength(2));
-    pending
-      .get("2405.00004")!
-      .resolve(inspireResponse([unpublishedRecord("2405.00004", 34)]));
+    pending.get(first[0])!.resolve(inspireResponse([]));
     await run;
 
     expect(progress).toEqual([
-      [1, 4],
-      [3, 4],
-      [4, 4],
+      [1, 53],
+      [3, 53],
+      [53, 53],
     ]);
   });
 
   it("keeps the answers received before it was stopped", async () => {
     const start = Date.now();
+    const ids = arxivIds(151, "2405");
     storeCache([
-      { arxivId: "2405.00007", status: "unpublished", lastChecked: NOW - DAY },
+      { arxivId: ids[60], status: "unpublished", lastChecked: NOW - DAY },
     ]);
-    const items = [
-      preprint("2405.00006"),
-      preprint("2405.00007"),
-      preprint("2405.00008"),
-      preprint("2405.00009"),
-    ];
+    const items = ids.map((id) => preprint(id));
     const stop = new AbortController();
     const pending = new Map<string, ReturnType<typeof deferred<Response>>>();
     mocks.fetch.mockImplementation(
       (url: string, options?: { signal?: AbortSignal }) => {
         const request = deferred<Response>();
-        pending.set(requestedArxivId(url), request);
+        pending.set(requestedArxivIds(url)[0], request);
         options?.signal?.addEventListener("abort", () =>
           request.reject(abortError()),
         );
@@ -518,41 +689,43 @@ describe("a manual check", () => {
     });
     await vi.waitFor(() => expect(pending.size).toBe(3));
     pending
-      .get("2405.00006")!
-      .resolve(inspireResponse([publishedRecord("2405.00006", 36)]));
+      .get(ids[0])!
+      .resolve(
+        inspireResponse(
+          ids.slice(0, 50).map((id, i) => publishedRecord(id, 100 + i)),
+        ),
+      );
     await vi.waitFor(() => expect(pending.size).toBe(4));
     stop.abort();
     const results = await run;
 
-    expect(results.map((r) => [r.arxivId, r.status])).toEqual([
-      ["2405.00006", "published"],
-      ["2405.00007", "error"],
-      ["2405.00008", "error"],
-      ["2405.00009", "error"],
+    expect(results.map((r) => r.status)).toEqual([
+      ...Array(50).fill("published"),
+      ...Array(101).fill("error"),
     ]);
-    expect(storedEntries()).toEqual([
-      { arxivId: "2405.00007", status: "unpublished", lastChecked: NOW - DAY },
-      expect.objectContaining({
-        arxivId: "2405.00006",
-        status: "published",
-      }),
-    ]);
-    expect(storedEntry("2405.00006")!.lastChecked).toBeGreaterThanOrEqual(
-      start,
-    );
+    expect(results[60].error).toBe("Cancelled");
+    expect(storedEntries()).toHaveLength(51);
+    expect(storedEntries()[0]).toEqual({
+      arxivId: ids[60],
+      status: "unpublished",
+      lastChecked: NOW - DAY,
+    });
+    expect(storedEntry(ids[0])).toMatchObject({ status: "published" });
+    expect(storedEntry(ids[0])!.lastChecked).toBeGreaterThanOrEqual(start);
   });
 });
 
 describe("the background check", () => {
-  it("reuses recent answers without renewing their time", async () => {
+  it("skips papers INSPIRE had no record of in the last 7 days, and asks about all others", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     const entries = [
-      // answered 19 hours ago: reused
+      // answered an hour ago: asked again (a record's publication and
+      // identity are checked on every check)
       {
         arxivId: "2406.00001",
         status: "unpublished",
-        lastChecked: NOW - 19 * HOUR,
+        lastChecked: NOW - HOUR,
       },
       {
         arxivId: "2406.00002",
@@ -560,30 +733,31 @@ describe("the background check", () => {
         lastChecked: NOW - HOUR,
         publicationInfo: PUBLICATION,
       },
-      // no record 6 days ago: reused
+      // no record 6 days ago: skipped
       {
         arxivId: "2406.00003",
         status: "not_in_inspire",
         lastChecked: NOW - 6 * DAY,
       },
-      // asked again: 21 hours, 8 days, never answered since the format changed
-      {
-        arxivId: "2406.00004",
-        status: "unpublished",
-        lastChecked: NOW - 21 * HOUR,
-      },
+      // no record 8 days ago, or never answered since the format changed
       {
         arxivId: "2406.00005",
         status: "not_in_inspire",
         lastChecked: NOW - 8 * DAY,
       },
-      { arxivId: "2406.00006", status: "unpublished", lastChecked: 0 },
+      { arxivId: "2406.00006", status: "not_in_inspire", lastChecked: 0 },
     ];
     storeCache(entries);
     const items = entries.map((entry) => preprint(entry.arxivId));
     // not in the cache: asked
     items.push(preprint("2406.00007"));
-    for (const id of ["2406.00004", "2406.00005", "2406.00006", "2406.00007"]) {
+    for (const id of [
+      "2406.00001",
+      "2406.00002",
+      "2406.00005",
+      "2406.00006",
+      "2406.00007",
+    ]) {
       answers.set(id, [unpublishedRecord(id, 40)]);
     }
 
@@ -591,24 +765,25 @@ describe("the background check", () => {
       background: true,
     });
 
-    expect(requestedIds().sort()).toEqual([
-      "2406.00004",
-      "2406.00005",
-      "2406.00006",
-      "2406.00007",
+    expect(requests()).toEqual([
+      ["2406.00001", "2406.00002", "2406.00005", "2406.00006", "2406.00007"],
     ]);
     expect(results.map((r) => r.status)).toEqual([
       "unpublished",
-      "published",
+      "unpublished",
       "not_in_inspire",
       "unpublished",
       "unpublished",
       "unpublished",
-      "unpublished",
     ]);
-    expect(results[1].publicationInfo).toEqual(PUBLICATION);
-    expect(storedEntries().slice(0, 3)).toEqual(entries.slice(0, 3));
-    for (const id of ["2406.00004", "2406.00005", "2406.00006", "2406.00007"]) {
+    expect(storedEntry("2406.00003")).toEqual(entries[2]);
+    for (const id of [
+      "2406.00001",
+      "2406.00002",
+      "2406.00005",
+      "2406.00006",
+      "2406.00007",
+    ]) {
       expect(storedEntry(id)).toEqual({
         arxivId: id,
         status: "unpublished",
@@ -617,23 +792,23 @@ describe("the background check", () => {
     }
   });
 
-  it("does not renew the time of an answer it reuses", async () => {
+  it("does not renew the time of a missing record it skips", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     const item = preprint("2406.00009");
-    answers.set("2406.00009", [unpublishedRecord("2406.00009", 49)]);
+    answers.set("2406.00009", []);
     await batchCheckPublicationStatus([item as any]);
 
-    vi.setSystemTime(NOW + 2 * HOUR);
+    vi.setSystemTime(NOW + 2 * DAY);
     const [result] = await batchCheckPublicationStatus([item as any], {
       background: true,
     });
 
-    expect(result.status).toBe("unpublished");
+    expect(result.status).toBe("not_in_inspire");
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
     expect(storedEntry("2406.00009")).toEqual({
       arxivId: "2406.00009",
-      status: "unpublished",
+      status: "not_in_inspire",
       lastChecked: NOW,
     });
   });
@@ -642,7 +817,11 @@ describe("the background check", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     storeCache([
-      { arxivId: "2406.00008", status: "unpublished", lastChecked: NOW + DAY },
+      {
+        arxivId: "2406.00008",
+        status: "not_in_inspire",
+        lastChecked: NOW + DAY,
+      },
     ]);
     answers.set("2406.00008", [publishedRecord("2406.00008", 48)]);
 
@@ -662,7 +841,7 @@ describe("the background check at startup", () => {
     mocks.fetch.mockImplementation(
       (url: string, options?: { signal?: AbortSignal }) => {
         const request = deferred<Response>();
-        pending.set(requestedArxivId(url), request);
+        pending.set(requestedArxivIds(url)[0], request);
         options?.signal?.addEventListener("abort", () =>
           request.reject(abortError()),
         );
@@ -681,7 +860,7 @@ describe("the background check at startup", () => {
     mocks.prefs.set("preprint_watch_last_check", 0);
   });
 
-  it("checks every editable library, reusing recent answers, and shows the published preprints", async () => {
+  it("checks every editable library, skipping recent missing records, and shows the published preprints", async () => {
     zotero.libraries.push({
       libraryID: 2,
       libraryType: "group",
@@ -691,7 +870,7 @@ describe("the background check at startup", () => {
     storeCache([
       {
         arxivId: "2406.00020",
-        status: "unpublished",
+        status: "not_in_inspire",
         lastChecked: Date.now() - HOUR,
       },
     ]);
@@ -711,7 +890,7 @@ describe("the background check at startup", () => {
         }>
       ).map((r) => [r.arxivId, r.status]),
     ).toEqual([
-      ["2406.00020", "unpublished"],
+      ["2406.00020", "not_in_inspire"],
       ["2406.00021", "published"],
     ]);
     // recorded as done for the day
@@ -723,7 +902,7 @@ describe("the background check at startup", () => {
     answers.set("2406.00023", [unpublishedRecord("2406.00023", 73)]);
     await runBackgroundCheck(showResults);
     await batchCheckPublicationStatus([preprint("2406.00024")] as any);
-    expect(mocks.fetch.mock.calls.map((call) => call[1]?.background)).toEqual(
+    expect(mocks.fetch.mock.calls.map((call) => !!call[1]?.background)).toEqual(
       [true, false],
     );
   });
@@ -742,15 +921,14 @@ describe("the background check at startup", () => {
   });
 
   it("is not recorded as done when every request failed, and is when INSPIRE answered some", async () => {
-    preprint("2406.00024");
-    preprint("2406.00025");
-    answers.set("2406.00024", new TypeError("NetworkError"));
-    answers.set("2406.00025", new TypeError("NetworkError"));
+    const ids = arxivIds(51, "2406", 100);
+    for (const id of ids) preprint(id);
+    for (const id of ids) answers.set(id, 503);
     await runBackgroundCheck(showResults);
     expect(shouldRunBackgroundCheck()).toBe(true);
 
-    answers.set("2406.00024", [unpublishedRecord("2406.00024", 74)]);
-    answers.set("2406.00025", 502);
+    // the second request (the 51st paper) is answered
+    answers.set(ids[50], [unpublishedRecord(ids[50], 74)]);
     await runBackgroundCheck(showResults);
     expect(shouldRunBackgroundCheck()).toBe(false);
   });
@@ -768,23 +946,22 @@ describe("the background check at startup", () => {
 
   it("is stopped by a manual check: keeps its answers, shows no dialog, and is not recorded as done", async () => {
     const pending = pendingRequests();
-    preprint("2406.00010");
-    preprint("2406.00011");
-    preprint("2406.00012");
+    const ids = arxivIds(51, "2406", 10);
+    for (const id of ids) preprint(id);
     const background = runBackgroundCheck(showResults);
-    await vi.waitFor(() => expect(pending.size).toBe(3));
+    await vi.waitFor(() => expect(pending.size).toBe(2));
     pending
-      .get("2406.00010")!
-      .resolve(inspireResponse([publishedRecord("2406.00010", 50)]));
+      .get(ids[0])!
+      .resolve(inspireResponse([publishedRecord(ids[0], 50)]));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const endManualCheck = beginManualCheck();
     await background;
 
     expect(showResults).not.toHaveBeenCalled();
-    expect(storedEntries()).toEqual([
-      expect.objectContaining({ arxivId: "2406.00010", status: "published" }),
-    ]);
+    expect(storedEntries()).toHaveLength(50);
+    expect(storedEntry(ids[0])).toMatchObject({ status: "published" });
+    expect(storedEntry(ids[50])).toBeUndefined();
     // the next start checks the papers not answered yet
     expect(shouldRunBackgroundCheck()).toBe(true);
     // and no background check starts while the manual check lasts
@@ -854,19 +1031,20 @@ describe("the cache file", () => {
     answers.set("2407.00003", []);
 
     // Even the background check asks: version-1 times are not answer times
-    const results = await batchCheckPublicationStatus(items as any, {
+    const results = await batchCheckPublicationStatus(
+      [items[0], items[2]] as any,
+      { background: true },
+    );
+    // a failed request (on its own: it fails every paper it asks about)
+    const failed = await batchCheckPublicationStatus([items[1]] as any, {
       background: true,
     });
 
-    expect(requestedIds().sort()).toEqual([
-      "2407.00001",
-      "2407.00002",
-      "2407.00003",
-    ]);
-    expect(results.map((r) => r.status)).toEqual([
-      "published",
-      "error",
-      "not_in_inspire",
+    expect(requests()).toEqual([["2407.00001", "2407.00003"], ["2407.00002"]]);
+    expect([...results, ...failed].map((r) => [r.arxivId, r.status])).toEqual([
+      ["2407.00001", "published"],
+      ["2407.00003", "not_in_inspire"],
+      ["2407.00002", "error"],
     ]);
     expect(zotero.files.get(CACHE_FILE)).toEqual({
       version: 2,
@@ -974,24 +1152,17 @@ describe("the cache file", () => {
   });
 
   it("writes the answers to disk every 100 answers during a long check", async () => {
-    const items = Array.from({ length: 150 }, (_, i) =>
-      preprint(`2408.${String(i + 1).padStart(5, "0")}`),
+    const items = arxivIds(150).map((id) => preprint(id));
+    mocks.fetch.mockImplementation(async (url: string) =>
+      inspireResponse(
+        requestedArxivIds(url).map((id) => unpublishedRecord(id, 1)),
+      ),
     );
-    let writtenDuringCheck = 0;
-    let requestsAnswered = 0;
-    mocks.fetch.mockImplementation(async (url: string) => {
-      requestsAnswered++;
-      if (requestsAnswered === 120) {
-        writtenDuringCheck = storedEntries().length;
-      }
-      return inspireResponse([unpublishedRecord(requestedArxivId(url), 1)]);
-    });
 
     await batchCheckPublicationStatus(items as any);
 
-    // written after the 100th answer (plus the few that arrived meanwhile)
-    expect(writtenDuringCheck).toBeGreaterThanOrEqual(100);
-    expect(writtenDuringCheck).toBeLessThan(120);
+    // after the second request (100 answers), and at the end
+    expect(zotero.writeOptions).toHaveLength(2);
     expect(storedEntries()).toHaveLength(150);
   });
 });

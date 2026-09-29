@@ -499,7 +499,11 @@ export async function searchLiteratureInBatch(
     const payload = (await response.json()) as unknown as
       | InspireLiteratureSearchResponse
       | null;
-    const hits = (payload?.hits?.hits ?? []).map((hit) => ({
+    // An answer without a list of records is not "no records"
+    if (!Array.isArray(payload?.hits?.hits)) {
+      return { hits: [], failedTerms: terms };
+    }
+    const hits = payload.hits.hits.map((hit) => ({
       ...(hit?.metadata ?? {}),
       control_number: hit?.metadata?.control_number ?? hit?.id,
     }));

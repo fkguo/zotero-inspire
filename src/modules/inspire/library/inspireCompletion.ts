@@ -18,7 +18,9 @@ import { arxivIdFromItem, arxivIdsFromFields } from "../../arxiv/arxivId";
 import {
   resolveInspireByArxiv,
   type IdentityMismatch,
+  type ResolvedInspireRecord,
 } from "../../arxiv/inspireByArxiv";
+import { API_FIELDS_INSPIRE_COMPLETION } from "../constants";
 import { setInspireCitationLines } from "../itemUpdater";
 import { recidFromFields, resolveItemRecid } from "./itemRecid";
 
@@ -131,47 +133,68 @@ export async function checkInspireCompletion(
   items: readonly Zotero.Item[],
   options: { signal?: AbortSignal } = {},
 ): Promise<CompletionEntry[]> {
-  const identities = items.map((item) => ({
-    item,
-    arxivId: arxivIdFromItem(item)!,
-    title: item.getField("title") as string,
-    firstAuthor: firstAuthorOf(item),
-  }));
+  const identities = items.map((item) =>
+    itemIdentity(item, arxivIdFromItem(item)!),
+  );
   const resolved = await resolveInspireByArxiv(identities, {
-    fields: [
-      "texkeys",
-      "citation_count",
-      "citation_count_without_self_citations",
-    ],
+    fields: API_FIELDS_INSPIRE_COMPLETION.split(","),
     signal: options.signal,
   });
-  return identities.map(({ item, arxivId, title, firstAuthor }, i) => {
-    const answer = resolved[i];
-    const entry: CompletionEntry = {
-      itemID: item.id,
-      libraryID: item.libraryID,
-      arxivId,
-      title,
-      firstAuthor,
-      status: answer.status,
-      mismatches: [],
-      preselected: false,
+  return items.map((item, i) =>
+    completionEntry(item, identities[i], resolved[i]),
+  );
+}
+
+/** An item as it is checked against INSPIRE: arXiv ID, title, first author */
+export interface CheckedIdentity {
+  arxivId: string;
+  title: string;
+  firstAuthor?: FirstAuthor;
+}
+
+/** The identity of `item` (whose arXiv ID is `arxivId`) as it is now */
+export function itemIdentity(
+  item: Zotero.Item,
+  arxivId: string,
+): CheckedIdentity {
+  return {
+    arxivId,
+    title: item.getField("title") as string,
+    firstAuthor: firstAuthorOf(item),
+  };
+}
+
+/**
+ * The entry of an item checked as `identity` against INSPIRE, with INSPIRE's
+ * answer (resolveInspireByArxiv, asked for API_FIELDS_INSPIRE_COMPLETION)
+ */
+export function completionEntry(
+  item: Zotero.Item,
+  identity: CheckedIdentity,
+  answer: ResolvedInspireRecord,
+): CompletionEntry {
+  const entry: CompletionEntry = {
+    itemID: item.id,
+    libraryID: item.libraryID,
+    ...identity,
+    status: answer.status,
+    mismatches: [],
+    preselected: false,
+  };
+  if (answer.status === "found") {
+    const md = answer.metadata;
+    entry.record = {
+      recid: answer.recid,
+      title: md.titles?.[0]?.title,
+      firstAuthor: md.first_author?.full_name,
+      texkey: md.texkeys?.[0],
+      citationCount: md.citation_count,
+      citationCountWithoutSelf: md.citation_count_without_self_citations,
     };
-    if (answer.status === "found") {
-      const md = answer.metadata;
-      entry.record = {
-        recid: answer.recid,
-        title: md.titles?.[0]?.title,
-        firstAuthor: md.first_author?.full_name,
-        texkey: md.texkeys?.[0],
-        citationCount: md.citation_count,
-        citationCountWithoutSelf: md.citation_count_without_self_citations,
-      };
-      entry.mismatches = answer.mismatches;
-      entry.preselected = answer.mismatches.length === 0;
-    }
-    return entry;
-  });
+    entry.mismatches = answer.mismatches;
+    entry.preselected = answer.mismatches.length === 0;
+  }
+  return entry;
 }
 
 /** Items shown now: selected in a main window's library, or open in a reader */
