@@ -699,21 +699,33 @@
   user-select: text;
 }
 
-/* The HTML button and its ▾ menu, one split button in the detail pane */
+/* The HTML button and its ▾ menu, one split button in the detail pane. The
+   pair is drawn as one system button with the other buttons' padding, like
+   the PDF button next to it: a button given its own border, background or
+   corners loses the system drawing (square and bevelled), so its two parts
+   stay plain, with a thin line between them. */
 .arxiv-browser__split {
+  appearance: auto;
+  -moz-default-appearance: button;
   display: inline-flex;
+  padding-block: 2px;
+  padding-inline: 8px 3px;
 }
 
-.arxiv-browser__split > .arxiv-browser__button:first-child {
-  border-start-end-radius: 0;
-  border-end-end-radius: 0;
+.arxiv-browser__split > .arxiv-browser__button {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  padding-inline-end: 8px;
+  border: none;
+  background: transparent;
 }
 
-.arxiv-browser__split-more {
-  margin-inline-start: -1px;
-  padding: 2px 4px;
-  border-start-start-radius: 0;
-  border-end-start-radius: 0;
+.arxiv-browser__split > .arxiv-browser__split-more {
+  padding: 0;
+  padding-inline-start: 5px;
+  border-inline-start: 1px solid
+    color-mix(in srgb, currentColor 30%, transparent);
 }
 
 /* ... and in a row, after the PDF button */

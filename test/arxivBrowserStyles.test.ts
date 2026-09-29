@@ -85,6 +85,23 @@ describe("arXiv window stylesheet", () => {
     );
   });
 
+  it("draws the HTML button and its menu as one system button, like the PDF button", () => {
+    // A button given its own corners, border or background loses the
+    // system's drawing and turns square and bevelled
+    expect(css).toMatch(
+      /\.arxiv-browser__split\s*\{[^}]*-moz-default-appearance:\s*button;/,
+    );
+    const ownDrawing = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(
+      ([selectors, , body]) =>
+        /arxiv-browser__split/.test(selectors) &&
+        /border(-[a-z-]+)?-radius\s*:/.test(body),
+    );
+    expect(ownDrawing).toEqual([]);
+    expect(css).toMatch(
+      /\.arxiv-browser__split > \.arxiv-browser__button\s*\{[^}]*appearance:\s*none;[^}]*border:\s*none;[^}]*background:\s*transparent;/,
+    );
+  });
+
   it("styles the References panel's row parts only inside the window's rows", () => {
     const panelParts = [...css.matchAll(/([^{}]+)\{/g)]
       .flatMap(([, selectors]) => selectors.split(","))
