@@ -195,31 +195,44 @@ function duplicates(
 }
 
 /**
- * Add `requests` to the library and collections of `target`. Resolves once
- * every paper is added or known not to be; PDFs are attached after that
- * (each added paper's `pdf`).
+ * Adds papers to a target once INSPIRE and the arXiv API were asked about
+ * all of them (prepareArxivAdd)
  */
-export async function addArxivPapers(
+export interface ArxivAdder {
+  /**
+   * Add one of the papers asked about. Several can be added at the same
+   * time; the check and creation run one at a time per library.
+   */
+  add(request: AddPaperRequest): Promise<AddPaperOutcome>;
+}
+
+/**
+ * Ask INSPIRE and the arXiv API about all `requests` at once (a request per
+ * batch of papers, not per paper); the adder returned then adds each of them
+ * to the library and collections of `target`.
+ */
+export async function prepareArxivAdd(
   requests: readonly AddPaperRequest[],
   target: NewItemTarget,
   options: AddOptions = {},
-): Promise<AddPaperOutcome[]> {
+): Promise<ArxivAdder> {
   const { signal } = options;
+  const always = (outcome: AddPaperOutcome): ArxivAdder => ({
+    add: async () => outcome,
+  });
   const library = Zotero.Libraries.get(target.libraryID) as
     | (Zotero.Library & { waitForDataLoad?(type: string): Promise<void> })
     | false;
   if (!library || !library.editable) {
-    return requests.map(() => ({
+    return always({
       status: "failed",
       reason: "notEditable",
       message: "The library cannot be edited",
-    }));
+    });
   }
   // Items of a library not shown yet have no data until loaded
   await library.waitForDataLoad?.("item");
 
-  const cancelled = () =>
-    requests.map((): AddPaperOutcome => ({ status: "cancelled" }));
   const ids = requests.map((request) => request.arxivId);
   let inspire: Map<string, InspireArxivAnswer>;
   let api: Awaited<ReturnType<typeof fetchArxivApiEntries>>;
@@ -246,7 +259,9 @@ export async function addArxivPapers(
     }
     api = await fetchArxivApiEntries(ids, { signal });
   } catch (err) {
-    if ((err as { name?: string })?.name === "AbortError") return cancelled();
+    if ((err as { name?: string })?.name === "AbortError") {
+      return always({ status: "cancelled" });
+    }
     throw err;
   }
   const apiFailed = new Set(api.failed.flatMap((batch) => batch.ids));
@@ -255,24 +270,39 @@ export async function addArxivPapers(
     options.attachPdf ?? getPref("auto_find_fulltext_on_import") === true;
   const skipJournalPdf = getPref("arxiv_pdf_skip_journal_items") === true;
 
+  return {
+    add: async (request) => {
+      if (signal?.aborted) return { status: "cancelled" };
+      return addPaper(
+        request,
+        inspire.get(request.arxivId),
+        api.entries.get(request.arxivId),
+        {
+          apiFailed: apiFailed.has(request.arxivId),
+          notOnArxiv: notOnArxiv.has(request.arxivId),
+          target,
+          signal,
+          attachPdf,
+          skipJournalPdf,
+        },
+      );
+    },
+  };
+}
+
+/**
+ * Add `requests` to the library and collections of `target`. Resolves once
+ * every paper is added or known not to be; PDFs are attached after that
+ * (each added paper's `pdf`).
+ */
+export async function addArxivPapers(
+  requests: readonly AddPaperRequest[],
+  target: NewItemTarget,
+  options: AddOptions = {},
+): Promise<AddPaperOutcome[]> {
+  const adder = await prepareArxivAdd(requests, target, options);
   const outcomes: AddPaperOutcome[] = [];
-  for (const request of requests) {
-    if (signal?.aborted) {
-      outcomes.push({ status: "cancelled" });
-      continue;
-    }
-    const answer = inspire.get(request.arxivId);
-    outcomes.push(
-      await addPaper(request, answer, api.entries.get(request.arxivId), {
-        apiFailed: apiFailed.has(request.arxivId),
-        notOnArxiv: notOnArxiv.has(request.arxivId),
-        target,
-        signal,
-        attachPdf,
-        skipJournalPdf,
-      }),
-    );
-  }
+  for (const request of requests) outcomes.push(await adder.add(request));
   return outcomes;
 }
 

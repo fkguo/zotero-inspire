@@ -50,6 +50,9 @@ vi.mock("../src/modules/arxiv/arxivPdf", () => ({
 }));
 
 import { addArxivPapers } from "../src/modules/arxiv/addToLibrary";
+import { arxivBatchImport } from "../src/modules/arxiv/batchAdd";
+import { BatchImportManager } from "../src/modules/inspire/panel/BatchImportManager";
+import type { InspireReferenceEntry } from "../src/modules/inspire/types";
 import type { ArxivApiEntry } from "../src/modules/arxiv/arxivApi";
 import { stopLibraryIndex } from "../src/modules/inspire/library/arxivIndex";
 import { FakeLibrary, GROUP_LIBRARY, USER_LIBRARY } from "./fakeLibrary";
@@ -804,5 +807,172 @@ describe("the target library and cancelling", () => {
     const outcomes = await addArxivPapers([{ arxivId: "2609.00034" }], TARGET);
     expect(outcomes).toEqual([{ status: "cancelled" }]);
     expect(mocks.fetchApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("a batch import of arXiv rows", () => {
+  /** A row of the arXiv browser: the paper announced on `day` */
+  function row(arxivId: string, day: string): InspireReferenceEntry {
+    return {
+      id: `arxiv-${arxivId}-${day}`,
+      title: `Paper ${arxivId}`,
+      authors: [],
+      authorText: "",
+      displayText: "",
+      searchText: "",
+      arxivDetails: { id: arxivId },
+    };
+  }
+
+  function manager(rows: InspireReferenceEntry[]) {
+    vi.stubGlobal("addon", {
+      data: {
+        locale: {
+          current: {
+            formatMessagesSync: ([{ id }]: { id: string }[]) => [{ value: id }],
+          },
+        },
+      },
+    });
+    (globalThis as any).Zotero.getMainWindow = () => null;
+    const manager = new BatchImportManager({
+      getDocument: () => ({ defaultView: null }) as unknown as Document,
+      getBody: () => ({}) as HTMLElement,
+      getListElement: () => ({ querySelectorAll: () => [] }) as any,
+      getAllEntries: () => rows,
+      getFilteredEntries: () => rows,
+      promptForSaveTarget: async () => ({
+        ...TARGET,
+        primaryRowID: "C3",
+        collectionIDs: [3],
+        tags: [],
+        note: "",
+      }),
+      reporter: {
+        notify: () => undefined,
+        startProgress: () => ({ update() {}, close() {} }),
+      },
+      updateRowStatus: () => undefined,
+      ...arxivBatchImport(),
+    });
+    manager.selectAll();
+    return manager;
+  }
+
+  it("adds papers without a recid, asking INSPIRE and arXiv once for all, and each paper once", async () => {
+    const rows = [
+      row("2609.00041", "2026-09-24"),
+      row("2609.00041", "2026-09-25"),
+      row("2609.00042", "2026-09-24"),
+      row("2609.00043", "2026-09-24"),
+    ];
+    inspire({
+      "2609.00043": {
+        status: "found",
+        recid: "4300",
+        at: Date.now(),
+        withDois: true,
+        metadata: {},
+      },
+    });
+    api([
+      apiEntry("2609.00041"),
+      apiEntry("2609.00042"),
+      apiEntry("2609.00043"),
+    ]);
+    const m = manager(rows);
+
+    const result = await m.handleBatchImport({} as HTMLElement);
+    m.dispose();
+
+    expect(mocks.lookupInspire).toHaveBeenCalledOnce();
+    expect(mocks.lookupInspire.mock.calls[0][0]).toEqual([
+      "2609.00041",
+      "2609.00042",
+      "2609.00043",
+    ]);
+    expect(mocks.fetchApi).toHaveBeenCalledOnce();
+    expect(mocks.fromArxiv).toHaveBeenCalledTimes(2);
+    expect(mocks.fromInspire).toHaveBeenCalledOnce();
+    expect(
+      result!.added.map((p) => [p.outcome.route, p.entries.length]),
+    ).toEqual([
+      ["arxiv", 2],
+      ["arxiv", 1],
+      ["inspire", 1],
+    ]);
+    // Both rows of the first paper show its one item
+    expect(rows[0].localItemID).toBeDefined();
+    expect(rows[1].localItemID).toBe(rows[0].localItemID);
+    expect(new Set(result!.added.map((p) => p.outcome.item.id)).size).toBe(3);
+  });
+
+  it("adds nothing once cancelled while the arXiv API is asked, and ends that request", async () => {
+    inspire({});
+    let apiSignal: AbortSignal | undefined;
+    // As the arXiv scheduler answers: a cancelled request is a failed batch
+    mocks.fetchApi.mockImplementation(
+      (ids: string[], { signal }: { signal: AbortSignal }) =>
+        new Promise((resolve) => {
+          apiSignal = signal;
+          signal.addEventListener("abort", () =>
+            resolve({
+              entries: new Map(),
+              missing: [],
+              failed: [{ ids, reason: "cancelled", message: "" }],
+            }),
+          );
+        }),
+    );
+    const m = manager([
+      row("2609.00046", "2026-09-24"),
+      row("2609.00047", "2026-09-24"),
+    ]);
+
+    const run = m.handleBatchImport({} as HTMLElement);
+    await vi.waitFor(() => expect(apiSignal).toBeDefined());
+    expect(mocks.lookupInspire.mock.calls[0][1].signal).toBe(apiSignal);
+    (m as any).importAbort.abort();
+    const result = await run;
+    m.dispose();
+
+    expect(apiSignal!.aborted).toBe(true);
+    expect(result!.cancelled).toBe(true);
+    expect(result!.notAdded.map((p) => p.outcome)).toEqual([
+      { status: "cancelled" },
+      { status: "cancelled" },
+    ]);
+    expect(mocks.fromArxiv).not.toHaveBeenCalled();
+  });
+
+  it("lists a paper the target library already has as not added, with its item", async () => {
+    const old = lib.put({ fields: { extra: "arXiv:2609.00044" } });
+    inspire({});
+    api([apiEntry("2609.00044"), apiEntry("2609.00045")]);
+    const m = manager([
+      row("2609.00044", "2026-09-24"),
+      row("2609.00045", "2026-09-24"),
+    ]);
+    // The duplicate dialog of the manager is not part of this check
+    (m as any).detectDuplicates = async () => new Map();
+
+    const result = await m.handleBatchImport({} as HTMLElement);
+    m.dispose();
+
+    expect(result!.added.map((p) => p.entries[0].arxivDetails)).toEqual([
+      { id: "2609.00045" },
+    ]);
+    expect(result!.notAdded).toEqual([
+      {
+        entries: [
+          expect.objectContaining({ id: "arxiv-2609.00044-2026-09-24" }),
+        ],
+        outcome: {
+          status: "inLibrary",
+          hits: [{ itemID: old.id, by: ["arxiv"] }],
+          doiOnly: false,
+        },
+      },
+    ]);
   });
 });
