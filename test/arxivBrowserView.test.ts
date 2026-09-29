@@ -1570,6 +1570,16 @@ describe("arXiv browser: the right-click menu and copying", () => {
     ).toBe(true);
   });
 
+  it("copies the paper's arXiv ID from the detail pane", async () => {
+    const { root, copy } = await loaded();
+    rows(root)[0].click();
+    const detail = root.querySelector<HTMLElement>(
+      ".arxiv-browser__detail-title",
+    )!;
+    menuAt(detail).run(msg("arxiv-browser-copy-id"));
+    await vi.waitFor(() => expect(copy).toHaveBeenLastCalledWith("2609.28538"));
+  });
+
   it("copies a selection, and in the detail pane's abstract all of it or, in KaTeX mode, its TeX", async () => {
     const { root, view } = await loaded();
     const title = rows(root)[0].querySelector<HTMLAnchorElement>(

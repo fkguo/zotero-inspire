@@ -337,8 +337,20 @@ describe("detail pane", () => {
   });
 
   it("offers the read-only actions", async () => {
-    const { root, launch, copy } = await loaded();
+    const { root, launch } = await loaded();
     key(root.querySelector(".arxiv-browser__list")!, "j");
+    // The identifier opens the arXiv page in the web browser
+    const link = root.querySelector<HTMLAnchorElement>(
+      ".arxiv-browser__detail a[href='https://arxiv.org/abs/2609.28538']",
+    )!;
+    expect(link.textContent).toBe("arXiv:2609.28538");
+    const click = new win.MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/abs/2609.28538");
     const buttons = Object.fromEntries(
       [
         ...root.querySelectorAll<HTMLButtonElement>(
@@ -346,11 +358,16 @@ describe("detail pane", () => {
         ),
       ].map((b) => [b.textContent, b]),
     );
-    buttons[msg("arxiv-browser-copy-id")].click();
-    await flushPromises();
-    expect(copy).toHaveBeenLastCalledWith("2609.28538");
-    buttons[msg("arxiv-browser-open-abstract-page")].click();
-    expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/abs/2609.28538");
+    // No buttons for what the link and the right-click menu do (Copy arXiv
+    // ID, the arXiv page)
+    expect(Object.keys(buttons)).toEqual([
+      msg("arxiv-browser-add"),
+      msg("arxiv-browser-link"),
+      msg("arxiv-browser-copy-bibtex"),
+      msg("arxiv-browser-open-pdf-button"),
+      msg("arxiv-browser-open-html-button"),
+      "▾",
+    ]);
     buttons[msg("arxiv-browser-open-pdf-button")].click();
     expect(launch).toHaveBeenLastCalledWith("https://arxiv.org/pdf/2609.28538");
     buttons[msg("arxiv-browser-open-html-button")].click();

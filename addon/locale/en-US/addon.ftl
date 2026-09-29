@@ -920,7 +920,6 @@ arxiv-browser-menu-copy-link = Copy Link Address
 arxiv-browser-menu-copy-title = Copy Title
 arxiv-browser-menu-copy-abs-link = Copy Link to the arXiv Page
 arxiv-browser-copied-text = Copied
-arxiv-browser-open-abstract-page = arXiv page
 arxiv-browser-open-pdf-button = PDF
 arxiv-browser-open-html = Open arXiv's HTML version in the web browser
 arxiv-browser-open-html-button = HTML

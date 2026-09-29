@@ -238,15 +238,9 @@ export class DetailPane {
 
     const buttons = html(doc, "div", "arxiv-browser__detail-actions");
     buttons.append(
-      button(doc, getString("arxiv-browser-copy-id"), () => {
-        void actions.copyId(listing.id);
-      }),
       button(doc, getString("arxiv-browser-copy-bibtex"), () => {
         void actions.copyBibtex(listing);
       }),
-      button(doc, getString("arxiv-browser-open-abstract-page"), () =>
-        actions.openAbstractPage(listing.id),
-      ),
       button(doc, getString("arxiv-browser-open-pdf-button"), () =>
         this.options.openPdf
           ? this.options.openPdf(entry)

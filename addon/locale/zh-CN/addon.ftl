@@ -873,7 +873,6 @@ arxiv-browser-menu-copy-link = 复制链接地址
 arxiv-browser-menu-copy-title = 复制标题
 arxiv-browser-menu-copy-abs-link = 复制 arXiv 页面链接
 arxiv-browser-copied-text = 已复制
-arxiv-browser-open-abstract-page = arXiv 页面
 arxiv-browser-open-pdf-button = PDF
 arxiv-browser-open-html = 在浏览器中打开 arXiv 的 HTML 版
 arxiv-browser-open-html-button = HTML
