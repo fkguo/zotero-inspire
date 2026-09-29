@@ -1,14 +1,24 @@
 # Zotero INSPIRE References
 
-[![zotero target version](https://img.shields.io/badge/Zotero-7%20to%2010-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
+[![zotero target version](https://img.shields.io/badge/Zotero-10-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 [![GitHub downloads, all releases](https://img.shields.io/github/downloads/fkguo/zotero-inspire/total?style=flat-square&logo=github&label=downloads)](https://github.com/fkguo/zotero-inspire/releases)
 
-A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a community maintained database for **high energy physics and related fields**, into your reference management workflow. Browse references, citations, author papers, and academic lineages directly in Zotero without leaving your library.
+A Zotero plugin with a Zotero-tailored arXiv browser and deep integration of [INSPIRE-HEP](https://inspirehep.net) into Zotero.
+
+The **arXiv browser** works for every arXiv category, from mathematics and computer science to biology, economics and physics: read the daily listings in a Zotero window, then add papers to your library or relate them to items you already have. The **INSPIRE integration** serves high energy physics and related fields: browse references, citations, author papers and academic lineages directly in Zotero without leaving your library.
 
 > 📖 **[中文功能说明](docs/FEATURES_CN.md)** | **[Technical Reference](docs/FEATURES_REFERENCE.md)**
 
 ## New features
+
+**4.0.0** (requires Zotero 10):
+
+- **[arXiv browser](#arxiv-browser)**: a separate Zotero window for reading arXiv listings of any field. Subscribe to any categories, pick announcement days in a calendar, read titles, authors and abstracts with rendered formulas, search arXiv, and add papers to your library (through INSPIRE when it has the paper, otherwise from arXiv's data) or relate them to your items.
+- **INSPIRE requests**: one rate limit for all INSPIRE requests of the plugin, with requests you start served before the background preprint check; the References panel shows a waiting queue as **🚦 INSPIRE queue: N**.
+- **[Preprint check](#preprint-monitoring)**: INSPIRE is asked about 50 preprints per request, each answer is checked against the item's title and first author, all editable libraries are covered, and preprints whose items lack an INSPIRE record can have it written.
+
+Earlier:
 
 - **[INSPIRE BibTeX export API](#read-only-inspire-bibtex)** for external tools such as [zotero-cite](https://github.com/fkguo/zotero-cite).
 - **[Academic family tree](#explore-academic-tree-new-in-320)**: trace advisor–student relationships in the Academic Tree view.
@@ -18,7 +28,17 @@ A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a communi
 
 - [Screenshots](#screenshots)
 - [Installation](#installation)
-- [Quick Start](#quick-start)
+- [arXiv Browser](#arxiv-browser)
+  - [Getting started](#getting-started)
+  - [Subscriptions and days](#subscriptions-and-days)
+  - [Reading the list](#reading-the-list)
+  - [Searching arXiv](#searching-arxiv)
+  - [Adding papers to your library](#adding-papers-to-your-library)
+  - [Relating papers to your items](#relating-papers-to-your-items)
+  - [Copying and links](#copying-and-links)
+  - [HTML version and snapshots](#html-version-and-snapshots)
+  - [Requests to arXiv and the cache](#requests-to-arxiv-and-the-cache)
+- [INSPIRE Quick Start](#inspire-quick-start)
   - [Academic Tree](#explore-academic-tree-new-in-320)
 - [Panel Features](#panel-features)
 - [PDF Reader Integration](#pdf-reader-integration)
@@ -37,6 +57,10 @@ A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a communi
 
 ## Screenshots
 
+### arXiv Browser
+
+![arXiv browser window: subscription, category chips, day and search boxes, the list of papers and the detail pane with the HTML menu open](images/arxiv_browser.png)
+
 ### References Panel
 
 ![INSPIRE References panel screenshot](images/screenshot1.png)
@@ -45,7 +69,13 @@ A Zotero plugin that integrates [INSPIRE-HEP](https://inspirehep.net), a communi
 
 ![Connections Graph screenshot](images/citation_graph.png)
 
+### Academic Tree
+
+![Academic Tree view of the Connections Graph window](images/academic_tree.png)
+
 ## Installation
+
+**Requires Zotero 10.** Version 3.2.5, the last release for Zotero 7 to 9, remains on the [Releases](https://github.com/fkguo/zotero-inspire/releases/) page.
 
 ### From Release
 
@@ -66,7 +96,99 @@ Then install `build/*.xpi` as above.
 
 ---
 
-## Quick Start
+## arXiv Browser
+
+The arXiv browser is a Zotero window for reading arXiv's announcements. It is not limited to high energy physics: every arXiv category can be subscribed to, and papers that INSPIRE does not cover are added to your library from arXiv's own data.
+
+**Open it** with `View` → `arXiv Browser`, or with the arXiv button at the right end of Zotero's tab bar. A second request brings the open window to the front. The window can also open when Zotero starts (see [Preferences](#preferences)).
+
+![arXiv browser window](images/arxiv_browser.png)
+
+### Getting started
+
+1. **Subscribe**: click **New…**, name the subscription, and tick categories in the category picker (search by name or identifier, e.g. `math.AG` or `quantum`). Choose the sections to show (new submissions, cross-lists, replacements) and click **Save**.
+2. **Pick days**: click the day button (it reads **Newest day ▾** at first) and choose a preset, or pick days in the calendar and click **Load**.
+3. **Read**: move through the papers with `j` / `k`; the detail pane on the right shows the chosen paper with its abstract. `n` / `p` turn the page.
+4. **Keep**: press `a` (or **Add…**) to add a paper, choosing the library or collection in the save-target picker; press `l` (or **Relate to items…**) to relate it to items in your library.
+
+### Subscriptions and days
+
+- **Subscriptions**: named sets of categories, managed with **New…**, **Edit…** and **Delete**; the window opens with the one chosen in Preferences (the first by default).
+  - The category picker lists arXiv's groups, archives and categories with a search box. An archive with several categories can be taken whole ("All of …"), which costs one listing page instead of one per category.
+  - The chosen categories are listed in the order you set; their listings are shown in that order.
+  - The editor shows how many requests a first load takes and its minimum duration, and suggests a whole archive when more than 10 categories are chosen.
+- **Category chips** under the subscription filter the list: click shows only that category, Ctrl/Cmd+click adds or removes one, Shift+click picks a range, and clicking the only chosen chip again shows all.
+- **Calendar**: announcement days (Monday to Friday) within arXiv's last 90 days can be picked. Click picks one day, Ctrl/Cmd+click adds or removes a day, Shift+click picks a range. Picked days are fetched only when you click **Load**; the calendar shows how many requests that takes if the days are not cached.
+- **Presets** load at once: **Newest day**, **Last 5 announcement days**, **This week**, **Unread days**.
+- **Unread days**: a blue dot marks each announcement day not yet read in this subscription, counted from the day the subscription was made.
+  - A day is marked read once its complete listing has been shown.
+  - **Mark read** / **Mark unread** act on the picked days; **Mark all read** clears every dot without fetching anything.
+  - Marks are kept per subscription for 100 days.
+
+### Reading the list
+
+- **Order of arrival**: the newest day is fetched and shown first. With several categories, a day appears as soon as its first category arrives, and the others are added as they come ("Still fetching: …" under the date). A category that failed gets **Retry**; a stopped load can be resumed with **Continue**.
+- **Pages**: 50 papers per page by default (**Per page**, 10–500), with **‹ Previous**, page numbers and **Next ›**. The day chips above the list jump to a day.
+- **Sort**: **Announcement order** (grouped as New submissions, Cross-lists, Replacements), **arXiv ID ↑ / ↓**, or **Primary category**. The **New submissions**, **Cross-lists** and **Replacements** boxes choose the sections shown and are saved with the subscription; a paper listed in several sections appears once.
+- **Abstracts** are folded in the list by default: **Abstract ▸** on a row or `Space` unfolds one, the **Abstracts** box unfolds all. Formulas are rendered as set by **Abstract LaTeX** in Preferences.
+- **Detail pane**: title, authors, arXiv ID, version, announcement date, categories, where the paper was announced (e.g. "hep-ph: new submission; hep-th: cross-list"), comments, journal reference, the paper's library state with its actions, **Copy BibTeX**, **PDF**, **HTML**, and the abstract. The divider between list and pane can be dragged (or moved with ← / → when focused); its position is remembered.
+- **Filter box**: words or `"quoted phrases"` matched against authors, title, arXiv ID, categories, comments, journal reference (including shorthand such as `PRL`, `PRD`, `JHEP`) and abstract. Its history is shared with the References panel.
+- **Quick filters (⏳)**: **Local items**, **Online items**, **≤10 Authors**, **Published** (has a journal reference), **arXiv only**.
+- **In-library marks** (by arXiv ID, over all your libraries, trash excluded): ● in your library (click selects it in the main window), ②, ③ … several items, ⊕ not in your library (click adds it), ? the library could not be read (click tries again). The detail pane shows **✓ In your library** with **Show in library**.
+- **PDF button**: green when the paper's item has a PDF, which a click opens in Zotero; otherwise it opens arXiv's PDF in your web browser.
+- **Author card**: hover an author name. When INSPIRE has the paper and the author is identified on its record, the INSPIRE author card appears; otherwise a local card. Both show the number of the author's papers in your library and a link to the author's arXiv search. The References panel's author card shows the same two additions.
+
+### Searching arXiv
+
+Type in the **Search arXiv** box and press Enter. Plain words search all fields and must all match; arXiv's own syntax works too, e.g. `au:witten`, `ti:tetraquark`, `abs:"chiral perturbation"`, `cat:hep-ph`, `AND`, `OR`, `ANDNOT`, parentheses, `submittedDate:[202601010000 TO 202612312359]`.
+
+- Results are listed newest submission first, grouped by month, and fetched one page at a time. arXiv gives the first 10000 matches only.
+- The filter box and quick filters apply to the results.
+- The search box has its own history.
+- **×**, or Enter in the empty box, returns to the listed days, at the same page and paper.
+
+### Adding papers to your library
+
+Add a paper with `a`, **Add…** in the detail pane, or a click on ⊕. The save-target picker (the same one as in the References panel) chooses the library or collection, tags and a note. The route is chosen from the data:
+
+- **INSPIRE has the paper** (a record whose arXiv identifier is this paper): imported from INSPIRE, as from the References panel.
+- **INSPIRE does not have it**: created from arXiv's data, as a Preprint (see **Keep Preprint item type for unpublished papers**) with the complete author list and `arXiv:<id> [category]` in Extra.
+- **Add the journal version…** (shown when arXiv gives a journal reference): when INSPIRE has no record, the journal DOI given on arXiv is looked up with Zotero's own DOI lookup. The result is used only if its title agrees with the paper and so does its first author (not checked when arXiv lists a collaboration first); otherwise the preprint is added and a notice says why.
+- If INSPIRE cannot be reached, nothing is added until you choose **Add from arXiv data** or **Try later**.
+
+Before creating an item, the target library is searched by arXiv ID, INSPIRE record and journal DOI; a paper already there is not added again (**Show in library** selects it), and an item that matches by journal DOI alone is shown with the question whether it is this paper.
+
+- **PDF**: when **Auto "Find Full Text" after adding to library** is on, the arXiv PDF of the paper's current version is attached ("arXiv preprint PDF vN"). **No arXiv PDF for journal articles added from the arXiv browser** leaves it out for journal items.
+- **Tag**: with **arXiv Primary Category Tag** on, the primary category (e.g. `hep-ph`, `math.AG`) is added as a tag.
+- **Several papers**: tick the boxes (`x`, Shift+click for a range). The toolbar in the first day header offers **Select all** (all pages), **Clear** and **Import**. Import uses the References panel's batch import: a duplicate check, one save target, each paper added once, `Escape` to cancel (which also stops its requests), and a summary of what was not added.
+- **INSPIRE completion**: the status line reports "N preprints added recently have no INSPIRE record yet" for items added in the last 30 days with an arXiv ID and no INSPIRE record. **Check now** asks INSPIRE and lists the records found; for the items you tick, only the INSPIRE record ID, the citation key (where it is empty) and the citation counts are written; bibliographic fields are left unchanged.
+
+### Relating papers to your items
+
+`l`, **Relate to items…** or the row's link button opens Zotero's **Select Items** dialog on the paper's library; choose one or more items. A paper not yet in your library is added first. The relation is written in both directions in one step and can be undone with `Ctrl/Cmd+Z` in the window or `Edit` → `Undo`. Items in different libraries cannot be related. The link button is green when the paper's item has related items, which its tooltip lists; remove a relation in the item's **Related** section in Zotero.
+
+### Copying and links
+
+- **Copy BibTeX** (button, row button, right-click menu, `Ctrl/Cmd+Shift+C`): INSPIRE's BibTeX when INSPIRE has the paper, otherwise arXiv's. The citation key is the library item's key when the paper is in your library, otherwise INSPIRE's texkey, otherwise one made like INSPIRE's: first author's family name (or the collaboration), year of the arXiv ID and the first significant title word, e.g. `Finkelberg:2022kostka`. The notice says which source was used.
+- **Right-click menu** in the list and the detail pane: **Copy** / **Copy Selection**, **Copy as LaTeX** (on an abstract with formulas in the detail pane), **Select All**, **Open Link in Web Browser**, **Copy Link Address**, and on a paper **Copy Title**, **Copy arXiv ID**, **Copy Link to the arXiv Page**, **Copy INSPIRE link**, **Copy BibTeX**.
+- `Ctrl/Cmd+C` copies the selected text with each formula once; `Ctrl/Cmd+A` selects the text of the list or the detail pane.
+- A click on a title, or `Enter`, opens the paper's arXiv page in your web browser.
+
+### HTML version and snapshots
+
+The **HTML** button in the detail pane and the `</>` button on each row (hidden when the listing says arXiv has no HTML version of the paper) open the saved snapshot in Zotero if there is one, and otherwise arXiv's HTML version in your web browser. Their ▾ menu offers **Open in the Web Browser**, **Save HTML Snapshot to the Library** and **Open Snapshot in Zotero**.
+
+Saving uses Zotero's own web snapshot of the listed version, titled "arXiv HTML vN", attached to the paper's item (the paper is added first if needed). The snapshot is a copy of arXiv's full-text HTML page, formulas and figures included; read and annotate it in Zotero's reader. Like other attachments it syncs, so it can also be read in Zotero's mobile apps.
+
+### Requests to arXiv and the cache
+
+- **Pacing**: at least 15 s between requests to arxiv.org and 3 s between requests to the arXiv API, each in one queue for the whole plugin. The status line counts down to the next request. When arXiv asks to wait (Retry-After), the queue waits.
+- **Cache**: each category's listing of each day is kept for 100 days. The newest listing and the index of recent days are reused until the next scheduled announcement (20:00 New York time, Sunday to Thursday), so reopening the window costs no requests. **Reload** fetches the newest listing again.
+- Closing the window cancels its queued requests.
+
+---
+
+## INSPIRE Quick Start
 
 ### Update Metadata from INSPIRE
 
@@ -77,6 +199,8 @@ Then install `build/*.xpi` as above.
 - **`Citation counts only`** — Just update citation numbers
 
 The plugin automatically fetches metadata when you add new items (configurable in Preferences).
+
+An update shows its progress in a small window that stays visible while you work; `Escape` or `INSPIRE` → **Cancel update** stops it, and a cancelled update says how many items were processed and how many of them updated. Items for which INSPIRE gives no usable answer (network, server or record problems) are left unchanged and counted in a notice; they are not tagged as having no INSPIRE record.
 
 ### Copy Actions
 
@@ -171,7 +295,9 @@ Enable them via the column picker in the items list header. Preferences:
 | Icon       | Meaning                       |
 | ---------- | ----------------------------- |
 | ● (green)  | Item exists in your library   |
+| ②, ③ …     | Several items for this paper  |
 | ⊕ (red)    | Item can be imported          |
+| ?          | Library could not be read     |
 | 🔗 (green) | Linked as related item        |
 | 🔗 (gray)  | Not linked                    |
 | 📄 (green) | PDF available - click to open |
@@ -180,22 +306,22 @@ Enable them via the column picker in the items list header. Preferences:
 
 ### Interactions
 
-| Action               | Result                   |
-| -------------------- | ------------------------ |
-| Click ●              | Jump to local item       |
-| Double-click ●       | Open PDF directly        |
-| Click ⊕              | Open import dialog       |
-| Click 🔗             | Toggle related item link |
-| Click 📄 (green)     | Open PDF attachment      |
-| Click ⬇️ (blue)      | Trigger Find Full Text   |
-| Click title          | Open in INSPIRE          |
-| Hover title          | Show abstract            |
-| Click author         | View author's papers     |
-| Hover author         | Show author profile      |
-| Click citation count | View citing papers       |
-| Click 📋             | Copy BibTeX              |
-| Click T              | Copy citation key        |
-| Right-click entry    | Context menu (Favorites) |
+| Action               | Result                                               |
+| -------------------- | ---------------------------------------------------- |
+| Click ●              | Jump to local item                                   |
+| Double-click ●       | Open PDF directly                                    |
+| Click ⊕              | Open import dialog                                   |
+| Click 🔗             | Toggle related item link (Edit → Undo takes it back) |
+| Click 📄 (green)     | Open PDF attachment                                  |
+| Click ⬇️ (blue)      | Trigger Find Full Text                               |
+| Click title          | Open in INSPIRE                                      |
+| Hover title          | Show abstract                                        |
+| Click author         | View author's papers                                 |
+| Hover author         | Show author profile                                  |
+| Click citation count | View citing papers                                   |
+| Click 📋             | Copy BibTeX                                          |
+| Click T              | Copy citation key                                    |
+| Right-click entry    | Context menu (Favorites)                             |
 
 ### Filtering & Sorting
 
@@ -222,7 +348,8 @@ The **⭐ Favorites** tab lets you quickly access your favorite authors, papers,
 
 1. Use checkboxes to select multiple entries
 2. Click **Import** to batch import selected items
-3. The plugin detects duplicates automatically before importing
+3. The plugin detects duplicates automatically before importing; the dialog says how many items match a paper and, when group libraries are involved, in which libraries
+4. A paper shown in several rows is imported once; press `Escape` to cancel, which also stops the requests in progress
 
 ### Export Options
 
@@ -254,6 +381,8 @@ When a hover delegates to the historical matcher, it restores the same small per
 
 ## Keyboard Shortcuts
 
+### References panel
+
 | Key                | Action             |
 | ------------------ | ------------------ |
 | `↑` / `k`          | Previous entry     |
@@ -265,6 +394,28 @@ When a hover delegates to the historical matcher, it restores the same small per
 | `Tab`              | Next tab           |
 | `Ctrl/Cmd+Shift+C` | Copy BibTeX        |
 | `Escape`           | Clear selection    |
+
+### arXiv browser window
+
+Keys act on the focused paper and are ignored while you type in a text box.
+
+| Key                              | Action                                                   |
+| -------------------------------- | -------------------------------------------------------- |
+| `j` / `↓`, `k` / `↑`             | Next / previous paper (continues onto the next page)     |
+| `n` / `p`                        | Next / previous page                                     |
+| `Home` / `End`                   | First / last paper of the page                           |
+| `Space`                          | Fold or unfold the abstract                              |
+| `Enter`                          | Open the paper's arXiv page in the web browser           |
+| `a`                              | Add to the library (save-target picker)                  |
+| `l`                              | Relate to items (Select Items dialog)                    |
+| `x`                              | Tick or untick for batch import                          |
+| `Escape`                         | Clear the focus; close the calendar                      |
+| `Ctrl/Cmd+Shift+C`               | Copy BibTeX                                              |
+| `Ctrl/Cmd+C`                     | Copy the selected text (each formula once)               |
+| `Ctrl/Cmd+A`                     | Select the text of the list or the detail pane           |
+| `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z` | Undo / redo (relations made in the window, among others) |
+| `Ctrl/Cmd+W`                     | Close the window                                         |
+| `←` / `→` on the divider         | Move the divider                                         |
 
 ---
 
@@ -293,13 +444,19 @@ Right-click items or collections → `INSPIRE` → `Download references cache` t
 
 Enable **Preprint Watch** in Preferences to automatically check if your arXiv preprints have been published. Both Journal Article items carrying arXiv data and Zotero `Preprint` items are monitored (see **Keep Preprint item type** above).
 
+- Check by hand with right-click → `INSPIRE` → **Check Preprint Status** (items), **Check Preprints in Collection**, or **Check All Preprints in Library** (My Library and every editable group library).
+- INSPIRE is asked about 50 preprints per request (for example, 883 preprints take about 18 requests). An answer counts only if the INSPIRE record carries the item's arXiv identifier; a record whose title or first author differs from the item's (and that the item does not already name) is shown with a warning and left unticked.
+- The results dialog gives the number of preprints that are published, unpublished, not covered by INSPIRE, or failed. Besides published papers to update, it lists preprints INSPIRE has a record of while their items do not name it yet: for these, only the INSPIRE record ID, the citation key (where empty) and the citation counts are written.
+
 ### Smart Update Mode
 
 Enable **Smart Update** in Preferences to preserve your manual edits when updating metadata. You can protect specific fields (title, authors, abstract, journal) and author names with diacritics.
 
+Authors are never dropped silently: when INSPIRE's author list lacks authors the item has, an update keeps the item's authors. In the Smart Update preview this change is left unticked with a note, so you can still choose it.
+
 ### Better BibTeX Integration
 
-The plugin automatically sets INSPIRE citation keys in the native Citation Key field (Zotero 8+) or Extra field (Zotero 7), which Better BibTeX can use for pinning.
+The plugin automatically sets INSPIRE citation keys in Zotero's Citation Key field, which Better BibTeX can use for pinning.
 
 ### INSPIRE Lookup Engine
 
@@ -325,7 +482,7 @@ Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences
 | Setting                               | Description                                                                                                                                    |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Auto-fetch for new items**          | Fetch metadata automatically when adding items                                                                                                 |
-| **Use INSPIRE Citekey**               | Write INSPIRE texkey to Citation Key (Zotero 8+) or Extra (Zotero 7)                                                                           |
+| **Use INSPIRE Citekey**               | Write INSPIRE texkey to the Citation Key field                                                                                                 |
 | **Max authors**                       | Number of authors shown before "et al."                                                                                                        |
 | **Statistics chart**                  | Show year/citation distribution chart                                                                                                          |
 | **Local cache**                       | Enable persistent disk cache for offline use                                                                                                   |
@@ -335,6 +492,18 @@ Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences
 | **Fuzzy citation detection**          | For PDFs with broken text layers                                                                                                               |
 | **Reuse Zotero 10 citation analysis** | Background reuse of completed Zotero 10.0 results; restart required                                                                            |
 | **Abstract LaTeX mode**               | KaTeX (full rendering, default) or Unicode                                                                                                     |
+
+**arXiv Browser** section and related options:
+
+| Setting                                                            | Description                                                                                         |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| **Opens with the subscription**                                    | The subscription the window shows first (default: the first one)                                    |
+| **Opens with**                                                     | The newest day (default), the last 5 announcement days, or this week                                |
+| **Show the abstracts in the list**                                 | Off by default: abstracts are folded in the list; the chosen paper's abstract is in the detail pane |
+| **Papers per page**                                                | 10 to 500 (default 50); also set from the list                                                      |
+| **Open the arXiv browser when Zotero starts**                      | Off by default                                                                                      |
+| **Auto "Find Full Text" after adding to library**                  | In the arXiv browser: attach the arXiv PDF to papers added                                          |
+| **No arXiv PDF for journal articles added from the arXiv browser** | With the option above on, journal items added from INSPIRE or by DOI get no arXiv PDF               |
 
 ---
 

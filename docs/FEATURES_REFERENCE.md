@@ -1,7 +1,7 @@
 # Zotero INSPIRE Plugin - Technical Reference
 
-> This document provides technical details for the INSPIRE References Panel and related functionality.
-> It serves as a reference for developers and advanced users.
+> This document provides technical details for the INSPIRE References Panel, the arXiv browser (section 15) and related functionality.
+> It serves as a reference for developers and advanced users. The plugin requires Zotero 10.
 
 ---
 
@@ -92,7 +92,7 @@ A statistics visualization chart is displayed at the top of the panel for Refere
 - Clickable title → open in INSPIRE or arXiv/DOI fallback
 - Publication summary (journal, volume, pages, arXiv ID)
 - Citation count button → view citing papers
-- Local status indicator: ● (in library), ⊕ (missing)
+- Local status indicator: ● (in library), ②…⑳ (several items for the paper; a click selects the first), ⊕ (missing), ? (the library could not be read; a click tries again). Items come from one index of arXiv IDs, INSPIRE recids and DOIs over all libraries (trash excluded)
 - Related item indicator: link icon
 - **PDF status indicator**:
   - 📄 (green): PDF available, click to open
@@ -121,7 +121,7 @@ The **⭐ Favorites** tab provides quick access to favorite authors, papers, and
 | ----------------------------- | -------------------------------------------------- |
 | Click local status (●/⊕)      | Open existing item in library, or add missing item |
 | Double-click local status (●) | Open PDF directly if available                     |
-| Click link icon               | Add/remove related item relationship               |
+| Click link icon               | Add/remove related item relationship (undoable)    |
 | Click PDF icon (green)        | Open PDF attachment in reader                      |
 | Click PDF icon (blue)         | Trigger Find Full Text for the item                |
 | Click author name             | View all papers by that author                     |
@@ -187,6 +187,8 @@ When hovering over an author name, a profile preview card appears with the follo
 | **arXiv Categories** | Research areas (e.g., hep-ph, nucl-th)           |
 | **Quick Links**      | 📧 Email, 🆔 ORCID, 🔗 INSPIRE page, 🌐 Homepage |
 | **View Papers**      | Button to open Author Papers tab                 |
+
+The card also shows the number of the author's papers in your library and a link to the author's arXiv search. In the arXiv browser, the INSPIRE card is shown when the paper's INSPIRE record identifies the author; otherwise a local card shows the name, the library count and arXiv / INSPIRE search links (authors are never looked up by name there).
 
 **Data Source Priority**:
 
@@ -309,10 +311,14 @@ A dedicated `localCache` service stores References/Cited By/Author Papers JSON f
 ### 4.1 Standard Mode
 
 - **Concurrent processing**: 4 parallel workers for batch updates
-- **Progress window**: Shows update progress
+- **Progress window**: Zotero's popup kept on top and open while you work (`runProgressWindow.ts`); it can be dragged, and `Escape` in it cancels. Overlapping runs each keep their own popup and final notice
+- **Cancel**: `Escape` in the main window (not in text fields, reader tabs, or the collection filter) or `INSPIRE` → `Cancel update` cancels every active run and aborts its requests; the notice reads "Processed completed/total items, N of them updated"
+- **Failed requests**: an item without a usable INSPIRE answer (network, server or record problem) is left unchanged and counted in a notice; only an item INSPIRE answered without a record gets the `tag_norecid` tag (when `tag_enable` is on)
+- **Authors**: an INSPIRE author list that is shorter than the item's, or lacks one of its authors, never replaces it in a plain update or a preprint publication update; in the Smart Update preview the change is a conflict, unticked, with a note
 - **CrossRef fallback**: Falls back to CrossRef for citation counts if INSPIRE fails
 - **Item type conversion**: with `keep_preprint_type` (default on), `preprint` / `report` items become `journalArticle` only once INSPIRE reports a journal publication, and unpublished arXiv `journalArticle` items are turned back into `preprint`; with it off, `preprint` / `report` become `journalArticle` as soon as an INSPIRE record is found (historical behaviour). Records typed `book` on INSPIRE become `book`. The `preprint` -> `journalArticle` / `journalArticle` -> `preprint` decisions need the full record, so they only run for full / no-abstract updates, never for citation-count-only requests
 - **Tag support**: Can tag items without INSPIRE recid
+- **arXiv tag**: with `arxiv_tag_enable`, the primary category (e.g. `hep-ph`, `math.RT`) is added as a plain tag; source order: the record's primary category, the `arXiv:<id> [cat]` line in Extra, the archive of an old-style ID
 
 ### 4.2 Smart Update Mode
 
@@ -463,9 +469,10 @@ Appears when entries are selected:
 
 ### 7.3 Duplicate Detection
 
-- Before import, batch detection of duplicates in local library
-- Priority: recid > arXiv > DOI
-- Functions: `findItemsByRecids()`, `findItemsByArxivs()`, `findItemsByDOIs()`
+- Before import, batch detection of duplicates in local library, from the library index (arXiv ID, recid, DOI)
+- Every matching item is kept, recid matches first; the dialog shows "(N items)" for several and the libraries when group libraries are involved
+- If the library cannot be read, nothing is imported and a notice asks to try again
+- Functions: `findItemsByRecids()`, `findItemsByArxivs()`, `findItemsByDOIs()`, merged by `mergeHits()` (`library/localStatus.ts`)
 
 ### 7.4 Duplicate Dialog
 
@@ -476,10 +483,12 @@ Appears when entries are selected:
 ### 7.5 Batch Import Execution
 
 - Single save target selection (library/collections/tags/notes)
+- **One job per paper**: rows sharing a canonical arXiv ID or recid are imported once, and the result is written to every row showing the paper (`groupByPaper()`)
 - Concurrent import with `CONCURRENCY = 3` limit
-- ProgressWindow shows "Importing N/M"
-- ESC key cancellation supported
+- ProgressWindow shows "Importing N/M"; PDFs, when attached, follow with their own progress line
+- ESC key cancellation: aborts the signal of every paper in progress, so queued INSPIRE / arXiv requests are withdrawn and running ones end; the notice counts the papers that finished
 - Error handling: individual failures don't affect other entries
+- The arXiv browser uses the same manager with its own per-row import (section 15.6)
 
 ### 7.6 Export Enhancement
 
@@ -568,11 +577,15 @@ A Zotero item is identified as an unpublished preprint if:
 | Collection context menu | Check All Preprints in Library (My Library and every editable group)                         |
 | Background (startup)    | Checks at startup as set by `preprint_watch_auto_check` (8.4), same scope as the entry above |
 
-The three menu entries ask INSPIRE about every preprint they find. The background check reuses INSPIRE answers younger than 20 hours; a paper INSPIRE has no record of is asked about again after 7 days at the earliest. A menu entry stops a background check in progress, and no background check starts until the entry's results dialog is closed; a background check that was stopped, or whose every result is an error (e.g. no network, and no answer recent enough to reuse), does not count as the day's check, and the next one continues with the papers not answered yet. The answers are kept in `preprintWatch.json` in the cache folder, each with the time INSPIRE gave it; a failed request is not stored and leaves the previous answer in place. The libraries are scanned on every check, so the file holds answers only, not the list of preprints.
+The three menu entries ask INSPIRE about every preprint they find. The background check (30 s after startup, as a background request, see 12.4) skips only a paper INSPIRE had no record of in the last 7 days (`BACKGROUND_NO_RECORD_REUSE_MS`).
+
+INSPIRE is asked by arXiv ID, 50 IDs per request (`INSPIRE_ARXIV_BATCH_SIZE`; INSPIRE answered 75 and refused 80 with a 502), 3 requests in flight, each ID once even when several items share it. A record counts only if one of its `arxiv_eprints` equals the ID. Its title (word overlap at least 0.5) and first author (family name, or the collaboration) are compared with the item's; unless the item already names that recid, a mismatch is shown as "May be another paper: …" and the row starts unticked. A menu entry stops a background check in progress, and no background check starts until the entry's results dialog is closed; a background check that was stopped, or whose every result is an error (e.g. no network, and no answer recent enough to reuse), does not count as the day's check, and the next one continues with the papers not answered yet. The answers are kept in `preprintWatch.json` in the cache folder, each with the time INSPIRE gave it; a failed request is not stored and leaves the previous answer in place. The libraries are scanned on every check, so the file holds answers only, not the list of preprints.
 
 ### 8.3 Update Process
 
 Each preprint gets one of four outcomes: published, unpublished (INSPIRE has a record without a journal publication), not in INSPIRE (no record), or failed (the request failed or was stopped). The results dialog shows the number of each; when no preprint is published, a notification shows these numbers instead.
+
+The dialog opens when a preprint is published or when INSPIRE has a record of a preprint whose item has no recid; otherwise a notification shows the numbers (10 s).
 
 When publications are found:
 
@@ -580,6 +593,8 @@ When publications are found:
 2. User selects which items to update
 3. Updates: DOI, journalAbbreviation, volume, pages, date (year)
 4. Preserves arXiv info in Extra field
+
+Records of unpublished preprints whose items lack the recid are listed in a second section ("In INSPIRE, not published: write the INSPIRE record only"). For ticked items the update writes Archive = INSPIRE and Archive Location = recid (only when both are empty or already agree), the citation key (only when empty and `citekey` is `inspire`) and the citation-count lines in Extra; bibliographic fields and Date Modified are unchanged. Items shown in the item pane or a reader, with unsaved changes, or changed since the check are not written, and the notice says so.
 
 ### 8.4 Preferences
 
@@ -694,6 +709,18 @@ filterDebounceDelay = 150     // ms, debounce delay for filter input
 maxRowPoolSize = 150          // Max row elements in pool
 LOCAL_STATUS_CHUNK_SIZE = 500 // SQL query batch size for local status
 
+// INSPIRE request pacing (rateLimiter.ts)
+SEND_WINDOW_MAX = 12          // requests sent in any window
+SEND_WINDOW_MS = 5000         // window length
+MIN_RETRY_WAIT_MS = 5000      // shortest wait after a 429
+MAX_RETRY_ATTEMPTS = 3
+
+// arXiv
+INSPIRE_ARXIV_BATCH_SIZE = 50 // arXiv IDs per INSPIRE query (preprint check, arXiv browser)
+ARXIV_WEB_INTERVAL_MS = 15000 // arxiv.org: listing pages, PDFs, BibTeX, HTML snapshots
+ARXIV_API_INTERVAL_MS = 3000  // export.arxiv.org API: metadata, search
+SEARCH_RESULT_LIMIT = 10000   // arXiv API search results reachable
+
 // LRU cache limits
 referencesCache.maxSize = 100
 citedByCache.maxSize = 50
@@ -749,6 +776,16 @@ updateRowStatus() / updateRowCitationCount()
 - **LRU caches**: Bounded caches prevent memory leaks
 - **Chart statistics caching**: Cached per view mode to avoid recomputation
 - **String caching**: Locale strings cached for performance
+
+### 12.4 INSPIRE Request Pacing
+
+All INSPIRE requests of the plugin pass one limiter (`rateLimiter.ts`):
+
+- At most 12 requests are sent in any 5 s (`SEND_WINDOW_MAX`, `SEND_WINDOW_MS`), below INSPIRE's limit of 15 per 5 s; retries count as sends.
+- Two classes: foreground (default) and background. Waiting foreground requests are sent first; within a class, first come, first served. The only background caller is the startup preprint check.
+- A request cancelled while it waits is never sent.
+- After a `429`, the request waits for Retry-After, at least 5 s, and is retried up to 3 times, queuing again with its own class. The external BibTeX API disables these retries and returns a rate-limit error instead.
+- The References panel toolbar shows **🚦 INSPIRE queue: N** while requests wait in the queue.
 
 ---
 
@@ -819,3 +856,131 @@ Right-click on abstract preview card shows context menu:
 - Context menu appears on right-click over abstract content
 - LaTeX source preserved from INSPIRE API response
 - Selection-aware: shows "Copy Selection" only when text is selected
+
+---
+
+## 15. arXiv Browser
+
+A separate window (`chrome://zoteroinspire/content/arxivBrowser.xhtml`) for reading arXiv listings of any category. Code: `src/modules/arxiv/` (data, adding) and `src/modules/arxiv/browser/` (window).
+
+### 15.1 Window and Entry Points
+
+| Entry          | Details                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| View menu      | `View` → `arXiv Browser`, registered with `Zotero.MenuManager` (`browserEntryPoints.ts`)     |
+| Tab bar button | Right end of `zotero-tabs-toolbar`, before the sync button; tooltip "Open the arXiv browser" |
+| Startup        | Opens when Zotero starts if `arxiv_browser_open_on_startup` is on                            |
+
+- One window at a time; opening again focuses it. Size and position are remembered.
+- The window closes with the main window and when the plugin shuts down; closing it cancels its queued arXiv requests.
+- There are no settings inside the window beyond the list controls; the rest is in the plugin's preferences (15.12).
+
+### 15.2 Subscriptions
+
+- A subscription has a name, an ordered list of categories or whole archives, and the sections to show (new submissions and cross-lists on, replacements off by default). Stored as JSON in `arxiv_subscriptions`.
+- Category picker: arXiv's groups → archives → categories (`arxivCategories.json`), searchable by name or identifier. An archive with several categories can be subscribed whole (one listing page). Aliases are stored under their canonical category (e.g. `math.MP` → `math-ph`).
+- The editor estimates the requests and minimum time of a first load and suggests a whole archive above 10 categories.
+- Category chips filter the list with the chart's click rules (`src/utils/clickSelection.ts`): click = only this one, Ctrl/Cmd+click = add/remove, Shift+click = range, click the only chosen one = all.
+
+### 15.3 Days and Loading
+
+- Calendar (`DayPicker.ts`): Monday–Friday listing days within arXiv's 90-day catch-up range, weeks starting on Monday. Click / Ctrl/Cmd+click / Shift+click as above; picked days load on **Load**. Presets load at once: newest day, last 5 announcement days, this week, unread days. The window opens with `arxiv_browser_open_days` ("newest", "recent", "week").
+- Sources (`listingService.ts`): `/list/<cat>/new` for the newest day; `/list/math/recent` as the index of the last announcement days; `/catchup` for older days.
+- The newest day is fetched first, before the date index. A day is shown as soon as its first category arrives; later categories are merged in, keeping the reader's position ("Still fetching: …").
+- Estimated requests: newest = N categories, last 5 days = 1 + 5N, other days = 1 + N per day, at 15 s each.
+- Failed or stale categories get **Retry**; a stopped load offers **Continue** for the days not loaded; days without an announcement are reported.
+
+### 15.4 arXiv Requests and Cache
+
+| Host               | Minimum interval | Timeout           | Used for                                    |
+| ------------------ | ---------------- | ----------------- | ------------------------------------------- |
+| `arxiv.org`        | 15 s             | 60 s (PDFs 120 s) | listing pages, PDFs, BibTeX, HTML snapshots |
+| `export.arxiv.org` | 3 s              | 30 s              | API metadata of papers, search              |
+
+- One serial queue per host for the whole plugin (`arxivFetch.ts`). A `429`/`503` with Retry-After pauses the queue until then and retries once; a second one, one without Retry-After, or a `403` fails the request and those queued behind it.
+- Listings are stored in `localCache` type `arxiv_listing`: each category's checked listing per day (`day_<spec>_<date>`) for 100 days (`LISTING_RETENTION_DAYS`), the `/new` date seen, and the recent-days index.
+- `/new` and the recent index are reused until a scheduled announcement (20:00 America/New_York, Sunday–Thursday) has passed since they were fetched; if arXiv is late, they are fetched again after 10 min. Reopening the window therefore needs no request. **Reload** fetches the newest listing again; other days come from the cache. A failed fetch falls back to the cached copy.
+
+### 15.5 Reading State
+
+- Stored per (subscription, listing day) in `<Zotero data directory>/zoteroinspire/arxiv-reading.json` (`JsonStateFile`: versioned, written through a temporary file; an unreadable file is kept under another name and reported), kept 100 days.
+- Unread days (blue dots) start at the listing that was current when the subscription was made.
+- A day is marked read when its complete listing (all categories fetched and checked) has been shown, or when it turned out to have no announcement. **Mark read** / **Mark unread** act on picked days; **Mark all read** marks every dotted day without fetching.
+
+### 15.6 List and Detail Pane
+
+- Pages of `arxiv_browser_page_size` papers (default 50, 10–500); day chips jump to a day ("…" still loading, "⚠" incomplete).
+- Sorts: announcement order (sections New submissions / Cross-lists / Replacements), arXiv ID ↑ / ↓, primary category. A paper listed in several sections is shown once, in the first shown section (new, cross, replace). The section boxes are saved to the subscription.
+- Abstracts: folded by default (`arxiv_browser_abstracts_expanded`); formulas are rendered when a row scrolls into view, in the `latex_render_mode` of the panel.
+- Divider: drag or ←/→ (2 % per press); stored in `arxiv_browser_list_share` (default 60 %, 25–80).
+- Filter box (150 ms debounce): authors, title, ID, categories, comments, journal reference with its abbreviations, abstract; accents normalized. Shares its history with the References panel.
+- Quick filters: Local items, Online items, ≤10 Authors (a collaboration is not counted as an author), Published (journal reference), arXiv only. The panel's citation, recency, review and related-item filters are not offered, as they need INSPIRE data or the panel's current item.
+- In-library marks: `findItemsByArxivs()` on the library index (all libraries, trash and feeds excluded); recomputed when the index changes.
+- Author card: the paper's INSPIRE record (one search per paper by arXiv ID) identifies authors; otherwise the local card. No search by name.
+- Status area: loading status with countdown to the next arXiv request; INSPIRE completion line (15.9).
+
+### 15.7 Adding Papers (`addToLibrary.ts`)
+
+Every add asks for a save target first (`pickSaveTarget()`, shared with the References panel; remembered in Zotero's recent save targets). INSPIRE is asked again at add time (the add service can reuse an answer under 10 minutes old, but the window passes none). Adds into one library run one at a time.
+
+| Route | Condition                                                            | Item                                                                                                                                                                               |
+| ----- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A     | INSPIRE has a record whose `arxiv_eprints` contains the ID           | INSPIRE import, as in the References panel                                                                                                                                         |
+| C     | "Add the journal version…", arXiv gives a DOI, INSPIRE has no record | Zotero's DOI lookup (`Zotero.Translate.Search`); used only if DOI, title (overlap ≥ 0.5) and first author agree (first author not compared when arXiv lists a collaboration first) |
+| B     | otherwise                                                            | From arXiv API data: Preprint (per `keep_preprint_type`), complete author list, DOI `10.48550/arXiv.<id>`, `arXiv:<id> [cat]` in Extra                                             |
+
+- INSPIRE unreachable: nothing is added; the notice offers **Add from arXiv data** or **Try later**.
+- Duplicate check before creation, in the target library, by arXiv ID, recid and every journal DOI. A match by journal DOI alone asks whether it is the same paper ("Not this paper: add it").
+- PDF: with `auto_find_fulltext_on_import`, the arXiv PDF of the current version from the arXiv API (`/pdf/<id>v<N>`, titled "arXiv preprint PDF vN", 120 s timeout) is downloaded through the arXiv queue and imported; `arxiv_pdf_skip_journal_items` skips it for non-preprint items of routes A and C.
+- Tag: with `arxiv_tag_enable`, the primary category.
+- Adding cannot be undone from the window.
+- Batch: the References panel's `BatchImportManager` and `BatchToolbar`; INSPIRE and the arXiv API are asked about all papers first; routes A and B only; `Escape` cancels.
+
+### 15.8 Relations, BibTeX and Links
+
+- **Relate** (`l`, **Relate to items…**, row link button): Zotero's `selectItemsDialog.xhtml` on the regular items of the paper's library. `linkItems()` (`library/relatedItems.ts`) writes both directions in one transaction without changing Date Modified and stages one `Zotero.UndoHistory` action; `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` in the window call undo / redo. Items in different libraries are refused. The References panel uses the same function.
+- **Copy BibTeX**: INSPIRE's (by the library item's recid when its eprint is this paper, else `arxiv:<id>` with `format=bibtex`), else arXiv's `/bibtex/<id>`. Key: the library item's citation key; else INSPIRE's texkey; else `<Name>:<YYYY><word>` (`citationKey.ts`: first author's family name or collaboration, ASCII-folded; year of the arXiv ID; first title word that is not one of Better BibTeX's default skip words).
+- **Right-click menu**: Copy / Copy Selection, Copy as LaTeX (detail pane abstract, KaTeX mode), Select All, Open Link in Web Browser, Copy Link Address, Copy Title, Copy arXiv ID, Copy Link to the arXiv Page, Copy INSPIRE link, Copy BibTeX.
+- The paper's INSPIRE record found in the window is shared by Copy BibTeX, Copy INSPIRE link and the author card.
+
+### 15.9 HTML Snapshots and INSPIRE Completion
+
+- **HTML**: shown unless the listing says arXiv has no HTML version (search results carry no such flag, so the button is always shown there). The button opens the saved snapshot in Zotero, else `arxiv.org/html/<id>` in the web browser. **Save HTML Snapshot to the Library** calls `Zotero.Attachments.importFromURL` on `/html/<id>v<N>` through the arXiv queue, one paper at a time, titled "arXiv HTML vN", as a child of the paper's item (added first if needed); a version already saved is not saved again. SVG figures in `<object>` elements are rewritten to `<img>`, which Zotero's reader displays.
+- **INSPIRE completion** (`library/inspireCompletion.ts`, `completionLine.ts`): counts items added in the last 30 days, in editable libraries, with an arXiv ID and no recid (library only, recounted 2 s after a change). **Check now** looks them up by arXiv ID with the identity check of 8.2 and lists the records in the preprint results dialog; ticked items get the INSPIRE record written as in 8.3.
+
+### 15.10 Search
+
+- `export.arxiv.org/api/query` sorted by submission date, newest first (`arxivApi.ts`). Prefixes `ti au abs co jr cat rn id all submittedDate`; `AND`, `OR`, `ANDNOT` (any case); unprefixed terms become `all:` and are joined with AND; unclosed quotes and brackets are closed.
+- Results are fetched a page at a time at the list's page size, listed by month of submission, and kept for the window's session; at most 10000 are reachable. Search history: `arxivSearchHistory`.
+
+### 15.11 Keyboard
+
+| Key                              | Action                                                |
+| -------------------------------- | ----------------------------------------------------- |
+| `j` / `↓`, `k` / `↑`             | Next / previous paper, across pages                   |
+| `n` / `p`                        | Next / previous page (more search results at the end) |
+| `Home` / `End`                   | First / last paper of the page                        |
+| `Space`                          | Fold or unfold the focused paper's abstract           |
+| `Enter`                          | Open the arXiv page in the web browser                |
+| `a` / `l` / `x`                  | Add / relate / tick the focused paper                 |
+| `Escape`                         | Clear the focus; close the calendar or editor         |
+| `Ctrl/Cmd+Shift+C`               | Copy BibTeX of the focused paper                      |
+| `Ctrl/Cmd+C`                     | Copy the selection, each formula once                 |
+| `Ctrl/Cmd+A`                     | Select the text of the focused pane                   |
+| `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z` | Zotero's undo / redo                                  |
+| `Ctrl/Cmd+W`                     | Close the window                                      |
+
+Keys other than `Ctrl/Cmd+W` are ignored in text fields and while the subscription editor is open; `Space` and `Enter` keep their meaning on buttons and links.
+
+### 15.12 Preferences
+
+| Preference                           | Type    | Default    | Description                                                   |
+| ------------------------------------ | ------- | ---------- | ------------------------------------------------------------- |
+| `arxiv_subscriptions`                | string  | `"[]"`     | JSON list of subscriptions (set by the window)                |
+| `arxiv_browser_default_subscription` | string  | `""`       | Subscription the window opens with; empty = the first         |
+| `arxiv_browser_open_days`            | string  | `"newest"` | `"newest"`, `"recent"` (last 5 announcement days) or `"week"` |
+| `arxiv_browser_page_size`            | integer | 50         | Papers per page, 10–500                                       |
+| `arxiv_browser_abstracts_expanded`   | boolean | false      | Abstracts unfolded in the list                                |
+| `arxiv_browser_open_on_startup`      | boolean | false      | Open the window when Zotero starts                            |
+| `arxiv_browser_list_share`           | integer | 60         | List width in percent, 25–80 (set by the divider)             |
+| `arxiv_pdf_skip_journal_items`       | boolean | false      | No arXiv PDF for journal items added from the window          |

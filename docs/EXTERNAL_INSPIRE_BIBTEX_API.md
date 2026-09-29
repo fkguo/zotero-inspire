@@ -16,7 +16,8 @@ is available only when that canonical recid is absent or its direct INSPIRE
 request returns `404`. Provider
 and field provenance are reported for every successful result.
 
-The API is supported on Zotero 7 through 10. Clients should probe `op: "ping"`
+The API is supported on Zotero 10 (plugin releases up to 3.2.5 also ran on
+Zotero 7 to 9). Clients should probe `op: "ping"`
 instead of inferring availability from the plugin version. A `404` for the path
 means that the endpoint is not registered (for example, because the plugin is
 disabled or the installed build predates this API).
