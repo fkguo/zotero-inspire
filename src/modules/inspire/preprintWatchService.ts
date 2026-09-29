@@ -26,6 +26,7 @@ import { localCache } from "./localCache";
 import { fetchInspireMetaByRecid } from "./metadataService";
 import { creatorsForUpdate, getFieldProtectionConfig } from "./smartUpdate";
 import { createAbortControllerWithSignal } from "./utils";
+import { addArxivCategoryTag } from "./arxivTag";
 import { arxivIdFromItem } from "../arxiv/arxivId";
 import type { jsobject } from "./types";
 import type { InspireLiteratureSearchResponse } from "./apiTypes";
@@ -1024,7 +1025,7 @@ async function updatePreprintWithFullMetadata(
   item.setField("extra", extra);
 
   // arXiv category tag
-  setArxivCategoryTagPreprint(item, extra);
+  addArxivCategoryTag(item, meta.arxiv?.categories?.[0]);
 
   await item.saveTx();
 }
@@ -1168,35 +1169,6 @@ function reorderExtraFieldsPreprint(extra: string): string {
 
   const reordered = [...arxivLines, ...otherLines, ...citationLines];
   return reordered.join("\n");
-}
-
-/**
- * Set arXiv category tag based on Extra field content.
- * Duplicated from itemUpdater.ts to avoid circular dependency.
- */
-function setArxivCategoryTagPreprint(item: Zotero.Item, extra: string): void {
-  const arxiv_tag_pref = getPref("arxiv_tag_enable");
-  if (!arxiv_tag_pref) {
-    return;
-  }
-
-  let primaryCategory = "";
-
-  const newFormatMatch = extra.match(/arXiv:\d{4}\.\d{4,5}\s*\[([^\]]+)\]/i);
-  if (newFormatMatch) {
-    primaryCategory = newFormatMatch[1];
-  } else {
-    const oldFormatMatch = extra.match(/arXiv:([a-z-]+)\/\d{7}/i);
-    if (oldFormatMatch) {
-      primaryCategory = oldFormatMatch[1];
-    }
-  }
-
-  if (primaryCategory) {
-    if (!item.hasTag(primaryCategory)) {
-      item.addTag(primaryCategory);
-    }
-  }
 }
 
 /**

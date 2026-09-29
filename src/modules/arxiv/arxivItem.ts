@@ -7,11 +7,11 @@
 // data cannot be fetched again later the way an INSPIRE record can), and the
 // DOI is arXiv's own, 10.48550/arXiv.<id>, as Zotero's arXiv translator
 // writes it. Bibliographic fields come from the arXiv API's current version.
-// The category tag (under its option) is the primary category, also for an
-// old-style identifier, which the INSPIRE import tags with its archive.
+// The category tag (under its option) is the primary category.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { cleanMathTitle } from "../../utils/mathTitle";
+import { addArxivCategoryTag } from "../inspire/arxivTag";
 import { getPref } from "../../utils/prefs";
 import {
   arxivExtraLine,
@@ -96,9 +96,7 @@ export function setArxivItemFields(
   }
   // The primary category, also for an old-style identifier (math/0702261 is
   // math.GM), whose Extra line has no category to read it from
-  if (getPref("arxiv_tag_enable") && entry.primaryCategory) {
-    item.addTag(entry.primaryCategory);
-  }
+  addArxivCategoryTag(item, entry.primaryCategory);
 }
 
 /** A new item in `target` from a paper's arXiv data */

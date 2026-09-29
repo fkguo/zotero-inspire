@@ -1,5 +1,6 @@
 import { config } from "../../../package.json";
 import { getString } from "../../utils/locale";
+import { addArxivCategoryTag } from "./arxivTag";
 import { getPref, setPref } from "../../utils/prefs";
 import { getPrimarySelectedCollection } from "../../utils/zoteroPaneSelection";
 import { ProgressWindowHelper } from "zotero-plugin-toolkit";
@@ -2650,7 +2651,7 @@ export async function setInspireMeta(
     extra = reorderExtraFields(extra);
     item.setField("extra", extra);
 
-    setArxivCategoryTag(item);
+    setArxivCategoryTag(item, metaInspire.arxiv?.categories?.[0]);
   }
 }
 
@@ -2931,7 +2932,7 @@ export async function setInspireMetaSelective(
     extra = reorderExtraFields(extra);
     item.setField("extra", extra);
 
-    setArxivCategoryTag(item);
+    setArxivCategoryTag(item, metaInspire.arxiv?.categories?.[0]);
   }
 }
 
@@ -3211,38 +3212,17 @@ function setCitations(
 // arXiv Tag Management
 // ─────────────────────────────────────────────────────────────────────────────
 
-function setArxivCategoryTag(item: Zotero.Item) {
-  const arxiv_tag_pref = getPref("arxiv_tag_enable");
-  if (!arxiv_tag_pref) {
-    return;
-  }
-
-  const extra = item.getField("extra") as string;
-  let primaryCategory = "";
-
-  const newFormatMatch = extra.match(/arXiv:\d{4}\.\d{4,5}\s*\[([^\]]+)\]/i);
-  if (newFormatMatch) {
-    primaryCategory = newFormatMatch[1];
-  } else {
-    const oldFormatMatch = extra.match(/arXiv:([a-z-]+)\/\d{7}/i);
-    if (oldFormatMatch) {
-      primaryCategory = oldFormatMatch[1];
-    }
-  }
-
-  if (primaryCategory) {
-    if (!item.hasTag(primaryCategory)) {
-      item.addTag(primaryCategory);
-      // Only persist here for an already-saved item. For a NEW (unsaved) item
-      // the caller (e.g. importReference) saves it right after, and a second
-      // concurrent saveTx on the same new item races that save -> duplicate
-      // INSERT -> "NOT NULL constraint failed: items.itemTypeID", which throws
-      // and aborts the whole add flow (including auto-find-full-text). The
-      // in-memory tag added above is persisted by the caller's save.
-      // skipSelect keeps the (already-saved) item's tree selection unchanged.
-      if (item.id) {
-        item.saveTx({ skipSelect: true });
-      }
+function setArxivCategoryTag(item: Zotero.Item, primaryCategory?: string) {
+  if (addArxivCategoryTag(item, primaryCategory)) {
+    // Only persist here for an already-saved item. For a NEW (unsaved) item
+    // the caller (e.g. importReference) saves it right after, and a second
+    // concurrent saveTx on the same new item races that save -> duplicate
+    // INSERT -> "NOT NULL constraint failed: items.itemTypeID", which throws
+    // and aborts the whole add flow (including auto-find-full-text). The
+    // in-memory tag added above is persisted by the caller's save.
+    // skipSelect keeps the (already-saved) item's tree selection unchanged.
+    if (item.id) {
+      item.saveTx({ skipSelect: true });
     }
   }
 }

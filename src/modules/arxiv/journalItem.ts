@@ -15,6 +15,7 @@ import {
   type NewItemTarget,
 } from "../inspire/library/itemCreation";
 import { arxivExtraLine } from "../inspire/itemUpdater";
+import { addArxivCategoryTag } from "../inspire/arxivTag";
 import type { ArxivApiEntry } from "./arxivApi";
 import { identityMismatches } from "./inspireByArxiv";
 
@@ -154,6 +155,7 @@ export async function createItemFromJournalVersion(
       .filter(Boolean)
       .join("\n"),
   );
+  addArxivCategoryTag(item, entry.primaryCategory);
   await saveNewItem(item, target);
   for (const note of data.notes ?? []) {
     const text = typeof note === "string" ? note : note?.note;

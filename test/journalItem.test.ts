@@ -7,8 +7,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const prefs = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("../src/utils/prefs", () => ({
-  getPref: () => undefined,
+  getPref: (key: string) => prefs.get(key),
   setPref: () => undefined,
 }));
 
@@ -64,6 +65,7 @@ let answer: () => Promise<any[]>;
 let translators: unknown[];
 
 beforeEach(() => {
+  prefs.clear();
   searches = [];
   automaticTags = true;
   translators = [{ label: "DOI Content Negotiation" }];
@@ -270,6 +272,17 @@ describe("an item from the journal version", () => {
       ["<p>Version 2</p>", item.id, 2],
       ["<p>Erratum</p>", item.id, 2],
     ]);
+  });
+
+  it("gets the primary category tag when category tags are on", async () => {
+    prefs.set("arxiv_tag_enable", true);
+    const item = (await createItemFromJournalVersion(
+      journalData(),
+      { ...ENTRY, id: "1009.0388", primaryCategory: "math.AG" },
+      TARGET,
+    )) as unknown as FakeNewItem;
+    expect(item.fields.extra).toContain("arXiv:1009.0388 [math.AG]");
+    expect(item.tags).toEqual(["to-read", "math.AG"]);
   });
 
   it("keeps a conference paper a conference paper", async () => {
