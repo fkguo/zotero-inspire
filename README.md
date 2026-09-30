@@ -35,7 +35,7 @@ Earlier:
   - [Relating papers to your items](#relating-papers-to-your-items)
   - [Copying and links](#copying-and-links)
   - [HTML version and snapshots](#html-version-and-snapshots)
-  - [Requests to arXiv and the cache](#requests-to-arxiv-and-the-cache)
+  - [Requests to arXiv](#requests-to-arxiv)
 - [INSPIRE Quick Start](#inspire-quick-start)
   - [Academic Tree](#explore-academic-tree-new-in-320)
 - [Panel Features](#panel-features)
@@ -132,7 +132,7 @@ The arXiv browser is a Zotero window for reading arXiv's announcements. It is no
 - **Quick filters (⏳)**: **Local items**, **Online items**, **≤10 Authors**, **Published** (has a journal reference), **arXiv only**.
 - **In-library marks** (by arXiv ID, over all your libraries, trash excluded): ● in your library (click selects it in the main window), ②, ③ … several items, ⊕ not in your library (click adds it), ? the library could not be read (click tries again). The detail pane shows **✓ In your library** with **Show in library**.
 - **PDF button**: green when the paper's item has a PDF, which a click opens in Zotero; otherwise it opens arXiv's PDF in your web browser.
-- **Author card**: hover an author name. When INSPIRE has the paper and the author is identified on its record, the INSPIRE author card appears; otherwise a local card. Both show the number of the author's papers in your library and a link to the author's arXiv search. The References panel's author card shows the same two additions.
+- **Author card**: hover an author name. When INSPIRE has the paper, the INSPIRE author card appears; otherwise a local card. Both show the author's papers in your library and a link to the author's arXiv search.
 
 ### Searching arXiv
 
@@ -149,10 +149,10 @@ Add a paper with `a`, **Add…** in the detail pane, or a click on ⊕. The save
 
 - **INSPIRE has the paper** (a record whose arXiv identifier is this paper): imported from INSPIRE, as from the References panel.
 - **INSPIRE does not have it**: created from arXiv's data, as a Preprint (see **Keep Preprint item type for unpublished papers**) with the complete author list and `arXiv:<id> [category]` in Extra.
-- **Add the journal version…** (shown when arXiv gives a journal reference): when INSPIRE has no record, the journal DOI given on arXiv is looked up with Zotero's own DOI lookup. The result is used only if its title agrees with the paper and so does its first author (not checked when arXiv lists a collaboration first); otherwise the preprint is added and a notice says why.
+- **Add the journal version…** (shown when arXiv gives a journal reference): when INSPIRE has no record, the journal DOI is looked up with Zotero's own DOI lookup; if the result does not match the paper, the preprint is added instead and a notice says why.
 - If INSPIRE cannot be reached, nothing is added until you choose **Add from arXiv data** or **Try later**.
 
-Before creating an item, the target library is searched by arXiv ID, INSPIRE record and journal DOI; a paper already there is not added again (**Show in library** selects it), and an item that matches by journal DOI alone is shown with the question whether it is this paper.
+A paper already in the target library (by arXiv ID, INSPIRE record or journal DOI) is not added again; **Show in library** selects it.
 
 - **PDF**: when **Auto "Find Full Text" after adding to library** is on, the arXiv PDF of the paper's current version is attached ("arXiv preprint PDF vN"). **No arXiv PDF for journal articles added from the arXiv browser** leaves it out for journal items.
 - **Tag**: with **arXiv Primary Category Tag** on, the primary category (e.g. `hep-ph`, `math.AG`) is added as a tag.
@@ -176,11 +176,9 @@ The **HTML** button in the detail pane and the `</>` button on each row (hidden 
 
 Saving uses Zotero's own web snapshot of the listed version, titled "arXiv HTML vN", attached to the paper's item (the paper is added first if needed). The snapshot is a copy of arXiv's full-text HTML page, formulas and figures included; read and annotate it in Zotero's reader. Like other attachments it syncs, so it can also be read in Zotero's mobile apps.
 
-### Requests to arXiv and the cache
+### Requests to arXiv
 
-- **Pacing**: at least 15 s between requests to arxiv.org and 3 s between requests to the arXiv API, each in one queue for the whole plugin. The status line counts down to the next request. When arXiv asks to wait (Retry-After), the queue waits.
-- **Cache**: each category's listing of each day is kept for 100 days. The newest listing and the index of recent days are reused until the next scheduled announcement (20:00 New York time, Sunday to Thursday), so reopening the window costs no requests. **Reload** fetches the newest listing again.
-- Closing the window cancels its queued requests.
+Requests to arXiv are spaced as arXiv asks (15 s for its web pages, 3 s for its API); the status line counts down to the next one. Listings are cached for 100 days, so reopening the window costs no requests until the next announcement; **Reload** fetches the newest listing again.
 
 ---
 
@@ -196,7 +194,7 @@ Saving uses Zotero's own web snapshot of the listed version, titled "arXiv HTML 
 
 The plugin automatically fetches metadata when you add new items (configurable in Preferences).
 
-An update shows its progress in a small window that stays visible while you work; `Escape` or `INSPIRE` → **Cancel update** stops it, and a cancelled update says how many items were processed and how many of them updated. Items for which INSPIRE gives no usable answer (network, server or record problems) are left unchanged and counted in a notice; they are not tagged as having no INSPIRE record.
+`Escape` or `INSPIRE` → **Cancel update** stops an update. Items INSPIRE gives no usable answer for are left unchanged.
 
 ### Copy Actions
 
@@ -230,31 +228,24 @@ Select an item with an INSPIRE record, then find the **INSPIRE** section in the 
 
 ### Explore Academic Tree (new in 3.2.0)
 
-**3.2.2** adds page-width wrapping, consistent generation backgrounds, reversible expansion of all shown ancestors’ students, and connectors with fewer turns. Supplemental co-advisors are hidden by default.
-
 Open **Academic Tree** from an author preview card or the **Author Papers** profile. You can also switch to **Academic Tree** at the top of the Connections Graph window and search for an author. The shared window can be resized or maximized.
 
 - **Choose generations**: set ancestors from **0 to 10** and descendants from **0 to 8**, with **2 in each direction** by default. Zero hides that direction.
-- **Sort within families**: all students of the same advisor on a generation row follow **Surname A–Z** (canonical INSPIRE name, default) or **Education year ↑**, including students who have additional advisors. Years use the degree type on that advisor–student relationship and a uniquely matching completed education record; unknown years come last, and ties use surname. If overlapping families require contradictory year orders, the advisor closest to the center takes priority. Card tooltips show education end years and their source. Navigation history and exports retain the selected order.
-- Author profiles and caches are shared with the sidebar and hover cards, including canonical names and public education histories. Simultaneous requests for the same author share one network call; older incomplete cache entries are refreshed when needed.
-- **Remember searches**: the ▾ button beside the author search box opens recent queries; choose one to search again or clear the list. Tab or Right Arrow at the end of the input accepts an inline suggestion, and Down Arrow opens history. Author searches are stored separately from sidebar literature queries and survive reopening or restarting Zotero; both share the history retention setting (30 days by default, up to 50 entries).
+- **Sort within families**: students of the same advisor follow **Surname A–Z** (default) or **Education year ↑**; unknown years come last. Card tooltips show education end years.
+- **Remember searches**: the ▾ button beside the author search box opens recent queries; Tab or → accepts an inline suggestion, ↓ opens the history.
 - **Follow a name**: click an author's name to make them the tree's center and display their author page in the sidebar. Hover for the usual author preview, including favorites and paper actions.
-- **Explore a branch**: click a card's background to select the person, then expand **one generation of advisors or students**. If those direct relationships are already visible, select a boundary person to continue. Expansion stops at ten ancestor or eight descendant generations from the current center; click a boundary name to trace further from a new center.
-- **Revisit a tree**: Back and Forward restore previous authors, expanded branches, generation settings, relationship filters, selection, visibility settings, path highlighting, and pan/zoom position.
-- **Read a dense tree**: cards fit their names and affiliations without reducing the name font size. If a full name would hide its ending, the card keeps the first given name, uses initials for later given names, and retains the complete surname; only then can it grow slightly. The center stays above the middle of its direct students after expansion, with its single-supervisor ancestor chain vertical. This alignment takes priority over name order; other same-advisor siblings use the selected surname or education-year order. Supplemental advisors stay near their students. Orthogonal links have separated arrowheads for multiple advisors and small gaps at crossings; hover a line to highlight that relationship and its endpoints. Drag to pan, scroll to zoom, or use the canvas controls to fit the whole graph or center the root.
-- **Direct students**: every student directly linked to the center stays in generation +1. If another visible student is also recorded as their advisor, that relationship remains as a same-generation connector rather than pushing the direct student to generation +2.
-- **Co-advisors**: supplemental co-advisors have a very light gray card background and a softer border; names remain fully readable. The center and selected card retain their blue emphasis. Supplemental co-advisors are hidden by default; use the toolbar toggle to show them while retaining the center’s own advisors and expanded ancestor branches.
-- **Find / path**: search the loaded tree by name, INSPIRE ID, or affiliation to locate a person without changing the center. Choose two people to highlight and fit their shortest relationship path; arrows keep their original directions, including paths through a common advisor.
-- **Connectors**: branch points may be unevenly spaced to follow clear corridors. Cross-row links favor fewer turns before shorter distance; single-advisor arrows may enter slightly off-center to avoid tiny final jogs. Shared students retain separate advisor arrowheads; a directly aligned advisor keeps the center entry point when its vertical route is clear.
-- **Relationship qualifications**: compact labels below the name and affiliation describe relationships to visible advisors, not the person’s highest degree. PhD, Diploma, Bachelor, Master, Habilitation, Laurea, Other and Unspecified remain distinct. Hover for the advisor–student mapping; hiding co-advisors removes their types from the labels. Filter each type individually or choose **Specified qualifications** for the first six. Other and missing types do not imply postdoctoral supervision. Labels are included in image exports.
-- **Generation backgrounds**: both layouts use the same pale bands. Colors indicate display layers, not unique academic seniority. A student with mentors on different layers stays below all of them; links from earlier mentors can span layers.
-- **Fit to page** (beside **Fit all**, **Center root**, **− / +**): reflow long generations into multiple rows at the window width, keeping names at their normal size. Pale generation bands and generation/row labels distinguish wrapping from descent. Read left to right, then the next row; scroll or drag vertically for more, and use Ctrl/⌘ + scroll to zoom. Resizing the window reflows the rows. Toggle off to restore the tree layout; **Fit all** still zooms out to show the whole graph. History and image/JSON exports retain the mode.
-- **Branches**: **Expand all shown ancestors’ students** loads the direct students of every ancestor already displayed, across all shown ancestral generations. Each ancestor expands down exactly one generation; newly added people are not expanded recursively. The same button then switches to **Collapse added ancestors’ students**, which hides the added branches while keeping the original tree; expand again to restore loaded branches without fetching them again. Collapse the selected person’s student branch, restore it, or restore all branches. A shared descendant remains visible when another route still connects them to the tree. The center’s ancestral chain cannot be collapsed.
-- **📤 Export▼**: open the same popup menu used by Citation Graph, then choose SVG, PNG, JSON, or CSV with **Current view** or **Full loaded tree**. SVG/PNG always capture the complete layout for the selected scope: Current view includes every currently shown person, even outside the panel, while Full loaded tree also includes hidden branches. JSON/CSV include the visible or all loaded people and relationships. JSON also records settings and the viewport; CSV uses separate person and relationship rows. Full-tree export makes no additional INSPIRE requests. Images use a portable light theme; PNG resolution is capped for large trees, for which SVG is recommended.
+- **Explore a branch**: click a card's background to select the person, then expand **one generation of advisors or students**; click a name at the edge to continue from a new center.
+- **Revisit a tree**: Back and Forward restore earlier trees as you left them.
+- **Co-advisors**: supplemental co-advisors (light gray cards) are hidden by default; **Show co-advisors** shows them.
+- **Find / path**: find a person in the loaded tree by name, INSPIRE ID or affiliation; choose two people to highlight the shortest path between them.
+- **Relationship qualifications**: labels under each name give the relationship to the visible advisors (PhD, Diploma, Bachelor, Master, Habilitation, Laurea, Other, Unspecified), not the person's highest degree; the relationship filter shows one type, **Specified qualifications**, or all.
+- **Fit to page** (beside **Fit all**, **Center root**, **− / +**): wraps long generations into several rows at the window width; read left to right, then the next row. Toggle off to restore the tree layout.
+- **Branches**: **Expand all shown ancestors’ students** adds one generation of students under every ancestor shown; the same button then collapses them again. You can also collapse or restore the selected person’s student branch.
+- **📤 Export▼**: SVG, PNG, JSON or CSV, for **Current view** or **Full loaded tree** (SVG is best for large trees).
 
-Shared advisors and multiple training relationships are retained. The layout accounts for multiple advisors when arranging generations. **Set as center** follows the selected person; for the existing center, it brings that person back into view. Use the relationship filter to choose a recorded qualification, Other, Unspecified, or all specified qualifications. Results appear progressively. **Refresh from INSPIRE** bypasses the cache for the current tree, including expanded branches, while retaining the previous graph until fresh data is ready. **Retry** appears after failures and **Continue loading** after **Stop**; both reuse successful requests. Author cards show current affiliations reported by INSPIRE beneath the name; long affiliations are shortened, with the full text available on hover.
+**Set as center** makes the selected person the center. **Refresh from INSPIRE** fetches the current tree again; **Retry** appears after failures and **Continue loading** after **Stop**.
 
-Relationships come from **public INSPIRE author records**. Arrows point from advisor to student. Dashed cards have no linked author record and cannot be expanded automatically; matching names are not treated as proof of identity. Missing records do not establish the absence of a relationship.
+Relationships come from **public INSPIRE author records**; arrows point from advisor to student. Dashed cards have no linked author record and cannot be expanded. A missing record does not mean there is no relationship.
 
 ### Search INSPIRE
 
@@ -280,7 +271,7 @@ Enable them via the column picker in the items list header. Preferences:
 
 - **Cites column: exclude self-citations** — Switch between total vs. without self-citations. If the list doesn't update immediately, switch collections or restart Zotero.
 - **Legacy: write arXiv ID into Journal Abbr.** — Disabled by default now that an `arXiv` column exists (kept for backward compatibility).
-- **Keep Preprint item type for unpublished papers** (on by default) — Preprint (and Report) items are left as they are until INSPIRE reports a journal publication, at which point they become Journal Article with the journal data. Unpublished arXiv papers that earlier versions stored as Journal Article are turned back into Preprint on their next metadata update, and papers imported from the panel are created as Preprint. Preprint Watch monitors Preprint items as well. Ignored while the legacy option above is on, because the Journal Abbr. field exists only for Journal Article. Untick it to keep converting everything to Journal Article.
+- **Keep Preprint item type for unpublished papers** (on by default) — Preprint items stay Preprint until INSPIRE reports a journal publication; untick it to convert everything to Journal Article.
 
 ---
 
@@ -369,10 +360,6 @@ When reading a PDF in Zotero:
 
 **Supported formats**: `[1]`, `[1,2,3]`, `[1-5]`, `[Smith 2024]`, `[arXiv:2301.12345]`, superscripts
 
-On source-audited Zotero 10.0 builds, selecting an item while the References section is collapsed, or merely opening a Reader, does not inflate the References cache, parse `.zotero-ft-cache`, or schedule a whole-document native-overlay index. This includes the embedded PDF Preview that Zotero creates in the library item pane: its `renderToolbar` event is never used as a preload trigger. The cached list is materialized when the section is actually expanded or when the user clicks lookup. On a cold hover, a marker-local internal-link target can be shown directly without decompressing a large cached list. Zotero's document-level citation-overlay result is first corroborated against the cached list, because the same number may identify another chapter; this path may therefore materialize a cold cache before showing a rich INSPIRE card. If a compatible Reader supplies no native result at all, or a linked target yields no extractable text (for example, on an unsupported build, for a non-numeric marker, for a scanned target page, or when no overlay intersects the selection), the historical cached-list fallback remains available. An ambiguous native target or one that exceeds the hover time budget instead suppresses the cold hover card until the list is already in memory or the user clicks lookup. When citation text selection creates a lookup control and only an internal-link target is available, even a multi-thousand-page _Review of Particle Physics_ loads at most the linked bibliography page. Strict matching uses arXiv, DOI, or journal/volume/page plus author metadata instead of treating a repeated chapter-local number as global identity. If that shortcut is unavailable, the persisted attachment mapping and the complete established PDF parser/matcher remain the compatibility fallback; grouped multi-paper entries are retained, while the same number in separated chapter runs fails closed. Global native-overlay indexing is admitted only after a real Reader text-selection or citation interaction.
-
-When a hover delegates to the historical matcher, it restores the same small persisted attachment mapping used by click, so both interactions resolve against the same evidence. Before any list or mapping is materialized, the unambiguous six-digit lost-dash form such as `125130` is recovered as `125–130`. An ambiguous four-digit token is kept intact so a genuine high reference number such as `1234` is never split. After the first hover or click, a fully labelled chapter-reset list may use its largest printed label to refine copied `6264` to `62–64`; if any cached entry lacks a label, the larger of that printed maximum and the full list length is used so a genuine unlabeled tail number remains intact. Equal-width lost-dash endpoints retain the established span limit; unequal-width recovery is limited to a short decimal-boundary crossing such as `912` → `9–12`, preventing a genuine high label such as `725` from becoming `7–25`. The coverage statistic is reused from the matcher's existing index pass rather than running a second full-list diagnosis. A persisted PDF mapping can only raise this bound.
-
 ---
 
 ## Keyboard Shortcuts
@@ -441,14 +428,14 @@ Right-click items or collections → `INSPIRE` → `Download references cache` t
 Enable **Preprint Watch** in Preferences to automatically check if your arXiv preprints have been published. Both Journal Article items carrying arXiv data and Zotero `Preprint` items are monitored (see **Keep Preprint item type** above).
 
 - Check by hand with right-click → `INSPIRE` → **Check Preprint Status** (items), **Check Preprints in Collection**, or **Check All Preprints in Library** (My Library and every editable group library).
-- INSPIRE is asked about 50 preprints per request (for example, 883 preprints take about 18 requests). An answer counts only if the INSPIRE record carries the item's arXiv identifier; a record whose title or first author differs from the item's (and that the item does not already name) is shown with a warning and left unticked.
-- The results dialog gives the number of preprints that are published, unpublished, not covered by INSPIRE, or failed. Besides published papers to update, it lists preprints INSPIRE has a record of while their items do not name it yet: for these, only the INSPIRE record ID, the citation key (where empty) and the citation counts are written.
+- A record whose title or first author differs from the item's is shown with a warning and left unticked.
+- Besides published papers to update, the results list preprints INSPIRE has a record of while their items lack it; for these only the INSPIRE record ID, citation key and citation counts are written.
 
 ### Smart Update Mode
 
 Enable **Smart Update** in Preferences to preserve your manual edits when updating metadata. You can protect specific fields (title, authors, abstract, journal) and author names with diacritics.
 
-Authors are never dropped silently: when INSPIRE's author list lacks authors the item has, an update keeps the item's authors. In the Smart Update preview this change is left unticked with a note, so you can still choose it.
+Authors are never dropped silently: if INSPIRE's list lacks authors the item has, the item keeps its list.
 
 ### Better BibTeX Integration
 
@@ -484,7 +471,7 @@ Access via `Tools` → `Add-ons` → `INSPIRE Metadata Updater` → `Preferences
 | **Local cache**                       | Enable persistent disk cache for offline use                                                                                                   |
 | **Smart Update**                      | Preserve manual edits during updates                                                                                                           |
 | **Preprint Watch**                    | Monitor unpublished preprints                                                                                                                  |
-| **Keep Preprint item type**           | On by default: Preprint/Report items stay until INSPIRE reports a journal publication; unpublished Journal Article items become Preprint again |
+| **Keep Preprint item type**           | On by default: Preprint items stay until INSPIRE reports a journal publication |
 | **Fuzzy citation detection**          | For PDFs with broken text layers                                                                                                               |
 | **Reuse Zotero 10 citation analysis** | Background reuse of completed Zotero 10.0 results; restart required                                                                            |
 | **Abstract LaTeX mode**               | KaTeX (full rendering, default) or Unicode                                                                                                     |
