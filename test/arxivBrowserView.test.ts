@@ -2131,9 +2131,13 @@ describe("arXiv browser: the HTML version beside the list", () => {
     expect(page.nextElementSibling === bar).toBe(true);
     expect(bar.browser === page).toBe(true);
     expect(page.getAttribute("messagemanagergroup")).toBe("browsers");
-    // A load gives the page a new frame loader: the bar is told again
+    // A load moves the page to another process: the bar is told again
+    // (not on XULFrameLoaderCreated: the page's element drops its finder
+    // after that)
     bar.browser = null;
     page.dispatchEvent(new win.Event("XULFrameLoaderCreated"));
+    expect(bar.browser).toBeNull();
+    page.dispatchEvent(new win.Event("DidChangeBrowserRemoteness"));
     expect(bar.browser === page).toBe(true);
 
     // From the page, the list and the bar's own field

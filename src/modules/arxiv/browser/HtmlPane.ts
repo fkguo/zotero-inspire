@@ -347,9 +347,11 @@ export class HtmlPane {
       const findBar = doc.createXULElement("findbar") as FindBar;
       container.append(browser, findBar);
       findBar.browser = browser;
-      // Every load gives the element a new frame loader (the page moves to
-      // a content process): the find bar is told, as a web browser's is
-      browser.addEventListener("XULFrameLoaderCreated", () => {
+      // Every load moves the page to a content process. The element drops
+      // its finder when it is set up again for that, after
+      // XULFrameLoaderCreated (so that event is too early);
+      // DidChangeBrowserRemoteness follows: the find bar is told then
+      browser.addEventListener("DidChangeBrowserRemoteness", () => {
         findBar.browser = browser;
       });
       this.browser = browser;
