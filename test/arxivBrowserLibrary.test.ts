@@ -454,7 +454,7 @@ describe("arXiv browser: in the library", () => {
     expect(inLibrary).toHaveBeenCalledTimes(1);
   });
 
-  it("draws the PDF button green only for a PDF in the library and opens it in Zotero; other PDFs open on arXiv", async () => {
+  it("draws the PDF button green for a PDF in the library and opens it in Zotero, the download icon for a paper in the library without one, and opens other papers' PDFs on arXiv", async () => {
     const withPdf = lib.put({ fields: { archiveID: "arXiv:2609.28538" } });
     const pdf = lib.put({ itemType: "attachment", parentItemID: withPdf.id });
     lib.put({ fields: { archiveID: "arXiv:2609.28544" } });
@@ -467,9 +467,13 @@ describe("arXiv browser: in the library", () => {
     );
     expect(pdfStates(root)).toMatchObject({
       "2609.28538": "has-pdf",
-      "2609.28544": "online",
+      "2609.28544": "find-pdf",
       "2609.28555": "online",
     });
+    // As in the References panel
+    expect(pdfOf(root, "2609.28544").title).toBe(
+      msg("references-panel-pdf-find"),
+    );
 
     pdfOf(root, "2609.28538").click();
     expect(openReader).toHaveBeenLastCalledWith(pdf.id, undefined, {
@@ -517,11 +521,11 @@ describe("arXiv browser: in the library", () => {
     });
   });
 
-  it("turns the PDF button green when a PDF is attached while listed, and grey when it goes to the trash", async () => {
+  it("turns the PDF button green when a PDF is attached while listed, and back to the download icon when it goes to the trash", async () => {
     const paper = lib.put({ fields: { archiveID: "arXiv:2609.28538" } });
     const root = await open();
     await vi.waitFor(() => expect(marks(root)).toEqual({ "2609.28538": "●" }));
-    expect(pdfStates(root)["2609.28538"]).toBe("online");
+    expect(pdfStates(root)["2609.28538"]).toBe("find-pdf");
     const pdf = await lib.add({
       itemType: "attachment",
       parentItemID: paper.id,
@@ -531,8 +535,129 @@ describe("arXiv browser: in the library", () => {
     );
     await lib.trash(pdf);
     await vi.waitFor(() =>
-      expect(pdfStates(root)["2609.28538"]).toBe("online"),
+      expect(pdfStates(root)["2609.28538"]).toBe("find-pdf"),
     );
+  });
+
+  /**
+   * Zotero's Find Full Text, which attaches a PDF to the item (`found`) or
+   * finds none, once `finish` is called
+   */
+  function fullTextSearch(found: boolean) {
+    let finish!: () => void;
+    const searched = new Promise<void>((resolve) => (finish = resolve));
+    const addAvailableFiles = vi.fn(async (items: Array<{ id: number }>) => {
+      await searched;
+      if (found) {
+        await lib.add({ itemType: "attachment", parentItemID: items[0].id });
+      }
+    });
+    (globalThis as any).Zotero.Attachments = { addAvailableFiles };
+    return { addAvailableFiles, finish };
+  }
+  const detailPdf = (root: HTMLElement) =>
+    [
+      ...root.querySelectorAll<HTMLButtonElement>(
+        ".arxiv-browser__detail-actions button",
+      ),
+    ].find((button) =>
+      [
+        "references-panel-pdf-find",
+        "references-panel-pdf-finding",
+        "arxiv-browser-open-pdf-button",
+      ].some((key) => button.textContent === msg(key)),
+    )!;
+
+  it("finds the PDF of a paper in the library without one with Zotero's Find Full Text on the item its mark shows; its buttons then turn green", async () => {
+    // Two items, none with a PDF: the one the mark selects comes first
+    const first = lib.put({
+      fields: {
+        archiveID: "arXiv:2609.28538",
+        archive: "INSPIRE",
+        archiveLocation: "3061234",
+      },
+    });
+    lib.put({ fields: { url: "https://arxiv.org/abs/2609.28538" } });
+    const search = fullTextSearch(true);
+    const openReader = vi.fn(async () => ({ focus: vi.fn() }));
+    (globalThis as any).Zotero.Reader = { open: openReader };
+    const launch = vi.fn();
+    const root = await open({ launch });
+    await vi.waitFor(() => expect(marks(root)).toEqual({ "2609.28538": "②" }));
+    expect(pdfStates(root)["2609.28538"]).toBe("find-pdf");
+    rows(root)[0].click();
+    expect(detailPdf(root).textContent).toBe(msg("references-panel-pdf-find"));
+
+    const button = pdfOf(root, "2609.28538");
+    button.click();
+    expect(search.addAvailableFiles).toHaveBeenCalledTimes(1);
+    expect(
+      search.addAvailableFiles.mock.calls[0][0].map((item) => item.id),
+    ).toEqual([first.id]);
+    // Searching
+    expect(button.textContent).toBe("⏳");
+    expect(button.disabled).toBe(true);
+
+    search.finish();
+    await vi.waitFor(() =>
+      expect(pdfStates(root)["2609.28538"]).toBe("has-pdf"),
+    );
+    await vi.waitFor(() =>
+      expect(detailPdf(root).textContent).toBe(
+        msg("arxiv-browser-open-pdf-button"),
+      ),
+    );
+    expect(pdfOf(root, "2609.28538").disabled).toBe(false);
+    pdfOf(root, "2609.28538").click();
+    await vi.waitFor(() => expect(openReader).toHaveBeenCalledTimes(1));
+    expect(search.addAvailableFiles).toHaveBeenCalledTimes(1);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("shows the download icon again when Find Full Text finds no PDF", async () => {
+    const paper = lib.put({ fields: { archiveID: "arXiv:2609.28538" } });
+    const search = fullTextSearch(false);
+    const launch = vi.fn();
+    const root = await open({ launch });
+    await vi.waitFor(() => expect(marks(root)).toEqual({ "2609.28538": "●" }));
+    const button = pdfOf(root, "2609.28538");
+    button.click();
+    expect(button.disabled).toBe(true);
+    search.finish();
+    // Zotero's attachments are looked for a few seconds more
+    await vi.waitFor(
+      () => {
+        expect(pdfStates(root)["2609.28538"]).toBe("find-pdf");
+        expect(pdfOf(root, "2609.28538").disabled).toBe(false);
+      },
+      { timeout: 10000 },
+    );
+    expect(search.addAvailableFiles.mock.calls[0][0][0].id).toBe(paper.id);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("finds the PDF from the detail pane's PDF button at the newest version", async () => {
+    const paper = lib.put({ fields: { archiveID: "arXiv:2609.28538" } });
+    const search = fullTextSearch(true);
+    const launch = vi.fn();
+    const root = await open({ launch });
+    await vi.waitFor(() => expect(marks(root)).toEqual({ "2609.28538": "●" }));
+    rows(root)[0].click();
+    const button = detailPdf(root);
+    expect(button.textContent).toBe(msg("references-panel-pdf-find"));
+    button.click();
+    expect(search.addAvailableFiles.mock.calls[0][0][0].id).toBe(paper.id);
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe(msg("references-panel-pdf-finding"));
+    search.finish();
+    await vi.waitFor(() =>
+      expect(detailPdf(root).textContent).toBe(
+        msg("arxiv-browser-open-pdf-button"),
+      ),
+    );
+    expect(detailPdf(root).disabled).toBe(false);
+    expect(pdfStates(root)["2609.28538"]).toBe("has-pdf");
+    expect(launch).not.toHaveBeenCalled();
   });
 
   it("keeps the marks of a lookup made after a change when an older one answers later", async () => {

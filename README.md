@@ -131,7 +131,7 @@ The arXiv browser is a Zotero window for reading arXiv's announcements. It is no
 - **Filter box**: words or `"quoted phrases"` matched against authors, title, arXiv ID, categories, comments, journal reference (including shorthand such as `PRL`, `PRD`, `JHEP`) and abstract. Its history is shared with the References panel.
 - **Quick filters (⏳)**: **Local items**, **Online items**, **≤10 Authors**, **Published** (has a journal reference), **arXiv only**.
 - **In-library marks** (by arXiv ID, over all your libraries, trash excluded): ● in your library (click selects it in the main window), ②, ③ … several items, ⊕ not in your library (click adds it), ? the library could not be read (click tries again). The detail pane shows **✓ In your library** with **Show in library**.
-- **PDF button**: green when the paper's item has a PDF, which a click opens in Zotero; otherwise it opens arXiv's PDF in your web browser.
+- **PDF button**: green when the paper's item has a PDF, which a click opens in Zotero. A paper in your library without a PDF shows the blue download icon, as in the References panel: a click runs Zotero's **Find Full Text** on its item, and the button turns green when a PDF is found (in the detail pane the button reads **Find Full Text**; for an older version chosen there, **PDF** opens arXiv's PDF of that version). A paper not in your library: a click opens arXiv's PDF in your web browser.
 - **Author card**: hover an author name. When INSPIRE has the paper, the INSPIRE author card appears; otherwise a local card. Both show the author's papers in your library and a link to the author's arXiv search.
 
 ### Searching arXiv
