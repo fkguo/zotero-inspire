@@ -172,13 +172,19 @@ A paper already in the target library (by arXiv ID, INSPIRE record or journal DO
 
 ### HTML version and snapshots
 
-The **HTML** button in the detail pane and the `</>` button on each row (hidden when the listing says arXiv has no HTML version of the paper) open the saved snapshot in Zotero if there is one, and otherwise arXiv's HTML version in your web browser. Their ▾ menu offers **Open in the Web Browser**, **Save HTML Snapshot to the Library** and **Open Snapshot in Zotero**.
+The **HTML** button in the detail pane and the `</>` button on each row (hidden when the listing says arXiv has no HTML version of the paper) open the saved snapshot in Zotero if there is one, and otherwise show arXiv's HTML version in the window, in the detail pane's place. Their ▾ menu offers **Show in This Window**, **Open in the Web Browser**, **Save HTML Snapshot to the Library** and **Open Snapshot in Zotero**.
+
+In the window, the page has the detail pane's width (drag the divider or enlarge the window for more room). **‹ Details** above it, or focusing another paper in the list, returns to the details; **Open in the Web Browser** opens the same page there.
+
+- Links within the page (sections, citations, footnotes) move within it; links to elsewhere (abstract page, PDF, DOIs) open in your web browser. The buttons of arXiv's page header work, including the table of contents and the reading mode.
+- `Ctrl/Cmd+F` finds in the page: `Ctrl/Cmd+G` and `Ctrl/Cmd+Shift+G` go to the next and previous match, `Escape` closes the find bar. The find bar is the Firefox platform's and is in English; `ss` and `ß` do not match each other.
+- Keys pressed in the page belong to the page (`Space`, arrows, `Ctrl/Cmd+C`, `Ctrl/Cmd+A`). Right-click copies the selection and, on a link, opens it or copies its address.
 
 Saving uses Zotero's own web snapshot of the listed version, titled "arXiv HTML vN", attached to the paper's item (the paper is added first if needed). The snapshot is a copy of arXiv's full-text HTML page, formulas and figures included; read and annotate it in Zotero's reader. Like other attachments it syncs, so it can also be read in Zotero's mobile apps.
 
 ### Requests to arXiv
 
-Requests to arXiv are spaced as arXiv asks (15 s for its web pages, 3 s for its API); the status line counts down to the next one. Listings are cached for 100 days, so reopening the window costs no requests until the next announcement; **Reload** fetches the newest listing again.
+Requests to arXiv are spaced as arXiv asks (15 s for its web pages, 3 s for its API); the status line counts down to the next one. Listings are cached for 100 days, so reopening the window costs no requests until the next announcement; **Reload** fetches the newest listing again. An HTML page shown in the window is loaded when you click, as a web browser would load it.
 
 ---
 
@@ -392,7 +398,9 @@ Keys act on the focused paper and are ignored while you type in a text box.
 | `a`                              | Add to the library (save-target picker)                  |
 | `l`                              | Relate to items (Select Items dialog)                    |
 | `x`                              | Tick or untick for batch import                          |
-| `Escape`                         | Clear the focus; close the calendar                      |
+| `Escape`                         | Clear the focus; close the calendar or the find bar      |
+| `Ctrl/Cmd+F`                     | Find in the HTML page shown in the window                |
+| `Ctrl/Cmd+G`, `Ctrl/Cmd+Shift+G` | Next / previous match in the HTML page                   |
 | `Ctrl/Cmd+Shift+C`               | Copy BibTeX                                              |
 | `Ctrl/Cmd+C`                     | Copy the selected text (each formula once)               |
 | `Ctrl/Cmd+A`                     | Select the text of the list or the detail pane           |

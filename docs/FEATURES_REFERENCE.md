@@ -897,6 +897,7 @@ A separate window (`chrome://zoteroinspire/content/arxivBrowser.xhtml`) for read
 | `arxiv.org`        | 15 s             | 60 s (PDFs 120 s) | listing pages, PDFs, BibTeX, HTML snapshots |
 | `export.arxiv.org` | 3 s              | 30 s              | API metadata of papers, search              |
 
+- The HTML pane's page (15.9) is loaded by its `<browser>` at once, outside these queues.
 - One serial queue per host for the whole plugin (`arxivFetch.ts`). A `429`/`503` with Retry-After pauses the queue until then and retries once; a second one, one without Retry-After, or a `403` fails the request and those queued behind it.
 - Listings are stored in `localCache` type `arxiv_listing`: each category's checked listing per day (`day_<spec>_<date>`) for 100 days (`LISTING_RETENTION_DAYS`), the `/new` date seen, and the recent-days index.
 - `/new` and the recent index are reused until a scheduled announcement (20:00 America/New_York, Sunday–Thursday) has passed since they were fetched; if arXiv is late, they are fetched again after 10 min. Reopening the window therefore needs no request. **Reload** fetches the newest listing again; other days come from the cache. A failed fetch falls back to the cached copy.
@@ -946,7 +947,11 @@ Every add asks for a save target first (`pickSaveTarget()`, shared with the Refe
 
 ### 15.9 HTML Snapshots and INSPIRE Completion
 
-- **HTML**: shown unless the listing says arXiv has no HTML version (search results carry no such flag, so the button is always shown there). The button opens the saved snapshot in Zotero, else `arxiv.org/html/<id>` in the web browser. **Save HTML Snapshot to the Library** calls `Zotero.Attachments.importFromURL` on `/html/<id>v<N>` through the arXiv queue, one paper at a time, titled "arXiv HTML vN", as a child of the paper's item (added first if needed); a version already saved is not saved again. SVG figures in `<object>` elements are rewritten to `<img>`, which Zotero's reader displays.
+- **HTML**: shown unless the listing says arXiv has no HTML version (search results carry no such flag, so the button is always shown there). The button opens the saved snapshot in Zotero, else shows `arxiv.org/html/<id>` in the window (HTML pane, below); the ▾ menu has **Show in This Window**, **Open in the Web Browser**, **Save HTML Snapshot to the Library** and, with a snapshot, **Open Snapshot in Zotero**.
+- **HTML pane** (`browser/HtmlPane.ts`): takes the detail pane's place at the divider's position. A bar (**‹ Details**, `arXiv:<id>` with title, "Loading…" until the page's title arrives, **Open in the Web Browser**) above a XUL `<browser type="content" remote="false" maychangeremoteness="true">` loaded with `loadURI` as Zotero's `basicViewer` does; the page runs in a content process (`webIsolated=https://arxiv.org`). The element exists only while the pane is shown. Focusing another paper closes the pane. The address has a version only for an older version chosen in the detail pane (`/html/<id>v<N>`, label `arXiv:<id>v<N>`, that version's title once fetched); otherwise it is arXiv's newest and the label has no version. The load is immediate, not in the arXiv queue.
+  - A frame script loaded through the window's message manager reports clicks (left, middle) on `http(s)` links that lead out of the page, which open in the web browser; links within the page are left to it. Zotero's browsers follow only exposed protocols (`network.protocol-handler.expose-all` is false), so the script runs a `javascript:` link's code with the `eval` of the link's own document (arXiv's table-of-contents and reading-mode buttons). A right-click is reported for a menu: copy the selection, open or copy a link.
+  - Find: the platform's `<findbar>` below the page; the `<browser>` is in the message-manager group `browsers`, which the `FindBar` actor serves, and the bar is given its browser again on `DidChangeBrowserRemoteness` (the element drops its finder on each process change). `Ctrl/Cmd+F`, `Ctrl/Cmd+G`, `Ctrl/Cmd+Shift+G`, `Escape`; other keys with the page or the find bar as target are not handled by the window. The bar's texts are English (Zotero ships no other locale for it); the platform's matcher does not equate `ss` and `ß`.
+- **Save HTML Snapshot to the Library** calls `Zotero.Attachments.importFromURL` on `/html/<id>v<N>` through the arXiv queue, one paper at a time, titled "arXiv HTML vN", as a child of the paper's item (added first if needed); a version already saved is not saved again. SVG figures in `<object>` elements are rewritten to `<img>`, which Zotero's reader displays.
 - **INSPIRE completion** (`library/inspireCompletion.ts`, `completionLine.ts`): counts items added in the last 30 days, in editable libraries, with an arXiv ID and no recid (library only, recounted 2 s after a change). **Check now** looks them up by arXiv ID with the identity check of 8.2 and lists the records in the preprint results dialog; ticked items get the INSPIRE record written as in 8.3.
 
 ### 15.10 Search
@@ -964,14 +969,16 @@ Every add asks for a save target first (`pickSaveTarget()`, shared with the Refe
 | `Space`                          | Fold or unfold the focused paper's abstract           |
 | `Enter`                          | Open the arXiv page in the web browser                |
 | `a` / `l` / `x`                  | Add / relate / tick the focused paper                 |
-| `Escape`                         | Clear the focus; close the calendar or editor         |
+| `Escape`                         | Clear the focus; close the calendar, editor, find bar |
+| `Ctrl/Cmd+F`                     | Find in the HTML pane's page                          |
+| `Ctrl/Cmd+G`, `Ctrl/Cmd+Shift+G` | Next / previous match in the HTML pane's page         |
 | `Ctrl/Cmd+Shift+C`               | Copy BibTeX of the focused paper                      |
 | `Ctrl/Cmd+C`                     | Copy the selection, each formula once                 |
 | `Ctrl/Cmd+A`                     | Select the text of the focused pane                   |
 | `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z` | Zotero's undo / redo                                  |
 | `Ctrl/Cmd+W`                     | Close the window                                      |
 
-Keys other than `Ctrl/Cmd+W` are ignored in text fields and while the subscription editor is open; `Space` and `Enter` keep their meaning on buttons and links.
+Keys other than `Ctrl/Cmd+W` are ignored in text fields and while the subscription editor is open; `Space` and `Enter` keep their meaning on buttons and links. While the HTML pane is shown, keys pressed in its page or its find bar are theirs (except the find keys and `Ctrl/Cmd+W`).
 
 ### 15.12 Preferences
 
