@@ -1,4 +1,4 @@
-import { JSDOM, type DOMWindow } from "jsdom";
+import { JSDOM, VirtualConsole, type DOMWindow } from "jsdom";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "../package.json";
@@ -1676,6 +1676,22 @@ describe("arXiv browser: the HTML version beside the list", () => {
     doc.createXULElement = (tag: string) => {
       const element = doc.createElement(tag);
       element.openPopup = vi.fn();
+      if (tag === "findbar") {
+        // The platform's find bar: closed until asked for, with its field
+        // (named html:input, as the platform's markup has it) and a button
+        element.hidden = true;
+        element.append(
+          doc.createElementNS("http://www.w3.org/1999/xhtml", "html:input"),
+          doc.createElement("toolbarbutton"),
+        );
+        element.onFindCommand = vi.fn(() => {
+          element.hidden = false;
+        });
+        element.onFindAgainCommand = vi.fn();
+        element.close = vi.fn(() => {
+          element.hidden = true;
+        });
+      }
       return element;
     };
     pageMessages = new Map();
@@ -1711,6 +1727,15 @@ describe("arXiv browser: the HTML version beside the list", () => {
       detail: root.querySelector<HTMLElement>(".arxiv-browser__detail")!,
       list: root.querySelector<HTMLElement>(".arxiv-browser__list-pane")!,
       page: () => root.querySelector<HTMLElement>("browser"),
+      findBar: () =>
+        root.querySelector("findbar") as
+          | (HTMLElement & {
+              browser?: unknown;
+              onFindCommand: ReturnType<typeof vi.fn>;
+              onFindAgainCommand: ReturnType<typeof vi.fn>;
+              close: ReturnType<typeof vi.fn>;
+            })
+          | null,
     };
   }
   const ID = "2502.20357";
@@ -1992,12 +2017,14 @@ describe("arXiv browser: the HTML version beside the list", () => {
        <a id="doi" href="https://doi.org/10.1/x">doi</a>
        <a id="section" href="#S1"><span>1</span></a>
        <a id="full" href="${URL}#bib.bib3">[3]</a>
-       <a id="script" href="javascript:void(0)">toggle</a>
+       <a id="script" href="javascript:toggleNavTOC();%20void%200">toggle</a>
        <a id="mail" href="mailto:a@b.c">mail</a>
        <p id="text">no link</p>`,
-      { url: URL },
+      // Its own console: jsdom tells there that it follows no links
+      { url: URL, virtualConsole: new VirtualConsole() },
     ).window;
     const sent: Array<[string, unknown]> = [];
+    const run = vi.fn();
     const listeners: Array<[string, (event: Event) => void, boolean]> = [];
     let selection = "";
     new page.Function(
@@ -2013,9 +2040,12 @@ describe("arXiv browser: the HTML version beside the list", () => {
       (name: string, data: unknown) => sent.push([name, data]),
       { location: page.location, getSelection: () => selection },
     );
+    // The eval of the links' own window
+    (page as any).eval = run;
     expect(listeners.map(([type, , capture]) => [type, capture])).toEqual([
       ["click", true],
       ["auxclick", true],
+      ["click", false],
       ["contextmenu", false],
     ]);
     /** A click on `id`: whether it was left to the page, and what was sent */
@@ -2043,9 +2073,23 @@ describe("arXiv browser: the HTML version beside the list", () => {
     expect(press("doi", "auxclick", 1).sent).toHaveLength(1);
     expect(press("doi", "auxclick", 2).sent).toEqual([]);
     // Within the page, and other kinds of link: the page's own
-    for (const id of ["section", "full", "script", "mail", "text"]) {
+    for (const id of ["section", "full", "mail", "text"]) {
       expect(press(id)).toEqual({ left: true, sent: [] });
     }
+    expect(run).not.toHaveBeenCalled();
+
+    // A javascript: link (Zotero follows none): its code is run in the page,
+    // unless the page handled the click itself; not by the other buttons
+    expect(press("script")).toEqual({ left: false, sent: [] });
+    expect(run.mock.calls).toEqual([["toggleNavTOC(); void 0"]]);
+    expect(press("script", "auxclick", 1).sent).toEqual([]);
+    page.document
+      .getElementById("script")!
+      .addEventListener("click", (event) => event.preventDefault(), {
+        once: true,
+      });
+    press("script");
+    expect(run).toHaveBeenCalledTimes(1);
 
     // A right-click: the selection and the link under it, where it was
     selection = "the ground state";
@@ -2065,22 +2109,125 @@ describe("arXiv browser: the HTML version beside the list", () => {
     });
   });
 
+  it("finds in the page with the platform's find bar: Ctrl/Cmd+F, Ctrl/Cmd+G, Escape", async () => {
+    const env = await loaded();
+    const { root, pane, view, launch } = env;
+    const list = root.querySelector<HTMLElement>(".arxiv-browser__list")!;
+    const pressed = (
+      target: EventTarget,
+      name: string,
+      init: KeyboardEventInit = {},
+    ) => !key(target, name, { cancelable: true, ...init });
+
+    // No page shown: the keys are not taken
+    expect(pressed(list, "f", { metaKey: true })).toBe(false);
+    expect(pressed(list, "g", { metaKey: true })).toBe(false);
+
+    env.htmlButton(ID).click();
+    const page = env.page()!;
+    const bar = env.findBar()!;
+    // Below the page, finding in it; the page's element is of the group
+    // the find bar's actor serves
+    expect(page.nextElementSibling === bar).toBe(true);
+    expect(bar.browser === page).toBe(true);
+    expect(page.getAttribute("messagemanagergroup")).toBe("browsers");
+    // A load gives the page a new frame loader: the bar is told again
+    bar.browser = null;
+    page.dispatchEvent(new win.Event("XULFrameLoaderCreated"));
+    expect(bar.browser === page).toBe(true);
+
+    // From the page, the list and the bar's own field
+    expect(pressed(page, "f", { metaKey: true })).toBe(true);
+    expect(bar.onFindCommand).toHaveBeenCalledTimes(1);
+    expect(pressed(list, "f", { ctrlKey: true })).toBe(true);
+    expect(bar.onFindCommand).toHaveBeenCalledTimes(2);
+    const [field, barButton] = [...bar.children];
+    expect(field.tagName).toBe("HTML:INPUT");
+    expect(pressed(field, "g", { metaKey: true })).toBe(true);
+    expect(bar.onFindAgainCommand).toHaveBeenLastCalledWith(false);
+    expect(pressed(page, "G", { metaKey: true, shiftKey: true })).toBe(true);
+    expect(bar.onFindAgainCommand).toHaveBeenLastCalledWith(true);
+
+    // Keys typed in the bar are the bar's, not the list's
+    const focused = view.listPane.focused;
+    for (const typed of ["a", "l", "j", "x", " ", "Enter", "Escape"]) {
+      expect(pressed(field, typed)).toBe(false);
+      expect(pressed(barButton, typed)).toBe(false);
+    }
+    expect(view.listPane.focused).toBe(focused);
+    expect(launch).not.toHaveBeenCalled();
+    expect(bar.hidden).toBe(false);
+
+    // Escape in the page closes the bar, once; then it is the page's key
+    expect(pressed(page, "Escape")).toBe(true);
+    expect(bar.close).toHaveBeenCalledTimes(1);
+    expect(pressed(page, "Escape")).toBe(false);
+    expect(pane.hidden).toBe(false);
+
+    // While the calendar is open: its Escape, also from the find bar, and
+    // no finding
+    pressed(page, "f", { metaKey: true });
+    const days = root.querySelector<HTMLButtonElement>(
+      ".arxiv-browser__days-button",
+    )!;
+    days.click();
+    const calendar = root.querySelector<HTMLElement>(
+      ".arxiv-browser__daypicker",
+    )!;
+    expect(calendar.hidden).toBe(false);
+    expect(pressed(list, "f", { metaKey: true })).toBe(false);
+    expect(pressed(field, "Escape")).toBe(true);
+    expect(calendar.hidden).toBe(true);
+    expect(bar.hidden).toBe(false);
+
+    // Another paper in the same element: the bar closes
+    const other = rows(root).find(
+      (row) =>
+        !row.dataset.entryId!.includes(ID) &&
+        row.querySelector(".arxiv-browser__html-button"),
+    )!;
+    other
+      .querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!
+      .click();
+    expect(env.findBar() === bar).toBe(true);
+    expect(bar.close).toHaveBeenCalledTimes(2);
+
+    // Back to the details: the bar goes with the page
+    pane.querySelector<HTMLButtonElement>("button")!.click();
+    expect(env.findBar()).toBeNull();
+    expect(pressed(list, "f", { metaKey: true })).toBe(false);
+  });
+
   it("keeps the divider where it is, and its one position for both panes", async () => {
     const env = await loaded();
     const { root, list } = env;
     const main = root.querySelector<HTMLElement>(".arxiv-browser__main")!;
     const divider = root.querySelector<HTMLElement>(".arxiv-browser__divider")!;
     main.getBoundingClientRect = () => ({ left: 0, width: 1000 }) as DOMRect;
+    const drag = (clientX: number) => {
+      divider.dispatchEvent(
+        new win.MouseEvent("mousedown", { bubbles: true, button: 0 }),
+      );
+      win.document.dispatchEvent(new win.MouseEvent("mousemove", { clientX }));
+      win.document.dispatchEvent(new win.MouseEvent("mouseup"));
+    };
+    // Set beside the details: the page is shown at that width, also
+    // another paper's
+    drag(500);
+    expect(list.style.flex).toBe("0 0 50%");
     env.htmlButton(ID).click();
-    expect(list.style.flex).toBe("0 0 60%");
+    expect(list.style.flex).toBe("0 0 50%");
+    rows(root)
+      .find(
+        (row) =>
+          !row.dataset.entryId!.includes(ID) &&
+          row.querySelector(".arxiv-browser__html-button"),
+      )!
+      .querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!
+      .click();
+    expect(list.style.flex).toBe("0 0 50%");
     // Dragged beside the page: the same position beside the details
-    divider.dispatchEvent(
-      new win.MouseEvent("mousedown", { bubbles: true, button: 0 }),
-    );
-    win.document.dispatchEvent(
-      new win.MouseEvent("mousemove", { clientX: 300 }),
-    );
-    win.document.dispatchEvent(new win.MouseEvent("mouseup"));
+    drag(300);
     expect(list.style.flex).toBe("0 0 30%");
     expect(prefs[`${PREFIX}.arxiv_browser_list_share`]).toBe(30);
 

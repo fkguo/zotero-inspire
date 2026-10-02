@@ -1576,11 +1576,9 @@ export class ArxivBrowserView {
       this.doc.defaultView?.close();
       return;
     }
-    // Keys pressed in a paper's HTML version are the page's
-    if (this.htmlPane?.isPage(event.target)) return;
-    // Not while the subscription editor or the calendar is open, nor while
-    // typing
+    // Not while the subscription editor is open
     if (this.root.querySelector(".arxiv-browser__backdrop")) return;
+    // Not while the calendar is open
     if (this.dayPicker.isOpen) {
       // Also when the focus has left the calendar
       if (event.key === "Escape") {
@@ -1589,6 +1587,31 @@ export class ArxivBrowserView {
       }
       return;
     }
+    // While a paper's HTML version is shown: find in it (also from the find
+    // bar's own field)
+    const page = this.htmlPane?.paper ? this.htmlPane : null;
+    if (page) {
+      const letter = accel && !event.altKey ? key.toLowerCase() : "";
+      if (letter === "f" && !event.shiftKey) {
+        event.preventDefault();
+        page.find();
+        return;
+      }
+      if (letter === "g") {
+        event.preventDefault();
+        page.findAgain(event.shiftKey);
+        return;
+      }
+      // Escape in the page closes the find bar (in its field, the bar does)
+      if (key === "Escape" && page.isPage(event.target) && page.closeFind()) {
+        event.preventDefault();
+        return;
+      }
+      // Other keys pressed in the page are the page's, those in its find
+      // bar the bar's
+      if (page.isPage(event.target) || page.inFindBar(event.target)) return;
+    }
+    // Nor while typing
     const target = event.target as Element | null;
     const tag = target?.tagName?.toUpperCase() ?? "";
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;

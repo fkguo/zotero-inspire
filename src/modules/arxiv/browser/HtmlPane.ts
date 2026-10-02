@@ -17,6 +17,20 @@
 // clicks here. The script also reports a right-click, for the page's menu:
 // copying the selection, and a link's entries. (Ctrl/Cmd+C and Ctrl/Cmd+A
 // are the page's own.)
+// Zotero's browsers follow web links only (its setting
+// network.protocol-handler.expose-all is off), so a javascript: link — the
+// buttons of arXiv's page header that show the table of contents and switch
+// the reading mode — does nothing when clicked. The script runs such a link's
+// code with the eval of the link's own document: in the page, with the page's
+// rights. (Not all a web browser does for such a link: what the code returns
+// is ignored, and a page whose policy forbids eval is not served. arXiv's
+// pages need neither.)
+// Finding in the page is the platform's own find bar (<findbar>, as in a web
+// browser: the field, next and previous, highlight all, match case), below
+// the page; the window's keys open it (find(), findAgain(), closeFind()).
+// Zotero ships its texts in English only. The find bar talks to the page
+// through the platform's FindBar actor, which serves the browsers of the
+// message-manager group "browsers": the page's element is in that group.
 // The page is loaded at once, like in a web browser, not in the arxiv.org
 // scheduler's chain: it is one page the user asked for.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,6 +53,18 @@ export interface HtmlPanePaper {
 /** Zotero's <browser> element, as far as the pane uses it */
 export interface PageBrowser extends Element {
   loadURI?(uri: unknown, options: { triggeringPrincipal: unknown }): void;
+}
+
+/** The platform's <findbar> element, as far as the pane uses it */
+interface FindBar extends Element {
+  /** The page it finds in */
+  browser?: PageBrowser | null;
+  hidden: boolean;
+  /** Open the bar with the focus in its field */
+  onFindCommand?(): unknown;
+  /** The next match, or the previous one */
+  onFindAgainCommand?(previous: boolean): unknown;
+  close?(): void;
 }
 
 export interface HtmlPaneOptions {
@@ -73,22 +99,30 @@ interface PageMenuRequest {
 /**
  * Runs in the page's process, for every page loaded in the window: a click
  * on a web link that leads out of the page is reported instead of followed
- * (a link within the page, and a javascript: or mailto: link, is left
- * alone); a right-click the page does not handle is reported with the
+ * (a link within the page, and a mailto: link, is left alone); a click on a
+ * javascript: link that the page itself did not handle runs the link's code
+ * in the page; a right-click the page does not handle is reported with the
  * selection and the link under it
  */
 const LINK_SCRIPT = `"use strict";
-function webLink(event) {
+function linkOf(event) {
   var target = event.composedTarget || event.target;
-  var link = target && target.closest && target.closest("a[href], area[href]");
-  if (!link) return null;
-  var url;
+  return (
+    (target && target.closest && target.closest("a[href], area[href]")) || null
+  );
+}
+function linkUrl(link) {
   try {
-    url = new URL(link.getAttribute("href"), link.baseURI);
+    return link && new URL(link.getAttribute("href"), link.baseURI);
   } catch (error) {
     return null;
   }
-  return url.protocol === "http:" || url.protocol === "https:" ? url : null;
+}
+function webLink(event) {
+  var url = linkUrl(linkOf(event));
+  return url && (url.protocol === "http:" || url.protocol === "https:")
+    ? url
+    : null;
 }
 function onLinkClick(event) {
   // The left and the middle button (a right-click asks for the menu)
@@ -107,6 +141,19 @@ function onLinkClick(event) {
   event.stopPropagation();
   sendAsyncMessage("${LINK_MESSAGE}", url.href);
 }
+function onScriptLinkClick(event) {
+  if (event.button !== 0 || event.defaultPrevented) return;
+  var link = linkOf(event);
+  var url = linkUrl(link);
+  if (!url || url.protocol !== "javascript:") return;
+  event.preventDefault();
+  var code = url.href.slice("javascript:".length);
+  try {
+    code = decodeURIComponent(code);
+  } catch (error) {}
+  // The eval of the link's own document: the code runs there, as the page's
+  link.ownerDocument.defaultView.eval(code);
+}
 function onContextMenu(event) {
   if (event.defaultPrevented) return;
   var url = webLink(event);
@@ -119,6 +166,7 @@ function onContextMenu(event) {
 }
 addEventListener("click", onLinkClick, true);
 addEventListener("auxclick", onLinkClick, true);
+addEventListener("click", onScriptLinkClick, false);
 addEventListener("contextmenu", onContextMenu, false);
 `;
 const LINK_SCRIPT_URL = `data:application/javascript;charset=utf-8,${encodeURIComponent(LINK_SCRIPT)}`;
@@ -146,6 +194,7 @@ export class HtmlPane {
   private readonly label: HTMLElement;
   private readonly loading: HTMLElement;
   private browser: PageBrowser | null = null;
+  private findBar: FindBar | null = null;
   /** Set once the link script is loaded in the window's pages */
   private links: WindowMessageManager | null = null;
   private readonly onLinkMessage = (message: {
@@ -239,6 +288,29 @@ export class HtmlPane {
     return this.browser !== null && target === this.browser;
   }
 
+  /** Whether `target` is in the find bar (its field, its buttons) */
+  inFindBar(target: unknown): boolean {
+    return this.findBar?.contains(target as Node | null) ?? false;
+  }
+
+  /** Find in the page: the find bar, with the focus in its field */
+  find(): void {
+    void this.findBar?.onFindCommand?.();
+  }
+
+  /** The next match (the previous one); the find bar when nothing is sought */
+  findAgain(previous: boolean): void {
+    void this.findBar?.onFindAgainCommand?.(previous);
+  }
+
+  /** Close the find bar; whether it was open */
+  closeFind(): boolean {
+    const bar = this.findBar;
+    if (!bar || bar.hidden) return false;
+    bar.close?.();
+    return true;
+  }
+
   /** Show a paper's HTML version in place of the detail pane */
   show(paper: HtmlPanePaper): void {
     const { container } = this.options;
@@ -263,6 +335,8 @@ export class HtmlPane {
       browser.setAttribute("remote", "false");
       browser.setAttribute("maychangeremoteness", "true");
       browser.setAttribute("disableglobalhistory", "true");
+      // The find bar's actor serves this group's browsers
+      browser.setAttribute("messagemanagergroup", "browsers");
       browser.setAttribute("class", "arxiv-browser__html-page");
       // The page's title has arrived: the page is being shown. (A progress
       // listener would be lost when the page moves to a content process.)
@@ -270,8 +344,20 @@ export class HtmlPane {
         this.loading.hidden = true;
       });
       this.followLinks();
-      container.append(browser);
+      const findBar = doc.createXULElement("findbar") as FindBar;
+      container.append(browser, findBar);
+      findBar.browser = browser;
+      // Every load gives the element a new frame loader (the page moves to
+      // a content process): the find bar is told, as a web browser's is
+      browser.addEventListener("XULFrameLoaderCreated", () => {
+        findBar.browser = browser;
+      });
       this.browser = browser;
+      this.findBar = findBar;
+    } else {
+      // Another paper in the same element: the find bar closes (its field
+      // keeps what was sought, as a web browser's does)
+      this.closeFind();
     }
     this.loading.hidden = false;
     (this.options.load ?? loadPage)(this.browser, paper.url);
@@ -316,6 +402,9 @@ export class HtmlPane {
 
   private dropBrowser(): void {
     this.loading.hidden = true;
+    // The find bar first: it lets go of the page it finds in
+    this.findBar?.remove();
+    this.findBar = null;
     this.browser?.remove();
     this.browser = null;
   }
