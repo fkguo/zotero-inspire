@@ -19,8 +19,10 @@ import { getPref } from "../../../utils/prefs";
 import { renderMathContent } from "../../inspire/mathRenderer";
 import {
   EntryListRenderer,
+  panelPdfButton,
   type EntryRenderContext,
 } from "../../inspire/panel/EntryListRenderer";
+import { showFullTextSearch } from "../../inspire/library/localPdf";
 import { isDarkMode } from "../../inspire/styles";
 import {
   applyPdfButtonStyle,
@@ -109,6 +111,11 @@ export interface ListPaneOptions {
   /** Open the paper's PDF (default: arXiv's, in the web browser) */
   openPdf?(entry: BrowserEntry): void;
   /**
+   * Find the PDF of a paper in the library without one (its download icon);
+   * resolves to the ID of the PDF found, or null
+   */
+  findPdf?(entry: BrowserEntry): Promise<number | null>;
+  /**
    * The paper's HTML version: open it (default: arXiv's, in the web
    * browser), and its menu (none: no menu)
    */
@@ -181,11 +188,12 @@ export class ListPane {
       adapter: {
         canCopyBibtex: () => true,
         canCopyTexkey: () => false,
-        // Green as in the References panel only for a PDF in the library;
-        // otherwise arXiv's PDF, opened in the web browser
+        // A paper in the library as in the References panel: green for its
+        // PDF, else the download icon (Find Full Text); a paper not in the
+        // library: arXiv's PDF, opened in the web browser
         pdfButton: (entry, hasPdf) =>
-          hasPdf
-            ? { state: PdfButtonState.HAS_PDF }
+          entry.localItemID
+            ? panelPdfButton(entry, hasPdf)
             : {
                 state: PdfButtonState.ONLINE,
                 title: getString("arxiv-browser-open-pdf"),
@@ -1129,7 +1137,24 @@ export class ListPane {
       void actions.copyBibtex(entry.listing);
     } else if (target.closest(".zinspire-ref-entry__pdf")) {
       event.preventDefault();
-      if (this.options.openPdf) this.options.openPdf(entry);
+      const pdf = target.closest<HTMLButtonElement>(
+        ".zinspire-ref-entry__pdf",
+      )!;
+      if (
+        pdf.dataset.state === PdfButtonState.FIND_PDF &&
+        this.options.findPdf
+      ) {
+        // The row may be drawn again meanwhile (another page)
+        void showFullTextSearch(
+          pdf,
+          this.options.findPdf(entry),
+          () => pdf.isConnected,
+          {
+            pdfOpen: getString("references-panel-pdf-open"),
+            pdfFind: getString("references-panel-pdf-find"),
+          },
+        );
+      } else if (this.options.openPdf) this.options.openPdf(entry);
       else actions.openPdf(id);
     } else if (target.closest(".arxiv-browser__html-button")) {
       if (this.options.html) this.options.html.open(entry);

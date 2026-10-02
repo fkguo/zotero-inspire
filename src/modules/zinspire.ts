@@ -263,7 +263,12 @@ import {
 import { createItemFromInspireMeta } from "./inspire/library/itemCreation";
 import { onLibraryIndexChange } from "./inspire/library/arxivIndex";
 import { loadedItem, refreshLocalState } from "./inspire/library/localStatus";
-import { firstPdfAttachmentID, openLocalPdf } from "./inspire/library/localPdf";
+import {
+  findFullText,
+  firstPdfAttachmentID,
+  openLocalPdf,
+  showFullTextSearch,
+} from "./inspire/library/localPdf";
 import { linkItems, unlinkItems } from "./inspire/library/relatedItems";
 import { pickSaveTarget, rememberSaveTarget } from "./saveTargets";
 import { applyLocalMarker } from "./inspire/panel/localMarker";
@@ -14745,101 +14750,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     return firstPdfAttachmentID(parentItemID);
   }
 
-  private async waitForFirstPdfAttachmentID(
-    parentItemID: number,
-    options: { timeoutMs?: number; intervalMs?: number } = {},
-  ): Promise<number | null> {
-    const timeoutMs =
-      typeof options.timeoutMs === "number" && options.timeoutMs > 0
-        ? options.timeoutMs
-        : 4000;
-    const intervalMs =
-      typeof options.intervalMs === "number" && options.intervalMs > 0
-        ? options.intervalMs
-        : 200;
-
-    const deadline = Date.now() + timeoutMs;
-    let pdfID = this.getFirstPdfAttachmentID(parentItemID);
-    while (!pdfID && Date.now() < deadline) {
-      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
-      pdfID = this.getFirstPdfAttachmentID(parentItemID);
-    }
-    return pdfID;
-  }
-
-  private async notifyItemModifiedForUI(
-    parentItemID: number,
-    attachmentItemID?: number,
-  ): Promise<void> {
-    const mainWin = Zotero.getMainWindow?.() as any;
-    const notifier: any = mainWin?.Zotero?.Notifier || (Zotero.Notifier as any);
-
-    // Prime best-attachment cache so the main items view (hasAttachment column) can show the icon
-    // without waiting for the delayed itemTree cell refresh.
-    try {
-      const Z: any = mainWin?.Zotero || Zotero;
-      const parentItem =
-        typeof Z.Items?.get === "function"
-          ? Z.Items.get(parentItemID)
-          : Zotero.Items.get(parentItemID);
-      await parentItem?.getBestAttachmentState?.();
-    } catch {
-      // ignore
-    }
-
-    // Prefer Zotero.Notifier.trigger(..., force=true) to avoid being queued in an open transaction.
-    try {
-      if (typeof notifier?.trigger === "function") {
-        if (attachmentItemID) {
-          // Update attachments box rows without selecting anything (avoid "add" side effects)
-          await notifier.trigger(
-            "refresh",
-            "item",
-            [attachmentItemID],
-            {},
-            true,
-          );
-        }
-        // Ensure itemTree re-renders the row, so the hasAttachment cell schedules
-        // (or immediately reflects) bestAttachmentState updates.
-        await notifier.trigger("refresh", "item", [parentItemID], {}, true);
-        await notifier.trigger("modify", "item", [parentItemID], {}, true);
-        await notifier.trigger("redraw", "item", [parentItemID], {}, true);
-      } else if (typeof notifier?.notify === "function") {
-        if (attachmentItemID) {
-          notifier.notify("refresh", "item", [attachmentItemID], {}, true);
-        }
-        notifier.notify("refresh", "item", [parentItemID], {}, true);
-        notifier.notify("modify", "item", [parentItemID], {}, true);
-        notifier.notify("redraw", "item", [parentItemID], {}, true);
-      }
-    } catch {
-      // ignore
-    }
-
-    // Best-effort UI refresh fallback (some Zotero builds cache attachment state in views).
-    try {
-      const pane: any =
-        Zotero.getActiveZoteroPane?.() ||
-        mainWin?.ZoteroPane ||
-        (globalThis as any).ZoteroPane;
-
-      if (attachmentItemID && typeof pane?.itemsView?.notify === "function") {
-        await pane.itemsView.notify("refresh", "item", [attachmentItemID], {});
-      }
-      if (typeof pane?.itemsView?.notify === "function") {
-        await pane.itemsView.notify("refresh", "item", [parentItemID], {});
-        await pane.itemsView.notify("modify", "item", [parentItemID], {});
-        await pane.itemsView.notify("redraw", "item", [parentItemID], {});
-      }
-
-      pane?.itemPane?.refresh?.();
-      pane?.itemsView?.invalidate?.();
-    } catch {
-      // ignore
-    }
-  }
-
   /**
    * Open PDF for a local item.
    * Returns true if PDF was opened successfully, false otherwise.
@@ -16799,22 +16709,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       if (getPref("auto_find_fulltext_on_import") !== true) {
         return;
       }
-      // Mirror the manual Find Full Text panel button: run in the main-window
-      // Zotero context, then poll for the attachment and refresh the panel row.
-      const mainWin = Zotero.getMainWindow?.() as any;
-      const Z: any = mainWin?.Zotero || Zotero;
-      const target =
-        (typeof Z.Items?.get === "function" ? Z.Items.get(item.id) : null) ||
-        item;
-      const attachmentsAPI: any = Z.Attachments || Zotero.Attachments;
-      if (!target || typeof attachmentsAPI?.addAvailableFiles !== "function") {
-        return;
-      }
-      await attachmentsAPI.addAvailableFiles([target]);
-      const pdfID = await this.waitForFirstPdfAttachmentID(item.id);
-      if (pdfID) {
-        await this.notifyItemModifiedForUI(item.id, pdfID);
-        // Refresh the panel row so the find-PDF marker becomes the PDF marker.
+      // As the panel's Find Full Text button; then refresh the panel row so
+      // the find-PDF marker becomes the PDF marker
+      if (await findFullText(item.id)) {
         this.updateRowStatus(entry);
       }
     } catch (err) {
@@ -17480,68 +17377,18 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       await this.openPdfForLocalItem(entry.localItemID);
       InspireReferencePanelController.syncBackButtonStates();
     } else if (state === "find-pdf") {
-      // Find Full Text - use Zotero's built-in PDF finder
-      // Show loading state
-      button.replaceChildren();
-      const loadingSpan = this.body.ownerDocument.createElement("span");
-      loadingSpan.textContent = "⏳";
-      loadingSpan.style.fontSize = "12px";
-      button.appendChild(loadingSpan);
-      button.disabled = true;
-
-      const doc = this.body.ownerDocument;
-      const pdfStrings = {
-        pdfOpen: getString("references-panel-pdf-open" as FluentMessageId),
-        pdfFind: getString("references-panel-pdf-find" as FluentMessageId),
-      };
-      // The search takes a while: if another list was drawn meanwhile, the
-      // row may show one of its papers, and is then left alone
-      const showResult = (result: PdfButtonState) => {
-        if (this.rowShowing(entry, button)) {
-          renderPdfButtonIcon(doc, button, result, pdfStrings);
-        }
-      };
-
-      try {
-        // Match Zotero main-window context menu behavior:
-        // ZoteroPane.findFilesForSelectedItems() → Zotero.Attachments.addAvailableFiles()
-        // Running in the main window context helps ensure notifier-driven UI updates fire.
-        const mainWin = Zotero.getMainWindow?.() as any;
-        const Z: any = mainWin?.Zotero || Zotero;
-        const item =
-          typeof Z.Items?.get === "function"
-            ? Z.Items.get(entry.localItemID)
-            : Zotero.Items.get(entry.localItemID);
-        const attachmentsAPI: any = Z.Attachments || Zotero.Attachments;
-
-        if (item && attachmentsAPI?.addAvailableFiles) {
-          // addAvailableFiles takes an array of items and shows a progress dialog
-          await attachmentsAPI.addAvailableFiles([item]);
-          // Some environments update attachments asynchronously after the promise resolves.
-          // Poll briefly to make PDF detection robust.
-          const pdfID = await this.waitForFirstPdfAttachmentID(
-            entry.localItemID,
-          );
-          if (pdfID) {
-            // Success - render PDF icon
-            showResult(PdfButtonState.HAS_PDF);
-            // Force UI refresh so the main window reflects the new attachment immediately.
-            await this.notifyItemModifiedForUI(entry.localItemID, pdfID);
-          } else {
-            // Not found - restore original state
-            showResult(PdfButtonState.FIND_PDF);
-          }
-        } else {
-          showResult(PdfButtonState.FIND_PDF);
-        }
-      } catch (err) {
-        Zotero.debug(`[${config.addonName}] Find Full Text failed: ${err}`);
-        showResult(PdfButtonState.FIND_PDF);
-      }
-
-      if (this.rowShowing(entry, button)) {
-        button.disabled = false;
-      }
+      // Find Full Text - use Zotero's built-in PDF finder. The search takes
+      // a while: if another list was drawn meanwhile, the row may show one
+      // of its papers, and is then left alone
+      await showFullTextSearch(
+        button,
+        findFullText(entry.localItemID),
+        () => Boolean(this.rowShowing(entry, button)),
+        {
+          pdfOpen: getString("references-panel-pdf-open" as FluentMessageId),
+          pdfFind: getString("references-panel-pdf-find" as FluentMessageId),
+        },
+      );
     }
   }
 

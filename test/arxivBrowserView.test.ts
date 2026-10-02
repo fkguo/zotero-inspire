@@ -3747,6 +3747,40 @@ describe("arXiv browser: adding and relating", () => {
       expect(launch).toHaveBeenCalledTimes(1);
     });
 
+    it("opens arXiv's PDF of an older version of a paper in the library without a PDF, and finds the PDF at the newest version (Find Full Text cannot ask for an older one)", async () => {
+      const { root, launch, row, pdf } = await atVersion2(ID);
+      const addAvailableFiles = vi.fn(async () => undefined);
+      (globalThis as any).Zotero.Attachments = { addAvailableFiles };
+      expect(
+        row().querySelector<HTMLButtonElement>(".zinspire-ref-entry__pdf")!
+          .dataset.state,
+      ).toBe("find-pdf");
+      // Version 2 of 3
+      pdf().click();
+      expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/pdf/${ID}v2`);
+      expect(addAvailableFiles).not.toHaveBeenCalled();
+      // Back at the newest
+      const chooser = root.querySelector<HTMLSelectElement>(
+        ".arxiv-browser__detail .arxiv-browser__version",
+      )!;
+      chooser.value = "3";
+      chooser.dispatchEvent(new win.Event("change"));
+      await flushPromises();
+      expect(pdf()).toBeUndefined();
+      const find = [
+        ...root.querySelectorAll<HTMLButtonElement>(
+          ".arxiv-browser__detail-actions button",
+        ),
+      ].find((b) => b.textContent === msg("references-panel-pdf-find"))!;
+      find.click();
+      expect(addAvailableFiles).toHaveBeenCalledTimes(1);
+      expect(
+        (addAvailableFiles.mock.calls[0] as unknown as [{ id: number }[]])[0][0]
+          .id,
+      ).toBe(77);
+      expect(launch).toHaveBeenCalledTimes(1);
+    });
+
     it("knows the version of the PDFs the plugin attached by their title (they have no address)", async () => {
       const { items, pdf, launch, readerOpen } = await atVersion2(ID);
       attachPdf(items, 77, "", 6001, "arXiv preprint PDF v3");
@@ -3761,12 +3795,14 @@ describe("arXiv browser: adding and relating", () => {
     });
 
     it("opens for the newest version a library PDF of that version, else one of no known version, never one of another version", async () => {
-      const { root, items, pdf, launch, readerOpen, row } =
+      const { root, items, pdf, launch, readerOpen, row, view } =
         await atVersion2(ID);
       // Only version 2 in the library (arXiv's address, and one the plugin
       // attached, known by its title): arXiv's newest
       attachPdf(items, 77, `http://arxiv.org/pdf/${ID}v2`, 6001);
       attachPdf(items, 77, "", 6005, "arXiv preprint PDF v2");
+      // As Zotero's notifier makes it
+      view.listPane.refreshPdfButtons();
       const chooser = root.querySelector<HTMLSelectElement>(
         ".arxiv-browser__detail .arxiv-browser__version",
       )!;

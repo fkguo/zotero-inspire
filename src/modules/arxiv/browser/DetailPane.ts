@@ -49,6 +49,15 @@ export interface DetailPaneOptions {
    * the version shown (the listing's for the newest, when known)
    */
   openPdf?(entry: BrowserEntry, version?: number): void;
+  /** Whether the paper has a PDF in the library */
+  hasPdf?(entry: BrowserEntry): boolean;
+  /**
+   * Find the PDF of a paper in the library without one (Zotero's Find Full
+   * Text, offered at the newest version only: it fetches the PDF its item's
+   * DOI or address lead to, which cannot be an older version chosen here);
+   * resolves once the search ended
+   */
+  findPdf?(entry: BrowserEntry): Promise<unknown>;
   /**
    * The paper's HTML version: open it (default: arXiv's, in the web
    * browser), and its menu (none: no menu); `version`: the version shown
@@ -111,6 +120,8 @@ export class DetailPane {
   private older: { row: string; paper: ArxivApiEntry } | null = null;
   /** The version the user chose that is being fetched, and for which row */
   private pending: { row: string; version: number } | null = null;
+  /** The PDF button shown, and the version it refers to (none: the newest) */
+  private pdf: { button: HTMLButtonElement; version?: number } | null = null;
 
   constructor(private readonly options: DetailPaneOptions) {
     this.doc = options.container.ownerDocument;
@@ -151,6 +162,7 @@ export class DetailPane {
       entry && this.shown?.id === entry.id ? container.scrollTop : 0;
     this.shown = entry;
     this.sections = null;
+    this.pdf = null;
     // Another paper (or another row of it) starts at its newest version
     if (this.older?.row !== entry?.id) this.older = null;
     if (this.pending?.row !== entry?.id) this.pending = null;
@@ -304,15 +316,19 @@ export class DetailPane {
     // The version chosen, also while it is fetched
     const version = this.pending?.version ?? older?.version;
     const buttons = html(doc, "div", "arxiv-browser__detail-actions");
+    const pdf = button(doc, "", () => {
+      if (this.findsPdf(entry, version)) void this.findPdf(entry, pdf);
+      else if (this.options.openPdf) {
+        this.options.openPdf(entry, version ?? listing.version);
+      } else actions.openPdf(listing.id, version);
+    });
+    this.pdf = { button: pdf, version };
+    this.refreshPdfButton();
     buttons.append(
       button(doc, getString("arxiv-browser-copy-bibtex"), () => {
         void actions.copyBibtex(listing);
       }),
-      button(doc, getString("arxiv-browser-open-pdf-button"), () =>
-        this.options.openPdf
-          ? this.options.openPdf(entry, version ?? listing.version)
-          : actions.openPdf(listing.id, version),
-      ),
+      pdf,
     );
     // Unless the listing says arXiv has no HTML version
     if (listing.html !== false) {
@@ -336,6 +352,44 @@ export class DetailPane {
     }
     container.replaceChildren(...parts);
     container.scrollTop = scroll;
+  }
+
+  /**
+   * The PDF button's label again (a PDF may have been attached or removed):
+   * "Find Full Text" when a click finds the PDF, else "PDF"
+   */
+  refreshPdfButton(): void {
+    if (!this.shown || !this.pdf || this.pdf.button.disabled) return;
+    this.pdf.button.textContent = getString(
+      this.findsPdf(this.shown, this.pdf.version)
+        ? "references-panel-pdf-find"
+        : "arxiv-browser-open-pdf-button",
+    );
+  }
+
+  /**
+   * Whether the PDF button finds the paper's PDF: a paper in the library
+   * none of whose items has a PDF, at its newest version (`version`
+   * undefined)
+   */
+  private findsPdf(entry: BrowserEntry, version: number | undefined): boolean {
+    return (
+      version === undefined &&
+      Boolean(entry.localItemID) &&
+      Boolean(this.options.findPdf) &&
+      !this.options.hasPdf?.(entry)
+    );
+  }
+
+  private async findPdf(
+    entry: BrowserEntry,
+    pdf: HTMLButtonElement,
+  ): Promise<void> {
+    pdf.disabled = true;
+    pdf.textContent = getString("references-panel-pdf-finding");
+    await this.options.findPdf?.(entry);
+    pdf.disabled = false;
+    this.refreshPdfButton();
   }
 
   /**

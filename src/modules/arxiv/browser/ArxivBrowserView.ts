@@ -97,6 +97,7 @@ import { LibraryActions, type LibraryActionsOptions } from "./libraryActions";
 import { CompletionLine, type CompletionLineOptions } from "./completionLine";
 import { selectItemsDialog, type PickRelatedItems } from "./relatedItemsDialog";
 import {
+  findFullText,
   firstAttachmentID,
   firstPdfAttachmentID,
   openAttachment,
@@ -604,6 +605,19 @@ export class ArxivBrowserView {
         (itemID) => firstPdfAttachmentID(itemID) !== null,
       );
     const hasPdf = (entry: BrowserEntry) => itemWithPdf(entry) !== undefined;
+    // A paper in the library none of whose items has a PDF: Zotero's Find
+    // Full Text on the item its mark shows (its first item); then the
+    // paper's buttons follow
+    const findPdf = async (entry: BrowserEntry) => {
+      const pdfID = entry.localItemID
+        ? await findFullText(entry.localItemID)
+        : null;
+      if (!this.disposed) {
+        this.listPane.refreshPdfButtons();
+        this.detail.refreshPdfButton();
+      }
+      return pdfID;
+    };
     const openPdf = (entry: BrowserEntry, version?: number) => {
       if (version !== undefined) {
         const newest = version === entry.listing.version;
@@ -773,6 +787,8 @@ export class ArxivBrowserView {
       onAuthorLeave: () => this.authorCard.scheduleHide(),
       showInLibrary,
       openPdf,
+      hasPdf,
+      findPdf,
       html: htmlActions,
       library: libraryButtons,
     });
@@ -787,6 +803,7 @@ export class ArxivBrowserView {
       onLibraryRetry: () => this.recheckLibrary(),
       hasPdf,
       openPdf,
+      findPdf,
       html: htmlActions,
       onAuthorHover: (entry, index, anchor) =>
         this.showAuthorCard(entry, index, anchor),
@@ -825,6 +842,7 @@ export class ArxivBrowserView {
     this.stopFollowingItems = options.followItems?.(() => {
       if (this.disposed) return;
       this.listPane.refreshPdfButtons();
+      this.detail.refreshPdfButton();
       // Relations may have been changed elsewhere
       this.listPane.refreshLinkStates();
     });
