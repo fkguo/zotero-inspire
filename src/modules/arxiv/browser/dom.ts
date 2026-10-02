@@ -56,12 +56,12 @@ export interface MenuEntry {
   run: () => void;
 }
 
-/** A menu of `entries` below `anchor`, removed once closed */
-export function showMenu(
-  anchor: HTMLElement,
+/** A menu of `entries`, removed once closed */
+function menuOf(
+  target: Document,
   entries: readonly MenuEntry[],
-): void {
-  const doc = anchor.ownerDocument as Document & {
+): XUL.MenuPopup {
+  const doc = target as Document & {
     createXULElement(tag: string): XULElement;
   };
   const popup = doc.createXULElement("menupopup") as XUL.MenuPopup;
@@ -73,5 +73,34 @@ export function showMenu(
   }
   doc.documentElement.append(popup);
   popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
-  popup.openPopup(anchor as unknown as XULElement, "after_start", 0, 0);
+  return popup;
+}
+
+/** A menu of `entries` below `anchor` */
+export function showMenu(
+  anchor: HTMLElement,
+  entries: readonly MenuEntry[],
+): void {
+  menuOf(anchor.ownerDocument, entries).openPopup(
+    anchor as unknown as XULElement,
+    "after_start",
+    0,
+    0,
+  );
+}
+
+/** A context menu of `entries` at (`x`, `y`) from `anchor`'s top left corner */
+export function showMenuAt(
+  anchor: Element,
+  entries: readonly MenuEntry[],
+  x: number,
+  y: number,
+): void {
+  menuOf(anchor.ownerDocument, entries).openPopup(
+    anchor as unknown as XULElement,
+    "overlap",
+    x,
+    y,
+    true,
+  );
 }

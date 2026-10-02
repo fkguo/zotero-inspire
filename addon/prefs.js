@@ -75,3 +75,4 @@ pref("__prefsPrefix__.arxiv_browser_page_size", 50); // papers per page (10-500)
 pref("__prefsPrefix__.arxiv_browser_abstracts_expanded", false); // abstracts shown in the list by default (else in the detail pane only)
 pref("__prefsPrefix__.arxiv_browser_open_on_startup", false); // open the arXiv browser when Zotero starts
 pref("__prefsPrefix__.arxiv_browser_list_share", 60); // the list's share of the window width, in percent (25-80; the divider sets it)
+pref("__prefsPrefix__.arxiv_browser_list_share_html", 40); // the same while a paper's HTML version is shown beside the list
