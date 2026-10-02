@@ -354,7 +354,7 @@ export function cleanMathTitle(title?: string | null): string {
     z: "ᶻ",
   };
   text = text.replace(
-    /\^([0-9a-zA-Z+\-*])|\^\\(pm|mp)/g,
+    /\^([0-9a-zA-Z+\-*])|\^\\(pm|mp|ast)/g,
     (match, char: string, latex: string) => {
       if (char) {
         if (superscriptMap[char]) return superscriptMap[char];
@@ -362,6 +362,7 @@ export function cleanMathTitle(title?: string | null): string {
       }
       if (latex === "pm") return "<sup>±</sup>";
       if (latex === "mp") return "<sup>∓</sup>";
+      if (latex === "ast") return superscriptMap["*"];
       return match;
     },
   );
