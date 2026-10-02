@@ -1,4 +1,4 @@
-import { JSDOM, type DOMWindow } from "jsdom";
+import { JSDOM, VirtualConsole, type DOMWindow } from "jsdom";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "../package.json";
@@ -1062,6 +1062,10 @@ describe("arXiv browser: read-only actions and keys", () => {
 
   it("opens arXiv's HTML version, offering it unless the listing says there is none", async () => {
     const { root, launch } = await loaded();
+    // A window that cannot show pages: the web browser, and no empty pane
+    expect(
+      root.querySelector<HTMLElement>(".arxiv-browser__html-pane")!.hidden,
+    ).toBe(true);
     // Oldest first: the replacements without and with an HTML link are on
     // the first page
     const sort = select(root, "sort");
@@ -1655,6 +1659,588 @@ describe("arXiv browser: read-only actions and keys", () => {
     expect(view.listPane.currentPage).toBe(0);
     await clock.advanceBy(60000);
     expect(site.sent.length).toBe(sent);
+  });
+});
+
+describe("arXiv browser: the HTML version beside the list", () => {
+  /** The listeners the window's message manager was given, by message */
+  let pageMessages: Map<string, (message: unknown) => void>;
+  let frameScripts: string[];
+
+  /** A window that can show pages: Zotero's elements and message manager */
+  async function loaded(options: Record<string, unknown> = {}) {
+    const env = environment();
+    subscribe(["hep-ph"]);
+    serveHepPh(env.site);
+    const doc = win.document as any;
+    doc.createXULElement = (tag: string) => {
+      const element = doc.createElement(tag);
+      element.openPopup = vi.fn();
+      if (tag === "findbar") {
+        // The platform's find bar: closed until asked for, with its field
+        // (named html:input, as the platform's markup has it) and a button
+        element.hidden = true;
+        element.append(
+          doc.createElementNS("http://www.w3.org/1999/xhtml", "html:input"),
+          doc.createElement("toolbarbutton"),
+        );
+        element.onFindCommand = vi.fn(() => {
+          element.hidden = false;
+        });
+        element.onFindAgainCommand = vi.fn();
+        element.close = vi.fn(() => {
+          element.hidden = true;
+        });
+      }
+      return element;
+    };
+    pageMessages = new Map();
+    frameScripts = [];
+    (win as any).messageManager = {
+      loadFrameScript: (url: string) => frameScripts.push(url),
+      removeDelayedFrameScript: (url: string) =>
+        frameScripts.splice(frameScripts.indexOf(url), 1),
+      addMessageListener: (name: string, listener: () => void) =>
+        pageMessages.set(name, listener),
+      removeMessageListener: (name: string) => pageMessages.delete(name),
+    };
+    const load = vi.fn();
+    const view = env.open({ loadHtmlPage: load, ...options });
+    await env.settle();
+    // Oldest first: a paper with an HTML link is on the first page
+    const sort = select(env.root, "sort");
+    sort.value = "id-asc";
+    sort.dispatchEvent(new win.Event("change"));
+    const { root } = env;
+    const rowOf = (id: string) =>
+      rows(root).find((row) => row.dataset.entryId!.includes(id))!;
+    return {
+      ...env,
+      view,
+      load,
+      rowOf,
+      htmlButton: (id: string) =>
+        rowOf(id).querySelector<HTMLButtonElement>(
+          ".arxiv-browser__html-button",
+        )!,
+      pane: root.querySelector<HTMLElement>(".arxiv-browser__html-pane")!,
+      detail: root.querySelector<HTMLElement>(".arxiv-browser__detail")!,
+      list: root.querySelector<HTMLElement>(".arxiv-browser__list-pane")!,
+      page: () => root.querySelector<HTMLElement>("browser"),
+      findBar: () =>
+        root.querySelector("findbar") as
+          | (HTMLElement & {
+              browser?: unknown;
+              onFindCommand: ReturnType<typeof vi.fn>;
+              onFindAgainCommand: ReturnType<typeof vi.fn>;
+              close: ReturnType<typeof vi.fn>;
+            })
+          | null,
+    };
+  }
+  const ID = "2502.20357";
+  const URL = `https://arxiv.org/html/${ID}`;
+
+  it("shows arXiv's HTML version in the detail pane's place, and the details again", async () => {
+    const env = await loaded();
+    const { root, pane, detail, list, load, launch } = env;
+    expect(pane.hidden).toBe(true);
+    expect(env.page()).toBeNull();
+    expect(list.style.flex).toBe("0 0 60%");
+
+    env.htmlButton(ID).click();
+    expect(launch).not.toHaveBeenCalled();
+    expect(pane.hidden).toBe(false);
+    expect(detail.hidden).toBe(true);
+    const page = env.page()!;
+    expect(page.parentElement).toBe(pane);
+    // Web content, moved to a content process when the page loads
+    expect(page.getAttribute("type")).toBe("content");
+    expect(page.getAttribute("maychangeremoteness")).toBe("true");
+    expect(load).toHaveBeenCalledExactlyOnceWith(page, URL);
+    // arXiv's newest version (maybe newer than the listing's): no number
+    const label = pane.querySelector(".arxiv-browser__html-label")!;
+    expect(label.textContent).toContain(`arXiv:${ID} · `);
+    // At the detail pane's width: the divider stays where it is
+    expect(list.style.flex).toBe("0 0 60%");
+    // The row's paper is the focused one
+    expect(env.view.listPane.focused?.listing.id).toBe(ID);
+
+    // "Loading…" until the page's title has arrived
+    const loading = pane.querySelector<HTMLElement>(
+      ".arxiv-browser__html-loading",
+    )!;
+    expect(loading.hidden).toBe(false);
+    page.dispatchEvent(new win.Event("pagetitlechanged"));
+    expect(loading.hidden).toBe(true);
+
+    // The bar's button opens the page in the web browser instead
+    const [back, outside] = [
+      ...pane.querySelectorAll<HTMLButtonElement>(
+        ".arxiv-browser__html-bar button",
+      ),
+    ];
+    outside.click();
+    expect(launch).toHaveBeenLastCalledWith(URL);
+
+    back.click();
+    expect(pane.hidden).toBe(true);
+    expect(detail.hidden).toBe(false);
+    expect(env.page()).toBeNull();
+    expect(list.style.flex).toBe("0 0 60%");
+    expect(root.querySelector(".arxiv-browser__detail")!.textContent).toContain(
+      ID,
+    );
+  });
+
+  it("shows the version the detail pane shows, and the menu's first entry does the same", async () => {
+    const env = await loaded();
+    const { root, pane, load, launch } = env;
+    env.rowOf(ID).click();
+    const split = root.querySelector<HTMLElement>(
+      ".arxiv-browser__detail-actions .arxiv-browser__split",
+    )!;
+    const [open, more] = [...split.querySelectorAll("button")];
+    expect(open.title).toBe(msg("arxiv-browser-open-html"));
+    more.click();
+    const entries = [
+      ...win.document.querySelectorAll("menupopup:last-of-type menuitem"),
+    ];
+    expect(entries.map((entry) => entry.getAttribute("label"))).toEqual([
+      msg("arxiv-browser-html-menu-here"),
+      msg("arxiv-browser-html-menu-browser"),
+      msg("arxiv-browser-html-menu-save"),
+    ]);
+    entries[0].dispatchEvent(new win.Event("command"));
+    expect(pane.hidden).toBe(false);
+    expect(load).toHaveBeenLastCalledWith(env.page(), URL);
+    entries[1].dispatchEvent(new win.Event("command"));
+    expect(launch).toHaveBeenLastCalledWith(URL);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an older version chosen in the detail pane, named with its number and, once fetched, its title", async () => {
+    const OLD = "2508.00226";
+    const older = (version: number) => ({
+      id: OLD,
+      version,
+      title: `The title of version ${version}`,
+      abstract: `The abstract of version ${version}.`,
+      authors: ["Ada Older"],
+      published: "2025-07-31T10:00:00Z",
+      updated: "2025-08-20T09:30:00Z",
+      primaryCategory: "hep-ph",
+      categories: ["hep-ph"],
+    });
+    // The arXiv API answers when the test lets it
+    const answers: Array<() => void> = [];
+    const apiVersion = vi.fn(
+      (_id: string, version: number) =>
+        new Promise<unknown>((resolve) =>
+          answers.push(() => resolve({ ok: true, entry: older(version) })),
+        ),
+    );
+    const env = await loaded({ apiVersion });
+    const { root, pane, detail, load } = env;
+    env.rowOf(OLD).click();
+    const open = () =>
+      root.querySelector<HTMLButtonElement>(
+        ".arxiv-browser__detail-actions .arxiv-browser__split button",
+      )!;
+    const label = pane.querySelector(".arxiv-browser__html-label")!;
+    /** Back to the details, and there another version chosen */
+    const choose = (version: number) => {
+      pane.querySelector<HTMLButtonElement>("button")!.click();
+      expect(pane.hidden).toBe(true);
+      expect(detail.hidden).toBe(false);
+      const chooser = root.querySelector<HTMLSelectElement>(
+        ".arxiv-browser__version",
+      )!;
+      chooser.value = String(version);
+      chooser.dispatchEvent(new win.Event("change"));
+    };
+    const answer = async () => {
+      answers.shift()!();
+      await flushPromises();
+    };
+    const address = (version?: number) =>
+      `https://arxiv.org/html/${OLD}${version ? `v${version}` : ""}`;
+
+    // The newest, as the listing has it (version 3): arXiv's newest page
+    open().click();
+    expect(load).toHaveBeenLastCalledWith(env.page(), address());
+    expect(label.textContent).toContain(`arXiv:${OLD} · `);
+    const newestTitle = label.textContent!.split(" · ")[1];
+
+    // Version 2, before the API has answered: its page, no title yet
+    choose(2);
+    open().click();
+    expect(load).toHaveBeenLastCalledWith(env.page(), address(2));
+    expect(label.textContent).toBe(`arXiv:${OLD}v2`);
+    await answer();
+    pane.querySelector<HTMLButtonElement>("button")!.click();
+    open().click();
+    expect(label.textContent).toBe(`arXiv:${OLD}v2 · The title of version 2`);
+
+    // Version 1 while version 2 is still the one shown: not version 2's title
+    choose(1);
+    open().click();
+    expect(load).toHaveBeenLastCalledWith(env.page(), address(1));
+    expect(label.textContent).toBe(`arXiv:${OLD}v1`);
+    await answer();
+    pane.querySelector<HTMLButtonElement>("button")!.click();
+    open().click();
+    expect(label.textContent).toBe(`arXiv:${OLD}v1 · The title of version 1`);
+
+    // Back to the newest: the listing's title, no number
+    choose(3);
+    open().click();
+    expect(load).toHaveBeenLastCalledWith(env.page(), address());
+    expect(label.textContent).toBe(`arXiv:${OLD} · ${newestTitle}`);
+  });
+
+  it("goes back to the details when another paper is focused, and leaves the page's keys to the page", async () => {
+    const env = await loaded();
+    const { pane, detail, view } = env;
+    env.htmlButton(ID).click();
+    const page = env.page()!;
+    const focused = view.listPane.focused;
+    // Ctrl/Cmd+W closes the window from the page too
+    const close = vi.spyOn(win, "close").mockImplementation(() => undefined);
+    key(page, "w", { metaKey: true });
+    expect(close).toHaveBeenCalledTimes(1);
+    close.mockRestore();
+
+    // Keys pressed in the page reach the window with the page as target
+    for (const pressed of ["j", "ArrowDown", " ", "a", "x", "Escape"]) {
+      // Not handled here: the page gets the key
+      expect(key(page, pressed, { cancelable: true })).toBe(true);
+    }
+    expect(view.listPane.focused).toBe(focused);
+    expect(pane.hidden).toBe(false);
+
+    // The same paper chosen again in the list: the page stays
+    env.rowOf(ID).click();
+    expect(pane.hidden).toBe(false);
+    // The list loses its focus: the page being read stays
+    key(env.root.querySelector(".arxiv-browser__list")!, "Escape");
+    expect(view.listPane.focused).toBeNull();
+    expect(pane.hidden).toBe(false);
+
+    // Another paper: its details
+    key(env.root.querySelector(".arxiv-browser__list")!, "j");
+    expect(view.listPane.focused?.listing.id).not.toBe(ID);
+    expect(pane.hidden).toBe(true);
+    expect(detail.hidden).toBe(false);
+    expect(env.page()).toBeNull();
+  });
+
+  it("opens the page's links to elsewhere in the web browser, and offers Copy and the link's entries on a right-click", async () => {
+    const env = await loaded();
+    const { launch, copy } = env;
+    env.htmlButton(ID).click();
+    const page = env.page()!;
+    // One script for the window's pages, reporting clicks and right-clicks
+    expect(frameScripts).toHaveLength(1);
+    const script = decodeURIComponent(frameScripts[0]);
+    expect(script).toContain('addEventListener("click", onLinkClick, true)');
+    const link = pageMessages.get("zoteroinspire:arxiv-html-link")!;
+    const menu = pageMessages.get("zoteroinspire:arxiv-html-menu")!;
+
+    link({ target: page, data: `https://arxiv.org/abs/${ID}v2` });
+    expect(launch).toHaveBeenLastCalledWith(`https://arxiv.org/abs/${ID}v2`);
+    launch.mockClear();
+    // Only web addresses, and only from the pane's page
+    link({ target: page, data: "file:///etc/passwd" });
+    link({ target: page, data: { href: "https://arxiv.org" } });
+    link({ target: {}, data: "https://arxiv.org/abs/1" });
+    expect(launch).not.toHaveBeenCalled();
+
+    const entriesOf = () => {
+      const popup = [...win.document.querySelectorAll("menupopup")].at(-1) as
+        | (HTMLElement & { openPopup: ReturnType<typeof vi.fn> })
+        | undefined;
+      return {
+        popup,
+        entries: [...(popup?.children ?? [])] as HTMLElement[],
+      };
+    };
+    // Nothing selected, no link: no menu
+    menu({ target: page, data: { text: " ", link: "", x: 5, y: 6 } });
+    expect(entriesOf().popup).toBeUndefined();
+    menu({
+      target: page,
+      data: {
+        text: "the ground state",
+        link: "https://doi.org/10.1/x",
+        x: 30,
+        y: 40,
+      },
+    });
+    const { popup, entries } = entriesOf();
+    expect(entries.map((entry) => entry.getAttribute("label"))).toEqual([
+      msg("references-panel-abstract-copy-selection"),
+      msg("arxiv-browser-menu-open-link"),
+      msg("arxiv-browser-menu-copy-link"),
+    ]);
+    // At the click, from the page's corner
+    expect(popup!.openPopup).toHaveBeenCalledWith(
+      page,
+      "overlap",
+      30,
+      40,
+      true,
+    );
+    entries[0].dispatchEvent(new win.Event("command"));
+    await flushPromises();
+    expect(copy).toHaveBeenLastCalledWith("the ground state");
+    entries[1].dispatchEvent(new win.Event("command"));
+    expect(launch).toHaveBeenLastCalledWith("https://doi.org/10.1/x");
+    entries[2].dispatchEvent(new win.Event("command"));
+    await flushPromises();
+    expect(copy).toHaveBeenLastCalledWith("https://doi.org/10.1/x");
+
+    // The window closes: the script and the listeners go
+    env.view.dispose();
+    expect(frameScripts).toEqual([]);
+    expect(pageMessages.size).toBe(0);
+    expect(env.page()).toBeNull();
+  });
+
+  it("reports, in the page, the clicks on links that lead out of it, and right-clicks", async () => {
+    const env = await loaded();
+    env.htmlButton(ID).click();
+    // The page: a document at the paper's address, with the script loaded
+    const page = new JSDOM(
+      `<a id="abs" href="/abs/${ID}v2"><svg><path id="icon"></path></svg></a>
+       <a id="pdf" href="/pdf/${ID}" target="_blank"><span>PDF</span></a>
+       <a id="doi" href="https://doi.org/10.1/x">doi</a>
+       <a id="section" href="#S1"><span>1</span></a>
+       <a id="full" href="${URL}#bib.bib3">[3]</a>
+       <a id="script" href="javascript:toggleNavTOC();%20void%200">toggle</a>
+       <a id="mail" href="mailto:a@b.c">mail</a>
+       <p id="text">no link</p>`,
+      // Its own console: jsdom tells there that it follows no links
+      { url: URL, virtualConsole: new VirtualConsole() },
+    ).window;
+    const sent: Array<[string, unknown]> = [];
+    const run = vi.fn();
+    const listeners: Array<[string, (event: Event) => void, boolean]> = [];
+    let selection = "";
+    new page.Function(
+      "addEventListener",
+      "sendAsyncMessage",
+      "content",
+      decodeURIComponent(frameScripts[0].replace(/^data:[^,]*,/, "")),
+    )(
+      (type: string, listener: (event: Event) => void, capture: boolean) => {
+        listeners.push([type, listener, capture]);
+        page.document.addEventListener(type, listener, capture);
+      },
+      (name: string, data: unknown) => sent.push([name, data]),
+      { location: page.location, getSelection: () => selection },
+    );
+    // The eval of the links' own window
+    (page as any).eval = run;
+    expect(listeners.map(([type, , capture]) => [type, capture])).toEqual([
+      ["click", true],
+      ["auxclick", true],
+      ["click", false],
+      ["contextmenu", false],
+    ]);
+    /** A click on `id`: whether it was left to the page, and what was sent */
+    const press = (id: string, type = "click", button = 0) => {
+      sent.length = 0;
+      const left = page.document.getElementById(id)!.dispatchEvent(
+        new page.MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          button,
+          clientX: 12,
+          clientY: 34,
+        }),
+      );
+      return { left, sent: [...sent] };
+    };
+    const LINK = "zoteroinspire:arxiv-html-link";
+    // Out of the page, also from an element inside the link: reported
+    const abs = press("icon");
+    expect(abs.sent).toEqual([[LINK, `https://arxiv.org/abs/${ID}v2`]]);
+    expect(abs.left).toBe(false);
+    expect(press("pdf").sent).toEqual([[LINK, `https://arxiv.org/pdf/${ID}`]]);
+    expect(press("doi").sent).toEqual([[LINK, "https://doi.org/10.1/x"]]);
+    // The middle button too; the right button asks for the menu
+    expect(press("doi", "auxclick", 1).sent).toHaveLength(1);
+    expect(press("doi", "auxclick", 2).sent).toEqual([]);
+    // Within the page, and other kinds of link: the page's own
+    for (const id of ["section", "full", "mail", "text"]) {
+      expect(press(id)).toEqual({ left: true, sent: [] });
+    }
+    expect(run).not.toHaveBeenCalled();
+
+    // A javascript: link (Zotero follows none): its code is run in the page,
+    // unless the page handled the click itself; not by the other buttons
+    expect(press("script")).toEqual({ left: false, sent: [] });
+    expect(run.mock.calls).toEqual([["toggleNavTOC(); void 0"]]);
+    expect(press("script", "auxclick", 1).sent).toEqual([]);
+    page.document
+      .getElementById("script")!
+      .addEventListener("click", (event) => event.preventDefault(), {
+        once: true,
+      });
+    press("script");
+    expect(run).toHaveBeenCalledTimes(1);
+
+    // A right-click: the selection and the link under it, where it was
+    selection = "the ground state";
+    expect(press("doi", "contextmenu", 2).sent).toEqual([
+      [
+        "zoteroinspire:arxiv-html-menu",
+        {
+          text: "the ground state",
+          link: "https://doi.org/10.1/x",
+          x: 12,
+          y: 34,
+        },
+      ],
+    ]);
+    expect(press("text", "contextmenu", 2).sent[0][1]).toMatchObject({
+      link: "",
+    });
+  });
+
+  it("finds in the page with the platform's find bar: Ctrl/Cmd+F, Ctrl/Cmd+G, Escape", async () => {
+    const env = await loaded();
+    const { root, pane, view, launch } = env;
+    const list = root.querySelector<HTMLElement>(".arxiv-browser__list")!;
+    const pressed = (
+      target: EventTarget,
+      name: string,
+      init: KeyboardEventInit = {},
+    ) => !key(target, name, { cancelable: true, ...init });
+
+    // No page shown: the keys are not taken
+    expect(pressed(list, "f", { metaKey: true })).toBe(false);
+    expect(pressed(list, "g", { metaKey: true })).toBe(false);
+
+    env.htmlButton(ID).click();
+    const page = env.page()!;
+    const bar = env.findBar()!;
+    // Below the page, finding in it; the page's element is of the group
+    // the find bar's actor serves
+    expect(page.nextElementSibling === bar).toBe(true);
+    expect(bar.browser === page).toBe(true);
+    expect(page.getAttribute("messagemanagergroup")).toBe("browsers");
+    // A load moves the page to another process: the bar is told again
+    // (not on XULFrameLoaderCreated: the page's element drops its finder
+    // after that)
+    bar.browser = null;
+    page.dispatchEvent(new win.Event("XULFrameLoaderCreated"));
+    expect(bar.browser).toBeNull();
+    page.dispatchEvent(new win.Event("DidChangeBrowserRemoteness"));
+    expect(bar.browser === page).toBe(true);
+
+    // From the page, the list and the bar's own field
+    expect(pressed(page, "f", { metaKey: true })).toBe(true);
+    expect(bar.onFindCommand).toHaveBeenCalledTimes(1);
+    expect(pressed(list, "f", { ctrlKey: true })).toBe(true);
+    expect(bar.onFindCommand).toHaveBeenCalledTimes(2);
+    const [field, barButton] = [...bar.children];
+    expect(field.tagName).toBe("HTML:INPUT");
+    expect(pressed(field, "g", { metaKey: true })).toBe(true);
+    expect(bar.onFindAgainCommand).toHaveBeenLastCalledWith(false);
+    expect(pressed(page, "G", { metaKey: true, shiftKey: true })).toBe(true);
+    expect(bar.onFindAgainCommand).toHaveBeenLastCalledWith(true);
+
+    // Keys typed in the bar are the bar's, not the list's
+    const focused = view.listPane.focused;
+    for (const typed of ["a", "l", "j", "x", " ", "Enter", "Escape"]) {
+      expect(pressed(field, typed)).toBe(false);
+      expect(pressed(barButton, typed)).toBe(false);
+    }
+    expect(view.listPane.focused).toBe(focused);
+    expect(launch).not.toHaveBeenCalled();
+    expect(bar.hidden).toBe(false);
+
+    // Escape in the page closes the bar, once; then it is the page's key
+    expect(pressed(page, "Escape")).toBe(true);
+    expect(bar.close).toHaveBeenCalledTimes(1);
+    expect(pressed(page, "Escape")).toBe(false);
+    expect(pane.hidden).toBe(false);
+
+    // While the calendar is open: its Escape, also from the find bar, and
+    // no finding
+    pressed(page, "f", { metaKey: true });
+    const days = root.querySelector<HTMLButtonElement>(
+      ".arxiv-browser__days-button",
+    )!;
+    days.click();
+    const calendar = root.querySelector<HTMLElement>(
+      ".arxiv-browser__daypicker",
+    )!;
+    expect(calendar.hidden).toBe(false);
+    expect(pressed(list, "f", { metaKey: true })).toBe(false);
+    expect(pressed(field, "Escape")).toBe(true);
+    expect(calendar.hidden).toBe(true);
+    expect(bar.hidden).toBe(false);
+
+    // Another paper in the same element: the bar closes
+    const other = rows(root).find(
+      (row) =>
+        !row.dataset.entryId!.includes(ID) &&
+        row.querySelector(".arxiv-browser__html-button"),
+    )!;
+    other
+      .querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!
+      .click();
+    expect(env.findBar() === bar).toBe(true);
+    expect(bar.close).toHaveBeenCalledTimes(2);
+
+    // Back to the details: the bar goes with the page
+    pane.querySelector<HTMLButtonElement>("button")!.click();
+    expect(env.findBar()).toBeNull();
+    expect(pressed(list, "f", { metaKey: true })).toBe(false);
+  });
+
+  it("keeps the divider where it is, and its one position for both panes", async () => {
+    const env = await loaded();
+    const { root, list } = env;
+    const main = root.querySelector<HTMLElement>(".arxiv-browser__main")!;
+    const divider = root.querySelector<HTMLElement>(".arxiv-browser__divider")!;
+    main.getBoundingClientRect = () => ({ left: 0, width: 1000 }) as DOMRect;
+    const drag = (clientX: number) => {
+      divider.dispatchEvent(
+        new win.MouseEvent("mousedown", { bubbles: true, button: 0 }),
+      );
+      win.document.dispatchEvent(new win.MouseEvent("mousemove", { clientX }));
+      win.document.dispatchEvent(new win.MouseEvent("mouseup"));
+    };
+    // Set beside the details: the page is shown at that width, also
+    // another paper's
+    drag(500);
+    expect(list.style.flex).toBe("0 0 50%");
+    env.htmlButton(ID).click();
+    expect(list.style.flex).toBe("0 0 50%");
+    rows(root)
+      .find(
+        (row) =>
+          !row.dataset.entryId!.includes(ID) &&
+          row.querySelector(".arxiv-browser__html-button"),
+      )!
+      .querySelector<HTMLButtonElement>(".arxiv-browser__html-button")!
+      .click();
+    expect(list.style.flex).toBe("0 0 50%");
+    // Dragged beside the page: the same position beside the details
+    drag(300);
+    expect(list.style.flex).toBe("0 0 30%");
+    expect(prefs[`${PREFIX}.arxiv_browser_list_share`]).toBe(30);
+
+    root
+      .querySelector<HTMLButtonElement>(".arxiv-browser__html-bar button")!
+      .click();
+    expect(list.style.flex).toBe("0 0 30%");
+    env.htmlButton(ID).click();
+    expect(list.style.flex).toBe("0 0 30%");
   });
 });
 
@@ -2998,6 +3584,30 @@ describe("arXiv browser: adding and relating", () => {
       MENU.save,
       MENU.open,
     ]);
+  });
+
+  it("in a window that shows pages, still opens a saved HTML snapshot in Zotero's reader", async () => {
+    (win.document as any).createXULElement = (tag: string) =>
+      win.document.createElement(tag);
+    const { root, launch, readerOpen, attach, view } = await loaded({
+      related: "2609.28538",
+    });
+    await vi.waitFor(() => expect(dot(rows(root)[0])).toBe("●"));
+    const parts = htmlParts(rows(root)[0]);
+    const pane = root.querySelector<HTMLElement>(".arxiv-browser__html-pane")!;
+    parts.open.click();
+    expect(pane.hidden).toBe(false);
+    pane.querySelector<HTMLButtonElement>("button")!.click();
+    expect(pane.hidden).toBe(true);
+
+    const snapshot = attach(77, "https://arxiv.org/html/2609.28538v1");
+    view.listPane.refreshPdfButtons();
+    parts.open.click();
+    expect(readerOpen).toHaveBeenLastCalledWith(snapshot.id, undefined, {
+      allowDuplicate: false,
+    });
+    expect(pane.hidden).toBe(true);
+    expect(launch).not.toHaveBeenCalled();
   });
 
   it("saves the HTML version of a paper in the library to its item, at the listing's version, once", async () => {

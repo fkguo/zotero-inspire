@@ -127,6 +127,13 @@ export class DetailPane {
     return this.older?.paper.title ?? this.shown?.listing.title;
   }
 
+  /** The title of older version `version` of the paper shown, once fetched */
+  olderTitle(version: number): string | undefined {
+    return this.older?.paper.version === version
+      ? this.older.paper.title
+      : undefined;
+  }
+
   /**
    * Its sections line again, when more of the day's categories list the
    * paper shown (the rest of the pane, a selection in it, stays)

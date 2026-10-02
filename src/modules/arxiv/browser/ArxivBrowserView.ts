@@ -41,6 +41,7 @@ import {
 } from "../listingTypes";
 import {
   abstractPageUrl,
+  htmlUrl,
   BrowserActions,
   windowReporter,
   type BrowserActionsOptions,
@@ -105,6 +106,7 @@ import { htmlSnapshotID } from "../arxivHtmlSnapshot";
 import { arxivPdfVersion } from "../arxivPdf";
 import { countAuthorPapers } from "../../inspire/library/authorCount";
 import { DetailPane } from "./DetailPane";
+import { HtmlPane, type HtmlPaneOptions } from "./HtmlPane";
 import { PaneDivider } from "./PaneDivider";
 import {
   firstUnreadDay,
@@ -190,6 +192,8 @@ export interface ArxivBrowserViewOptions {
   pickTarget?: LibraryActionsOptions["pickTarget"];
   /** Saves an HTML snapshot (default: saveArxivHtmlSnapshot) */
   saveHtmlSnapshot?: LibraryActionsOptions["saveHtmlSnapshot"];
+  /** Loads a page in the HTML pane (default: Zotero's loadURI) */
+  loadHtmlPage?: HtmlPaneOptions["load"];
   /** The INSPIRE completion entry's library, INSPIRE and dialog */
   completion?: Omit<CompletionLineOptions, "reporter">;
   /** The batch import's callbacks (default: arxivBatchImport) */
@@ -228,6 +232,11 @@ export class ArxivBrowserView {
   readonly listPane: ListPane;
   /** The detail pane of the focused paper */
   readonly detail: DetailPane;
+  /**
+   * A paper's HTML version in the detail pane's place (none in a window
+   * that cannot show pages)
+   */
+  readonly htmlPane: HtmlPane | null;
   private readonly divider: PaneDivider;
   private readonly authorCard: AuthorPreviewController;
   private readonly paperCard: HoverPreviewController;
@@ -526,8 +535,27 @@ export class ArxivBrowserView {
       listContainer,
       html(doc, "div", "arxiv-browser__divider"),
     );
-    main.append(listContainer, this.divider.element, detailContainer);
+    const htmlContainer = html(doc, "div", "arxiv-browser__html-pane");
+    htmlContainer.hidden = true;
+    main.append(
+      listContainer,
+      this.divider.element,
+      detailContainer,
+      htmlContainer,
+    );
     root.append(this.toolbar, main, notices);
+    this.htmlPane = HtmlPane.available(doc)
+      ? new HtmlPane({
+          container: htmlContainer,
+          openInWebBrowser: (url) => this.actions.openLink(url),
+          copyText: (text) => void this.actions.copyText(text),
+          // In the detail pane's place, at its width
+          onToggle: (shown) => {
+            detailContainer.hidden = shown;
+          },
+          load: options.loadHtmlPage,
+        })
+      : null;
 
     // Cards: the author's card (INSPIRE's when the paper's record names the
     // author, else the local one), and the paper's card on its title when the
@@ -602,9 +630,10 @@ export class ArxivBrowserView {
       else this.actions.openPdf(entry.listing.id);
     };
     // A paper's HTML version: a snapshot of it saved among its items (opened
-    // in Zotero's reader), otherwise arXiv's, in the web browser. The detail
-    // pane gives the version it shows: a snapshot of that version; the rows
-    // none: any snapshot. arXiv's newest version without a version number.
+    // in Zotero's reader), otherwise arXiv's, in this window beside the list
+    // (the menu also offers the web browser). The detail pane gives the
+    // version it shows: a snapshot of that version; the rows none: any
+    // snapshot. arXiv's newest version without a version number.
     const htmlSnapshot = (entry: BrowserEntry, version?: number) => {
       for (const itemID of entry.localItemIDs ?? []) {
         const attachmentID = htmlSnapshotID(itemID, entry.listing.id, version);
@@ -617,17 +646,48 @@ export class ArxivBrowserView {
         entry.listing.id,
         version === entry.listing.version ? undefined : version,
       );
+    const showHtmlHere = (entry: BrowserEntry, version?: number) => {
+      const { id } = entry.listing;
+      if (!this.htmlPane) {
+        openHtmlOnArxiv(entry, version);
+        return;
+      }
+      // An older version chosen in the detail pane: that version's page,
+      // named with its number, and its title once the pane has it.
+      // Otherwise arXiv's newest (which may be newer than the listing's):
+      // no number
+      const older = version === entry.listing.version ? undefined : version;
+      this.htmlPane.show({
+        id,
+        version: older,
+        title:
+          older === undefined
+            ? entry.listing.title
+            : this.detail.entry === entry
+              ? this.detail.olderTitle(older)
+              : undefined,
+        url: htmlUrl(id, older),
+      });
+    };
     const htmlActions = {
       saved: (entry: BrowserEntry, version?: number) =>
         htmlSnapshot(entry, version) !== null,
       open: (entry: BrowserEntry, version?: number) => {
         const attachmentID = htmlSnapshot(entry, version);
-        if (attachmentID === null) openHtmlOnArxiv(entry, version);
+        if (attachmentID === null) showHtmlHere(entry, version);
         else void openAttachment(attachmentID);
       },
       menu: (entry: BrowserEntry, anchor: HTMLElement, version?: number) => {
         const attachmentID = htmlSnapshot(entry, version);
         showMenu(anchor, [
+          ...(this.htmlPane
+            ? [
+                {
+                  label: getString("arxiv-browser-html-menu-here"),
+                  run: () => showHtmlHere(entry, version),
+                },
+              ]
+            : []),
           {
             label: getString("arxiv-browser-html-menu-browser"),
             run: () => openHtmlOnArxiv(entry, version),
@@ -722,7 +782,7 @@ export class ArxivBrowserView {
       pageSize: size,
       abstractsShown: abstracts.input.checked,
       onRetryDay: (date) => void this.loader.retryDay(date),
-      onFocus: (entry) => this.detail.show(entry),
+      onFocus: (entry) => this.showDetail(entry),
       showInLibrary,
       onLibraryRetry: () => this.recheckLibrary(),
       hasPdf,
@@ -822,6 +882,7 @@ export class ArxivBrowserView {
     this.authorCard.dispose();
     this.paperCard.dispose();
     this.divider.dispose();
+    this.htmlPane?.dispose();
   }
 
   /**
@@ -981,10 +1042,20 @@ export class ArxivBrowserView {
       : undefined;
   }
 
+  /**
+   * The detail pane shows `entry`; another paper's HTML version shown in
+   * its place goes (one being read stays when the list loses its focus)
+   */
+  private showDetail(entry: BrowserEntry | null): void {
+    this.detail.show(entry);
+    const read = this.htmlPane?.paper;
+    if (read && entry && read.id !== entry.listing.id) this.htmlPane?.close();
+  }
+
   /** The detail pane follows the focused paper */
   private showFocused(): void {
     const focused = this.listPane.focused;
-    if (focused && focused !== this.detail.entry) this.detail.show(focused);
+    if (focused && focused !== this.detail.entry) this.showDetail(focused);
     // More of the day's categories may list the paper shown
     else this.detail.refreshSections();
   }
@@ -1505,9 +1576,9 @@ export class ArxivBrowserView {
       this.doc.defaultView?.close();
       return;
     }
-    // Not while the subscription editor or the calendar is open, nor while
-    // typing
+    // Not while the subscription editor is open
     if (this.root.querySelector(".arxiv-browser__backdrop")) return;
+    // Not while the calendar is open
     if (this.dayPicker.isOpen) {
       // Also when the focus has left the calendar
       if (event.key === "Escape") {
@@ -1516,6 +1587,31 @@ export class ArxivBrowserView {
       }
       return;
     }
+    // While a paper's HTML version is shown: find in it (also from the find
+    // bar's own field)
+    const page = this.htmlPane?.paper ? this.htmlPane : null;
+    if (page) {
+      const letter = accel && !event.altKey ? key.toLowerCase() : "";
+      if (letter === "f" && !event.shiftKey) {
+        event.preventDefault();
+        page.find();
+        return;
+      }
+      if (letter === "g") {
+        event.preventDefault();
+        page.findAgain(event.shiftKey);
+        return;
+      }
+      // Escape in the page closes the find bar (in its field, the bar does)
+      if (key === "Escape" && page.isPage(event.target) && page.closeFind()) {
+        event.preventDefault();
+        return;
+      }
+      // Other keys pressed in the page are the page's, those in its find
+      // bar the bar's
+      if (page.isPage(event.target) || page.inFindBar(event.target)) return;
+    }
+    // Nor while typing
     const target = event.target as Element | null;
     const tag = target?.tagName?.toUpperCase() ?? "";
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
