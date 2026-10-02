@@ -18,6 +18,7 @@
 
 import { config } from "../../../../package.json";
 import { getString } from "../../../utils/locale";
+import { renderSupSubText } from "../../../utils/mathTitle";
 import { getPref } from "../../../utils/prefs";
 import {
   DOI_ORG_URL,
@@ -548,7 +549,11 @@ export class EntryListRenderer {
       ".zinspire-ref-entry__title-link",
     ) as HTMLAnchorElement | null;
     if (titleLink) {
-      titleLink.textContent = entry.title + (this.adapter.titleSuffix ?? ";");
+      // cleanMathTitle's <sub>/<sup> markup as elements, not as text
+      renderSupSubText(
+        titleLink,
+        entry.title + (this.adapter.titleSuffix ?? ";"),
+      );
       titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
       titleLink.style.wordBreak = "break-word";
       // Make long titles wrap even when they contain long unbroken segments

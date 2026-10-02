@@ -273,6 +273,64 @@ describe("References panel rows reused for another list", () => {
   });
 });
 
+describe("A title with a subscript that has no Unicode form", () => {
+  // INSPIRE's title, as cleanMathTitle writes "$Z_c(3900)$"
+  const title = "Structure of the Z<sub>c</sub>(3900)";
+  let panel: ReturnType<typeof openPanel> | undefined;
+  afterEach(() => {
+    panel?.controller.destroy();
+    panel = undefined;
+  });
+  const titleLink = (row: HTMLElement) =>
+    row.querySelector(".zinspire-ref-entry__title-link") as HTMLElement;
+
+  it("shows the subscript as an element when the title arrives after the row was drawn", async () => {
+    panel = openPanel();
+    const { controller, rows, show } = panel;
+    const list = [paper("A", 0)];
+    await show(list);
+
+    list[0].title = title;
+    controller.updateRowMetadata(list[0]);
+
+    expect(titleLink(rows()[0]).innerHTML).toBe(`${title};`);
+  });
+
+  it("keeps the abstract tooltip while the pointer moves over the subscript", async () => {
+    panel = openPanel();
+    const { controller, doc, rows, show } = panel;
+    await show([paper("A", 0, { title })]);
+    const row = rows()[0];
+    const link = titleLink(row);
+    const sub = link.querySelector("sub")!;
+    const shows = vi
+      .spyOn(controller, "scheduleAbstractTooltip")
+      .mockImplementation(() => undefined);
+    const hides = vi.spyOn(controller, "doHideTooltip");
+    /** The pointer goes from one element onto another */
+    const move = (from: Element, to: Element) => {
+      const { MouseEvent } = doc.defaultView!;
+      from.dispatchEvent(
+        new MouseEvent("mouseout", { bubbles: true, relatedTarget: to }),
+      );
+      to.dispatchEvent(
+        new MouseEvent("mouseover", { bubbles: true, relatedTarget: from }),
+      );
+    };
+
+    move(row, link);
+    expect([shows.mock.calls.length, hides.mock.calls.length]).toEqual([1, 0]);
+    // Onto the subscript and back onto the text: still the same title
+    move(link, sub);
+    move(sub, link);
+    move(link, sub);
+    expect([shows.mock.calls.length, hides.mock.calls.length]).toEqual([1, 0]);
+    // Off the title, from the subscript
+    move(sub, row);
+    expect([shows.mock.calls.length, hides.mock.calls.length]).toEqual([1, 1]);
+  });
+});
+
 describe("Row actions that show their result after a wait", () => {
   // Adding a paper, Find Full Text and the copy buttons wait for INSPIRE or
   // Zotero before they show their result in the row they were started from.

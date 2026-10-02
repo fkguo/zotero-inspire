@@ -715,6 +715,87 @@ export function cleanMathTitle(title?: string | null): string {
 }
 
 /**
+ * Show a title from cleanMathTitle in an element: its <sub>/<sup> markup
+ * (for characters without a Unicode subscript/superscript) becomes real
+ * elements, everything else text; nothing is parsed as HTML
+ */
+export function renderSupSubText(container: HTMLElement, text: string): void {
+  container.replaceChildren();
+  const doc = container.ownerDocument;
+
+  const value = text ?? "";
+  if (!value) return;
+
+  const lower = value.toLowerCase();
+  const hasSupSub =
+    lower.includes("<sup>") ||
+    lower.includes("</sup>") ||
+    lower.includes("<sub>") ||
+    lower.includes("</sub>");
+  if (!hasSupSub) {
+    container.textContent = value;
+    return;
+  }
+
+  const stack: HTMLElement[] = [];
+  let current: HTMLElement = container;
+  let buffer = "";
+
+  const flush = (): void => {
+    if (!buffer) return;
+    current.appendChild(doc.createTextNode(buffer));
+    buffer = "";
+  };
+
+  let i = 0;
+  while (i < value.length) {
+    if (lower.startsWith("<sup>", i)) {
+      flush();
+      const sup = doc.createElement("sup");
+      current.appendChild(sup);
+      stack.push(current);
+      current = sup;
+      i += "<sup>".length;
+      continue;
+    }
+    if (lower.startsWith("</sup>", i)) {
+      flush();
+      if (current.tagName.toLowerCase() === "sup" && stack.length) {
+        current = stack.pop()!;
+      } else {
+        buffer += value.slice(i, i + "</sup>".length);
+      }
+      i += "</sup>".length;
+      continue;
+    }
+    if (lower.startsWith("<sub>", i)) {
+      flush();
+      const sub = doc.createElement("sub");
+      current.appendChild(sub);
+      stack.push(current);
+      current = sub;
+      i += "<sub>".length;
+      continue;
+    }
+    if (lower.startsWith("</sub>", i)) {
+      flush();
+      if (current.tagName.toLowerCase() === "sub" && stack.length) {
+        current = stack.pop()!;
+      } else {
+        buffer += value.slice(i, i + "</sub>".length);
+      }
+      i += "</sub>".length;
+      continue;
+    }
+
+    buffer += value[i];
+    i += 1;
+  }
+
+  flush();
+}
+
+/**
  * Convert particle notation to proper Unicode symbols
  */
 function convertParticleNotation(text: string): string {
