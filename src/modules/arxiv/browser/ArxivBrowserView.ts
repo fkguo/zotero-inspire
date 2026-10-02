@@ -549,9 +549,9 @@ export class ArxivBrowserView {
           container: htmlContainer,
           openInWebBrowser: (url) => this.actions.openLink(url),
           copyText: (text) => void this.actions.copyText(text),
+          // In the detail pane's place, at its width
           onToggle: (shown) => {
             detailContainer.hidden = shown;
-            this.divider.use(shown ? "html" : "detail");
           },
           load: options.loadHtmlPage,
         })

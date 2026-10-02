@@ -2,22 +2,13 @@
 // The divider between the arXiv browser's list and its detail pane. Dragged
 // with the mouse, or moved with ← / → while it has the focus, it sets the
 // list's share of the width, which the settings keep for the next window.
-// The share is kept twice: beside the detail pane, and beside a paper's HTML
-// version (which wants more room).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getString } from "../../../utils/locale";
 import { getPref, setPref } from "../../../utils/prefs";
 
-/** What the list stands beside: the detail pane or a paper's HTML version */
-export type DividerSide = "detail" | "html";
-
-const SHARE_PREFS = {
-  detail: "arxiv_browser_list_share",
-  html: "arxiv_browser_list_share_html",
-} as const;
 /** The list's share of the width, in percent */
-const DEFAULT_SHARES: Record<DividerSide, number> = { detail: 60, html: 40 };
+const DEFAULT_SHARE = 60;
 const MIN_SHARE = 25;
 const MAX_SHARE = 80;
 /** One press of ← or → */
@@ -27,16 +18,13 @@ const clamp = (share: number) =>
   Math.min(MAX_SHARE, Math.max(MIN_SHARE, Math.round(share)));
 
 /** The list's share of the width from the settings */
-export function listShareSetting(side: DividerSide = "detail"): number {
-  const value = Number(getPref(SHARE_PREFS[side]));
-  return Number.isFinite(value) && value > 0
-    ? clamp(value)
-    : DEFAULT_SHARES[side];
+export function listShareSetting(): number {
+  const value = Number(getPref("arxiv_browser_list_share"));
+  return Number.isFinite(value) && value > 0 ? clamp(value) : DEFAULT_SHARE;
 }
 
 export class PaneDivider {
   private share: number;
-  private side: DividerSide = "detail";
   private dragging = false;
 
   constructor(
@@ -57,13 +45,6 @@ export class PaneDivider {
     element.addEventListener("keydown", this.onKeyDown);
   }
 
-  /** The list stands beside `side` now: the share kept for it */
-  use(side: DividerSide): void {
-    if (side === this.side) return;
-    this.side = side;
-    this.apply(listShareSetting(side));
-  }
-
   dispose(): void {
     this.stopDragging();
     this.element.removeEventListener("mousedown", this.onMouseDown);
@@ -77,7 +58,7 @@ export class PaneDivider {
   }
 
   private save(): void {
-    setPref(SHARE_PREFS[this.side], this.share);
+    setPref("arxiv_browser_list_share", this.share);
   }
 
   private stopDragging(): void {

@@ -1736,8 +1736,8 @@ describe("arXiv browser: the HTML version beside the list", () => {
     // arXiv's newest version (maybe newer than the listing's): no number
     const label = pane.querySelector(".arxiv-browser__html-label")!;
     expect(label.textContent).toContain(`arXiv:${ID} · `);
-    // The list gives the page more room
-    expect(list.style.flex).toBe("0 0 40%");
+    // At the detail pane's width: the divider stays where it is
+    expect(list.style.flex).toBe("0 0 60%");
     // The row's paper is the focused one
     expect(env.view.listPane.focused?.listing.id).toBe(ID);
 
@@ -2065,13 +2065,15 @@ describe("arXiv browser: the HTML version beside the list", () => {
     });
   });
 
-  it("keeps the list's width beside the page apart from the one beside the details", async () => {
+  it("keeps the divider where it is, and its one position for both panes", async () => {
     const env = await loaded();
     const { root, list } = env;
     const main = root.querySelector<HTMLElement>(".arxiv-browser__main")!;
     const divider = root.querySelector<HTMLElement>(".arxiv-browser__divider")!;
     main.getBoundingClientRect = () => ({ left: 0, width: 1000 }) as DOMRect;
     env.htmlButton(ID).click();
+    expect(list.style.flex).toBe("0 0 60%");
+    // Dragged beside the page: the same position beside the details
     divider.dispatchEvent(
       new win.MouseEvent("mousedown", { bubbles: true, button: 0 }),
     );
@@ -2080,13 +2082,12 @@ describe("arXiv browser: the HTML version beside the list", () => {
     );
     win.document.dispatchEvent(new win.MouseEvent("mouseup"));
     expect(list.style.flex).toBe("0 0 30%");
-    expect(prefs[`${PREFIX}.arxiv_browser_list_share_html`]).toBe(30);
-    expect(prefs[`${PREFIX}.arxiv_browser_list_share`]).toBeUndefined();
+    expect(prefs[`${PREFIX}.arxiv_browser_list_share`]).toBe(30);
 
     root
       .querySelector<HTMLButtonElement>(".arxiv-browser__html-bar button")!
       .click();
-    expect(list.style.flex).toBe("0 0 60%");
+    expect(list.style.flex).toBe("0 0 30%");
     env.htmlButton(ID).click();
     expect(list.style.flex).toBe("0 0 30%");
   });
