@@ -648,6 +648,35 @@ describe("arXiv browser: the list", () => {
     return { ...env, view };
   }
 
+  it("shows a title's sub- and superscripts without a Unicode form as elements, not as tags", async () => {
+    const env = environment();
+    subscribe(["hep-ph"]);
+    // The title of arXiv:2610.00138: no Unicode subscript c or superscript *
+    env.site.html(
+      LIST_URL("hep-ph"),
+      newPageHtml("hep-ph", "2026-09-25", [
+        {
+          id: "2609.90001",
+          section: "new",
+          primary: "hep-ph",
+          title: String.raw`M1 Radiative Transitions in the $B_c$ System after the $B_c^\ast(1S)$ Observation`,
+        },
+      ]),
+    );
+    env.open();
+    await env.settle();
+
+    const title = rows(env.root)[0].querySelector(
+      ".zinspire-ref-entry__title-link",
+    )!;
+    expect(title.innerHTML).toBe(
+      "M1 Radiative Transitions in the B<sub>c</sub> System after the B<sub>c</sub><sup>*</sup>(1S) Observation",
+    );
+    expect(title.textContent).toBe(
+      "M1 Radiative Transitions in the Bc System after the Bc*(1S) Observation",
+    );
+  });
+
   it("keeps only the chosen categories' papers with the chips, each where that category lists it", async () => {
     const env = environment();
     subscribe(["hep-ph", "hep-lat", "hep-ex"]);

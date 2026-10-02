@@ -240,6 +240,60 @@ describe("References panel row", () => {
   });
 });
 
+describe("a title with sub- and superscripts that have no Unicode form", () => {
+  // cleanMathTitle writes them as <sub>…</sub> and <sup>…</sup>
+  const title =
+    "Decays of the B<sub>c</sub><sup>*</sup> and the Z<sub>c</sub>(3900)";
+
+  it("shows them as elements, not as tags", () => {
+    const renderer = new EntryListRenderer({ document: main.document });
+    const link = part(
+      renderer.createRow(paper({ title }), context()),
+      "title-link",
+    );
+
+    expect(link.innerHTML).toBe(`${title};`);
+    expect(link.textContent).toBe("Decays of the Bc* and the Zc(3900);");
+    expect([...link.children].map((el) => el.localName)).toEqual([
+      "sub",
+      "sup",
+      "sub",
+    ]);
+  });
+
+  it("keeps none of them when the row is redrawn for another paper", () => {
+    const renderer = new EntryListRenderer({ document: main.document });
+    const list = main.document.createElement("div");
+    const first = renderer.createRow(paper({ title }), context());
+    list.appendChild(first);
+    renderer.recycleRowsFromContainer(list);
+    renderer.clearCache();
+    const next = renderer.createRow(
+      paper({ id: "0-7", recid: "7", title: "Another paper" }),
+      context(),
+    );
+
+    expect(next === first).toBe(true);
+    expect(part(next, "title-link").innerHTML).toBe("Another paper;");
+  });
+
+  it("shows any other markup of a title as text", () => {
+    const renderer = new EntryListRenderer({ document: main.document });
+    const markup =
+      'x<sub>c</sub> <img src="x" onerror="alert(1)"> <b>b</b> a<b';
+    const link = part(
+      renderer.createRow(paper({ title: markup }), context()),
+      "title-link",
+    );
+
+    expect(link.textContent).toBe(
+      'xc <img src="x" onerror="alert(1)"> <b>b</b> a<b;',
+    );
+    expect([...link.children].map((el) => el.localName)).toEqual(["sub"]);
+    expect(link.querySelector("img, b")).toBeNull();
+  });
+});
+
 describe("rows of a list with its own choices", () => {
   /** Choices a list of arXiv papers would make. */
   const arxivList: EntryRowAdapter = {

@@ -11,7 +11,7 @@ import { literatureSearchHistory } from "./inspire/searchHistory";
 import { FilterHistoryInput } from "./inspire/panel/FilterHistoryInput";
 import { QuickFiltersControl } from "./inspire/panel/QuickFiltersControl";
 import { setQuickFilter } from "./inspire/filters";
-import { cleanMathTitle } from "../utils/mathTitle";
+import { cleanMathTitle, renderSupSubText } from "../utils/mathTitle";
 import { getJournalAbbreviations } from "../utils/journalAbbreviations";
 import { getLocaleID, getString } from "../utils/locale";
 import type { FluentMessageId } from "../../typings/i10n";
@@ -6021,6 +6021,9 @@ export class InspireReferencePanelController {
         ".zinspire-ref-entry__title-link",
       ) as HTMLElement | null;
       if (titleLink && entry) {
+        // From the title's text onto one of its sub/superscripts or back:
+        // the pointer has not left the title
+        if (titleLink.contains(event.relatedTarget as Node | null)) return;
         this.scheduleAbstractTooltip(entry, titleLink);
         return;
       }
@@ -6065,6 +6068,8 @@ export class InspireReferencePanelController {
       // Title link mouseout - hide tooltip
       const titleLink = target.closest(".zinspire-ref-entry__title-link");
       if (titleLink) {
+        // Still within the title (see the mouseover handler)
+        if (titleLink.contains(event.relatedTarget as Node | null)) return;
         this.handleTitleMouseLeave(event);
         return;
       }
@@ -11442,7 +11447,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       ".zinspire-ref-entry__title-link",
     ) as HTMLAnchorElement;
     if (titleLink) {
-      titleLink.textContent = entry.title + ";";
+      renderSupSubText(titleLink, entry.title + ";");
       titleLink.href = entry.inspireUrl || entry.fallbackUrl || "#";
     }
 

@@ -24,3 +24,15 @@ describe("cleanMathTitle particle notation", () => {
     );
   });
 });
+
+describe("cleanMathTitle sub- and superscripts", () => {
+  it("writes a superscript \\ast as it writes a superscript *", () => {
+    // arXiv:2610.00138's title has $B_c^\ast(1S)$
+    expect(
+      cleanMathTitle(String.raw`The $B_c$ system after the $B_c^\ast(1S)$`),
+    ).toBe("The B<sub>c</sub> system after the B<sub>c</sub><sup>*</sup>(1S)");
+    expect(cleanMathTitle(String.raw`$D^\ast\bar{D}^{\ast}$ and $D^*$`)).toBe(
+      "D<sup>*</sup>D̄<sup>*</sup> and D<sup>*</sup>",
+    );
+  });
+});

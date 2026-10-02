@@ -881,6 +881,30 @@ describe("cards", () => {
     expect(browser).toContain(msg("references-panel-copy-bibtex"));
     expect(browser).not.toContain("T");
   });
+
+  it("shows a title's sub- and superscripts without a Unicode form as elements on the card", () => {
+    const renderer = new HoverPreviewRenderer({ document: win.document });
+    const card = renderer.createCard();
+    renderer.buildContent(card, {
+      entry: {
+        id: "e1",
+        title: "",
+        // An arXiv listing's title, as the list's entries keep it
+        titleOriginal: String.raw`The $B_c^\ast(1S)$ observation`,
+        year: "2026",
+        authors: ["Author, A."],
+        authorText: "Author, A.",
+        displayText: "",
+        searchText: "",
+      },
+      onAdd: vi.fn(),
+      onCopyBibtex: vi.fn(),
+      onCopyTexkey: vi.fn(),
+    });
+    expect(card.querySelector(".zinspire-preview-card__title")!.innerHTML).toBe(
+      "The B<sub>c</sub><sup>*</sup>(1S) observation",
+    );
+  });
 });
 
 describe("divider", () => {

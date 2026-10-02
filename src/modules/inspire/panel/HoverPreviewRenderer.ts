@@ -17,7 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getString } from "../../../utils/locale";
-import { cleanMathTitle } from "../../../utils/mathTitle";
+import { cleanMathTitle, renderSupSubText } from "../../../utils/mathTitle";
 import {
   ARXIV_ABS_URL,
   DOI_ORG_URL,
@@ -175,81 +175,6 @@ export class HoverPreviewRenderer {
   // Content Building
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private renderSupSubText(container: HTMLElement, text: string): void {
-    container.replaceChildren();
-
-    const value = text ?? "";
-    if (!value) return;
-
-    const lower = value.toLowerCase();
-    const hasSupSub =
-      lower.includes("<sup>") ||
-      lower.includes("</sup>") ||
-      lower.includes("<sub>") ||
-      lower.includes("</sub>");
-    if (!hasSupSub) {
-      container.textContent = value;
-      return;
-    }
-
-    const stack: HTMLElement[] = [];
-    let current: HTMLElement = container;
-    let buffer = "";
-
-    const flush = (): void => {
-      if (!buffer) return;
-      current.appendChild(this.doc.createTextNode(buffer));
-      buffer = "";
-    };
-
-    let i = 0;
-    while (i < value.length) {
-      if (lower.startsWith("<sup>", i)) {
-        flush();
-        const sup = this.doc.createElement("sup");
-        current.appendChild(sup);
-        stack.push(current);
-        current = sup;
-        i += "<sup>".length;
-        continue;
-      }
-      if (lower.startsWith("</sup>", i)) {
-        flush();
-        if (current.tagName.toLowerCase() === "sup" && stack.length) {
-          current = stack.pop()!;
-        } else {
-          buffer += value.slice(i, i + "</sup>".length);
-        }
-        i += "</sup>".length;
-        continue;
-      }
-      if (lower.startsWith("<sub>", i)) {
-        flush();
-        const sub = this.doc.createElement("sub");
-        current.appendChild(sub);
-        stack.push(current);
-        current = sub;
-        i += "<sub>".length;
-        continue;
-      }
-      if (lower.startsWith("</sub>", i)) {
-        flush();
-        if (current.tagName.toLowerCase() === "sub" && stack.length) {
-          current = stack.pop()!;
-        } else {
-          buffer += value.slice(i, i + "</sub>".length);
-        }
-        i += "</sub>".length;
-        continue;
-      }
-
-      buffer += value[i];
-      i += 1;
-    }
-
-    flush();
-  }
-
   /**
    * Build the preview card content.
    * Clears existing content and rebuilds with entry data.
@@ -271,7 +196,7 @@ export class HoverPreviewRenderer {
         ? entry.titleOriginal
         : entry.title || "";
     const cleanedTitle = cleanMathTitle(titleCandidate);
-    this.renderSupSubText(titleEl, cleanedTitle || s.noTitle);
+    renderSupSubText(titleEl, cleanedTitle || s.noTitle);
     card.appendChild(titleEl);
 
     // Authors
