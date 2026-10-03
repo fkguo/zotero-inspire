@@ -22,6 +22,7 @@
 
 import { getString } from "../../utils/locale";
 import { firstAttachmentID } from "../inspire/library/localPdf";
+import { fetchArxivApiEntries } from "./arxivApi";
 import {
   ArxivFetchError,
   getArxivWebScheduler,
@@ -161,6 +162,72 @@ export async function saveArxivHtmlSnapshot(
       return fail("noHtml", `arXiv has no HTML version at ${url}`);
     }
     return fail("capture", String(err));
+  }
+}
+
+/** What came of a request to save a paper's HTML version to an item */
+export type HtmlSaveOutcome =
+  | {
+      /** Saved now, or that version was there already */
+      status: "saved" | "there";
+      version: number;
+      attachmentID: number;
+    }
+  | {
+      status: "failed";
+      /** Absent: the arXiv API gave no version */
+      version?: number;
+      reason: HtmlSnapshotFailure;
+      message: string;
+    };
+
+export interface HtmlSaveOptions {
+  /** Saves the snapshot (default: saveArxivHtmlSnapshot) */
+  saveHtmlSnapshot?: typeof saveArxivHtmlSnapshot;
+  /** Asks the arXiv API for versions (default: fetchArxivApiEntries) */
+  apiEntries?: typeof fetchArxivApiEntries;
+}
+
+/**
+ * Save arXiv's HTML version of paper `id` at `version` (absent: the newest,
+ * as the arXiv API gives it) to `item`, unless that version is there already
+ */
+export async function saveArxivHtmlVersion(
+  item: Zotero.Item,
+  id: string,
+  version: number | undefined,
+  options: HtmlSaveOptions = {},
+): Promise<HtmlSaveOutcome> {
+  try {
+    if (version === undefined) {
+      const api = await (options.apiEntries ?? fetchArxivApiEntries)([id]);
+      version = api.entries.get(id)?.version;
+    }
+    if (version === undefined) {
+      return {
+        status: "failed",
+        reason: "capture",
+        message: "The arXiv API gave no version",
+      };
+    }
+    const there = htmlSnapshotID(item.id, id, version);
+    if (there !== null) {
+      return { status: "there", version, attachmentID: there };
+    }
+    const result = await (options.saveHtmlSnapshot ?? saveArxivHtmlSnapshot)(
+      item,
+      { id, version },
+    );
+    return result.status === "saved"
+      ? { status: "saved", version, attachmentID: result.attachment.id }
+      : { ...result, version };
+  } catch (error) {
+    return {
+      status: "failed",
+      ...(version === undefined ? {} : { version }),
+      reason: "capture",
+      message: String(error),
+    };
   }
 }
 

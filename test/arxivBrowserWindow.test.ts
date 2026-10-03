@@ -179,6 +179,55 @@ describe("arXiv browser window", () => {
     expect(openDialog).toHaveBeenCalledTimes(2);
   });
 
+  it("opened at a paper, shows its HTML version once the window has loaded", () => {
+    const showHtml = vi.fn();
+    const paper = { id: "2609.35133", title: "The Dπ and D*π femtoscopy puzzle" };
+    openArxivBrowser(paper);
+    expect(openDialog).toHaveBeenCalledTimes(1);
+    expect(showHtml).not.toHaveBeenCalled();
+
+    onArxivBrowserLoad(browser as unknown as Window, () => ({
+      showHtml,
+      dispose: vi.fn(),
+    }));
+
+    expect(showHtml).toHaveBeenCalledTimes(1);
+    expect(showHtml).toHaveBeenCalledWith(paper);
+  });
+
+  it("asked for a paper while open, brings the window to the front and shows it", () => {
+    const showHtml = vi.fn();
+    openArxivBrowser();
+    // Asked again while the window loads: the last paper asked for
+    openArxivBrowser({ id: "2609.00001" });
+    openArxivBrowser({ id: "2609.00002" });
+    onArxivBrowserLoad(browser as unknown as Window, () => ({
+      showHtml,
+      dispose: vi.fn(),
+    }));
+    expect(showHtml.mock.calls).toEqual([[{ id: "2609.00002" }]]);
+
+    openArxivBrowser({ id: "hep-ph/0101001" });
+
+    expect(openDialog).toHaveBeenCalledTimes(1);
+    expect(showHtml).toHaveBeenLastCalledWith({ id: "hep-ph/0101001" });
+    expect(browser.focus).toHaveBeenCalledTimes(3);
+  });
+
+  it("forgets the paper asked for when the window closes before it loaded", () => {
+    const showHtml = vi.fn();
+    openArxivBrowser({ id: "2609.00001" });
+    closeArxivBrowser();
+
+    openArxivBrowser();
+    onArxivBrowserLoad(browser as unknown as Window, () => ({
+      showHtml,
+      dispose: vi.fn(),
+    }));
+
+    expect(showHtml).not.toHaveBeenCalled();
+  });
+
   it("builds its content into the window when it loads", () => {
     onArxivBrowserLoad(browser as unknown as Window);
 
