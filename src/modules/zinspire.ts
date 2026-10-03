@@ -267,7 +267,11 @@ import {
   openLocalPdf,
   showFullTextSearch,
 } from "./inspire/library/localPdf";
-import { htmlSnapshotID, saveArxivHtmlVersion } from "./arxiv/arxivHtmlSnapshot";
+import {
+  htmlSnapshotAmong,
+  htmlSnapshotVersion,
+  saveArxivHtmlVersion,
+} from "./arxiv/arxivHtmlSnapshot";
 import { htmlSaveText } from "./arxiv/browser/browserText";
 import { openArxivBrowser } from "./arxiv/browser/browserWindow";
 import { showMenu } from "./arxiv/browser/dom";
@@ -2361,6 +2365,10 @@ export class InspireReferencePanelController {
     this.entryRenderer = new EntryListRenderer({
       document: this.listEl.ownerDocument,
       maxPoolSize: this.maxRowPoolSize,
+      adapter: {
+        arxivHtmlSaved: (entry, id) =>
+          this.arxivHtmlSnapshotOf(entry, id) !== null,
+      },
     });
 
     // Phase 0.4 Refactor: Initialize HoverPreviewController for preview card
@@ -8081,12 +8089,25 @@ export class InspireReferencePanelController {
         continue;
       }
 
-      // PDF attachment added: refresh PDF button state for entries pointing to its parent item.
-      // This covers PDFs added outside the panel (or with delayed notifier timing).
+      // An attachment added: refresh the buttons of the papers of its parent item
       const parentItemID = (item as any)?.parentItemID as number | undefined;
       if (typeof parentItemID !== "number" || parentItemID <= 0) {
         continue;
       }
+      // A snapshot of arXiv's HTML version (saved from the arXiv window, or
+      // from another list): its papers' "HTML" turns green
+      if (item.attachmentContentType === "text/html") {
+        for (const entry of this.allEntries) {
+          if (!this.itemsOfPaper(entry).includes(parentItemID)) continue;
+          const id = formatArxivDetails(entry.arxivDetails)?.id;
+          if (id && htmlSnapshotVersion(item, id) !== null) {
+            this.redrawArxivHtml(entry);
+          }
+        }
+        continue;
+      }
+      // PDF attachment added: refresh PDF button state for entries pointing to its parent item.
+      // This covers PDFs added outside the panel (or with delayed notifier timing).
       if (!item.isPDFAttachment?.()) {
         continue;
       }
@@ -11424,6 +11445,9 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
         renderPdfButtonIcon(doc, pdfButton, PdfButtonState.DISABLED);
       }
     }
+
+    // "HTML": green once a snapshot is saved among the paper's items
+    this.entryRenderer?.updateArxivHtml(row, entry);
   }
 
   /**
@@ -16581,10 +16605,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   ): void {
     const id = formatArxivDetails(entry.arxivDetails)?.id;
     if (!id) return;
-    const snapshotID =
-      (entry.localItemIDs ?? (entry.localItemID ? [entry.localItemID] : []))
-        .map((itemID) => htmlSnapshotID(itemID, id))
-        .find((found) => found !== null) ?? null;
+    const snapshotID = this.arxivHtmlSnapshotOf(entry, id);
     showMenu(anchor, [
       {
         label: getString("references-panel-arxiv-html-show"),
@@ -16608,6 +16629,25 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
             },
           ]),
     ]);
+  }
+
+  /** Draw the paper's "HTML" again in its row, if one shows the paper */
+  private redrawArxivHtml(entry: InspireReferenceEntry): void {
+    const row = this.rowShowing(entry, this.rowCache.get(entry.id));
+    if (row) this.entryRenderer?.updateArxivHtml(row, entry);
+  }
+
+  /** A saved snapshot of the paper's HTML version among its items, or null */
+  private arxivHtmlSnapshotOf(
+    entry: InspireReferenceEntry,
+    id: string,
+  ): number | null {
+    return htmlSnapshotAmong(this.itemsOfPaper(entry), id);
+  }
+
+  /** The library items of the paper */
+  private itemsOfPaper(entry: InspireReferenceEntry): number[] {
+    return entry.localItemIDs ?? (entry.localItemID ? [entry.localItemID] : []);
   }
 
   /**
@@ -16635,6 +16675,8 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       const outcome = await saveArxivHtmlVersion(item, id, undefined);
       progress.close();
       this.showToast(htmlSaveText(id, outcome));
+      // "HTML" turns green (also when it was saved before from elsewhere)
+      if (outcome.status !== "failed") this.redrawArxivHtml(entry);
     } finally {
       InspireReferencePanelController.savingArxivHtml.delete(id);
     }

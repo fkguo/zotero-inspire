@@ -103,7 +103,7 @@ import {
   openAttachment,
   openLocalPdf,
 } from "../../inspire/library/localPdf";
-import { htmlSnapshotID } from "../arxivHtmlSnapshot";
+import { htmlSnapshotAmong } from "../arxivHtmlSnapshot";
 import { arxivPdfVersion } from "../arxivPdf";
 import { countAuthorPapers } from "../../inspire/library/authorCount";
 import { DetailPane } from "./DetailPane";
@@ -648,13 +648,8 @@ export class ArxivBrowserView {
     // (the menu also offers the web browser). The detail pane gives the
     // version it shows: a snapshot of that version; the rows none: any
     // snapshot. arXiv's newest version without a version number.
-    const htmlSnapshot = (entry: BrowserEntry, version?: number) => {
-      for (const itemID of entry.localItemIDs ?? []) {
-        const attachmentID = htmlSnapshotID(itemID, entry.listing.id, version);
-        if (attachmentID !== null) return attachmentID;
-      }
-      return null;
-    };
+    const htmlSnapshot = (entry: BrowserEntry, version?: number) =>
+      htmlSnapshotAmong(entry.localItemIDs ?? [], entry.listing.id, version);
     const openHtmlOnArxiv = (entry: BrowserEntry, version?: number) =>
       this.actions.openHtml(
         entry.listing.id,

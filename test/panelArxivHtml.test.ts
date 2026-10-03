@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   openArxivBrowser: vi.fn(),
   showMenu: vi.fn(),
-  htmlSnapshotID: vi.fn((): number | null => null),
   saveArxivHtmlVersion: vi.fn(),
   notify: vi.fn(),
   progressClose: vi.fn(),
@@ -27,7 +26,6 @@ vi.mock("../src/modules/arxiv/arxivHtmlSnapshot", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("../src/modules/arxiv/arxivHtmlSnapshot")
   >()),
-  htmlSnapshotID: mocks.htmlSnapshotID,
   saveArxivHtmlVersion: mocks.saveArxivHtmlVersion,
 }));
 vi.mock(
@@ -61,7 +59,27 @@ import { stopLibraryIndex } from "../src/modules/inspire/library/arxivIndex";
 // a snapshot (a paper not in the library is added first), and open the
 // snapshot once saved.
 
-const ITEM = { id: 900, libraryID: 1, getField: () => "Dπ femtoscopy" };
+/** The attachments of the library's items, by parent */
+const attachments = new Map<number, number[]>();
+/** A library item of the paper */
+function libraryItem(id: number) {
+  return {
+    id,
+    libraryID: 1,
+    getField: () => "Dπ femtoscopy",
+    getAttachments: () => attachments.get(id) ?? [],
+  };
+}
+const ITEM = libraryItem(900);
+/** Attachment 77: a snapshot of arXiv's HTML version of the paper */
+const SNAPSHOT = {
+  id: 77,
+  parentItemID: 901,
+  attachmentContentType: "text/html",
+  getField: (field: string) =>
+    field === "url" ? "https://arxiv.org/html/2609.35133v1" : "",
+  isRegularItem: () => false,
+};
 
 beforeEach(() => {
   vi.stubGlobal("Zotero", {
@@ -73,7 +91,13 @@ beforeEach(() => {
     },
     Items: {
       get: (id: number) =>
-        id === ITEM.id ? ITEM : id === 901 ? { ...ITEM, id } : null,
+        id === ITEM.id
+          ? ITEM
+          : id === 901
+            ? libraryItem(901)
+            : id === SNAPSHOT.id
+              ? SNAPSHOT
+              : null,
     },
     Libraries: { get: () => ({ name: "My Library" }) },
     // An empty library: a paper is looked up there before it is added
@@ -95,7 +119,7 @@ beforeEach(() => {
   });
   mocks.lookup = null;
   for (const mock of Object.values(mocks)) mock?.mockReset();
-  mocks.htmlSnapshotID.mockReturnValue(null);
+  attachments.clear();
   mocks.startProgress.mockReturnValue({
     update: vi.fn(),
     close: mocks.progressClose,
@@ -192,6 +216,15 @@ function paper(fields: Partial<InspireReferenceEntry> = {}) {
   } as InspireReferenceEntry;
 }
 
+/** The state of the HTML button of the panel's (only) row */
+function htmlState() {
+  return (
+    panel!.controller.listEl.querySelector(
+      ".zinspire-ref-entry__html",
+    ) as HTMLElement
+  ).dataset.state;
+}
+
 /** Click "HTML" of the panel's (only) row: the menu's entries */
 async function openMenu(entry: InspireReferenceEntry) {
   panel?.controller.destroy();
@@ -223,24 +256,87 @@ describe("HTML after the arXiv number in the References panel", () => {
       title: "The Dπ and D*π femtoscopy puzzle",
     });
 
-    // A paper with a snapshot among its items
+    // A paper with a snapshot among its items: green, with the snapshot
+    // in the menu
     mocks.showMenu.mockReset();
-    mocks.htmlSnapshotID.mockImplementation(((itemID: number) =>
-      itemID === 901 ? 77 : null) as any);
+    attachments.set(901, [SNAPSHOT.id]);
     const saved = await openMenu(
       paper({ localItemID: 900, localItemIDs: [900, 901] }),
     );
+    expect(htmlState()).toBe("saved");
     expect(saved.map((e) => e.label)).toEqual([
       msg("references-panel-arxiv-html-show"),
       msg("arxiv-browser-html-menu-save"),
       msg("arxiv-browser-html-menu-open"),
     ]);
-    expect(mocks.htmlSnapshotID).toHaveBeenCalledWith(900, "2609.35133");
-    expect(mocks.htmlSnapshotID).toHaveBeenCalledWith(901, "2609.35133");
+  });
+
+  it("turns HTML green once the library lookup after the first drawing finds the paper's items", async () => {
+    // A list's rows are drawn before the paper is looked up in the library
+    const entry = paper();
+    attachments.set(901, [SNAPSHOT.id]);
+    await openMenu(entry);
+    expect(htmlState()).toBe("online");
+    const before = panel!.controller.listEl.querySelector(
+      ".zinspire-ref-entry__html",
+    );
+
+    entry.localItemID = 900;
+    entry.localItemIDs = [900, 901];
+    panel!.controller.updateRowStatus(entry);
+
+    expect(htmlState()).toBe("saved");
+    // In the same place on the line, the rest of the line kept
+    const html = panel!.controller.listEl.querySelector(
+      ".zinspire-ref-entry__html",
+    ) as HTMLElement;
+    expect(html).not.toBe(before);
+    expect(html.previousSibling?.previousSibling?.textContent).toBe(
+      "[arXiv:2609.35133]",
+    );
+  });
+
+  it("turns HTML green when a snapshot of the paper is added to one of its items", async () => {
+    await openMenu(paper({ localItemID: 900, localItemIDs: [900, 901] }));
+    expect(htmlState()).toBe("online");
+
+    // Saved elsewhere (the arXiv window): Zotero announces the attachment
+    attachments.set(901, [SNAPSHOT.id]);
+    await panel!.controller.handleItemAdded([SNAPSHOT.id]);
+
+    expect(htmlState()).toBe("saved");
+  });
+
+  it("leaves HTML as it is when another web page is saved to the paper's item", async () => {
+    await openMenu(paper({ localItemID: 900, localItemIDs: [900, 901] }));
+    const page = {
+      ...SNAPSHOT,
+      id: 78,
+      getField: (field: string) =>
+        field === "url" ? "https://example.com/talk.html" : "",
+    };
+    const get = Zotero.Items.get;
+    Zotero.Items.get = ((id: number) => (id === 78 ? page : get(id))) as any;
+    attachments.set(901, [78]);
+    const before = panel!.controller.listEl.querySelector(
+      ".zinspire-ref-entry__html",
+    );
+
+    await panel!.controller.handleItemAdded([78]);
+
+    expect(htmlState()).toBe("online");
+    expect(
+      panel!.controller.listEl.querySelector(".zinspire-ref-entry__html"),
+    ).toBe(before);
   });
 
   it("saves the newest HTML version of a paper in the library to its item", async () => {
     const entries = await openMenu(paper({ localItemID: ITEM.id }));
+    expect(htmlState()).toBe("online");
+    mocks.saveArxivHtmlVersion.mockImplementation(async () => {
+      attachments.set(ITEM.id, [SNAPSHOT.id]);
+      return { status: "saved", version: 2, attachmentID: SNAPSHOT.id };
+    });
     entries[1].run();
 
     await vi.waitFor(() => expect(mocks.notify).toHaveBeenCalled());
@@ -256,6 +352,8 @@ describe("HTML after the arXiv number in the References panel", () => {
     expect(mocks.notify).toHaveBeenCalledExactlyOnceWith(
       msg("arxiv-browser-html-saved", { id: "2609.35133", version: 2 }),
     );
+    // The row's HTML turns green
+    expect(htmlState()).toBe("saved");
   });
 
   it("adds a paper not in the library first, where the user chooses, then saves", async () => {

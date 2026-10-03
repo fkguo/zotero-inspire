@@ -182,7 +182,7 @@ In the window, the page has the detail pane's width (drag the divider or enlarge
 
 Saving uses Zotero's own web snapshot of the listed version, titled "arXiv HTML vN", attached to the paper's item (the paper is added first if needed). The snapshot is a copy of arXiv's full-text HTML page, formulas and figures included; read and annotate it in Zotero's reader. Like other attachments it syncs, so it can also be read in Zotero's mobile apps.
 
-In the INSPIRE References panel, **HTML** after a paper's arXiv number opens a menu: **Show in the arXiv Browser** opens the window (or brings it to the front) with arXiv's HTML version of the paper on its right-hand side, the list unchanged; **Save HTML Snapshot to the Library** saves the newest version to the paper's item (a paper not in your library is added first, where you choose); **Open Snapshot in Zotero** appears once a snapshot is saved.
+In the INSPIRE References panel, **HTML** after a paper's arXiv number opens a menu: **Show in the arXiv Browser** opens the window (or brings it to the front) with arXiv's HTML version of the paper on its right-hand side, the list unchanged; **Save HTML Snapshot to the Library** saves the newest version to the paper's item (a paper not in your library is added first, where you choose); once a snapshot is saved, the button is green with a ✓ and the menu also offers **Open Snapshot in Zotero**.
 
 ### Requests to arXiv
 

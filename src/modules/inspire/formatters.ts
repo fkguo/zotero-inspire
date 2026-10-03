@@ -45,6 +45,7 @@ export function getCachedStrings(): Record<string, string> {
       noTitle: getString("references-panel-no-title"),
       arxivHtml: getString("arxiv-browser-open-html-button"),
       arxivHtmlTitle: getString("references-panel-arxiv-html"),
+      arxivHtmlSavedTitle: getString("references-panel-arxiv-html-saved"),
       // Abstract tooltip strings
       noAbstract: getString("references-panel-no-abstract"),
       loadingAbstract: getString("references-panel-loading-abstract"),
