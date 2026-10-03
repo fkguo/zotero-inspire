@@ -15,9 +15,12 @@ import {
 import {
   addArxivBrowserButton,
   ARXIV_BROWSER_BUTTON_ID,
+  orderWithPaneAfter,
   registerArxivBrowserMenu,
+  registerArxivBrowserSidenav,
   removeArxivBrowserButton,
   unregisterArxivBrowserMenu,
+  unregisterArxivBrowserSidenav,
 } from "../src/modules/arxiv/browser/browserEntryPoints";
 import type { ArxivBrowserViewOptions } from "../src/modules/arxiv/browser/ArxivBrowserView";
 import {
@@ -58,6 +61,11 @@ let menus: {
   registerMenu: ReturnType<typeof vi.fn>;
   unregisterMenu: ReturnType<typeof vi.fn>;
 };
+let sections: {
+  registerSection: ReturnType<typeof vi.fn>;
+  unregisterSection: ReturnType<typeof vi.fn>;
+};
+let prefs: Map<string, string>;
 
 function newWindow(html: string): DOMWindow {
   return new JSDOM(html, { url: "https://zotero.test/" }).window;
@@ -84,27 +92,38 @@ beforeEach(() => {
   // (pluginAPIBase.mjs _namespacedMainKey); jsdom has no CSS.escape, and
   // for these IDs it escapes the "@" and "." of the plugin's ID
   const registered = new Set<string>();
+  const escapedKey = (pluginID: string, id: string) =>
+    `${pluginID}-${id}`.replace(/[^A-Za-z0-9_-]/g, (char) => `\\${char}`);
   menus = {
     registerMenu: vi.fn((options: { menuID: string; pluginID: string }) => {
-      const key = `${options.pluginID}-${options.menuID}`.replace(
-        /[^A-Za-z0-9_-]/g,
-        (char) => `\\${char}`,
-      );
+      const key = escapedKey(options.pluginID, options.menuID);
       registered.add(key);
       return key;
     }),
     unregisterMenu: vi.fn((key: string) => registered.delete(key)),
   };
+  // Sections are keyed the same way, by pluginID + "-" + paneID
+  sections = {
+    registerSection: vi.fn((options: { paneID: string; pluginID: string }) =>
+      escapedKey(options.pluginID, options.paneID),
+    ),
+    unregisterSection: vi.fn(() => true),
+  };
+  prefs = new Map();
   vi.stubGlobal("Zotero", {
     debug: vi.fn(),
     getMainWindow: () => main,
     getMainWindows: () => [main],
     MenuManager: menus,
+    ItemPaneManager: sections,
     Notifier: {
       registerObserver: vi.fn(() => "observer"),
       unregisterObserver: vi.fn(),
     },
-    Prefs: { get: () => undefined, set: vi.fn() },
+    Prefs: {
+      get: (key: string) => prefs.get(key),
+      set: (key: string, value: string) => prefs.set(key, value),
+    },
   });
   vi.stubGlobal("Services", { wm: mediator });
   vi.stubGlobal("addon", {
@@ -124,6 +143,7 @@ afterEach(() => {
   // Leave no window behind for the next test
   closeArxivBrowser();
   unregisterArxivBrowserMenu();
+  unregisterArxivBrowserSidenav();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -181,7 +201,10 @@ describe("arXiv browser window", () => {
 
   it("opened at a paper, shows its HTML version once the window has loaded", () => {
     const showHtml = vi.fn();
-    const paper = { id: "2609.35133", title: "The Dπ and D*π femtoscopy puzzle" };
+    const paper = {
+      id: "2609.35133",
+      title: "The Dπ and D*π femtoscopy puzzle",
+    };
     openArxivBrowser(paper);
     expect(openDialog).toHaveBeenCalledTimes(1);
     expect(showHtml).not.toHaveBeenCalled();
@@ -338,6 +361,9 @@ describe("where the arXiv browser opens from", () => {
       (menu: { menuType: string }) => menu.menuType === "menuitem",
     );
     expect(item.l10nID).toBe(`${config.addonRef}-arxiv-browser-menuitem`);
+    expect(item.icon).toBe(
+      `chrome://${config.addonRef}/content/icons/arxiv.svg`,
+    );
     item.onCommand(new main.Event("command"), {});
     expect(open).toHaveBeenCalledTimes(1);
 
@@ -371,6 +397,130 @@ describe("where the arXiv browser opens from", () => {
 
     removeArxivBrowserButton(main as unknown as Window);
     expect(main.document.getElementById(ARXIV_BROWSER_BUTTON_ID)).toBeNull();
+  });
+
+  it("is a button in the item pane's side navigation, after INSPIRE's", () => {
+    const inspire = "zoteroinspire\\@itp\\.ac\\.cn-zoteroinspire-references";
+    prefs.set("sidenav.order", `info,abstract,${inspire},tags`);
+    registerArxivBrowserSidenav(inspire);
+    registerArxivBrowserSidenav(inspire);
+
+    expect(sections.registerSection).toHaveBeenCalledTimes(1);
+    const options = sections.registerSection.mock.calls[0][0];
+    expect(options.pluginID).toBe(config.addonID);
+    expect(options.sidenav).toEqual({
+      l10nID: `${config.addonRef}-arxiv-browser-button`,
+      icon: `chrome://${config.addonRef}/content/icons/arxiv-sidenav.svg`,
+    });
+    // The user arranged the order: the button goes right after INSPIRE's
+    const pane = sections.registerSection.mock.results[0].value;
+    expect(pane).toBe("zoteroinspire\\@itp\\.ac\\.cn-arxiv-browser");
+    expect(prefs.get("sidenav.order")).toBe(
+      `info,abstract,${inspire},${pane},tags`,
+    );
+    // Only the button is wanted: the section stays out of sight
+    const section = main.document.createElement("item-pane-custom-section");
+    const body = main.document.createElement("div");
+    section.append(body);
+    options.onInit({ body });
+    expect(section.style.display).toBe("none");
+
+    unregisterArxivBrowserSidenav();
+    expect(sections.unregisterSection).toHaveBeenCalledWith(pane);
+  });
+
+  it("finds the button's place in the side navigation order once", () => {
+    expect(orderWithPaneAfter("a,inspire,b", "arxiv", "inspire")).toBe(
+      "a,inspire,arxiv,b",
+    );
+    expect(orderWithPaneAfter("a,inspire", "arxiv", "inspire")).toBe(
+      "a,inspire,arxiv",
+    );
+    // Not arranged yet: Zotero adds the button after INSPIRE's by itself
+    expect(orderWithPaneAfter(undefined, "arxiv", "inspire")).toBeNull();
+    expect(orderWithPaneAfter("", "arxiv", "inspire")).toBeNull();
+    // Placed already (perhaps moved by the user), or no INSPIRE to follow
+    expect(
+      orderWithPaneAfter("arxiv,a,inspire", "arxiv", "inspire"),
+    ).toBeNull();
+    expect(orderWithPaneAfter("a,b", "arxiv", "inspire")).toBeNull();
+  });
+
+  it("opens the browser from the side navigation button", () => {
+    registerArxivBrowserSidenav();
+    const pane = sections.registerSection.mock.results[0].value as string;
+    const doc = main.document;
+    doc.body.insertAdjacentHTML(
+      "beforeend",
+      `<item-pane-sidenav>
+        <div class="inherit-flex">
+          <div class="pin-wrapper"><div class="btn" id="arxiv"></div></div>
+          <div class="pin-wrapper"><div class="btn" data-pane="tags"></div></div>
+        </div>
+        <div class="context-menu">
+          <div class="zotero-menuitem-pin"></div>
+          <div class="zotero-menuitem-unpin"></div>
+          <div class="zotero-menuitem-pin-separator"></div>
+          <div class="zotero-menuitem-reorder-up"></div>
+        </div>
+      </item-pane-sidenav>`,
+    );
+    const sidenav = doc.querySelector("item-pane-sidenav")!;
+    const button = doc.getElementById("arxiv")!;
+    button.dataset.pane = pane;
+    const tags = doc.querySelector<HTMLElement>('[data-pane="tags"]')!;
+    const menu = doc.querySelector(".context-menu")!;
+    // What Zotero's side navigation itself receives
+    const zoteroClicks: Element[] = [];
+    sidenav.addEventListener("click", (event) =>
+      zoteroClicks.push(event.target as Element),
+    );
+    const open = vi.fn();
+    addArxivBrowserButton(main as unknown as Window, open);
+    addArxivBrowserButton(main as unknown as Window, open);
+    const click = (target: Element, detail: number) =>
+      target.dispatchEvent(
+        new main.MouseEvent("click", { bubbles: true, detail, button: 0 }),
+      );
+
+    // A click opens the browser, once per double click, and never reaches
+    // Zotero, which would go to the (hidden) section or pin it
+    click(button, 1);
+    expect(open).toHaveBeenCalledTimes(1);
+    click(button, 1);
+    click(button, 2);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(zoteroClicks).toEqual([]);
+    click(tags, 1);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(zoteroClicks).toEqual([tags]);
+
+    // Its context menu has no pin items, the other buttons' menus keep them
+    const hiddenItems = () =>
+      [...menu.children]
+        .filter((item) => (item as HTMLElement).hidden)
+        .map((item) => item.className);
+    const rightClick = (target: Element) => {
+      for (const item of menu.children) (item as HTMLElement).hidden = false;
+      target.dispatchEvent(
+        new main.MouseEvent("contextmenu", { bubbles: true }),
+      );
+      menu.dispatchEvent(new main.Event("popupshowing", { bubbles: true }));
+    };
+    rightClick(button);
+    expect(hiddenItems()).toEqual([
+      "zotero-menuitem-pin",
+      "zotero-menuitem-unpin",
+      "zotero-menuitem-pin-separator",
+    ]);
+    rightClick(tags);
+    expect(hiddenItems()).toEqual([]);
+
+    // Removed from the window, the button is Zotero's again
+    removeArxivBrowserButton(main as unknown as Window);
+    click(button, 1);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(zoteroClicks).toEqual([tags, button]);
   });
 
   it("loads its labels into the main window, and removes them again", () => {

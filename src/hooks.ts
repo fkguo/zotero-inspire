@@ -61,8 +61,10 @@ import {
 import {
   addArxivBrowserButton,
   registerArxivBrowserMenu,
+  registerArxivBrowserSidenav,
   removeArxivBrowserButton,
   unregisterArxivBrowserMenu,
+  unregisterArxivBrowserSidenav,
 } from "./modules/arxiv/browser/browserEntryPoints";
 import { initArxivBrowserPrefs } from "./modules/arxiv/browser/browserPrefs";
 import { paintTimes } from "./modules/arxiv/browser/paintTimes";
@@ -181,6 +183,8 @@ async function onMainWindowLoad(_win: Window): Promise<void> {
   addon.data.ztoolkit = createZToolkit();
 
   ZInspireReferencePane.registerPanel();
+  // After INSPIRE's section, so that its button comes after INSPIRE's
+  registerArxivBrowserSidenav(ZInspireReferencePane.paneID);
 
   ZInsMenu.registerRightClickMenuPopup();
   ZInsMenu.registerRightClickCollectionMenu();
@@ -223,6 +227,7 @@ function onShutdown(): void {
   // Before the plugin's chrome:// files are unregistered
   closeArxivBrowser();
   unregisterArxivBrowserMenu();
+  unregisterArxivBrowserSidenav();
   for (const win of Zotero.getMainWindows()) {
     removeArxivBrowserButton(win);
   }

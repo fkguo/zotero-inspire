@@ -98,7 +98,7 @@ Then install `build/*.xpi` as above.
 
 The arXiv browser is a Zotero window for reading arXiv's announcements. It is not limited to high energy physics: every arXiv category can be subscribed to, and papers that INSPIRE does not cover are added to your library from arXiv's own data.
 
-**Open it** with `View` → `arXiv Browser`, or with the arXiv button at the right end of Zotero's tab bar. A second request brings the open window to the front. The window can also open when Zotero starts (see [Preferences](#preferences)).
+**Open it** with `View` → `arXiv Browser`, with the arXiv button at the right end of Zotero's tab bar, or with the arXiv button (a red X on a dark tile) next to the INSPIRE button in the item pane's side navigation, also in the Reader. A second request brings the open window to the front. The window can also open when Zotero starts (see [Preferences](#preferences)).
 
 ### Getting started
 

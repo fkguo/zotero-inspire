@@ -555,6 +555,11 @@ export class ZInspireReferencePane {
   private static mainToolbarGraphButtonCleanup?: () => void;
   private static mainToolbarGraphDialog?: CitationGraphDialog;
 
+  /** The ID Zotero gave the registered section */
+  static get paneID(): string | undefined {
+    return this.registrationKey || undefined;
+  }
+
   static buildCitationGraphIconSvg(isDark: boolean): string {
     const green = isDark ? "#059669" : "#10b981";
     const purple = isDark ? "#7c3aed" : "#8b5cf6";

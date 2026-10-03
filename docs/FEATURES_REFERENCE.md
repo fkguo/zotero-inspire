@@ -865,13 +865,15 @@ A separate window (`chrome://zoteroinspire/content/arxivBrowser.xhtml`) for read
 
 ### 15.1 Window and Entry Points
 
-| Entry          | Details                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------- |
-| View menu      | `View` → `arXiv Browser`, registered with `Zotero.MenuManager` (`browserEntryPoints.ts`)     |
-| Tab bar button | Right end of `zotero-tabs-toolbar`, before the sync button; tooltip "Open the arXiv browser" |
-| Startup        | Opens when Zotero starts if `arxiv_browser_open_on_startup` is on                            |
+| Entry           | Details                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| View menu       | `View` → `arXiv Browser`, registered with `Zotero.MenuManager` (`browserEntryPoints.ts`)     |
+| Tab bar button  | Right end of `zotero-tabs-toolbar`, before the sync button; tooltip "Open the arXiv browser" |
+| Side navigation | Button after INSPIRE's in the item pane's side navigation (library and Reader), same tooltip |
+| Startup         | Opens when Zotero starts if `arxiv_browser_open_on_startup` is on                            |
 
 - One window at a time; opening again focuses it. Size and position are remembered.
+- The side navigation button belongs to an item-pane section (`ItemPaneManager.registerSection`) that is never shown: Zotero places, reorders and remembers the button like its own; the plugin opens the browser on its click (instead of going to the section) and leaves the pin items out of its context menu. The first time, it is put after INSPIRE's button in the order the user arranged (`sidenav.order`). View menu and side navigation use `icons/arxiv.svg` / `arxiv-sidenav.svg` (arXiv's X on the dark tile of the INSPIRE icons); the tab bar button keeps the line icon `arxiv-browser.svg`.
 - The window closes with the main window and when the plugin shuts down; closing it cancels its queued arXiv requests.
 - There are no settings inside the window beyond the list controls; the rest is in the plugin's preferences (15.12).
 

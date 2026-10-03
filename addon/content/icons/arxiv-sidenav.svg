@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+  <!-- arxiv.svg with padding, to line up with inspire-sidenav.svg -->
+  <rect x="2" y="2" width="16" height="16" rx="2.5" fill="#1a1a1a"/>
+  <path d="M13.6 5.6 6.4 14.4" stroke="#e5e5e5" stroke-width="1.7" stroke-linecap="round"/>
+  <path d="M6.2 5.4c2.2 2.4 4.4 5.6 7.6 9.2" stroke="#ef4444" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+</svg>
