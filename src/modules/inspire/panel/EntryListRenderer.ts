@@ -913,19 +913,44 @@ export class EntryListRenderer {
   /**
    * "HTML", for the menu of the paper's HTML version: the list's own click
    * handler acts on it. Without an address, so that it has no link menu.
+   * Drawn as a small tinted button in the links' colour, with a page icon
+   * and a ▾ for its menu; inline, so that it does not make the line taller.
+   * (Styles are set here: the panel has no stylesheet of its own.)
    */
   private arxivHtmlLink(dark: boolean): HTMLAnchorElement {
     const link = this.doc.createElement("a");
     link.classList.add("zinspire-ref-entry__html");
-    link.textContent = this.strings.arxivHtml;
     link.title = this.strings.arxivHtmlTitle;
     applyMetaLinkStyle(link, dark);
+    const tint = (percent: number) =>
+      `color-mix(in srgb, currentColor ${percent}%, transparent)`;
+    Object.assign(link.style, {
+      padding: "1px 4px",
+      borderRadius: "4px",
+      fontWeight: "600",
+      whiteSpace: "nowrap",
+      userSelect: "none",
+      background: tint(13),
+    });
     link.addEventListener("mouseenter", () => {
-      link.style.textDecoration = "underline";
+      link.style.background = tint(24);
     });
     link.addEventListener("mouseleave", () => {
-      link.style.textDecoration = "none";
+      link.style.background = tint(13);
     });
+
+    // Zotero's document icon, filled with the text's colour
+    const icon = this.doc.createElement("span");
+    icon.style.cssText =
+      "display: inline-block; width: 9px; height: 10px; margin-inline-end: 3px; " +
+      "vertical-align: -1px; background: currentColor; " +
+      'mask: url("chrome://zotero/skin/item-type/16/white/document.svg") center / contain no-repeat;';
+    // ▾, drawn, so that the text stays the label
+    const arrow = this.doc.createElement("span");
+    arrow.style.cssText =
+      "display: inline-block; margin-inline-start: 3px; vertical-align: 2px; " +
+      "border-inline: 3px solid transparent; border-top: 4px solid currentColor;";
+    link.append(icon, this.strings.arxivHtml, arrow);
     return link;
   }
 
