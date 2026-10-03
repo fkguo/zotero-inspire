@@ -199,6 +199,22 @@ export function htmlSnapshotID(
 }
 
 /**
+ * The first HTML snapshot of paper `id` (at `version`, when given) among the
+ * items `itemIDs`, or null
+ */
+export function htmlSnapshotAmong(
+  itemIDs: readonly number[],
+  id: string,
+  version?: number,
+): number | null {
+  for (const itemID of itemIDs) {
+    const attachmentID = htmlSnapshotID(itemID, id, version);
+    if (attachmentID !== null) return attachmentID;
+  }
+  return null;
+}
+
+/**
  * Save arXiv's HTML version of a paper, at `source.version`, as a snapshot
  * attachment of `item`
  */

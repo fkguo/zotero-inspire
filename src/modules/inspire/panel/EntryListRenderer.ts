@@ -46,6 +46,7 @@ import {
   // PDF button rendering (shared with zinspire.ts)
   renderPdfButtonIcon,
   PdfButtonState,
+  PDF_BUTTON_COLORS,
 } from "../../pickerUI";
 import {
   RowPoolManager,
@@ -135,6 +136,11 @@ export interface EntryRowAdapter {
    * HTML version (References panel: yes)
    */
   arxivHtml?: boolean;
+  /**
+   * Whether a snapshot of arXiv's HTML version of the paper (arXiv number
+   * `id`) is saved in the library, for the colour of "HTML" (default: no)
+   */
+  arxivHtmlSaved?: (entry: InspireReferenceEntry, id: string) => boolean;
 }
 
 /**
@@ -661,6 +667,24 @@ export class EntryListRenderer {
     this.updateFocusState(row, ctx.focusedEntryID === entry.id);
   }
 
+  /**
+   * Draw the row's "HTML" again: whether the snapshot is saved (the paper's
+   * items or their attachments changed)
+   */
+  updateArxivHtml(
+    row: HTMLElement,
+    entry: InspireReferenceEntry,
+    dark = isDarkMode(this.doc),
+  ): void {
+    const shown = row.querySelector<HTMLElement>(".zinspire-ref-entry__html");
+    const id = formatArxivDetails(entry.arxivDetails)?.id;
+    if (!shown || !id) return;
+    // Unchanged: kept as it is (with its hover tint)
+    const saved = this.adapter.arxivHtmlSaved?.(entry, id) ?? false;
+    if (shown.dataset.state === (saved ? "saved" : "online")) return;
+    shown.replaceWith(this.arxivHtmlLink(entry, id, dark));
+  }
+
   /** The paper's second line: journal, DOI and arXiv links */
   updateMeta(
     row: HTMLElement,
@@ -869,7 +893,7 @@ export class EntryListRenderer {
       const arxivText = `[arXiv:${arxivDetails.id}]`;
       container.appendChild(this.createExternalLink(arxivText, arxivUrl, dark));
       if (this.adapter.arxivHtml !== false) {
-        container.append(" ", this.arxivHtmlLink(dark));
+        container.append(" ", this.arxivHtmlLink(entry, arxivDetails.id, dark));
       }
     }
 
@@ -915,13 +939,28 @@ export class EntryListRenderer {
    * handler acts on it. Without an address, so that it has no link menu.
    * Drawn as a small tinted button in the links' colour, with a page icon
    * and a ▾ for its menu; inline, so that it does not make the line taller.
+   * Once the snapshot is saved: green, as a PDF in the library, with ✓ in
+   * the icon's place.
    * (Styles are set here: the panel has no stylesheet of its own.)
    */
-  private arxivHtmlLink(dark: boolean): HTMLAnchorElement {
+  private arxivHtmlLink(
+    entry: InspireReferenceEntry,
+    id: string,
+    dark: boolean,
+  ): HTMLAnchorElement {
+    const saved = this.adapter.arxivHtmlSaved?.(entry, id) ?? false;
     const link = this.doc.createElement("a");
     link.classList.add("zinspire-ref-entry__html");
-    link.title = this.strings.arxivHtmlTitle;
+    link.dataset.state = saved ? "saved" : "online";
+    link.title = saved
+      ? this.strings.arxivHtmlSavedTitle
+      : this.strings.arxivHtmlTitle;
     applyMetaLinkStyle(link, dark);
+    if (saved) {
+      link.style.color = dark
+        ? PDF_BUTTON_COLORS.greenDark
+        : PDF_BUTTON_COLORS.greenLight;
+    }
     const tint = (percent: number) =>
       `color-mix(in srgb, currentColor ${percent}%, transparent)`;
     Object.assign(link.style, {
@@ -939,12 +978,20 @@ export class EntryListRenderer {
       link.style.background = tint(13);
     });
 
-    // Zotero's document icon, filled with the text's colour
+    // Zotero's document icon, filled with the text's colour; ✓ once saved
     const icon = this.doc.createElement("span");
-    icon.style.cssText =
-      "display: inline-block; width: 9px; height: 10px; margin-inline-end: 3px; " +
-      "vertical-align: -1px; background: currentColor; " +
-      'mask: url("chrome://zotero/skin/item-type/16/white/document.svg") center / contain no-repeat;';
+    if (saved) {
+      // ✓, drawn, so that the text stays the label
+      icon.style.cssText =
+        "display: inline-block; width: 3px; height: 7px; margin-inline: 2px 4px; " +
+        "vertical-align: 0; border: solid currentColor; " +
+        "border-width: 0 2px 2px 0; transform: rotate(45deg);";
+    } else {
+      icon.style.cssText =
+        "display: inline-block; width: 9px; height: 10px; margin-inline-end: 3px; " +
+        "vertical-align: -1px; background: currentColor; " +
+        'mask: url("chrome://zotero/skin/item-type/16/white/document.svg") center / contain no-repeat;';
+    }
     // ▾, drawn, so that the text stays the label
     const arrow = this.doc.createElement("span");
     arrow.style.cssText =

@@ -288,6 +288,7 @@ references-panel-pdf-open = 打开 PDF
 references-panel-pdf-find = 查找全文
 references-panel-pdf-finding = 正在查找全文...
 references-panel-arxiv-html = arXiv 的 HTML 版
+references-panel-arxiv-html-saved = arXiv 的 HTML 版（快照已保存到文库）
 references-panel-arxiv-html-show = 在 arXiv 浏览器中显示
 references-panel-pdf-not-found = 未找到全文
 references-panel-bibtex-copied = BibTeX 已复制到剪贴板

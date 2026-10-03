@@ -398,6 +398,44 @@ describe("rows of a list with its own choices", () => {
     ).toBeNull();
   });
 
+  it("draws HTML green with a check once the snapshot is saved", () => {
+    const saved = new Set<string>();
+    const asked: Array<[string, string]> = [];
+    const renderer = new EntryListRenderer({
+      document: main.document,
+      adapter: {
+        arxivHtmlSaved: (entry, id) => {
+          asked.push([entry.id, id]);
+          return saved.has(id);
+        },
+      },
+    });
+    const html = (row: HTMLElement) =>
+      row.querySelector(".zinspire-ref-entry__html") as HTMLAnchorElement;
+    const row = renderer.createRow(paper(), context());
+    expect(asked).toEqual([["3-2001", "1705.00141"]]);
+    expect(html(row).dataset.state).toBe("online");
+    expect(html(row).title).toBe(msg("references-panel-arxiv-html"));
+    const linkColor = html(row).style.color;
+
+    saved.add("1705.00141");
+    renderer.updateMeta(row, paper());
+    expect(html(row).dataset.state).toBe("saved");
+    expect(html(row).style.color).toBe(css(main, "#1a8f4d"));
+    expect(html(row).style.color).not.toBe(linkColor);
+    expect(html(row).title).toBe(msg("references-panel-arxiv-html-saved"));
+    // The check is drawn: the text stays the label
+    expect(html(row).textContent).toBe(msg("arxiv-browser-open-html-button"));
+    const check = html(row).firstElementChild as HTMLElement;
+    expect(check.style.transform).toBe("rotate(45deg)");
+    expect(check.style.maskImage ?? "").toBe("");
+
+    // Dark theme: the PDF button's green of the dark theme
+    setTheme(main, "dark");
+    renderer.updateMeta(row, paper());
+    expect(html(row).style.color).toBe(css(main, "#22c55e"));
+  });
+
   it("writes the list's text after the paper's links", () => {
     const suffixes: Record<string, string> = {
       "2609.28544@2026-09-28": " · hep-ph · Cross-list",

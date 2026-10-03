@@ -562,6 +562,7 @@ export type FluentMessageId =
   | 'references-panel-abstract-copy-selection'
   | 'references-panel-abstract-latex-copied'
   | 'references-panel-arxiv-html'
+  | 'references-panel-arxiv-html-saved'
   | 'references-panel-arxiv-html-show'
   | 'references-panel-author-advisors'
   | 'references-panel-author-bai-label'

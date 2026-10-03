@@ -292,6 +292,7 @@ references-panel-pdf-open = Open PDF
 references-panel-pdf-find = Find Full Text
 references-panel-pdf-finding = Finding full text...
 references-panel-arxiv-html = arXiv's HTML version
+references-panel-arxiv-html-saved = arXiv's HTML version (snapshot saved in the library)
 references-panel-arxiv-html-show = Show in the arXiv Browser
 references-panel-pdf-not-found = No full text found
 references-panel-bibtex-copied = BibTeX copied to clipboard
