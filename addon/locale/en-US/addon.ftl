@@ -32,11 +32,6 @@ download-cache-disabled = Enable local cache in Preferences → INSPIRE to use t
 download-cache-cancelled-title = Cache download cancelled
 download-cache-cancelled = Cached { $done } / { $total } items before cancellation
 
-pane-item-references-header = INSPIRE References
-    .label = INSPIRE References
-pane-item-references-sidenav = INSPIRE References
-    .label = INSPIRE References
-    .tooltiptext = INSPIRE References
 references-panel-tab-references = Refs.
 references-panel-tab-cited = Cited by
 references-panel-tab-related = Related
@@ -330,10 +325,6 @@ update-request-failed =
    *[other] No usable answer from INSPIRE for { $count } items (network, server or record problem); they were left unchanged
   }
 
-zoteroinspire-refresh-button =
-    .tooltiptext = Refresh INSPIRE data
-zoteroinspire-copy-all-button =
-    .tooltiptext = Export references (BibTeX/LaTeX)
 references-panel-bibtex-fetching = Fetching entries...
 references-panel-bibtex-all-failed = Failed to fetch entries
 references-panel-no-recid-entries = No INSPIRE records to export

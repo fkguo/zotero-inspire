@@ -2,8 +2,8 @@
 // Where the arXiv browser opens from in the main window: an item of the View
 // menu (Zotero.MenuManager) and a button in the tabs toolbar. Zotero has no
 // interface for toolbar buttons, so the button is added to the toolbar the
-// way Zotero adds its own. Both labels come from mainWindow.ftl, which is
-// loaded into the main window for them.
+// way Zotero adds its own. Both labels come from mainWindow.ftl, which the
+// plugin loads into every main window (addMainWindowLabels).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../../../package.json";
@@ -11,7 +11,6 @@ import { getLocaleID } from "../../../utils/locale";
 
 const MENU_ID = `${config.addonRef}-arxiv-browser-menu`;
 export const ARXIV_BROWSER_BUTTON_ID = `${config.addonRef}-tb-arxiv-browser`;
-const MAIN_WINDOW_FTL = `${config.addonRef}-mainWindow.ftl`;
 const ICON = `chrome://${config.addonRef}/content/icons/arxiv-browser.svg`;
 
 /** The key Zotero gave the registered menu (it prefixes the plugin's ID) */
@@ -43,12 +42,11 @@ export function unregisterArxivBrowserMenu(): void {
 }
 
 /**
- * Load the labels into a main window and add the toolbar button there
- * (once, however often the window is announced)
+ * Add the toolbar button to a main window (once, however often the window is
+ * announced)
  */
 export function addArxivBrowserButton(win: Window, open: () => void): void {
   const doc = win.document;
-  (win as any).MozXULElement?.insertFTLIfNeeded(MAIN_WINDOW_FTL);
   if (doc.getElementById(ARXIV_BROWSER_BUTTON_ID)) return;
   const toolbar = doc.getElementById("zotero-tabs-toolbar");
   if (!toolbar) return;
@@ -66,11 +64,7 @@ export function addArxivBrowserButton(win: Window, open: () => void): void {
   toolbar.insertBefore(button, doc.getElementById("zotero-tb-sync"));
 }
 
-/** Remove the button and the labels from a main window */
+/** Remove the button from a main window */
 export function removeArxivBrowserButton(win: Window): void {
-  const doc = win.document;
-  doc.getElementById(ARXIV_BROWSER_BUTTON_ID)?.remove();
-  doc
-    .querySelector(`link[rel="localization"][href="${MAIN_WINDOW_FTL}"]`)
-    ?.remove();
+  win.document.getElementById(ARXIV_BROWSER_BUTTON_ID)?.remove();
 }

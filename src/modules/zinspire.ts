@@ -589,12 +589,12 @@ export class ZInspireReferencePane {
       paneID: "zoteroinspire-references",
       pluginID: config.addonID,
       header: {
-        l10nID: "pane-item-references-header",
+        l10nID: getLocaleID("pane-item-references-header"),
         icon: headerIcon,
         darkIcon: headerIcon,
       },
       sidenav: {
-        l10nID: "pane-item-references-sidenav",
+        l10nID: getLocaleID("pane-item-references-sidenav"),
         icon: sidenavIcon,
         darkIcon: sidenavIcon,
       },
@@ -668,7 +668,7 @@ export class ZInspireReferencePane {
           // FIX-WINDOWS-REFRESH-BUTTON: Use custom type and local icon
           type: "zinspire-refresh",
           icon: `chrome://${config.addonRef}/content/icons/refresh.svg`,
-          l10nID: "zoteroinspire-refresh-button",
+          l10nID: getLocaleID("pane-item-references-refresh"),
           onClick: ({ body }: { body: HTMLDivElement }) => {
             try {
               const controller = this.controllers.get(body);
@@ -681,7 +681,7 @@ export class ZInspireReferencePane {
         {
           type: "zinspire-export",
           icon: `chrome://${config.addonRef}/content/icons/clipboard.svg`,
-          l10nID: "zoteroinspire-copy-all-button",
+          l10nID: getLocaleID("pane-item-references-copy-all"),
           onClick: ({
             body,
             event,
@@ -5351,7 +5351,7 @@ export class InspireReferencePanelController {
     // Try to find the sidenav button for our section
     // The button should be in item-pane-sidenav or similar container
     const sidenavButton = doc.querySelector(
-      `[data-pane="${paneID}"], [data-l10n-id="pane-item-references-sidenav"]`,
+      `[data-pane="${paneID}"], [data-l10n-id="${getLocaleID("pane-item-references-sidenav")}"]`,
     ) as HTMLElement | null;
 
     if (sidenavButton) {
