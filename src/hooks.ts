@@ -1,5 +1,10 @@
 import { config } from "../package.json";
-import { initLocale, getString } from "./utils/locale";
+import {
+  addMainWindowLabels,
+  getString,
+  initLocale,
+  removeMainWindowLabels,
+} from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 import { ZInsMenu, ZInsUtils, ZInspireReferencePane } from "./modules/zinspire";
 import {
@@ -61,8 +66,10 @@ import {
 import {
   addArxivBrowserButton,
   registerArxivBrowserMenu,
+  registerArxivBrowserSidenav,
   removeArxivBrowserButton,
   unregisterArxivBrowserMenu,
+  unregisterArxivBrowserSidenav,
 } from "./modules/arxiv/browser/browserEntryPoints";
 import { initArxivBrowserPrefs } from "./modules/arxiv/browser/browserPrefs";
 import { paintTimes } from "./modules/arxiv/browser/paintTimes";
@@ -180,7 +187,11 @@ async function onMainWindowLoad(_win: Window): Promise<void> {
   // Create ztoolkit for every window
   addon.data.ztoolkit = createZToolkit();
 
+  // Labels of the item-pane section and of the arXiv browser's entry points
+  addMainWindowLabels(_win);
   ZInspireReferencePane.registerPanel();
+  // After INSPIRE's section, so that its button comes after INSPIRE's
+  registerArxivBrowserSidenav(ZInspireReferencePane.paneID);
 
   ZInsMenu.registerRightClickMenuPopup();
   ZInsMenu.registerRightClickCollectionMenu();
@@ -215,6 +226,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
   // The browser relies on the main window (library, related items)
   closeArxivBrowser();
   removeArxivBrowserButton(_win);
+  removeMainWindowLabels(_win);
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
 }
@@ -223,8 +235,10 @@ function onShutdown(): void {
   // Before the plugin's chrome:// files are unregistered
   closeArxivBrowser();
   unregisterArxivBrowserMenu();
+  unregisterArxivBrowserSidenav();
   for (const win of Zotero.getMainWindows()) {
     removeArxivBrowserButton(win);
+    removeMainWindowLabels(win);
   }
   unregisterZInspireBibtexEndpoint();
   unregisterZInspirePickSaveTargetEndpoint();

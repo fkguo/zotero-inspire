@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- arXiv's crossed X on the plugin's dark tile (like inspire.svg) -->
+  <rect width="16" height="16" rx="2.5" fill="#1a1a1a"/>
+  <!-- Light stroke, lower left to upper right -->
+  <path d="M11.6 3.6 4.4 12.4" stroke="#e5e5e5" stroke-width="1.7" stroke-linecap="round"/>
+  <!-- Red swash, upper left to lower right, on top -->
+  <path d="M4.2 3.4c2.2 2.4 4.4 5.6 7.6 9.2" stroke="#ef4444" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+</svg>

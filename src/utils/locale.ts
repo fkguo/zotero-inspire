@@ -1,7 +1,15 @@
 import { config } from "../../package.json";
 import type { FluentMessageId } from "../../typings/i10n";
 
-export { initLocale, getString, getLocaleID };
+export {
+  initLocale,
+  getString,
+  getLocaleID,
+  addMainWindowLabels,
+  removeMainWindowLabels,
+};
+
+const MAIN_WINDOW_FTL = `${config.addonRef}-mainWindow.ftl`;
 
 /**
  * Initialize locale data
@@ -90,4 +98,19 @@ function _getString(
 
 function getLocaleID(id: string) {
   return `${config.addonRef}-${id}`;
+}
+
+/**
+ * Load mainWindow.ftl into a main window: the labels of the INSPIRE section
+ * of the item pane and of the arXiv browser's menu item and toolbar button
+ */
+function addMainWindowLabels(win: Window) {
+  (win as any).MozXULElement?.insertFTLIfNeeded(MAIN_WINDOW_FTL);
+}
+
+/** Remove the labels of mainWindow.ftl from a main window again */
+function removeMainWindowLabels(win: Window) {
+  win.document
+    .querySelector(`link[rel="localization"][href="${MAIN_WINDOW_FTL}"]`)
+    ?.remove();
 }
