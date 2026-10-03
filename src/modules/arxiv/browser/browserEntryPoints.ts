@@ -3,8 +3,8 @@
 // menu (Zotero.MenuManager), a button in the tabs toolbar and a button in the
 // side navigation of the item pane, next to INSPIRE's. Zotero has no
 // interface for toolbar buttons, so the button is added to the toolbar the
-// way Zotero adds its own. The labels come from mainWindow.ftl, which is
-// loaded into the main window for them.
+// way Zotero adds its own. The labels come from mainWindow.ftl, which the
+// plugin loads into every main window (addMainWindowLabels).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { config } from "../../../../package.json";
@@ -12,7 +12,6 @@ import { getLocaleID } from "../../../utils/locale";
 
 const MENU_ID = `${config.addonRef}-arxiv-browser-menu`;
 export const ARXIV_BROWSER_BUTTON_ID = `${config.addonRef}-tb-arxiv-browser`;
-const MAIN_WINDOW_FTL = `${config.addonRef}-mainWindow.ftl`;
 /** The toolbar button's icon, a line drawing like Zotero's toolbar buttons */
 const ICON = `chrome://${config.addonRef}/content/icons/arxiv-browser.svg`;
 /** arXiv's X on the plugin's dark tile, like INSPIRE's icons */
@@ -155,13 +154,12 @@ function listenToSidenavButton(win: Window, open: () => void): void {
 }
 
 /**
- * Load the labels into a main window, add the toolbar button there and
- * listen for the side navigation button (once, however often the window is
+ * Add the toolbar button to a main window and listen for the side navigation
+ * button (once, however often the window is
  * announced)
  */
 export function addArxivBrowserButton(win: Window, open: () => void): void {
   const doc = win.document;
-  (win as any).MozXULElement?.insertFTLIfNeeded(MAIN_WINDOW_FTL);
   listenToSidenavButton(win, open);
   if (doc.getElementById(ARXIV_BROWSER_BUTTON_ID)) return;
   const toolbar = doc.getElementById("zotero-tabs-toolbar");
@@ -180,13 +178,9 @@ export function addArxivBrowserButton(win: Window, open: () => void): void {
   toolbar.insertBefore(button, doc.getElementById("zotero-tb-sync"));
 }
 
-/** Remove the button, the listeners and the labels from a main window */
+/** Remove the button and the listeners from a main window */
 export function removeArxivBrowserButton(win: Window): void {
-  const doc = win.document;
-  doc.getElementById(ARXIV_BROWSER_BUTTON_ID)?.remove();
+  win.document.getElementById(ARXIV_BROWSER_BUTTON_ID)?.remove();
   sidenavListeners.get(win)?.();
   sidenavListeners.delete(win);
-  doc
-    .querySelector(`link[rel="localization"][href="${MAIN_WINDOW_FTL}"]`)
-    ?.remove();
 }

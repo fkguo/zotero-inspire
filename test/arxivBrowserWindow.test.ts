@@ -22,6 +22,10 @@ import {
   unregisterArxivBrowserMenu,
   unregisterArxivBrowserSidenav,
 } from "../src/modules/arxiv/browser/browserEntryPoints";
+import {
+  addMainWindowLabels,
+  removeMainWindowLabels,
+} from "../src/utils/locale";
 import type { ArxivBrowserViewOptions } from "../src/modules/arxiv/browser/ArxivBrowserView";
 import {
   followItems,
@@ -523,7 +527,7 @@ describe("where the arXiv browser opens from", () => {
     expect(zoteroClicks).toEqual([tags, button]);
   });
 
-  it("loads its labels into the main window, and removes them again", () => {
+  it("has its labels loaded into the main window, and removed again", () => {
     const insertFTLIfNeeded = vi.fn((name: string) => {
       const link = main.document.createElement("link");
       link.rel = "localization";
@@ -532,12 +536,12 @@ describe("where the arXiv browser opens from", () => {
     });
     (main as any).MozXULElement = { insertFTLIfNeeded };
 
-    addArxivBrowserButton(main as unknown as Window, vi.fn());
+    addMainWindowLabels(main as unknown as Window);
     expect(insertFTLIfNeeded).toHaveBeenCalledWith(
       `${config.addonRef}-mainWindow.ftl`,
     );
 
-    removeArxivBrowserButton(main as unknown as Window);
+    removeMainWindowLabels(main as unknown as Window);
     expect(main.document.querySelector('link[rel="localization"]')).toBeNull();
   });
 });

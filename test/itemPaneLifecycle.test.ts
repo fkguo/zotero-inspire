@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { FluentParser, Message } from "@fluent/syntax";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { config } from "../package.json";
 import {
   InspireReferencePanelController,
   ZInspireReferencePane,
@@ -343,6 +346,48 @@ describe("Zotero item-pane lifecycle", () => {
     expect(retry).toHaveBeenCalledWith(button, context, "27", "numeric", [
       "27",
     ]);
+  });
+
+  it("labels its header, side-navigation button and header buttons from mainWindow.ftl", () => {
+    ZInspireReferencePane.registerPanel();
+    expect(registered).toBeTruthy();
+
+    // mainWindow.ftl is the plugin's only .ftl file loaded into the main
+    // window; the build prefixes its message IDs with the addonRef. Zotero
+    // reads .label for the header and .tooltiptext for the buttons, and a
+    // message value would replace the section's content.
+    const wanted: Array<[string, string]> = [
+      [registered.header.l10nID, ".label"],
+      [registered.sidenav.l10nID, ".tooltiptext"],
+      ...registered.sectionButtons.map(
+        (button: { l10nID: string }): [string, string] => [
+          button.l10nID,
+          ".tooltiptext",
+        ],
+      ),
+    ];
+    expect(wanted).toHaveLength(4);
+    for (const locale of ["en-US", "zh-CN"]) {
+      const text = readFileSync(
+        new URL(`../addon/locale/${locale}/mainWindow.ftl`, import.meta.url),
+        "utf8",
+      );
+      const messages = new Map(
+        new FluentParser()
+          .parse(text)
+          .body.filter((entry): entry is Message => entry instanceof Message)
+          .map((message) => [`${config.addonRef}-${message.id.name}`, message]),
+      );
+      for (const [l10nID, attribute] of wanted) {
+        const message = messages.get(l10nID);
+        expect(message, `${locale}: ${l10nID}`).toBeDefined();
+        expect(message!.value, `${locale}: ${l10nID}`).toBeNull();
+        expect(
+          message!.attributes.map((a) => `.${a.id.name}`),
+          `${locale}: ${l10nID}`,
+        ).toEqual([attribute]);
+      }
+    }
   });
 
   it("keeps off-screen item changes state-only and loads on visible async render", async () => {

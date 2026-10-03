@@ -32,11 +32,6 @@ download-cache-disabled = 请在「首选项 → INSPIRE」中启用本地缓存
 download-cache-cancelled-title = 缓存下载已取消
 download-cache-cancelled = 取消前已缓存 { $done } / { $total } 条
 
-pane-item-references-header = INSPIRE 引用
-    .label = INSPIRE 引用
-pane-item-references-sidenav = INSPIRE 引用
-    .label = INSPIRE 引用
-    .tooltiptext = INSPIRE 引用
 references-panel-tab-references = 引用
 references-panel-tab-cited = 被引
 references-panel-tab-related = 相关
@@ -326,10 +321,6 @@ update-request-failed =
    *[other] { $count } 条未得到 INSPIRE 的可用应答（网络、服务器或记录问题），未作改动
   }
 
-zoteroinspire-refresh-button =
-    .tooltiptext = 刷新 INSPIRE 数据
-zoteroinspire-copy-all-button =
-    .tooltiptext = 导出引用（BibTeX/LaTeX）
 references-panel-bibtex-fetching = 正在获取条目...
 references-panel-bibtex-all-failed = 获取条目失败
 references-panel-no-recid-entries = 无 INSPIRE 记录可导出

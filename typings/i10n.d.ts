@@ -380,7 +380,9 @@ export type FluentMessageId =
   | 'meta-full'
   | 'meta-no'
   | 'meta-noabstract'
+  | 'pane-item-references-copy-all'
   | 'pane-item-references-header'
+  | 'pane-item-references-refresh'
   | 'pane-item-references-sidenav'
   | 'pdf-annotate-ambiguous-cancel'
   | 'pdf-annotate-ambiguous-message'
@@ -918,6 +920,4 @@ export type FluentMessageId =
   | 'startup-finish'
   | 'update-cancelled'
   | 'update-cancelled-stats'
-  | 'update-request-failed'
-  | 'zoteroinspire-copy-all-button'
-  | 'zoteroinspire-refresh-button';
+  | 'update-request-failed';
