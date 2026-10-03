@@ -15,12 +15,13 @@ export const ARXIV_PAPER_STYLESHEET =
   "/static/browse/0.3.4/css/arxiv-html-papers-20260823.css";
 
 /**
- * Source of a script for a page's process (a frame script): a link to one of
- * arXiv's stylesheets for its HTML papers that fails to load, or has failed
- * when the script starts, is pointed at the current stylesheet. Its functions
- * are named restore*, so that it can be put into another frame script.
+ * Source of the functions of the script below: restorePaperStylesheet(link)
+ * points a link to one of arXiv's stylesheets for its HTML papers, other than
+ * the current one, at the current one; restoreFailedStylesheets() does so for
+ * each such link whose file failed. They are named restore*, so that they can
+ * be put into another frame script.
  */
-export const RESTORE_STYLESHEET_SCRIPT = `
+export const RESTORE_STYLESHEET_FUNCTIONS = `
 function restorePaperStylesheet(link) {
   if (!link || link.localName !== "link") return;
   if (!/(^|\\s)stylesheet(\\s|$)/i.test(link.rel)) return;
@@ -47,6 +48,14 @@ function restoreFailedStylesheets() {
     if (!sheet || !sheet.cssRules.length) restorePaperStylesheet(links[i]);
   }
 }
+`;
+
+/**
+ * Source of a script for a page's process (a frame script): a link to one of
+ * arXiv's stylesheets for its HTML papers that fails to load, or has failed
+ * when the script starts, is pointed at the current stylesheet.
+ */
+export const RESTORE_STYLESHEET_SCRIPT = `${RESTORE_STYLESHEET_FUNCTIONS}
 // A stylesheet's error does not bubble: it is seen on its way down
 addEventListener("error", function (event) {
   restorePaperStylesheet(event.target);
