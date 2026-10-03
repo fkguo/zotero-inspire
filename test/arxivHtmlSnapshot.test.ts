@@ -1,13 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// arXiv's HTML version saved as a snapshot: Zotero's importFromURL of the
-// versioned page, started only in the arxiv.org scheduler's slot (15 s after
-// the previous request); a paper without HTML version or a capture of
-// another page leaves nothing; snapshots are recognised by their URL, the
-// arXiv translator's abstract-page snapshot not among them. SVG figures,
-// which arXiv shows with <object> and Zotero's reader blocks, are saved as
-// <img>.
+// arXiv's HTML version saved as a snapshot: the steps of Zotero's
+// importFromURL for the versioned page (a hidden browser, here at a desktop
+// window's size), with arXiv's stylesheet written into the page before the
+// capture, started only in the arxiv.org scheduler's slot (15 s after the
+// previous request); a paper without HTML version or a page that did not
+// load leaves nothing; snapshots are recognised by their URL, the arXiv
+// translator's abstract-page snapshot not among them. SVG figures, which
+// arXiv shows with <object> and Zotero's reader blocks, are saved as <img>.
+// In the page, each stylesheet link that imports into cascade layers becomes
+// a <style> of the same rules in their layers, after a deleted stylesheet of
+// arXiv's has been replaced by the current one.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/utils/locale", () => ({
@@ -22,9 +27,11 @@ import {
   htmlSnapshotID,
   htmlSnapshotVersion,
   saveArxivHtmlSnapshot,
+  SNAPSHOT_STYLES_SCRIPT,
   svgObjectsAsImages,
 } from "../src/modules/arxiv/arxivHtmlSnapshot";
-import { VirtualClock } from "./virtualClock";
+import { ARXIV_PAPER_STYLESHEET } from "../src/modules/arxiv/arxivHtmlStylesheet";
+import { flushPromises, VirtualClock } from "./virtualClock";
 
 const SOURCE = { id: "2609.28538", version: 2 };
 const URL_V2 = "https://arxiv.org/html/2609.28538v2";
@@ -36,7 +43,6 @@ function attachment(id: number, url: string, contentType = "text/html") {
     attachmentContentType: contentType,
     getField: (field: string) => (field === "url" ? url : ""),
     getFilePathAsync: async () => `/storage/${id}/2609.html`,
-    eraseTx: vi.fn(async () => undefined),
   };
 }
 
@@ -57,17 +63,78 @@ const PNG_FIGURE =
 let clock: VirtualClock;
 let scheduler: ArxivScheduler;
 let sent: { url: string; at: number }[];
+/** What happened to the hidden browsers, in order */
+let steps: string[];
+/** The frame scripts loaded, as data: URLs */
+let scripts: string[];
+/** Whether the page's script sends its message */
+let scriptAnswers: boolean;
 let imports: { options: any; at: number }[];
-let importFromURL: (options: any) => Promise<unknown>;
+let browsers: FakeBrowser[];
+let load: (url: string) => Promise<boolean>;
+let importFromDocument: (options: any) => Promise<unknown>;
 let filesEditable: boolean;
 let files: Record<string, string>;
 
 const item = { id: 77, libraryID: 1 } as unknown as Zotero.Item;
 
+/** Zotero's HiddenBrowser as the plugin uses it */
+class FakeBrowser {
+  readonly _createdPromise = Promise.resolve();
+  readonly style: Record<string, string> = { display: "none" };
+  destroyed = false;
+  private readonly listeners = new Map<string, () => void>();
+  readonly messageManager = {
+    addMessageListener: (name: string, listener: () => void) =>
+      this.listeners.set(name, listener),
+    removeMessageListener: (name: string) => this.listeners.delete(name),
+    // The page's script ends with its message
+    loadFrameScript: (url: string) => {
+      steps.push("script");
+      scripts.push(url);
+      // Later than any promise callback, as a message from the page's process
+      if (scriptAnswers) {
+        setImmediate(() => {
+          steps.push("styles written");
+          this.listeners.get(STYLES_MESSAGE)?.();
+        });
+      }
+    },
+  };
+
+  constructor(readonly options: unknown) {
+    browsers.push(this);
+  }
+
+  async load(url: string, options: unknown) {
+    steps.push(`load ${url} ${JSON.stringify(options)} ${this.size()}`);
+    return load(url);
+  }
+
+  async waitForDocument() {
+    steps.push("ready");
+  }
+
+  destroy() {
+    steps.push("destroy");
+    this.destroyed = true;
+  }
+
+  private size() {
+    return `${this.style.display || "shown"} ${this.style.width} ${this.style.height}`;
+  }
+}
+
+const STYLES_MESSAGE = "zoteroinspire:arxiv-snapshot-styles";
+
 beforeEach(() => {
   clock = new VirtualClock();
   sent = [];
+  steps = [];
+  scripts = [];
+  scriptAnswers = true;
   imports = [];
+  browsers = [];
   filesEditable = true;
   scheduler = new ArxivScheduler({
     host: "arxiv.org",
@@ -79,8 +146,15 @@ beforeEach(() => {
       return { status: 200, text: "", header: () => null };
     },
   });
-  importFromURL = async (options) => attachment(78, options.url);
+  load = async () => true;
+  importFromDocument = async () => attachment(78, URL_V2);
   files = {};
+  vi.stubGlobal("ChromeUtils", {
+    importESModule: (url: string) =>
+      url === "chrome://zotero/content/HiddenBrowser.mjs"
+        ? { HiddenBrowser: FakeBrowser }
+        : {},
+  });
   vi.stubGlobal("Zotero", {
     debug: vi.fn(),
     File: {
@@ -91,9 +165,10 @@ beforeEach(() => {
     },
     Libraries: { get: () => ({ filesEditable }) },
     Attachments: {
-      importFromURL: (options: any) => {
+      importFromDocument: (options: any) => {
+        steps.push("capture");
         imports.push({ options, at: clock.now() });
-        return importFromURL(options);
+        return importFromDocument(options);
       },
     },
   });
@@ -104,26 +179,57 @@ afterEach(() => {
 });
 
 describe("saving arXiv's HTML version as a snapshot", () => {
-  it("captures the versioned page with Zotero's importFromURL, titled with the version, in the scheduler's slot 15 s after the previous arxiv.org request", async () => {
+  it("captures the versioned page as Zotero's importFromURL does, at a desktop window's size, after the page's styles are written in, titled with the version, in the scheduler's slot 15 s after the previous arxiv.org request", async () => {
     const listing = scheduler.request("https://arxiv.org/list/hep-ph/new");
     const saving = saveArxivHtmlSnapshot(item, SOURCE, { scheduler });
     await clock.advanceBy(14999);
-    expect(imports).toHaveLength(0);
+    expect(steps).toEqual([]);
     const result = await clock.run(saving);
     await listing;
 
+    expect(browsers.map((browser) => browser.options)).toEqual([
+      { docShell: { allowImages: true } },
+    ]);
+    expect(steps).toEqual([
+      `load ${URL_V2} {"requireSuccessfulStatus":true} shown 1920px 1080px`,
+      "ready",
+      "script",
+      "styles written",
+      "capture",
+      "destroy",
+    ]);
+    // The styles script, which ends with its message
+    expect(
+      scripts.map((url) => decodeURIComponent(url.replace(/^data:[^,]*,/, ""))),
+    ).toEqual([SNAPSHOT_STYLES_SCRIPT]);
     expect(imports).toEqual([
       {
         options: {
-          url: URL_V2,
+          browser: browsers[0],
           parentItemID: 77,
           title: "arXiv HTML v2",
-          contentType: "text/html",
         },
         at: 15000,
       },
     ]);
     expect(result).toMatchObject({ status: "saved", attachment: { id: 78 } });
+  });
+
+  it("captures the page after 30 s when the page's script does not answer (its process ended)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      scriptAnswers = false;
+      const saving = saveArxivHtmlSnapshot(item, SOURCE, { scheduler });
+      while (!steps.includes("script")) await flushPromises();
+      vi.advanceTimersByTime(29999);
+      await flushPromises();
+      expect(steps).not.toContain("capture");
+      vi.advanceTimersByTime(1);
+      expect(await clock.run(saving)).toMatchObject({ status: "saved" });
+      expect(steps.slice(-2)).toEqual(["capture", "destroy"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("saves SVG figures as images, which Zotero's reader shows, and leaves the rest of the page", async () => {
@@ -140,11 +246,11 @@ describe("saving arXiv's HTML version as a snapshot", () => {
 
   it("captures one page at a time: a second save waits for the first to end", async () => {
     let finish: () => void = () => undefined;
-    importFromURL = async (options) => {
+    importFromDocument = async () => {
       if (imports.length === 1) {
         await new Promise<void>((resolve) => (finish = resolve));
       }
-      return attachment(78 + imports.length, options.url);
+      return attachment(78 + imports.length, URL_V2);
     };
     const first = saveArxivHtmlSnapshot(item, SOURCE, { scheduler });
     const second = saveArxivHtmlSnapshot(
@@ -160,39 +266,196 @@ describe("saving arXiv's HTML version as a snapshot", () => {
   });
 
   it("says arXiv has no HTML version when the page answers 404, with nothing saved", async () => {
-    importFromURL = async () => {
+    load = async () => {
       throw Object.assign(new Error("Invalid response 404"), { status: 404 });
     };
     const result = await clock.run(
       saveArxivHtmlSnapshot(item, SOURCE, { scheduler }),
     );
     expect(result).toMatchObject({ status: "failed", reason: "noHtml" });
+    expect(imports).toHaveLength(0);
+    expect(browsers[0].destroyed).toBe(true);
   });
 
-  it("erases a snapshot of another page than the one asked for (a load Zotero gave up on)", async () => {
-    const blank = attachment(79, "about:blank");
-    importFromURL = async () => blank;
+  it("captures nothing when Zotero gave up waiting for the page", async () => {
+    load = async () => false;
     const result = await clock.run(
       saveArxivHtmlSnapshot(item, SOURCE, { scheduler }),
     );
     expect(result).toMatchObject({ status: "failed", reason: "capture" });
-    expect(blank.eraseTx).toHaveBeenCalledTimes(1);
+    expect(imports).toHaveLength(0);
+    expect(browsers[0].destroyed).toBe(true);
   });
 
   it("reports a failed capture, and a library without files before any request", async () => {
-    importFromURL = async () => {
-      throw new Error("Page never loaded in hidden browser");
+    importFromDocument = async () => {
+      throw new Error("Timed out getting the snapshot");
     };
     expect(
       await clock.run(saveArxivHtmlSnapshot(item, SOURCE, { scheduler })),
     ).toMatchObject({ status: "failed", reason: "capture" });
+    expect(browsers[0].destroyed).toBe(true);
 
     filesEditable = false;
-    imports = [];
+    steps = [];
     expect(
       await clock.run(saveArxivHtmlSnapshot(item, SOURCE, { scheduler })),
     ).toMatchObject({ status: "failed", reason: "filesNotEditable" });
-    expect(imports).toHaveLength(0);
+    expect(steps).toEqual([]);
+  });
+});
+
+const CSS = "/static/browse/0.3.4/css/";
+
+/** A rule as the page's CSS object model gives it */
+const rule = (cssText: string) => ({ cssText, layerName: undefined });
+/** An @import rule into `layer` of a sheet with `rules` */
+const layeredImport = (href: string, layer: string, rules: string[]) => ({
+  cssText: `@import url("${href}") layer(${layer});`,
+  layerName: layer,
+  styleSheet: { cssRules: rules.map(rule) },
+});
+
+/** arXiv's current stylesheet for its HTML papers, once loaded */
+const PAPER_SHEET = {
+  cssRules: [
+    layeredImport(`${CSS}ar5iv.0.9.1.min.css`, "ar5iv", [
+      "@layer reset;",
+      ".ltx_page_main { margin: auto; }",
+    ]),
+    layeredImport(`${CSS}arxiv-html-papers-theme-20260807.css`, "arxiv-theme", [
+      '@font-face { font-family: "STIX Two Math"; src: url("/static/browse/0.3.4/fonts/STIXTwoMath-Regular.woff2"); }',
+      "@layer header { .html-header-nav { display: flex; } }",
+    ]),
+    rule("@layer ar5iv, arxiv-theme;"),
+  ],
+};
+const PAPER_STYLE =
+  "@layer ar5iv {\n@layer reset;\n.ltx_page_main { margin: auto; }\n}\n" +
+  '@layer arxiv-theme {\n@font-face { font-family: "STIX Two Math"; src: url("/static/browse/0.3.4/fonts/STIXTwoMath-Regular.woff2"); }\n' +
+  "@layer header { .html-header-nav { display: flex; } }\n}\n" +
+  "@layer ar5iv, arxiv-theme;\n";
+
+/** What a link's sheet is: its rules, an empty sheet, or none */
+type Sheet = { cssRules: unknown[] } | "empty" | "none";
+
+/**
+ * A paper's page at arxiv.org with the given stylesheet links, loaded, and
+ * the styles script started in it; `messages` are the script's messages
+ */
+function paperPage(links: Array<[id: string, href: string, sheet: Sheet]>) {
+  const window = new JSDOM(
+    `<head>${links
+      .map(([id, href]) => `<link id="${id}" rel="stylesheet" href="${href}">`)
+      .join("")}</head><body></body>`,
+    { url: "https://arxiv.org/html/2610.00014v1" },
+  ).window;
+  const { document } = window;
+  const sheets: Record<string, unknown> = {};
+  for (const [id, , sheet] of links) {
+    sheets[id] =
+      sheet === "none" ? null : sheet === "empty" ? { cssRules: [] } : sheet;
+    Object.defineProperty(document.getElementById(id)!, "sheet", {
+      get: () => sheets[id],
+    });
+  }
+  const messages: string[] = [];
+  new window.Function("content", "sendAsyncMessage", SNAPSHOT_STYLES_SCRIPT)(
+    { document },
+    (name: string) => messages.push(name),
+  );
+  const head = () =>
+    [...document.head.children].map((element) =>
+      element.localName === "style"
+        ? `style ${element.textContent}`
+        : `link ${element.getAttribute("href")}`,
+    );
+  /** The link's file loads (or fails) with `sheet` */
+  const loaded = (id: string, sheet: Sheet, type = "load") => {
+    sheets[id] = sheet === "empty" ? { cssRules: [] } : sheet;
+    document.getElementById(id)!.dispatchEvent(new window.Event(type));
+  };
+  return { document, messages, head, loaded };
+}
+
+describe("the page's styles written in before the capture", () => {
+  it("replaces a link whose sheet imports into layers by a <style> of each imported sheet's rules in its layer, and leaves other links", async () => {
+    const page = paperPage([
+      ["paper", `${CSS}arxiv-html-papers-20260807.css`, PAPER_SHEET],
+      [
+        "header",
+        "/static/base/1.0.1/css/arxiv-header-footer.css",
+        {
+          cssRules: [
+            rule('@import url("fonts.css");'),
+            rule("a { color: red; }"),
+          ],
+        },
+      ],
+      [
+        "typekit",
+        "https://use.typekit.net/utz6mli.css",
+        {
+          cssRules: [rule("@font-face { font-family: rival-sans; }")],
+        },
+      ],
+    ]);
+    await flushPromises();
+    expect(page.head()).toEqual([
+      `style ${PAPER_STYLE}`,
+      "link /static/base/1.0.1/css/arxiv-header-footer.css",
+      "link https://use.typekit.net/utz6mli.css",
+    ]);
+    expect(page.messages).toEqual([STYLES_MESSAGE]);
+  });
+
+  it("first points a link to a deleted stylesheet of arXiv's at the current one, and writes it in once it has loaded", async () => {
+    const page = paperPage([
+      ["deleted", `${CSS}arxiv-html-papers-20260131.css`, "empty"],
+    ]);
+    await flushPromises();
+    expect(page.head()).toEqual([
+      `link https://arxiv.org${ARXIV_PAPER_STYLESHEET}`,
+    ]);
+    expect(page.messages).toEqual([]);
+
+    page.loaded("deleted", PAPER_SHEET);
+    await flushPromises();
+    expect(page.head()).toEqual([`style ${PAPER_STYLE}`]);
+    expect(page.messages).toEqual([STYLES_MESSAGE]);
+  });
+
+  it("leaves failed stylesheets that are not arXiv's older ones, and one whose replacement failed too", async () => {
+    const page = paperPage([
+      ["current", ARXIV_PAPER_STYLESHEET, "empty"],
+      ["other", "https://example.org/a.css", "none"],
+      ["deleted", `${CSS}arxiv-html-papers-20260131.css`, "empty"],
+    ]);
+    await flushPromises();
+    page.loaded("deleted", "empty", "error");
+    await flushPromises();
+    expect(page.head()).toEqual([
+      `link ${ARXIV_PAPER_STYLESHEET}`,
+      "link https://example.org/a.css",
+      `link https://arxiv.org${ARXIV_PAPER_STYLESHEET}`,
+    ]);
+    expect(page.messages).toEqual([STYLES_MESSAGE]);
+  });
+
+  it("sends its message also when a sheet cannot be read", async () => {
+    const page = paperPage([
+      [
+        "paper",
+        `${CSS}arxiv-html-papers-20260807.css`,
+        {
+          get cssRules(): unknown[] {
+            throw new Error("SecurityError");
+          },
+        },
+      ],
+    ]);
+    await flushPromises();
+    expect(page.messages).toEqual([STYLES_MESSAGE]);
   });
 });
 

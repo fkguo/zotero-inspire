@@ -16,7 +16,8 @@
 // formatted text; so a small script in the page's process reports such
 // clicks here. The script also reports a right-click, for the page's menu:
 // copying the selection, and a link's entries. (Ctrl/Cmd+C and Ctrl/Cmd+A
-// are the page's own.)
+// are the page's own.) And it puts back arXiv's stylesheet when the page
+// links one that arXiv has deleted (see arxivHtmlStylesheet).
 // Zotero's browsers follow web links only (its setting
 // network.protocol-handler.expose-all is off), so a javascript: link — the
 // buttons of arXiv's page header that show the table of contents and switch
@@ -37,6 +38,7 @@
 
 import { getString } from "../../../utils/locale";
 import { renderMathContent } from "../../inspire/mathRenderer";
+import { RESTORE_STYLESHEET_SCRIPT } from "../arxivHtmlStylesheet";
 import { button, html, showMenuAt, type MenuEntry } from "./dom";
 
 /** The paper whose HTML version is shown */
@@ -102,7 +104,7 @@ interface PageMenuRequest {
  * (a link within the page, and a mailto: link, is left alone); a click on a
  * javascript: link that the page itself did not handle runs the link's code
  * in the page; a right-click the page does not handle is reported with the
- * selection and the link under it
+ * selection and the link under it; a deleted arXiv stylesheet is replaced
  */
 const LINK_SCRIPT = `"use strict";
 function linkOf(event) {
@@ -168,7 +170,7 @@ addEventListener("click", onLinkClick, true);
 addEventListener("auxclick", onLinkClick, true);
 addEventListener("click", onScriptLinkClick, false);
 addEventListener("contextmenu", onContextMenu, false);
-`;
+${RESTORE_STYLESHEET_SCRIPT}`;
 const LINK_SCRIPT_URL = `data:application/javascript;charset=utf-8,${encodeURIComponent(LINK_SCRIPT)}`;
 
 const WEB_ADDRESS = /^https?:\/\//i;

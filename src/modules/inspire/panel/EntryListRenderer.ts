@@ -130,6 +130,11 @@ export interface EntryRowAdapter {
   abstract?: (entry: InspireReferenceEntry) => string | undefined;
   /** Text after the links of the paper's second line (References panel: none) */
   metaSuffix?: (entry: InspireReferenceEntry) => string | undefined;
+  /**
+   * Whether "HTML" follows the arXiv number, for the menu of the paper's
+   * HTML version (References panel: yes)
+   */
+  arxivHtml?: boolean;
 }
 
 /**
@@ -612,27 +617,7 @@ export class EntryListRenderer {
       }
     }
 
-    // Update meta (journal, DOI, arXiv links)
-    const meta = row.querySelector(
-      ".zinspire-ref-entry__meta",
-    ) as HTMLElement | null;
-    if (meta) {
-      const hasMeta = entry.publicationInfo || entry.arxivDetails || entry.doi;
-      const suffix = this.adapter.metaSuffix?.(entry);
-      if (hasMeta || suffix) {
-        this.buildMetaContent(meta, entry, dark);
-        if (suffix) {
-          const span = this.doc.createElement("span");
-          span.classList.add("zinspire-ref-entry__meta-suffix");
-          span.textContent = suffix;
-          meta.appendChild(span);
-        }
-        meta.style.display = "";
-      } else {
-        meta.replaceChildren();
-        meta.style.display = "none";
-      }
-    }
+    this.updateMeta(row, entry, dark);
 
     // Update stats button (citation count)
     const statsButton = row.querySelector(
@@ -674,6 +659,33 @@ export class EntryListRenderer {
 
     // Apply focus state if this entry is focused
     this.updateFocusState(row, ctx.focusedEntryID === entry.id);
+  }
+
+  /** The paper's second line: journal, DOI and arXiv links */
+  updateMeta(
+    row: HTMLElement,
+    entry: InspireReferenceEntry,
+    dark = isDarkMode(this.doc),
+  ): void {
+    const meta = row.querySelector(
+      ".zinspire-ref-entry__meta",
+    ) as HTMLElement | null;
+    if (!meta) return;
+    const hasMeta = entry.publicationInfo || entry.arxivDetails || entry.doi;
+    const suffix = this.adapter.metaSuffix?.(entry);
+    if (hasMeta || suffix) {
+      this.buildMetaContent(meta, entry, dark);
+      if (suffix) {
+        const span = this.doc.createElement("span");
+        span.classList.add("zinspire-ref-entry__meta-suffix");
+        span.textContent = suffix;
+        meta.appendChild(span);
+      }
+      meta.style.display = "";
+    } else {
+      meta.replaceChildren();
+      meta.style.display = "none";
+    }
   }
 
   /**
@@ -856,6 +868,9 @@ export class EntryListRenderer {
       const arxivUrl = `${ARXIV_ABS_URL}/${arxivDetails.id}`;
       const arxivText = `[arXiv:${arxivDetails.id}]`;
       container.appendChild(this.createExternalLink(arxivText, arxivUrl, dark));
+      if (this.adapter.arxivHtml !== false) {
+        container.append(" ", this.arxivHtmlLink(dark));
+      }
     }
 
     // Erratum info
@@ -893,6 +908,50 @@ export class EntryListRenderer {
       closeBracket.textContent = "]";
       container.appendChild(closeBracket);
     }
+  }
+
+  /**
+   * "HTML", for the menu of the paper's HTML version: the list's own click
+   * handler acts on it. Without an address, so that it has no link menu.
+   * Drawn as a small tinted button in the links' colour, with a page icon
+   * and a ▾ for its menu; inline, so that it does not make the line taller.
+   * (Styles are set here: the panel has no stylesheet of its own.)
+   */
+  private arxivHtmlLink(dark: boolean): HTMLAnchorElement {
+    const link = this.doc.createElement("a");
+    link.classList.add("zinspire-ref-entry__html");
+    link.title = this.strings.arxivHtmlTitle;
+    applyMetaLinkStyle(link, dark);
+    const tint = (percent: number) =>
+      `color-mix(in srgb, currentColor ${percent}%, transparent)`;
+    Object.assign(link.style, {
+      padding: "1px 4px",
+      borderRadius: "4px",
+      fontWeight: "600",
+      whiteSpace: "nowrap",
+      userSelect: "none",
+      background: tint(13),
+    });
+    link.addEventListener("mouseenter", () => {
+      link.style.background = tint(24);
+    });
+    link.addEventListener("mouseleave", () => {
+      link.style.background = tint(13);
+    });
+
+    // Zotero's document icon, filled with the text's colour
+    const icon = this.doc.createElement("span");
+    icon.style.cssText =
+      "display: inline-block; width: 9px; height: 10px; margin-inline-end: 3px; " +
+      "vertical-align: -1px; background: currentColor; " +
+      'mask: url("chrome://zotero/skin/item-type/16/white/document.svg") center / contain no-repeat;';
+    // ▾, drawn, so that the text stays the label
+    const arrow = this.doc.createElement("span");
+    arrow.style.cssText =
+      "display: inline-block; margin-inline-start: 3px; vertical-align: 2px; " +
+      "border-inline: 3px solid transparent; border-top: 4px solid currentColor;";
+    link.append(icon, this.strings.arxivHtml, arrow);
+    return link;
   }
 
   /**

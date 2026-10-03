@@ -7,6 +7,7 @@ import type { FluentMessageId } from "../../../../typings/i10n";
 import { getString } from "../../../utils/locale";
 import { isoDateToMs, type IsoDate } from "../arxivDates";
 import type { ArxivSchedulerStatus } from "../arxivFetch";
+import type { HtmlSaveOutcome } from "../arxivHtmlSnapshot";
 import type { ListingFailureReason } from "../listingTypes";
 
 /** Zotero's interface language, for dates */
@@ -71,6 +72,32 @@ const REASONS: Record<ListingFailureReason, FluentMessageId> = {
 /** Why a listing could not be fetched, in words */
 export function reasonText(reason: ListingFailureReason): string {
   return getString(REASONS[reason]);
+}
+
+/**
+ * What came of saving the HTML version of paper `id`, in words: saved, there
+ * already, or why not
+ */
+export function htmlSaveText(id: string, outcome: HtmlSaveOutcome): string {
+  if (outcome.status !== "failed") {
+    return getString(
+      outcome.status === "there"
+        ? "arxiv-browser-html-there"
+        : "arxiv-browser-html-saved",
+      { args: { id, version: outcome.version } },
+    );
+  }
+  const reason =
+    outcome.version === undefined
+      ? getString("arxiv-browser-html-no-version")
+      : outcome.reason === "noHtml"
+        ? getString("arxiv-browser-html-no-html")
+        : outcome.reason === "filesNotEditable"
+          ? getString("arxiv-browser-pdf-files-not-editable")
+          : outcome.reason === "capture"
+            ? getString("arxiv-browser-html-capture")
+            : reasonText(outcome.reason);
+  return getString("arxiv-browser-html-failed", { args: { id, reason } });
 }
 
 /** Wall-clock time of `ms` as HH:MM */

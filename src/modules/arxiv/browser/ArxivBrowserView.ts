@@ -875,6 +875,23 @@ export class ArxivBrowserView {
     return this.selection;
   }
 
+  /**
+   * Show arXiv's HTML version (the newest) of a paper asked for from outside
+   * the window (the References panel); the list stays as it is
+   */
+  showHtml(paper: { id: string; title?: string }): void {
+    if (this.disposed) return;
+    if (!this.htmlPane) {
+      this.actions.openHtml(paper.id);
+      return;
+    }
+    this.htmlPane.show({
+      id: paper.id,
+      title: paper.title,
+      url: htmlUrl(paper.id),
+    });
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

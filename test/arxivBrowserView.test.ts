@@ -1822,6 +1822,33 @@ describe("arXiv browser: the HTML version beside the list", () => {
     );
   });
 
+  it("shows the HTML version of a paper asked for from outside the window, the list as it was", async () => {
+    const env = await loaded();
+    const { pane, detail, load, launch } = env;
+    const focused = env.view.listPane.focused;
+
+    env.view.showHtml({ id: "hep-ph/0101001", title: "Quantum Weakdynamics" });
+
+    expect(launch).not.toHaveBeenCalled();
+    expect(pane.hidden).toBe(false);
+    expect(detail.hidden).toBe(true);
+    expect(load).toHaveBeenCalledExactlyOnceWith(
+      env.page(),
+      "https://arxiv.org/html/hep-ph/0101001",
+    );
+    expect(pane.querySelector(".arxiv-browser__html-label")!.textContent).toBe(
+      "arXiv:hep-ph/0101001 · Quantum Weakdynamics",
+    );
+    expect(env.view.listPane.focused).toBe(focused);
+
+    // Another paper asked for: in its place
+    env.view.showHtml({ id: ID });
+    expect(load).toHaveBeenLastCalledWith(env.page(), URL);
+    expect(pane.querySelector(".arxiv-browser__html-label")!.textContent).toBe(
+      `arXiv:${ID}`,
+    );
+  });
+
   it("shows the version the detail pane shows, and the menu's first entry does the same", async () => {
     const env = await loaded();
     const { root, pane, load, launch } = env;
@@ -2067,7 +2094,11 @@ describe("arXiv browser: the HTML version beside the list", () => {
         page.document.addEventListener(type, listener, capture);
       },
       (name: string, data: unknown) => sent.push([name, data]),
-      { location: page.location, getSelection: () => selection },
+      {
+        location: page.location,
+        document: page.document,
+        getSelection: () => selection,
+      },
     );
     // The eval of the links' own window
     (page as any).eval = run;
@@ -2076,6 +2107,9 @@ describe("arXiv browser: the HTML version beside the list", () => {
       ["auxclick", true],
       ["click", false],
       ["contextmenu", false],
+      // A deleted arXiv stylesheet replaced (arxivHtmlStylesheet.test.ts)
+      ["error", true],
+      ["load", true],
     ]);
     /** A click on `id`: whether it was left to the page, and what was sent */
     const press = (id: string, type = "click", button = 0) => {
