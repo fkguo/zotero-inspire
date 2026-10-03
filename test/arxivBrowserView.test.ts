@@ -2067,7 +2067,11 @@ describe("arXiv browser: the HTML version beside the list", () => {
         page.document.addEventListener(type, listener, capture);
       },
       (name: string, data: unknown) => sent.push([name, data]),
-      { location: page.location, getSelection: () => selection },
+      {
+        location: page.location,
+        document: page.document,
+        getSelection: () => selection,
+      },
     );
     // The eval of the links' own window
     (page as any).eval = run;
@@ -2076,6 +2080,9 @@ describe("arXiv browser: the HTML version beside the list", () => {
       ["auxclick", true],
       ["click", false],
       ["contextmenu", false],
+      // A deleted arXiv stylesheet replaced (arxivHtmlStylesheet.test.ts)
+      ["error", true],
+      ["load", true],
     ]);
     /** A click on `id`: whether it was left to the page, and what was sent */
     const press = (id: string, type = "click", button = 0) => {
