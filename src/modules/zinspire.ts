@@ -61,8 +61,6 @@ import {
   // Constants
   INSPIRE_API_BASE,
   INSPIRE_LITERATURE_URL,
-  ARXIV_ABS_URL,
-  DOI_ORG_URL,
   CROSSREF_API_URL,
   CITED_BY_PAGE_SIZE,
   CITED_BY_MAX_PAGES,
@@ -165,7 +163,6 @@ import {
   buildEntrySearchText,
   splitPublicationInfo,
   getPublicationNoteLabel,
-  formatPublicationInfo,
   buildPublicationSummary,
   normalizeArxivID,
   normalizeArxivCategories,
@@ -266,9 +263,14 @@ import { loadedItem, refreshLocalState } from "./inspire/library/localStatus";
 import {
   findFullText,
   firstPdfAttachmentID,
+  openAttachment,
   openLocalPdf,
   showFullTextSearch,
 } from "./inspire/library/localPdf";
+import { htmlSnapshotID, saveArxivHtmlVersion } from "./arxiv/arxivHtmlSnapshot";
+import { htmlSaveText } from "./arxiv/browser/browserText";
+import { openArxivBrowser } from "./arxiv/browser/browserWindow";
+import { showMenu } from "./arxiv/browser/dom";
 import { linkItems, unlinkItems } from "./inspire/library/relatedItems";
 import { pickSaveTarget, rememberSaveTarget } from "./saveTargets";
 import { applyLocalMarker } from "./inspire/panel/localMarker";
@@ -1427,6 +1429,8 @@ export class ZInspireReferencePane {
 }
 
 export class InspireReferencePanelController {
+  /** arXiv identifiers of the papers whose HTML version is being saved */
+  private static savingArxivHtml = new Set<string>();
   private static get PANEL_LAYOUT_DEBUG(): boolean {
     return getPref("debug_panel_layout") === true;
   }
@@ -5901,6 +5905,16 @@ export class InspireReferencePanelController {
           });
           this.markerClickTimer = undefined;
         }, 250);
+        return;
+      }
+
+      // "HTML" after the arXiv number: the menu of arXiv's HTML version
+      if (target.closest(".zinspire-ref-entry__html")) {
+        event.preventDefault();
+        this.showArxivHtmlMenu(
+          entry,
+          target.closest(".zinspire-ref-entry__html") as HTMLElement,
+        );
         return;
       }
 
@@ -11457,18 +11471,7 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
 
     // Update meta with clickable links (DOI/arXiv) - PERF-13: rebuild content
-    const meta = row.querySelector(".zinspire-ref-entry__meta") as HTMLElement;
-    if (meta) {
-      const hasMeta = entry.publicationInfo || entry.arxivDetails || entry.doi;
-      if (hasMeta) {
-        this.buildMetaContent(meta, entry);
-        meta.style.display = "";
-      } else {
-        // PERF-FIX-15: Use replaceChildren() instead of innerHTML
-        meta.replaceChildren();
-        meta.style.display = "none";
-      }
-    }
+    this.entryRenderer?.updateMeta(row, entry);
 
     // Update stats button (show/hide) - PERF-13: use existing element
     const statsButton = row.querySelector(
@@ -14253,134 +14256,6 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
   }
 
   /**
-   * Create a clickable external link element.
-   * Shared helper for title links, DOI links, arXiv links, etc.
-   * - Blue color, underline on hover
-   * - Left click opens in browser via Zotero.launchURL()
-   * - Right click shows context menu (handled by event delegation)
-   */
-  private createExternalLink(
-    doc: Document,
-    text: string,
-    url: string,
-  ): HTMLAnchorElement {
-    const link = doc.createElement("a");
-    link.href = url;
-    link.textContent = text;
-    applyMetaLinkStyle(link, isDarkMode());
-    // Hover underline
-    link.addEventListener("mouseenter", () => {
-      link.style.textDecoration = "underline";
-    });
-    link.addEventListener("mouseleave", () => {
-      link.style.textDecoration = "none";
-    });
-    // Left click opens in browser (Zotero doesn't support target="_blank")
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      Zotero.launchURL(url);
-    });
-    return link;
-  }
-
-  /**
-   * Build meta content with clickable links for DOI and arXiv.
-   * - Journal info links to DOI if available
-   * - arXiv tag links to arXiv abstract page
-   * - Erratum info also links to its DOI if available
-   */
-  private buildMetaContent(
-    container: HTMLElement,
-    entry: InspireReferenceEntry,
-  ): void {
-    const doc = this.listEl.ownerDocument;
-    // PERF-FIX-15: Use replaceChildren() instead of innerHTML = ""
-    container.replaceChildren();
-
-    // Build journal info part
-    const journalText = formatPublicationInfo(
-      entry.publicationInfo,
-      entry.year,
-    );
-    if (journalText) {
-      if (entry.doi) {
-        const doiUrl = `${DOI_ORG_URL}/${entry.doi}`;
-        container.appendChild(
-          this.createExternalLink(doc, journalText, doiUrl),
-        );
-      } else {
-        const journalSpan = doc.createElement("span");
-        journalSpan.textContent = journalText;
-        container.appendChild(journalSpan);
-      }
-    }
-
-    // Build arXiv part
-    const arxivDetails = formatArxivDetails(entry.arxivDetails);
-    if (arxivDetails?.id) {
-      if (journalText) {
-        // Add space separator
-        const space = doc.createElement("span");
-        space.textContent = " ";
-        container.appendChild(space);
-      }
-      const arxivUrl = `${ARXIV_ABS_URL}/${arxivDetails.id}`;
-      const arxivText = `[arXiv:${arxivDetails.id}]`;
-      container.appendChild(this.createExternalLink(doc, arxivText, arxivUrl));
-    }
-
-    // Build erratum part
-    if (entry.publicationInfoErrata?.length) {
-      const errataSummaries: string[] = [];
-      for (const errataEntry of entry.publicationInfoErrata) {
-        const text = formatPublicationInfo(errataEntry.info, entry.year, {
-          omitJournal: true,
-        });
-        if (text) {
-          errataSummaries.push(`${errataEntry.label}: ${text}`);
-        }
-      }
-      if (errataSummaries.length) {
-        // Add space before erratum bracket
-        const space = doc.createElement("span");
-        space.textContent = " [";
-        container.appendChild(space);
-
-        for (let i = 0; i < entry.publicationInfoErrata.length; i++) {
-          const errataEntry = entry.publicationInfoErrata[i];
-          const text = formatPublicationInfo(errataEntry.info, entry.year, {
-            omitJournal: true,
-          });
-          if (!text) continue;
-
-          if (i > 0) {
-            const sep = doc.createElement("span");
-            sep.textContent = "; ";
-            container.appendChild(sep);
-          }
-
-          const labelText = `${errataEntry.label}: ${text}`;
-          if (errataEntry.doi) {
-            const errataUrl = `${DOI_ORG_URL}/${errataEntry.doi}`;
-            container.appendChild(
-              this.createExternalLink(doc, labelText, errataUrl),
-            );
-          } else {
-            const errataSpan = doc.createElement("span");
-            errataSpan.textContent = labelText;
-            container.appendChild(errataSpan);
-          }
-        }
-
-        const closeBracket = doc.createElement("span");
-        closeBracket.textContent = "]";
-        container.appendChild(closeBracket);
-      }
-    }
-  }
-
-  /**
    * Show a context menu for link with copy option.
    * FTR-COPY-LINK: Right-click on any link to copy its URL.
    */
@@ -16651,23 +16526,24 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
     }
   }
 
+  /** Add the paper to the library where the user chooses: its new item */
   private async handleAddAction(
     entry: InspireReferenceEntry,
     anchor: HTMLElement,
-  ) {
+  ): Promise<Zotero.Item | null> {
     if (entry.localItemID) {
-      return;
+      return null;
     }
     if (!entry.recid) {
       this.showToast(getString("references-panel-toast-missing"));
-      return;
+      return null;
     }
     if (!(await this.confirmNotInLibrary(entry))) {
-      return;
+      return null;
     }
     const selection = await this.promptForSaveTarget(anchor);
     if (!selection) {
-      return;
+      return null;
     }
     const newItem = await this.importReference(entry.recid, selection);
     if (newItem) {
@@ -16691,6 +16567,76 @@ toolbarbutton.zinspire-refresh.section-custom-button.zinspire-section-button-loa
       }
       // ISSUE-110: optionally fetch the PDF right after adding (opt-in pref).
       void this.maybeAutoFindFullText(entry, newItem);
+    }
+    return newItem ?? null;
+  }
+
+  /**
+   * The menu of arXiv's HTML version of the paper, as in the arXiv browser:
+   * show it there, save it as a snapshot, and open the snapshot when saved
+   */
+  private showArxivHtmlMenu(
+    entry: InspireReferenceEntry,
+    anchor: HTMLElement,
+  ): void {
+    const id = formatArxivDetails(entry.arxivDetails)?.id;
+    if (!id) return;
+    const snapshotID =
+      (entry.localItemIDs ?? (entry.localItemID ? [entry.localItemID] : []))
+        .map((itemID) => htmlSnapshotID(itemID, id))
+        .find((found) => found !== null) ?? null;
+    showMenu(anchor, [
+      {
+        label: getString("references-panel-arxiv-html-show"),
+        run: () => openArxivBrowser({ id, title: entry.title }),
+      },
+      {
+        label: getString("arxiv-browser-html-menu-save"),
+        run: () =>
+          void this.saveArxivHtml(entry, id, anchor).catch((err) =>
+            Zotero.debug(
+              `[${config.addonName}] saveArxivHtml failed\n${(err as Error)?.stack ?? err}`,
+            ),
+          ),
+      },
+      ...(snapshotID === null
+        ? []
+        : [
+            {
+              label: getString("arxiv-browser-html-menu-open"),
+              run: () => void openAttachment(snapshotID),
+            },
+          ]),
+    ]);
+  }
+
+  /**
+   * Save arXiv's HTML version (the newest) of the paper as a snapshot of its
+   * (first) item; a paper not in the library is added first, where the user
+   * chooses
+   */
+  private async saveArxivHtml(
+    entry: InspireReferenceEntry,
+    id: string,
+    anchor: HTMLElement,
+  ): Promise<void> {
+    // One save at a time per paper
+    if (InspireReferencePanelController.savingArxivHtml.has(id)) return;
+    InspireReferencePanelController.savingArxivHtml.add(id);
+    try {
+      // Added, or found in the library when it was to be added
+      const item =
+        (!entry.localItemID && (await this.handleAddAction(entry, anchor))) ||
+        (entry.localItemID ? loadedItem(entry.localItemID) : null);
+      if (!item) return;
+      const progress = popupReporter.startProgress(
+        getString("arxiv-browser-html-saving", { args: { id } }),
+      );
+      const outcome = await saveArxivHtmlVersion(item, id, undefined);
+      progress.close();
+      this.showToast(htmlSaveText(id, outcome));
+    } finally {
+      InspireReferencePanelController.savingArxivHtml.delete(id);
     }
   }
 

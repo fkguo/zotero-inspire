@@ -38,17 +38,16 @@ import {
   type AddPaperOutcome,
   type AddPaperRequest,
 } from "../addToLibrary";
-import { fetchArxivApiEntries } from "../arxivApi";
+import type { fetchArxivApiEntries } from "../arxivApi";
 import {
-  htmlSnapshotID,
   saveArxivHtmlSnapshot,
-  type HtmlSnapshotResult,
+  saveArxivHtmlVersion,
 } from "../arxivHtmlSnapshot";
 import type { ArxivPdfResult } from "../arxivPdf";
 import { arxivAddRequest } from "../batchAdd";
 import type { NoticeAction, WindowReporter } from "./browserActions";
 import type { BrowserEntry } from "./browserList";
-import { reasonText } from "./browserText";
+import { htmlSaveText, reasonText } from "./browserText";
 
 const NOTE_TEXTS: Record<AddNote, Parameters<typeof getString>[0]> = {
   journalDoiMismatch: "arxiv-browser-note-journal-mismatch",
@@ -132,22 +131,6 @@ export function pdfFailureText(
       return getString("arxiv-browser-pdf-files-not-editable");
     case "save":
       return getString("arxiv-browser-pdf-save");
-    default:
-      return reasonText(result.reason);
-  }
-}
-
-/** Why an HTML snapshot was not saved, in words */
-function htmlFailureText(
-  result: Extract<HtmlSnapshotResult, { status: "failed" }>,
-): string {
-  switch (result.reason) {
-    case "noHtml":
-      return getString("arxiv-browser-html-no-html");
-    case "filesNotEditable":
-      return getString("arxiv-browser-pdf-files-not-editable");
-    case "capture":
-      return getString("arxiv-browser-html-capture");
     default:
       return reasonText(result.reason);
   }
@@ -488,75 +471,30 @@ export class LibraryActions {
     const progress = this.reporter.startProgress(
       getString("arxiv-browser-html-saving", { args: { id } }),
     );
-    let version: number | undefined;
-    let result: HtmlSnapshotResult | "there";
-    try {
-      version = wanted ?? entry.listing.version;
-      if (version === undefined) {
-        const api = await (this.options.apiEntries ?? fetchArxivApiEntries)([
-          id,
-        ]);
-        version = api.entries.get(id)?.version;
-      }
-      if (version === undefined) {
-        result = {
-          status: "failed",
-          reason: "capture",
-          message: "The arXiv API gave no version",
-        };
-      } else if (htmlSnapshotID(item.id, id, version) !== null) {
-        result = "there";
-      } else {
-        result = await (this.options.saveHtmlSnapshot ?? saveArxivHtmlSnapshot)(
-          item,
-          { id, version },
-        );
-      }
-    } catch (error) {
-      result = { status: "failed", reason: "capture", message: String(error) };
-    } finally {
+    const outcome = await saveArxivHtmlVersion(
+      item,
+      id,
+      wanted ?? entry.listing.version,
+      {
+        saveHtmlSnapshot: this.options.saveHtmlSnapshot,
+        apiEntries: this.options.apiEntries,
+      },
+    ).finally(() => {
       progress.close();
       this.savingHtml.delete(job);
-    }
+    });
     if (this.disposed) return;
-    if (result === "there" || result.status === "saved") {
-      const attachmentID =
-        result === "there"
-          ? htmlSnapshotID(item.id, id, version)
-          : result.attachment.id;
-      const args = { id, version: version! };
-      this.reporter.ask(
-        getString(
-          result === "there"
-            ? "arxiv-browser-html-there"
-            : "arxiv-browser-html-saved",
-          { args },
-        ),
-        [
-          ...(attachmentID !== null
-            ? [
-                {
-                  label: getString("arxiv-browser-html-menu-open"),
-                  run: () => void openAttachment(attachmentID),
-                },
-              ]
-            : []),
-          this.showAction([item.id]),
-        ],
-      );
-      return;
-    }
     this.reporter.ask(
-      getString("arxiv-browser-html-failed", {
-        args: {
-          id,
-          reason:
-            version === undefined
-              ? getString("arxiv-browser-html-no-version")
-              : htmlFailureText(result),
-        },
-      }),
-      [],
+      htmlSaveText(id, outcome),
+      outcome.status === "failed"
+        ? []
+        : [
+            {
+              label: getString("arxiv-browser-html-menu-open"),
+              run: () => void openAttachment(outcome.attachmentID),
+            },
+            this.showAction([item.id]),
+          ],
     );
   }
 

@@ -202,6 +202,8 @@ export class ListPane {
         titleSuffix: "",
         abstract: (entry) => entry.abstract || undefined,
         metaSuffix: (entry) => this.metaSuffix(entry as BrowserEntry),
+        // The row has its HTML button
+        arxivHtml: false,
       },
     });
 
