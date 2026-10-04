@@ -2075,7 +2075,8 @@ describe("arXiv browser: the HTML version beside the list", () => {
        <a id="full" href="${URL}#bib.bib3">[3]</a>
        <a id="script" href="javascript:toggleNavTOC();%20void%200">toggle</a>
        <a id="mail" href="mailto:a@b.c">mail</a>
-       <p id="text">no link</p>`,
+       <p id="text">no link</p>
+       <nav id="navbar" class="ltx_page_navbar"><nav id="toc" class="ltx_TOC"></nav></nav>`,
       // Its own console: jsdom tells there that it follows no links
       { url: URL, virtualConsole: new VirtualConsole() },
     ).window;
@@ -2107,10 +2108,36 @@ describe("arXiv browser: the HTML version beside the list", () => {
       ["auxclick", true],
       ["click", false],
       ["contextmenu", false],
+      ["DOMContentLoaded", true],
       // A deleted arXiv stylesheet replaced (arxivHtmlStylesheet.test.ts)
       ["error", true],
       ["load", true],
     ]);
+    // arXiv's empty box for the table of contents, over the text in a
+    // narrow view, lets the pointer through once the page is read; the
+    // contents take it
+    const navbar = page.document.getElementById("navbar")!;
+    expect(navbar.style.pointerEvents).toBe("");
+    page.document.dispatchEvent(new page.Event("DOMContentLoaded"));
+    expect(navbar.style.pointerEvents).toBe("none");
+    expect(page.document.getElementById("toc")!.style.pointerEvents).toBe(
+      "auto",
+    );
+    // The script starting on a page already read: at once
+    const read = new JSDOM(
+      `<nav id="navbar" class="ltx_page_navbar"><nav class="ltx_TOC"></nav></nav>`,
+      { url: URL },
+    ).window;
+    Object.defineProperty(read.document, "readyState", { value: "complete" });
+    new read.Function(
+      "addEventListener",
+      "sendAsyncMessage",
+      "content",
+      decodeURIComponent(frameScripts[0].replace(/^data:[^,]*,/, "")),
+    )(() => undefined, () => undefined, { document: read.document });
+    expect(read.document.getElementById("navbar")!.style.pointerEvents).toBe(
+      "none",
+    );
     /** A click on `id`: whether it was left to the page, and what was sent */
     const press = (id: string, type = "click", button = 0) => {
       sent.length = 0;

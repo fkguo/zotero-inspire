@@ -170,6 +170,21 @@ addEventListener("click", onLinkClick, true);
 addEventListener("auxclick", onLinkClick, true);
 addEventListener("click", onScriptLinkClick, false);
 addEventListener("contextmenu", onContextMenu, false);
+// arXiv's box for the table of contents, in a view narrower than 1280
+// pixels: fixed over the right of the text, and empty (transparent) until
+// the contents are asked for, it takes the pointer from the text and links
+// under it. The pointer goes through the box; the contents, shown, take it.
+function letPointerThroughContentsBox() {
+  var box = content.document.querySelector(".ltx_page_navbar");
+  if (!box) return;
+  box.style.pointerEvents = "none";
+  var contents = box.querySelector("nav.ltx_TOC");
+  if (contents) contents.style.pointerEvents = "auto";
+}
+addEventListener("DOMContentLoaded", function (event) {
+  if (event.target === content.document) letPointerThroughContentsBox();
+}, true);
+if (content.document.readyState !== "loading") letPointerThroughContentsBox();
 ${RESTORE_STYLESHEET_SCRIPT}`;
 const LINK_SCRIPT_URL = `data:application/javascript;charset=utf-8,${encodeURIComponent(LINK_SCRIPT)}`;
 
