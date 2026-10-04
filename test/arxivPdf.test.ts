@@ -37,7 +37,7 @@ let files: Map<string, Uint8Array>;
 let dirs: Set<string>;
 let importFromFile: ReturnType<typeof vi.fn>;
 let filesEditable: boolean;
-let autoRename: boolean;
+let getFileBaseNameFromItem: ReturnType<typeof vi.fn>;
 let requests: { url: string; options: any }[];
 let reply: () => Promise<ArxivResponse>;
 
@@ -59,7 +59,7 @@ beforeEach(() => {
   dirs = new Set();
   requests = [];
   filesEditable = true;
-  autoRename = false;
+  getFileBaseNameFromItem = vi.fn(() => "Pathak et al. - 2026 - Hyperfine");
   reply = async () => response(200, PDF);
   importFromFile = vi.fn(async (options: any) => {
     if (!files.has(options.file)) throw new Error("no file");
@@ -75,9 +75,8 @@ beforeEach(() => {
         dirs.add(path);
         return { path };
       },
-      shouldAutoRenameFile: () => autoRename,
-      isRenameAllowedForType: (type: string) => type === "application/pdf",
-      getFileBaseNameFromItem: () => "Pathak et al. - 2026 - Hyperfine",
+      // No renaming-setting functions: the PDF is named whatever they say
+      getFileBaseNameFromItem,
       importFromFile,
     },
   });
@@ -118,6 +117,7 @@ describe("attaching a paper's arXiv PDF", () => {
       parentItemID: 77,
       contentType: "application/pdf",
       title: "arXiv preprint PDF v2",
+      fileBaseName: "Pathak et al. - 2026 - Hyperfine",
     });
     expect(result).toMatchObject({
       status: "attached",
@@ -128,11 +128,10 @@ describe("attaching a paper's arXiv PDF", () => {
     expect(files.size).toBe(0);
   });
 
-  it("names the file as Zotero names downloaded PDFs when Zotero renames files", async () => {
-    autoRename = true;
+  it("names the file from the item as Zotero names the files it downloads", async () => {
     await attachArxivPdf(item, SOURCE, { scheduler });
-    expect(importFromFile.mock.calls[0][0]).toMatchObject({
-      fileBaseName: "Pathak et al. - 2026 - Hyperfine",
+    expect(getFileBaseNameFromItem).toHaveBeenCalledWith(item, {
+      attachmentTitle: "arXiv preprint PDF v2",
     });
   });
 
