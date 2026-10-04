@@ -149,6 +149,26 @@ describe("arXiv browser loading", () => {
     expect(site.count(LIST_URL("hep-ph"))).toBe(0);
   });
 
+  it("tells the choice's days once a run settled them, and counts the runs", async () => {
+    const { clock, loader } = setup();
+    const first = loader.runNumber;
+    const running = loader.load(hepPh, { kind: "recent" });
+    expect(loader.runNumber).toBe(first + 1);
+    // Not known during the run
+    expect(loader.choiceDates).toBeUndefined();
+    await clock.run(running);
+    expect(loader.choiceDates).toEqual([...DAYS].reverse());
+  });
+
+  it("does not tell the newest day when its run stopped before arXiv named it", async () => {
+    const { clock, loader } = setup();
+    const stopped = loader.load(hepPh, { kind: "newest" });
+    loader.cancel();
+    await clock.run(stopped);
+    expect(loader.result?.stopped).toBeDefined();
+    expect(loader.choiceDates).toBeUndefined();
+  });
+
   it("loads this week: Monday to the newest scheduled listing", async () => {
     const { clock, loader } = setup();
     await clock.run(loader.load(hepPh, { kind: "week" }));

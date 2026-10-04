@@ -93,6 +93,8 @@ export class PaneDivider {
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
+    // Alt+← / Alt+→ are the window's Back and Forward
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const step =
       event.key === "ArrowLeft"
         ? -KEY_STEP

@@ -63,10 +63,14 @@ export class FilterHistoryInput {
     this.hint = hint;
 
     input.addEventListener("keydown", (event: KeyboardEvent) => {
-      if (
-        (event.key === "Tab" || event.key === "ArrowRight") &&
-        hint.currentHintText
-      ) {
+      // → with a modifier is not completion (Alt+→: Forward in the arXiv
+      // browser)
+      const arrow =
+        event.key === "ArrowRight" &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey;
+      if ((event.key === "Tab" || arrow) && hint.currentHintText) {
         const cursorAtEnd = input.selectionStart === input.value.length;
         if (cursorAtEnd && hint.accept()) {
           event.preventDefault();

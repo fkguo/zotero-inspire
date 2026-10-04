@@ -53,6 +53,11 @@ import {
   HTML_SELECTION_SCRIPT,
   SELECTION_MESSAGE,
 } from "../arxivHtmlSelection";
+import {
+  HTML_PLACE_SCRIPT,
+  PLACE_MESSAGE,
+  type PlaceReport,
+} from "../arxivHtmlPlace";
 import { RESTORE_STYLESHEET_SCRIPT } from "../arxivHtmlStylesheet";
 import type { HtmlReferenceEntry } from "../htmlReferences";
 import { button, html, showMenuAt, type MenuEntry } from "./dom";
@@ -71,6 +76,23 @@ export interface HtmlPanePaper {
 /** Zotero's <browser> element, as far as the pane uses it */
 export interface PageBrowser extends Element {
   loadURI?(uri: unknown, options: { triggeringPrincipal: unknown }): void;
+  reload?(): void;
+  goBack?(requireUserInteraction: boolean): void;
+  goForward?(requireUserInteraction: boolean): void;
+  /** The page's session history, in Zotero's own process */
+  browsingContext?: {
+    sessionHistory?: { index: number; count: number } | null;
+  } | null;
+}
+
+/** Where the page shown is in its own history */
+export interface PageHistory {
+  /** The page element, numbered by the pane: a new one for each paper */
+  element: number;
+  /** The entry shown (−1 before the first load) */
+  index: number;
+  /** The entries: the page and its `#` places visited */
+  count: number;
 }
 
 /** The platform's <findbar> element, as far as the pane uses it */
@@ -123,6 +145,13 @@ export interface HtmlPaneOptions {
    * window)
    */
   details(paper: HtmlPanePaper): void;
+  /**
+   * The page moved within its own history or its reader's place changed:
+   * `jump` when the reader went to a place in it (a section, a citation),
+   * `move` otherwise (Back and Forward through it, a page shown, the place
+   * scrolled to)
+   */
+  onPage?(kind: "jump" | "move"): void;
   /** Loads a page in the browser element (default: Zotero's loadURI) */
   load?: (browser: PageBrowser, url: string) => void;
   /** INSPIRE's cards of the page's citations */
@@ -236,7 +265,8 @@ addEventListener("DOMContentLoaded", function (event) {
 if (content.document.readyState !== "loading") letPointerThroughContentsBox();
 ${RESTORE_STYLESHEET_SCRIPT}
 ${HTML_PREVIEW_SCRIPT}
-${HTML_SELECTION_SCRIPT}`;
+${HTML_SELECTION_SCRIPT}
+${HTML_PLACE_SCRIPT}`;
 const LINK_SCRIPT_URL = `data:application/javascript;charset=utf-8,${encodeURIComponent(LINK_SCRIPT)}`;
 
 const WEB_ADDRESS = /^https?:\/\//i;
@@ -247,6 +277,15 @@ interface WindowMessageManager {
   removeDelayedFrameScript(url: string): void;
   addMessageListener(name: string, listener: unknown): void;
   removeMessageListener(name: string, listener: unknown): void;
+}
+
+/** Whether two web addresses are of the same site */
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
 }
 
 /** Load `url` as Zotero's viewer window does */
@@ -263,6 +302,16 @@ export class HtmlPane {
   private readonly loading: HTMLElement;
   private browser: PageBrowser | null = null;
   private findBar: FindBar | null = null;
+  /** The page elements made so far, and the number of the one shown */
+  private elements = 0;
+  private elementNumber: number | null = null;
+  /** The reader's place: the page's address with the `#` place last told */
+  private readingAddress = "";
+  /**
+   * Steps the window made in the page's history not yet told back by the
+   * page: those moves are not the reader's jumps
+   */
+  private ownMoves = 0;
   /** Set once the link script is loaded in the window's pages */
   private links: WindowMessageManager | null = null;
   private readonly onLinkMessage = (message: {
@@ -334,6 +383,30 @@ export class HtmlPane {
         ),
       }));
     this.options.citations?.entries(paperId, entries);
+  };
+  /** The page moved in its history, was shown, or tells the reader's place */
+  private readonly onPlaceMessage = (message: {
+    target?: unknown;
+    data?: Partial<PlaceReport> | null;
+  }): void => {
+    const report = message.data;
+    if (!report || !this.pageOf(message)) return;
+    // The page's process is not trusted: a web address of the page only
+    // A web address of the paper's own site only
+    const href = typeof report.href === "string" ? report.href : "";
+    if (!WEB_ADDRESS.test(href) || !sameOrigin(href, this.shown!.url)) return;
+    if (report.kind === "place") {
+      if (typeof report.id !== "string" || !report.id) return;
+      this.readingAddress = `${href.replace(/#.*$/, "")}#${encodeURIComponent(report.id)}`;
+      this.options.onPage?.("move");
+      return;
+    }
+    this.readingAddress = href;
+    let jump = false;
+    if (report.kind === "shown") this.ownMoves = 0;
+    else if (this.ownMoves > 0) this.ownMoves--;
+    else jump = true;
+    this.options.onPage?.(jump ? "jump" : "move");
   };
   /** The citations selected in the page, or none */
   private readonly onSelectionMessage = (message: {
@@ -430,10 +503,63 @@ export class HtmlPane {
     return true;
   }
 
-  /** Show a paper's HTML version in place of the detail pane */
-  show(paper: HtmlPanePaper): void {
+  /** Whether the page of `paper` (that version; none: the newest) is shown */
+  shows(paper: { id: string; version?: number }): boolean {
+    return this.shown?.id === paper.id && this.shown.version === paper.version;
+  }
+
+  /**
+   * The page shown: its element and where it is in its own history (none
+   * before its first load arrived)
+   */
+  get history(): PageHistory | null {
+    if (this.elementNumber === null) return null;
+    const history = this.browser?.browsingContext?.sessionHistory;
+    return {
+      element: this.elementNumber,
+      index: history?.index ?? -1,
+      count: history?.count ?? 0,
+    };
+  }
+
+  /**
+   * The reader's place in the page shown: its address with the `#` place
+   * last jumped or scrolled to
+   */
+  get address(): string | null {
+    return this.shown ? this.readingAddress : null;
+  }
+
+  /**
+   * One step back (forward) in the page's own history. The window keeps
+   * the bounds, so entries without the reader's interaction are not skipped.
+   */
+  goBack(): void {
+    if (!this.browser) return;
+    this.ownMoves++;
+    this.browser.goBack?.(false);
+  }
+
+  goForward(): void {
+    if (!this.browser) return;
+    this.ownMoves++;
+    this.browser.goForward?.(false);
+  }
+
+  /**
+   * Show a paper's HTML version in place of the detail pane, at `address`
+   * (a place in it; default its start). The page shown asked for again is
+   * loaded anew in its place (nothing while it is still loading). Another
+   * paper's page comes in a new element: its own history, so that Back in
+   * it never leads into the other paper's page.
+   */
+  show(paper: HtmlPanePaper, address?: string): void {
     const { container } = this.options;
     const wasShown = this.shown !== null;
+    if (this.browser && this.shows(paper)) {
+      if (this.loading.hidden) this.browser.reload?.();
+      return;
+    }
     this.shown = paper;
     const name = `arXiv:${paper.id}${paper.version ? `v${paper.version}` : ""}`;
     if (paper.title) {
@@ -445,7 +571,16 @@ export class HtmlPane {
     }
     this.label.title = paper.title ?? name;
     container.hidden = false;
-    if (!this.browser) {
+    if (this.browser) {
+      // Another paper: the find bar closes (its field keeps what was sought,
+      // as a web browser's does) and finds in the new element; a citation's
+      // card goes
+      this.closeFind();
+      this.options.citations?.clear();
+      this.browser.remove();
+      this.browser = null;
+    }
+    {
       const doc = this.doc as Document & {
         createXULElement(tag: string): Element;
       };
@@ -463,27 +598,30 @@ export class HtmlPane {
         this.loading.hidden = true;
       });
       this.followLinks();
-      const findBar = doc.createXULElement("findbar") as FindBar;
-      container.append(browser, findBar);
-      findBar.browser = browser;
+      let findBar = this.findBar;
+      if (findBar) {
+        container.insertBefore(browser, findBar);
+      } else {
+        findBar = doc.createXULElement("findbar") as FindBar;
+        container.append(browser, findBar);
+        this.findBar = findBar;
+      }
+      const bar = findBar;
+      bar.browser = browser;
       // Every load moves the page to a content process. The element drops
       // its finder when it is set up again for that, after
       // XULFrameLoaderCreated (so that event is too early);
       // DidChangeBrowserRemoteness follows: the find bar is told then
       browser.addEventListener("DidChangeBrowserRemoteness", () => {
-        findBar.browser = browser;
+        if (this.browser === browser) bar.browser = browser;
       });
       this.browser = browser;
-      this.findBar = findBar;
-    } else {
-      // Another paper in the same element: the find bar closes (its field
-      // keeps what was sought, as a web browser's does), and a citation's
-      // card
-      this.closeFind();
-      this.options.citations?.clear();
+      this.elementNumber = ++this.elements;
     }
+    this.readingAddress = address ?? paper.url;
+    this.ownMoves = 0;
     this.loading.hidden = false;
-    (this.options.load ?? loadPage)(this.browser, paper.url);
+    (this.options.load ?? loadPage)(this.browser, this.readingAddress);
     if (!wasShown) this.options.onToggle(true);
   }
 
@@ -512,6 +650,7 @@ export class HtmlPane {
         SELECTION_MESSAGE,
         this.onSelectionMessage,
       );
+      this.links.removeMessageListener(PLACE_MESSAGE, this.onPlaceMessage);
       this.links = null;
     }
   }
@@ -531,6 +670,7 @@ export class HtmlPane {
     manager.addMessageListener(MENU_MESSAGE, this.onMenuMessage);
     manager.addMessageListener(CITATIONS_MESSAGE, this.onCitationsMessage);
     manager.addMessageListener(SELECTION_MESSAGE, this.onSelectionMessage);
+    manager.addMessageListener(PLACE_MESSAGE, this.onPlaceMessage);
     this.links = manager;
   }
 
@@ -559,5 +699,6 @@ export class HtmlPane {
     this.findBar = null;
     this.browser?.remove();
     this.browser = null;
+    this.elementNumber = null;
   }
 }
