@@ -91,9 +91,21 @@ Response:
 }
 ```
 
-> ⚠️ With `mode:"link"`, file-management plugins (e.g. **Attanger**, ZotFile) may
-> rename/move the _source_ file on disk based on the parent item's metadata.
-> Prefer `import` when the source file must not be mutated.
+File name: the file is named as Zotero names a single file added to an item
+from disk (Add Attachment → File, drag and drop). When Zotero's "Automatically
+rename files" setting is on, the file is of a type Zotero renames, and the parent
+has no other non-HTML file attachment, it takes the parent's name from the rename
+template: with `import` the copy in Zotero storage gets that name; with `link`
+the source file itself is renamed in place (a number is added when the name is
+taken), and only when "Rename linked files" is also on. Otherwise the file keeps
+its name. `path` is the source path for `import` (the stored copy's path is not
+returned), and the linked file's path for `link` (the renamed path when it was
+renamed).
+
+> ⚠️ With `mode:"link"`, the source file on disk may be renamed (see above), and
+> file-management plugins (e.g. **Attanger**, ZotFile) may rename/move it based
+> on the parent item's metadata. Prefer `import` when the source file must not be
+> mutated.
 
 ### `trash_item`
 

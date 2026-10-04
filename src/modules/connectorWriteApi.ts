@@ -161,6 +161,34 @@ function resolveExistingFile(filePath: string): { file: any; absPath: string } {
   return { file, absPath: file.path };
 }
 
+/**
+ * The name Zotero gives a single file added to an item from disk
+ * (ZoteroPane.addAttachmentFromDialog, the item tree's drop): the parent's
+ * name when Zotero renames files ("Rename linked files" for a linked file),
+ * the parent has no other non-HTML file, and the file's type is one Zotero
+ * renames; else none
+ */
+async function renamedFileBaseName(
+  parent: Zotero.Item,
+  path: string,
+  link: boolean,
+): Promise<string | undefined> {
+  const attachments = Zotero.Attachments as any;
+  if (!attachments.shouldAutoRenameFile(link, parent.libraryID)) {
+    return undefined;
+  }
+  // The parent's children and data, in a library not shown yet
+  const library = Zotero.Libraries.get(parent.libraryID) as
+    | { waitForDataLoad(type: string): Promise<void> }
+    | false;
+  if (library) await library.waitForDataLoad("item");
+  if ((parent as any).numNonHTMLFileAttachments()) return undefined;
+  return (
+    (await attachments.getRenamedFileBaseNameIfAllowedType(parent, path)) ||
+    undefined
+  );
+}
+
 function linkModeLabel(linkMode: number): string {
   switch (linkMode) {
     case 0:
@@ -216,10 +244,34 @@ async function handleAttachFile(
   }
 
   const { file, absPath } = resolveExistingFile(filePath);
+  const fileBaseName = await renamedFileBaseName(
+    parent,
+    absPath,
+    mode === "link",
+  );
 
   const options: any = { file, parentItemID: parent.id };
   if (title) options.title = title;
   if (contentType) options.contentType = contentType;
+  let path = absPath;
+  if (fileBaseName && mode === "import") {
+    options.fileBaseName = fileBaseName;
+  } else if (fileBaseName) {
+    // As Zotero does: the linked file is renamed where it is, with a number
+    // added when the name is taken, and linked under its old name if that fails
+    try {
+      const ext = Zotero.File.getExtension(absPath);
+      const newName = await (Zotero.File as any).rename(
+        absPath,
+        fileBaseName + (ext ? "." + ext : ""),
+        { unique: true },
+      );
+      path = PathUtils.join(PathUtils.parent(absPath)!, newName);
+      options.file = path;
+    } catch (err) {
+      Zotero.logError(err as Error);
+    }
+  }
 
   const attachment =
     mode === "import"
@@ -241,7 +293,7 @@ async function handleAttachFile(
     attachment_id: attachment.id,
     link_mode: linkMode,
     link_mode_label: linkModeLabel(linkMode),
-    path: absPath,
+    path,
   });
 }
 
