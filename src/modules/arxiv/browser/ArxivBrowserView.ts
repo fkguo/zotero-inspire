@@ -108,6 +108,9 @@ import { arxivPdfVersion } from "../arxivPdf";
 import { countAuthorPapers } from "../../inspire/library/authorCount";
 import { DetailPane } from "./DetailPane";
 import { HtmlPane, type HtmlPaneOptions } from "./HtmlPane";
+import { CitationCards, type CitationCardsOptions } from "./CitationCards";
+import { loadReferenceList } from "../htmlReferences";
+import { fetchBibTeX } from "../../inspire/metadataService";
 import { PaneDivider } from "./PaneDivider";
 import {
   firstUnreadDay,
@@ -195,6 +198,10 @@ export interface ArxivBrowserViewOptions {
   saveHtmlSnapshot?: LibraryActionsOptions["saveHtmlSnapshot"];
   /** Loads a page in the HTML pane (default: Zotero's loadURI) */
   loadHtmlPage?: HtmlPaneOptions["load"];
+  /** INSPIRE's reference list of a paper shown there (default: INSPIRE's) */
+  citationReferences?: CitationCardsOptions["references"];
+  /** Adds a cited paper's INSPIRE record (default: Zotero's import of it) */
+  addRecord?: LibraryActionsOptions["addRecord"];
   /** The INSPIRE completion entry's library, INSPIRE and dialog */
   completion?: Omit<CompletionLineOptions, "reporter">;
   /** The batch import's callbacks (default: arxivBatchImport) */
@@ -241,6 +248,8 @@ export class ArxivBrowserView {
   private readonly divider: PaneDivider;
   private readonly authorCard: AuthorPreviewController;
   private readonly paperCard: HoverPreviewController;
+  /** The look-up of citations selected in a paper's HTML version */
+  private readonly citationCards: CitationCards;
   /** Papers of authors in the library, by name, counted once per window */
   private readonly authorCounts = new Map<string, Promise<number>>();
   readonly loader: ListingLoader;
@@ -545,18 +554,6 @@ export class ArxivBrowserView {
       htmlContainer,
     );
     root.append(this.toolbar, main, notices);
-    this.htmlPane = HtmlPane.available(doc)
-      ? new HtmlPane({
-          container: htmlContainer,
-          openInWebBrowser: (url) => this.actions.openLink(url),
-          copyText: (text) => void this.actions.copyText(text),
-          // In the detail pane's place, at its width
-          onToggle: (shown) => {
-            detailContainer.hidden = shown;
-          },
-          load: options.loadHtmlPage,
-        })
-      : null;
 
     // Cards: the author's card (INSPIRE's when the paper's record names the
     // author, else the local one), and the paper's card on its title when the
@@ -742,7 +739,63 @@ export class ArxivBrowserView {
       addPapers: options.addPapers,
       pickTarget: options.pickTarget,
       saveHtmlSnapshot: options.saveHtmlSnapshot,
+      addRecord: options.addRecord,
     });
+    // Citations selected in a paper's HTML version: the PDF reader's
+    // look-up bar, and INSPIRE's card of the paper with the References
+    // panel's actions that need no item shown
+    this.citationCards = new CitationCards({
+      document: doc,
+      container: root,
+      callbacks: {
+        onAdd: (entry, anchor) =>
+          this.library.addReference(entry, anchor ?? root),
+        onSelectInLibrary: (entry) => {
+          if (entry.localItemID) showInLibrary(entry.localItemID);
+        },
+        hasPdf: (entry) =>
+          !!entry.localItemID &&
+          firstPdfAttachmentID(entry.localItemID) !== null,
+        onOpenPdf: async (entry) => {
+          if (entry.localItemID) await openLocalPdf(entry.localItemID);
+        },
+        onCopyBibtex: async (entry) => {
+          const bibtex = entry.recid ? await fetchBibTeX(entry.recid) : null;
+          if (bibtex) await this.actions.copyText(bibtex);
+        },
+        onCopyTexkey: async (entry) => {
+          if (entry.texkey) await this.actions.copyText(entry.texkey);
+        },
+      },
+      entryOptions: {
+        canAdd: (entry) => !!entry.recid,
+        canCopyBibtex: (entry) => !!entry.recid,
+        canCopyTexkey: (entry) => !!entry.texkey,
+      },
+      // The window's record of the paper (library, memory, else a search),
+      // then its reference list through the plugin's cache
+      references:
+        options.citationReferences ??
+        (async (id, signal) => {
+          const recid = await this.actions.paperRecid(id);
+          if (recid === undefined) throw new Error("INSPIRE not reached");
+          return recid ? loadReferenceList(recid, signal) : null;
+        }),
+    });
+    this.htmlPane = HtmlPane.available(doc)
+      ? new HtmlPane({
+          container: htmlContainer,
+          openInWebBrowser: (url) => this.actions.openLink(url),
+          copyText: (text) => void this.actions.copyText(text),
+          // In the detail pane's place, at its width
+          onToggle: (shown) => {
+            detailContainer.hidden = shown;
+          },
+          load: options.loadHtmlPage,
+          citations: this.citationCards,
+        })
+      : null;
+
     this.batch = new BatchImportManager({
       getDocument: () => doc,
       getBody: () => root,
@@ -911,6 +964,7 @@ export class ArxivBrowserView {
     this.quickFiltersControl.dispose();
     this.authorCard.dispose();
     this.paperCard.dispose();
+    this.citationCards.dispose();
     this.divider.dispose();
     this.htmlPane?.dispose();
   }
