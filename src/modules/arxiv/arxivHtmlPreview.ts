@@ -1,22 +1,29 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Previews in arXiv's HTML version of a paper: the pointer resting on a link
-// to an equation, a figure, a table or an entry of the bibliography shows
-// that element in a small box beside the link, as Zotero's reader does for
-// the footnotes of an EPUB book: a copy of the element, in the page itself,
-// so that arXiv's own styles and its formulas (MathML) apply to it.
+// to an equation, a figure, a table, an entry of the bibliography or a
+// section shows that element in a small box beside the link, as Zotero's
+// reader does for the footnotes of an EPUB book: a copy of the element, in
+// the page itself, so that arXiv's own styles and its formulas (MathML)
+// apply to it.
 // arXiv's pages are made by LaTeXML: a link within the page is
 // <a href="#id">; the element it leads to is, for an equation, a table of
 // class ltx_eqn_table (a row or a group of rows of it for one equation of a
 // group, or one line), for a figure or a table a <figure> (a panel of a
-// figure: the figure), for a reference an <li class="ltx_bibitem">. Links to
-// other elements (sections, footnotes, theorems) show nothing.
+// figure: the figure), for a reference an <li class="ltx_bibitem">, for a
+// section, a subsection or an appendix a <section>. Links to other elements
+// (footnotes, theorems) show nothing, nor do the links of the table of
+// contents.
 // The box shows an equation as the lines the link names, with their number;
 // a figure or a table with its caption, its pictures scaled to the box; an
 // entry of the bibliography with its links, without arXiv's list of the
-// places citing it. It appears after a short rest of the pointer, stays
-// while the pointer is on the link or in the box, and goes when the pointer
-// has left both, on a click elsewhere, on scrolling, on Escape, and when the
-// view changes size. Links in the box work as in the page; pointing at them
+// places citing it; a section as its heading and its start, cut off at the
+// box's height (as Zotero's reader shows the place a link leads to): only
+// the blocks that fill the box are copied (paragraphs, equations, figures,
+// the headings of its subsections), so that a long section costs no more.
+// The box appears after a short rest of the pointer, stays while the
+// pointer is on the link or in the box, and goes when the pointer has left
+// both, on a click elsewhere, on scrolling, on Escape, and when the view
+// changes size. Links in the box work as in the page; pointing at them
 // shows nothing more. Nothing appears while a mouse button is held (text
 // being selected).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +52,8 @@ var PREVIEW_GAP = 4;
 /** The box's width at most: a figure, a table, an equation; an entry */
 var PREVIEW_WIDTH = 640;
 var PREVIEW_ENTRY_WIDTH = 480;
+/** A section's box: at most this share of the view's height */
+var PREVIEW_SECTION_SHARE = 0.45;
 
 /** The element a link within the page leads to, if one shown in a box */
 function previewTargetOf(link) {
@@ -57,10 +66,47 @@ function previewTargetOf(link) {
     return null;
   }
   var target = link.ownerDocument.getElementById(id);
-  return target &&
-    target.closest(".ltx_eqn_table, .ltx_bibitem, figure")
+  if (!target) return null;
+  if (target.closest(".ltx_eqn_table, .ltx_bibitem, figure")) return target;
+  // A section, a subsection, an appendix: not for the table of contents
+  return target.localName === "section" && !link.closest(".ltx_TOC")
     ? target
     : null;
+}
+
+/** The pictures of a copy, scaled to the box: not their parts (an SVG's) */
+function previewScalePictures(copy) {
+  var pictures = copy.querySelectorAll("img, svg, object");
+  for (var k = 0; k < pictures.length; k++) {
+    if (pictures[k].parentElement.closest("svg")) continue;
+    var style = pictures[k].style;
+    style.minWidth = "0";
+    style.maxWidth = "100%";
+    style.maxHeight = "35vh";
+    style.width = "auto";
+    style.height = "auto";
+  }
+}
+
+/**
+ * Copies of the first blocks of the section \`source\` into \`copy\`
+ * (into copies of its subsections, as they come) while \`box\` is at most
+ * \`limit\` high; whether there was room for all
+ */
+function previewFillSection(source, copy, box, limit) {
+  for (var child = source.firstElementChild; child; child = child.nextElementSibling) {
+    if (child.localName === "section") {
+      var inner = child.cloneNode(false);
+      copy.appendChild(inner);
+      if (!previewFillSection(child, inner, box, limit)) return false;
+      continue;
+    }
+    var part = child.cloneNode(true);
+    previewScalePictures(part);
+    copy.appendChild(part);
+    if (box.scrollHeight > limit) return false;
+  }
+  return true;
 }
 
 /**
@@ -68,7 +114,8 @@ function previewTargetOf(link) {
  * link names (in the table of the equation, for its columns); the whole
  * table when the link names a row without formula (as arXiv's links to an
  * equation group can). The figure, the outermost when \`target\` is a
- * panel of one. The entry, without the places citing it.
+ * panel of one. The entry, without the places citing it. For a section,
+ * its element without its content (previewFillSection fills it).
  */
 function previewCopyOf(target) {
   var equation = target.closest(".ltx_eqn_table");
@@ -100,6 +147,11 @@ function previewCopyOf(target) {
     if (number) number.style.marginInlineEnd = "0.5em";
     return copy;
   }
+  if (target.localName === "section") {
+    copy = target.cloneNode(false);
+    copy.style.margin = "0";
+    return copy;
+  }
   var figure = target.closest("figure");
   var outer;
   while (figure.parentElement && (outer = figure.parentElement.closest("figure"))) {
@@ -107,17 +159,7 @@ function previewCopyOf(target) {
   }
   copy = figure.cloneNode(true);
   copy.style.margin = "0";
-  var pictures = copy.querySelectorAll("img, svg, object");
-  for (var k = 0; k < pictures.length; k++) {
-    // Not the pictures' parts (an SVG's own elements)
-    if (pictures[k].parentElement.closest("svg")) continue;
-    var style = pictures[k].style;
-    style.minWidth = "0";
-    style.maxWidth = "100%";
-    style.maxHeight = "35vh";
-    style.width = "auto";
-    style.height = "auto";
-  }
+  previewScalePictures(copy);
   return copy;
 }
 
@@ -191,14 +233,39 @@ function previewShow(link) {
   box.style.left = Math.max(PREVIEW_MARGIN, left) + "px";
   var below = viewHeight - rect.bottom - PREVIEW_GAP - PREVIEW_MARGIN;
   var above = rect.top - PREVIEW_GAP - PREVIEW_MARGIN;
-  if (box.offsetHeight <= below || below >= above) {
+  // A section: its start, as much as fills the box where there is more room
+  var section = target.localName === "section";
+  var limit = section
+    ? Math.min(
+        Math.round(viewHeight * PREVIEW_SECTION_SHARE),
+        Math.max(below, above),
+      )
+    : Infinity;
+  var whole =
+    !section || previewFillSection(target, box.firstElementChild, box, limit);
+  var height = Math.min(box.offsetHeight, limit);
+  if (height <= below || below >= above) {
     box.style.top = rect.bottom + PREVIEW_GAP + "px";
-    box.style.maxHeight = Math.max(0, below) + "px";
+    box.style.maxHeight = Math.max(0, Math.min(below, limit)) + "px";
   } else {
     // Held at its lower edge: pictures loading later make it grow upwards
     box.style.top = "auto";
     box.style.bottom = viewHeight - rect.top + PREVIEW_GAP + "px";
-    box.style.maxHeight = Math.max(0, above) + "px";
+    box.style.maxHeight = Math.max(0, Math.min(above, limit)) + "px";
+  }
+  if (section) {
+    // Cut off, the text fading into the box at its lower edge, as a
+    // glimpse of the place
+    box.style.overflow = "hidden";
+    if (!whole) {
+      var fade = doc.createElement("div");
+      fade.style.cssText =
+        "position: absolute; left: 0; right: 0; bottom: 0; height: 3em;" +
+        " pointer-events: none;" +
+        " background: linear-gradient(to bottom, transparent," +
+        " var(--background-color, Canvas));";
+      box.appendChild(fade);
+    }
   }
   box.style.visibility = "visible";
   previewBox = box;

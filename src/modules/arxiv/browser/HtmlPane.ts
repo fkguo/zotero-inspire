@@ -18,12 +18,12 @@
 // copying the selection, and a link's entries. (Ctrl/Cmd+C and Ctrl/Cmd+A
 // are the page's own.) It puts back arXiv's stylesheet when the page links
 // one that arXiv has deleted (see arxivHtmlStylesheet). And it shows, while
-// the pointer rests on a link to an equation, a figure, a table or a
-// reference, that element in a small box (see arxivHtmlPreview). Text
-// selected across citations gives, as the plugin's look-up in the PDF
-// reader, a bar with their numbers and INSPIRE's card of the reference the
-// pointer is on (see arxivHtmlSelection); the pane has them shown by
-// `citations` (CitationCards).
+// the pointer rests on a link to an equation, a figure, a table, a
+// reference or a section, that element in a small box (see
+// arxivHtmlPreview). Text selected across citations gives, as the plugin's
+// look-up in the PDF reader, a bar with their numbers and INSPIRE's card of
+// the reference the pointer is on (see arxivHtmlSelection); the pane has
+// them shown by `citations` (CitationCards).
 // Zotero's browsers follow web links only (its setting
 // network.protocol-handler.expose-all is off), so a javascript: link — the
 // buttons of arXiv's page header that show the table of contents and switch

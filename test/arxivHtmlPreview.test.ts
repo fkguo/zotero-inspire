@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Previews in arXiv's HTML version of a paper: the pointer resting on a link
 // to an equation, a figure, a table or a reference shows a copy of that
-// element in a box beside the link; links to other elements show nothing.
+// element in a box beside the link, one to a section the section's start;
+// links to other elements, and those of the table of contents, show nothing.
 // The page is made of the structures arXiv's pages (LaTeXML) have, taken
 // from arXiv:2610.00014, 1810.05653, 2512.03003, 2610.02097 and 2610.02138.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,6 +20,7 @@ const row = (id: string, tex: string, tag: string) =>
    </tr>`;
 
 const PAGE = `<!DOCTYPE html><html><head></head><body>
+<nav class="ltx_page_navbar"><nav class="ltx_TOC"><a id="toc-section" href="#S6" class="ltx_ref">6 Results</a></nav></nav>
 <div class="ltx_page_content"><article class="ltx_document">
 <section id="S1" class="ltx_section"><div id="S1.p1" class="ltx_para"><p class="ltx_p">
   theory (<a id="to-eq" href="#S1.E1" class="ltx_ref"><span class="ltx_text ltx_ref_tag">1</span></a>),
@@ -28,7 +30,9 @@ const PAGE = `<!DOCTYPE html><html><head></head><body>
   Fig. <a id="to-panel" href="#S3.F3.sf1" class="ltx_ref">3a</a>,
   Table <a id="to-table" href="#S7.T1" class="ltx_ref">1</a>,
   <cite class="ltx_cite">[<a id="to-bib" href="#bib.bib4" class="ltx_ref">4</a>]</cite>,
-  Section <a id="to-section" href="#S2" class="ltx_ref">2</a>,
+  Section <a id="to-section" href="#S6" class="ltx_ref">6</a>,
+  Sec. <a id="to-subsection" href="#S6.SS1" class="ltx_ref">6.1</a>,
+  Appendix <a id="to-appendix" href="#A1" class="ltx_ref">A</a>,
   Theorem <a id="to-theorem" href="#Thmtheorem2" class="ltx_ref">2</a>,
   footnote <a id="to-footnote" href="#footnote1" class="ltx_ref">1</a>,
   conditions (<a id="to-98" href="#S4.E98" class="ltx_ref">98</a>),
@@ -57,6 +61,20 @@ const PAGE = `<!DOCTYPE html><html><head></head><body>
 <div id="Thmtheorem2" class="ltx_theorem ltx_theorem_theorem"><p>A theorem.</p></div>
 <span id="footnote1" class="ltx_note ltx_role_footnote">a footnote</span>
 </div></section>
+<section id="S6" class="ltx_section">
+  <h2 class="ltx_title ltx_title_section">6 Results</h2>
+  <div class="ltx_para"><p class="ltx_p">First paragraph.</p></div>
+  <section id="S6.SS1" class="ltx_subsection">
+    <h3 class="ltx_title ltx_title_subsection">6.1 Spectra</h3>
+    <div class="ltx_para"><p class="ltx_p">Paragraph of 6.1.</p></div>
+    <div class="ltx_para"><p class="ltx_p">More of 6.1.</p></div>
+  </section>
+  <div class="ltx_para"><p class="ltx_p">Last paragraph of 6.</p></div>
+</section>
+<section id="A1" class="ltx_appendix">
+  <h2 class="ltx_title ltx_title_appendix">Appendix A Conventions</h2>
+  <div class="ltx_para"><p class="ltx_p">The conventions.</p></div>
+</section>
 <figure id="S3.F3" class="ltx_figure">
   <figure id="S3.F3.sf1" class="ltx_figure ltx_figure_panel">
     <img src="x/a.png" id="S3.F3.sf1.g1" class="ltx_graphics" width="598" height="371">
@@ -130,6 +148,7 @@ function page({
   rect = { left: 260, top: 360, width: 6, height: 23 },
   boxHeight = 90,
   boxWidth = 0,
+  blockHeight = 100,
 }: {
   width?: number;
   height?: number;
@@ -137,6 +156,8 @@ function page({
   boxHeight?: number;
   /** The box's width as its content would have it */
   boxWidth?: number;
+  /** The height of a heading or a paragraph copied into a section's box */
+  blockHeight?: number;
 } = {}) {
   const window = new JSDOM(PAGE, {
     url: "https://arxiv.org/html/2610.00014",
@@ -161,7 +182,20 @@ function page({
   Object.defineProperty(window.HTMLElement.prototype, "offsetHeight", {
     configurable: true,
     get() {
-      return isBox(this) ? boxHeight : 0;
+      if (!isBox(this)) return 0;
+      // A section's box: as high as what was copied into it
+      return this.firstElementChild?.localName === "section"
+        ? this.scrollHeight + 2
+        : boxHeight;
+    },
+  });
+  // A section's box: as high as its blocks
+  Object.defineProperty(window.HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return isBox(this)
+        ? this.querySelectorAll("h2, h3, .ltx_para").length * blockHeight
+        : 0;
     },
   });
   Object.defineProperty(window.HTMLElement.prototype, "offsetWidth", {
@@ -229,7 +263,7 @@ function page({
   };
 }
 
-describe("arXiv HTML page: previews of a link's equation, figure, table or reference", () => {
+describe("arXiv HTML page: previews of a link's equation, figure, table, reference or section", () => {
   it("shows the equation a link leads to, with its number, after a short rest of the pointer", () => {
     const { clock, over, box } = page();
     over("to-eq");
@@ -343,10 +377,55 @@ describe("arXiv HTML page: previews of a link's equation, figure, table or refer
     );
   });
 
-  it("shows nothing for links to sections, theorems, footnotes, missing elements and other pages", () => {
+  it("shows a section, a subsection or an appendix as its heading and its start: only the blocks that fill the box, its lower edge fading", () => {
+    // The box at most 333 pixels high (45 % of the view): three blocks
+    const { show, element } = page();
+    const shown = show("to-section")!;
+    const section = shown.firstElementChild as HTMLElement;
+    expect(section.matches("section.ltx_section")).toBe(true);
+    expect(section.style.margin).toBe("0px");
+    // The heading, a paragraph, then the subsection's heading and its first
+    // paragraph (the fourth block: over the height, the last copied)
+    expect(
+      [...section.querySelectorAll("h2, h3, p")].map(
+        (block) => block.textContent,
+      ),
+    ).toEqual([
+      "6 Results",
+      "First paragraph.",
+      "6.1 Spectra",
+      "Paragraph of 6.1.",
+    ]);
+    expect(shown.style.overflow).toBe("hidden");
+    expect(shown.style.maxHeight).toBe("333px");
+    // Cut off: its lower edge fades into the box
+    expect(shown.lastElementChild!.getAttribute("style")).toContain(
+      "linear-gradient",
+    );
+    // The page's section is as it was
+    expect(element("S6").querySelectorAll(".ltx_para")).toHaveLength(4);
+
+    const subsection = page().show("to-subsection")!.firstElementChild!;
+    expect(subsection.matches("section.ltx_subsection")).toBe(true);
+    expect(subsection.textContent).toContain("More of 6.1.");
+    // A link low in the view: above it, where there is more room
+    const low = page({ rect: { left: 100, top: 600, width: 6, height: 23 } });
+    const above = low.show("to-section")!;
+    expect(above.style.top).toBe("auto");
+    expect(above.style.bottom).toBe(`${741 - 600 + 4}px`);
+    expect(above.style.maxHeight).toBe("333px");
+    // A short one: whole, nothing fading
+    const appendix = page().show("to-appendix")!;
+    expect(appendix.firstElementChild!.textContent).toContain(
+      "The conventions.",
+    );
+    expect(appendix.querySelector("[style*=linear-gradient]")).toBeNull();
+  });
+
+  it("shows nothing for links from the table of contents, to theorems, footnotes, missing elements and other pages", () => {
     const { show } = page();
     for (const id of [
-      "to-section",
+      "toc-section",
       "to-theorem",
       "to-footnote",
       "to-nowhere",
