@@ -6,7 +6,8 @@
 // redirects: arXiv answers these addresses directly, and a redirect followed
 // inside Zotero's download would leave the scheduler. The bytes go to a
 // temporary file in Zotero's storage folder, from which Zotero's own
-// importFromFile makes the attachment; the temporary folder is removed.
+// importFromFile makes the attachment, its file named from the item's data
+// as Zotero names every file it downloads; the temporary folder is removed.
 // The attachment's title names the version, so that a journal article's
 // item does not pass an arXiv PDF off as the journal's.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,8 +72,6 @@ export function arxivPdfVersion(
 
 interface ZoteroAttachments {
   createTemporaryStorageDirectory(): Promise<{ path: string }>;
-  shouldAutoRenameFile(isLink: boolean, libraryID: number): boolean;
-  isRenameAllowedForType(contentType: string, libraryID: number): boolean;
   getFileBaseNameFromItem(
     item: Zotero.Item,
     options: { attachmentTitle: string },
@@ -155,23 +154,17 @@ export async function attachArxivPdf(
     );
     await IOUtils.write(file, bytes);
     if (options.signal?.aborted) return fail("cancelled", "Request cancelled");
-    // Named like the PDFs Zotero itself downloads, when the user has Zotero
-    // rename files
-    const rename =
-      attachments.shouldAutoRenameFile(false, item.libraryID) &&
-      attachments.isRenameAllowedForType("application/pdf", item.libraryID);
+    // Named like the files Zotero itself downloads (its translators, Find
+    // Full Text), which take the parent's name whatever the "Automatically
+    // rename files" setting: that setting governs files added from disk
     const attachment = await attachments.importFromFile({
       file,
       parentItemID: item.id,
       contentType: "application/pdf",
       title,
-      ...(rename
-        ? {
-            fileBaseName: attachments.getFileBaseNameFromItem(item, {
-              attachmentTitle: title,
-            }),
-          }
-        : {}),
+      fileBaseName: attachments.getFileBaseNameFromItem(item, {
+        attachmentTitle: title,
+      }),
     });
     return { status: "attached", attachment };
   } catch (err) {

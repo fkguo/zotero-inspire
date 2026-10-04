@@ -42,7 +42,9 @@ function makeRegularItem(overrides: Record<string, any> = {}) {
   return {
     id: 42,
     key: "PARENT01",
+    libraryID: 1,
     isRegularItem: () => true,
+    numNonHTMLFileAttachments: () => 0,
     eraseTx: vi.fn(async () => true),
     ...overrides,
   };
@@ -53,6 +55,11 @@ let importFromFile: ReturnType<typeof vi.fn>;
 let trashTx: ReturnType<typeof vi.fn>;
 let getByLibraryAndKeyAsync: ReturnType<typeof vi.fn>;
 let pathToFile: ReturnType<typeof vi.fn>;
+let shouldAutoRenameFile: ReturnType<typeof vi.fn>;
+let getRenamedFileBaseNameIfAllowedType: ReturnType<typeof vi.fn>;
+let waitForDataLoad: ReturnType<typeof vi.fn>;
+let renameFile: ReturnType<typeof vi.fn>;
+let logError: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   tokenMocks.ensureExternalToken.mockReset();
@@ -72,14 +79,36 @@ beforeEach(() => {
     makeRegularItem(),
   );
   pathToFile = vi.fn((_p: string) => makeFile());
+  // Zotero does not rename files unless a test turns it on
+  shouldAutoRenameFile = vi.fn(() => false);
+  getRenamedFileBaseNameIfAllowedType = vi.fn(
+    async () => "Guo et al. - 2026 - Title",
+  );
+  waitForDataLoad = vi.fn(async () => undefined);
+  renameFile = vi.fn(async (_path: string, newName: string) => newName);
+  logError = vi.fn();
 
   vi.stubGlobal("Zotero", {
     debug: vi.fn(),
-    Libraries: { userLibraryID: 1 },
+    logError,
+    Libraries: { userLibraryID: 1, get: () => ({ waitForDataLoad }) },
     Items: { getByLibraryAndKeyAsync, trashTx },
-    Attachments: { linkFromFile, importFromFile },
-    File: { pathToFile },
+    Attachments: {
+      linkFromFile,
+      importFromFile,
+      shouldAutoRenameFile,
+      getRenamedFileBaseNameIfAllowedType,
+    },
+    File: {
+      pathToFile,
+      getExtension: (path: string) => path.match(/\.([^./]+)$/)?.[1] ?? "",
+      rename: renameFile,
+    },
     Server: { Endpoints: {} as Record<string, any> },
+  });
+  vi.stubGlobal("PathUtils", {
+    join: (...parts: string[]) => parts.join("/"),
+    parent: (path: string) => path.replace(/\/[^/]*$/, ""),
   });
 });
 
@@ -315,6 +344,109 @@ describe("dispatchWriteOp: attach_file", () => {
     );
     expect(status).toBe(400);
     expect(body.code).toBe("INVALID_PATH");
+  });
+});
+
+describe("dispatchWriteOp: attach_file names the file as Zotero names a file added from disk", () => {
+  const attach = (mode: string) =>
+    dispatchWriteOp({
+      op: "attach_file",
+      parent_item_key: "PARENT01",
+      file_path: "/abs/paper.pdf",
+      mode,
+    });
+
+  it("gives an imported copy the parent's name when Zotero renames files", async () => {
+    shouldAutoRenameFile.mockReturnValue(true);
+    // As in a library not shown yet: the children are there only after the wait
+    let loaded = false;
+    waitForDataLoad.mockImplementation(async () => {
+      loaded = true;
+    });
+    getByLibraryAndKeyAsync.mockResolvedValueOnce(
+      makeRegularItem({
+        numNonHTMLFileAttachments: () => {
+          if (!loaded) throw new Error("Item's child items not loaded");
+          return 0;
+        },
+      }),
+    );
+    const { status, body } = parse(await attach("import"));
+    expect(status).toBe(200);
+    expect(shouldAutoRenameFile).toHaveBeenCalledWith(false, 1);
+    expect(waitForDataLoad).toHaveBeenCalledWith("item");
+    expect(getRenamedFileBaseNameIfAllowedType).toHaveBeenCalledWith(
+      expect.objectContaining({ key: "PARENT01" }),
+      "/abs/paper.pdf",
+    );
+    expect(importFromFile.mock.calls[0][0].fileBaseName).toBe(
+      "Guo et al. - 2026 - Title",
+    );
+    // The source file is left as it is
+    expect(renameFile).not.toHaveBeenCalled();
+    expect(body.path).toBe("/abs/paper.pdf");
+  });
+
+  it("keeps the file's name when Zotero does not rename files", async () => {
+    parse(await attach("import"));
+    expect(importFromFile.mock.calls[0][0]).not.toHaveProperty("fileBaseName");
+    expect(waitForDataLoad).not.toHaveBeenCalled();
+    expect(getRenamedFileBaseNameIfAllowedType).not.toHaveBeenCalled();
+  });
+
+  it("keeps the file's name when the parent already has a file", async () => {
+    shouldAutoRenameFile.mockReturnValue(true);
+    getByLibraryAndKeyAsync.mockResolvedValueOnce(
+      makeRegularItem({ numNonHTMLFileAttachments: () => 1 }),
+    );
+    parse(await attach("import"));
+    expect(importFromFile.mock.calls[0][0]).not.toHaveProperty("fileBaseName");
+    expect(getRenamedFileBaseNameIfAllowedType).not.toHaveBeenCalled();
+  });
+
+  it("keeps the file's name when Zotero does not rename its type", async () => {
+    shouldAutoRenameFile.mockReturnValue(true);
+    getRenamedFileBaseNameIfAllowedType.mockResolvedValueOnce(false);
+    parse(await attach("import"));
+    expect(importFromFile.mock.calls[0][0]).not.toHaveProperty("fileBaseName");
+  });
+
+  it("renames a linked file in place when Zotero renames linked files", async () => {
+    shouldAutoRenameFile.mockReturnValue(true);
+    renameFile.mockResolvedValueOnce("Guo et al. - 2026 - Title 2.pdf");
+    const { status, body } = parse(await attach("link"));
+    expect(status).toBe(200);
+    expect(shouldAutoRenameFile).toHaveBeenCalledWith(true, 1);
+    expect(renameFile).toHaveBeenCalledWith(
+      "/abs/paper.pdf",
+      "Guo et al. - 2026 - Title.pdf",
+      { unique: true },
+    );
+    expect(linkFromFile.mock.calls[0][0].file).toBe(
+      "/abs/Guo et al. - 2026 - Title 2.pdf",
+    );
+    expect(body.path).toBe("/abs/Guo et al. - 2026 - Title 2.pdf");
+  });
+
+  it("links the file under its old name when renaming it fails", async () => {
+    shouldAutoRenameFile.mockReturnValue(true);
+    renameFile.mockRejectedValueOnce(new Error("read-only folder"));
+    const { status, body } = parse(await attach("link"));
+    expect(status).toBe(200);
+    expect(logError).toHaveBeenCalledOnce();
+    expect(linkFromFile.mock.calls[0][0].file).toMatchObject({
+      path: "/abs/paper.pdf",
+    });
+    expect(body.path).toBe("/abs/paper.pdf");
+  });
+
+  it("leaves a linked file's name alone when Zotero does not rename linked files", async () => {
+    parse(await attach("link"));
+    expect(shouldAutoRenameFile).toHaveBeenCalledWith(true, 1);
+    expect(renameFile).not.toHaveBeenCalled();
+    expect(linkFromFile.mock.calls[0][0].file).toMatchObject({
+      path: "/abs/paper.pdf",
+    });
   });
 });
 
