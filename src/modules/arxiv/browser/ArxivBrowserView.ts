@@ -69,7 +69,11 @@ import {
   type OpeningSelection,
 } from "./ListingLoader";
 import { ListPane, type ListPosition, type ListUpdate } from "./ListPane";
-import { SearchLoader, type FetchSearchPage } from "./SearchLoader";
+import {
+  SearchLoader,
+  searchResultEntry,
+  type FetchSearchPage,
+} from "./SearchLoader";
 import { AuthorPreviewController } from "../../inspire/panel/AuthorPreviewController";
 import { HoverPreviewController } from "../../inspire/panel/HoverPreviewController";
 import {
@@ -107,7 +111,7 @@ import { htmlSnapshotAmong } from "../arxivHtmlSnapshot";
 import { arxivPdfVersion } from "../arxivPdf";
 import { countAuthorPapers } from "../../inspire/library/authorCount";
 import { DetailPane } from "./DetailPane";
-import { HtmlPane, type HtmlPaneOptions } from "./HtmlPane";
+import { HtmlPane, type HtmlPaneOptions, type HtmlPanePaper } from "./HtmlPane";
 import { CitationCards, type CitationCardsOptions } from "./CitationCards";
 import { loadReferenceList } from "../htmlReferences";
 import { fetchBibTeX } from "../../inspire/metadataService";
@@ -321,6 +325,14 @@ export class ArxivBrowserView {
   private checkedDays = new WeakSet<DayListing>();
   /** Search results looked up in the library since it last changed */
   private checkedResults = new WeakSet<BrowserEntry>();
+  /**
+   * The paper the detail pane shows that the list does not (its details
+   * asked for from its HTML version, shown from outside the window), until
+   * the list's focus moves
+   */
+  private outside: BrowserEntry | null = null;
+  /** The paper whose record is being fetched for the detail pane */
+  private fetchingDetails: string | null = null;
   /** Counts the library's changes: a lookup older than one is not written */
   private libraryChanges = 0;
   private readonly stopFollowingLibrary: (() => void) | undefined;
@@ -791,6 +803,7 @@ export class ArxivBrowserView {
           onToggle: (shown) => {
             detailContainer.hidden = shown;
           },
+          details: (paper) => this.showDetailsOf(paper),
           load: options.loadHtmlPage,
           citations: this.citationCards,
         })
@@ -1131,9 +1144,65 @@ export class ArxivBrowserView {
    * its place goes (one being read stays when the list loses its focus)
    */
   private showDetail(entry: BrowserEntry | null): void {
+    this.outside = null;
+    this.fetchingDetails = null;
     this.detail.show(entry);
     const read = this.htmlPane?.paper;
     if (read && entry && read.id !== entry.listing.id) this.htmlPane?.close();
+  }
+
+  /**
+   * "‹ Details" in the HTML pane: the details of the paper whose page is
+   * shown, in its place. Its row when the list shows the paper; otherwise
+   * (a page asked for from outside the window) the paper alone, the list
+   * as it is without a focus: a row of it the window has (hidden by a
+   * filter, a search's), else its record from the arXiv API. Moving in the
+   * list shows the list's papers again.
+   */
+  private showDetailsOf(paper: HtmlPanePaper): void {
+    const pane = this.htmlPane;
+    if (!pane) return;
+    const { id } = paper;
+    if (this.detail.entry?.listing.id !== id) {
+      const row = this.listPane.entries.find(
+        (entry) => entry.listing.id === id,
+      );
+      if (row) this.listPane.focusEntry(row.id);
+    }
+    if (this.detail.entry?.listing.id === id) {
+      pane.close();
+      return;
+    }
+    this.listPane.clearFocus();
+    pane.close();
+    const known = this.rowsOfPaper(id)[0];
+    if (known) {
+      this.showOutside(known);
+      return;
+    }
+    this.outside = null;
+    this.fetchingDetails = id;
+    this.detail.showText(
+      getString("arxiv-browser-detail-fetching", {
+        args: { id: `arXiv:${id}` },
+      }),
+    );
+    void this.actions.paperVersion(id).then((record) => {
+      if (this.disposed || this.fetchingDetails !== id) return;
+      this.fetchingDetails = null;
+      // Failed: the user was told why
+      if (!record) this.detail.show(null);
+      else this.showOutside(toBrowserEntry(searchResultEntry(record)));
+    });
+  }
+
+  /** A paper the list does not show, in the detail pane */
+  private showOutside(entry: BrowserEntry): void {
+    // A record still being fetched for another page's details is not wanted
+    this.fetchingDetails = null;
+    this.outside = entry;
+    this.detail.show(entry);
+    void this.markLibraryPapers();
   }
 
   /** The detail pane follows the focused paper */
@@ -1319,6 +1388,14 @@ export class ArxivBrowserView {
     const results = this.search.entries
       .map(this.resultEntry)
       .filter((entry) => !this.checkedResults.has(entry));
+    const outside = this.outside;
+    if (
+      outside &&
+      !this.checkedResults.has(outside) &&
+      !results.includes(outside)
+    ) {
+      results.push(outside);
+    }
     if (!days.length && !results.length) return;
     for (const day of days) this.checkedDays.add(day);
     for (const entry of results) this.checkedResults.add(entry);
@@ -1399,11 +1476,19 @@ export class ArxivBrowserView {
     this.completion.recount();
   }
 
-  /** The rows loaded that show the paper `id` (one per announcement day) */
+  /**
+   * The rows loaded that show the paper `id` (one per announcement day),
+   * and the paper the detail pane shows apart from the list
+   */
   private rowsOfPaper(id: string): BrowserEntry[] {
-    return [...this.entryByKey.values()].filter(
+    const rows = [...this.entryByKey.values()].filter(
       (entry) => entry.listing.id === id,
     );
+    const outside = this.outside;
+    if (outside?.listing.id === id && !rows.includes(outside)) {
+      rows.push(outside);
+    }
+    return rows;
   }
 
   /**

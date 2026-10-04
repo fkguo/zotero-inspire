@@ -287,13 +287,14 @@ export class BrowserActions {
   }
 
   /**
-   * Version `version` of paper `id` as the arXiv API gives it: one request,
-   * shared by all who ask meanwhile and kept for the window; nothing when
-   * it failed (the user was told why, and a later choice asks again)
+   * Version `version` of paper `id` (without `version`: its newest) as the
+   * arXiv API gives it: one request, shared by all who ask meanwhile and
+   * kept for the window; nothing when it failed (the user was told why, and
+   * a later choice asks again)
    */
   paperVersion(
     id: string,
-    version: number,
+    version?: number,
   ): Promise<ArxivApiEntry | undefined> {
     const key = versioned(id, version);
     let asking = this.versions.get(key);
@@ -307,10 +308,15 @@ export class BrowserActions {
           `[${config.addonName}] arXiv ${key}: ${answer.reason} ${answer.message}`,
         );
         if (answer.reason !== "cancelled" && !this.disposed) {
+          const reason = reasonText(answer.reason);
           this.reporter.notify(
-            getString("arxiv-browser-version-failed", {
-              args: { id, version, reason: reasonText(answer.reason) },
-            }),
+            version === undefined
+              ? getString("arxiv-browser-paper-failed", {
+                  args: { id, reason },
+                })
+              : getString("arxiv-browser-version-failed", {
+                  args: { id, version, reason },
+                }),
           );
         }
         return undefined;

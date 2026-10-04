@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // HtmlPane: arXiv's HTML version of a paper, shown in the arXiv browser's
 // right-hand side in place of the detail pane. Above the page: a button back
-// to the paper's details, the paper's identifier and title, and a button that
+// to the paper's details (the window shows them: the detail pane may show
+// another paper), the paper's identifier and title, and a button that
 // opens the page in the web browser instead; "Loading…" until the page's
 // title has arrived.
 // The page is shown in a <browser> element as Zotero's own viewer window
@@ -116,6 +117,12 @@ export interface HtmlPaneOptions {
   copyText(text: string): void;
   /** The pane was shown or closed */
   onToggle(shown: boolean): void;
+  /**
+   * The bar's button back to the details: shows those of `paper`, which
+   * the detail pane may not show (a page asked for from outside the
+   * window)
+   */
+  details(paper: HtmlPanePaper): void;
   /** Loads a page in the browser element (default: Zotero's loadURI) */
   load?: (browser: PageBrowser, url: string) => void;
   /** INSPIRE's cards of the page's citations */
@@ -361,9 +368,9 @@ export class HtmlPane {
     const doc = (this.doc = container.ownerDocument);
     container.hidden = true;
     this.bar = html(doc, "div", "arxiv-browser__html-bar");
-    const back = button(doc, getString("arxiv-browser-html-pane-back"), () =>
-      this.close(),
-    );
+    const back = button(doc, getString("arxiv-browser-html-pane-back"), () => {
+      if (this.shown) options.details(this.shown);
+    });
     back.title = getString("arxiv-browser-html-pane-back-tip");
     this.label = html(doc, "span", "arxiv-browser__html-label");
     this.loading = html(

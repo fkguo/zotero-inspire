@@ -449,6 +449,17 @@ export class ListPane {
     this.setFocus(null, false);
   }
 
+  /** Focus the paper of row `key`, on its page, in view */
+  focusEntry(key: string): void {
+    const page = pageOfEntry(this.arranged, key, this.pageSize);
+    if (page < 0) return;
+    if (page !== this.page) {
+      this.page = page;
+      this.render("top");
+    }
+    this.setFocus(key, true);
+  }
+
   /** Show or hide the focused paper's abstract */
   toggleFocusedAbstract(): void {
     if (this.focusedKey) this.toggleAbstract(this.focusedKey);

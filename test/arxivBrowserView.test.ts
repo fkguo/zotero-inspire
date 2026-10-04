@@ -1854,6 +1854,162 @@ describe("arXiv browser: the HTML version beside the list", () => {
     );
   });
 
+  describe("back to the details of a page asked for from outside the window", () => {
+    const OUT = "hep-ph/0101001";
+    const record = {
+      id: OUT,
+      version: 2,
+      title: "Quantum Weakdynamics",
+      abstract: "An abstract.",
+      authors: ["Ada Weak"],
+      published: "2001-01-01T00:00:00Z",
+      updated: "2001-02-01T00:00:00Z",
+      primaryCategory: "hep-ph",
+      categories: ["hep-ph"],
+    };
+    const back = (pane: HTMLElement) =>
+      pane.querySelector<HTMLButtonElement>(".arxiv-browser__html-bar button")!;
+    const title = (detail: HTMLElement) =>
+      detail.querySelector(".arxiv-browser__detail-title")?.textContent;
+
+    it("shows the paper's row when the list shows it", async () => {
+      const env = await loaded();
+      const { root, pane, detail } = env;
+      rows(root)
+        .find((row) => !row.dataset.entryId!.includes(ID))!
+        .click();
+      const before = env.view.listPane.focused!;
+      expect(before.listing.id).not.toBe(ID);
+
+      env.view.showHtml({ id: ID });
+      expect(env.view.listPane.focused).toBe(before);
+      back(pane).click();
+
+      expect(pane.hidden).toBe(true);
+      expect(detail.hidden).toBe(false);
+      const focused = env.view.listPane.focused!;
+      expect(focused.listing.id).toBe(ID);
+      expect(title(detail)).toBe(focused.listing.title);
+    });
+
+    it("shows a paper the list does not show alone, from its arXiv record, until the list's focus moves", async () => {
+      let answer: (value: unknown) => void = () => undefined;
+      const apiVersion = vi.fn(
+        () => new Promise((resolve) => (answer = resolve)),
+      );
+      const lookup = vi.fn(
+        async (ids: readonly string[]) =>
+          new Map(ids.filter((id) => id === OUT).map((id) => [id, [7]])),
+      );
+      const env = await loaded({ apiVersion, inLibrary: lookup });
+      const { root, pane, detail } = env;
+      rows(root)[0].click();
+
+      env.view.showHtml({ id: OUT, title: "Quantum Weakdynamics" });
+      back(pane).click();
+
+      // The page has gone; the list stays without a focus while the record
+      // is fetched (its newest version)
+      expect(pane.hidden).toBe(true);
+      expect(detail.hidden).toBe(false);
+      expect(env.view.listPane.focused).toBeNull();
+      expect(detail.textContent).toBe(
+        msg("arxiv-browser-detail-fetching", { id: `arXiv:${OUT}` }),
+      );
+      expect(apiVersion.mock.calls[0].slice(0, 2)).toEqual([OUT, undefined]);
+
+      answer({ ok: true, entry: record });
+      await flushPromises();
+      expect(title(detail)).toBe("Quantum Weakdynamics");
+      // Looked up in the library as the list's papers are
+      expect(lookup.mock.calls.some(([ids]) => ids.includes(OUT))).toBe(true);
+      expect(detail.textContent).toContain(
+        msg("arxiv-browser-detail-in-library"),
+      );
+      // Its page again, and back: the same paper, no second request
+      root
+        .querySelector<HTMLButtonElement>(
+          ".arxiv-browser__detail-actions .arxiv-browser__split button",
+        )!
+        .click();
+      expect(pane.hidden).toBe(false);
+      back(pane).click();
+      expect(title(detail)).toBe("Quantum Weakdynamics");
+      expect(apiVersion).toHaveBeenCalledTimes(1);
+
+      // The list's focus moves: the list's papers again
+      rows(root)[1].click();
+      expect(title(detail)).toBe(env.view.listPane.focused!.listing.title);
+    });
+
+    it("keeps the list's paper when the list's focus moves while the record is fetched", async () => {
+      let answer: (value: unknown) => void = () => undefined;
+      const apiVersion = vi.fn(
+        () => new Promise((resolve) => (answer = resolve)),
+      );
+      const env = await loaded({ apiVersion });
+      const { root, pane, detail } = env;
+      env.view.showHtml({ id: OUT });
+      back(pane).click();
+      expect(detail.textContent).toBe(
+        msg("arxiv-browser-detail-fetching", { id: `arXiv:${OUT}` }),
+      );
+      rows(root)[1].click();
+      const focused = env.view.listPane.focused!;
+
+      answer({ ok: true, entry: record });
+      await flushPromises();
+      expect(env.view.listPane.focused).toBe(focused);
+      expect(title(detail)).toBe(focused.listing.title);
+    });
+
+    it("shows a paper the window has but the filter hides without asking arXiv", async () => {
+      const apiVersion = vi.fn();
+      const env = await loaded({ apiVersion });
+      const { root, pane, detail } = env;
+      const hidden = env.rowOf(ID);
+      const paperTitle = env.view.listPane.entries.find(
+        (entry) => entry.listing.id === ID,
+      )!.listing.title;
+      const filter = root.querySelector<HTMLInputElement>(
+        ".arxiv-browser__filter input",
+      )!;
+      filter.value = "nosuchwordanywhere";
+      filter.dispatchEvent(new win.Event("input"));
+      await vi.waitFor(() => expect(rows(root)).toHaveLength(0));
+      expect(hidden.isConnected).toBe(false);
+
+      env.view.showHtml({ id: ID });
+      back(pane).click();
+      expect(title(detail)).toBe(paperTitle);
+      expect(apiVersion).not.toHaveBeenCalled();
+    });
+
+    it("tells why when the record cannot be fetched", async () => {
+      const apiVersion = vi.fn(async () => ({
+        ok: false,
+        reason: "network",
+        message: "down",
+      }));
+      const env = await loaded({ apiVersion });
+      const { root, pane, detail } = env;
+      env.view.showHtml({ id: OUT });
+      back(pane).click();
+      await flushPromises();
+      expect(detail.textContent).toBe(msg("arxiv-browser-detail-empty"));
+      expect(
+        [...root.querySelectorAll(".arxiv-browser__notice")]
+          .map((notice) => notice.textContent)
+          .join(),
+      ).toContain(
+        msg("arxiv-browser-paper-failed", {
+          id: OUT,
+          reason: msg("arxiv-browser-reason-network"),
+        }),
+      );
+    });
+  });
+
   it("shows the version the detail pane shows, and the menu's first entry does the same", async () => {
     const env = await loaded();
     const { root, pane, load, launch } = env;

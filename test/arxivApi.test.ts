@@ -276,6 +276,21 @@ describe("fetchArxivApiVersion", () => {
     );
     expect(answer).toMatchObject({ ok: false, reason: "parse" });
   });
+
+  it("gives the newest version when none is asked for", async () => {
+    const { site, clock, scheduler } = setup();
+    const newest =
+      "https://export.arxiv.org/api/query?id_list=1706.03762&max_results=1";
+    site.html(newest, feed(["1706.03762"]));
+    const answer = await clock.run(
+      fetchArxivApiVersion("1706.03762", undefined, {
+        scheduler,
+        parseXml: xmlDocument,
+      }),
+    );
+    expect(site.sent.map((request) => request.url)).toEqual([newest]);
+    expect(answer).toMatchObject({ ok: true, entry: { id: "1706.03762" } });
+  });
 });
 
 describe("arxivSearchQuery", () => {

@@ -155,6 +155,14 @@ export class DetailPane {
     if (this.sections.textContent !== text) this.sections.textContent = text;
   }
 
+  /** No paper, a text in the pane's place (a paper being fetched) */
+  showText(text: string): void {
+    this.show(null);
+    this.options.container.replaceChildren(
+      html(this.doc, "div", "arxiv-browser__empty", text),
+    );
+  }
+
   show(entry: BrowserEntry | null): void {
     const container = this.options.container;
     // The same paper shown again (a mark arrived) keeps its scroll position
