@@ -16,8 +16,10 @@
 // formatted text; so a small script in the page's process reports such
 // clicks here. The script also reports a right-click, for the page's menu:
 // copying the selection, and a link's entries. (Ctrl/Cmd+C and Ctrl/Cmd+A
-// are the page's own.) And it puts back arXiv's stylesheet when the page
-// links one that arXiv has deleted (see arxivHtmlStylesheet).
+// are the page's own.) It puts back arXiv's stylesheet when the page links
+// one that arXiv has deleted (see arxivHtmlStylesheet). And it shows, while
+// the pointer rests on a link to an equation, a figure, a table or a
+// reference, that element in a small box (see arxivHtmlPreview).
 // Zotero's browsers follow web links only (its setting
 // network.protocol-handler.expose-all is off), so a javascript: link — the
 // buttons of arXiv's page header that show the table of contents and switch
@@ -38,6 +40,7 @@
 
 import { getString } from "../../../utils/locale";
 import { renderMathContent } from "../../inspire/mathRenderer";
+import { HTML_PREVIEW_SCRIPT } from "../arxivHtmlPreview";
 import { RESTORE_STYLESHEET_SCRIPT } from "../arxivHtmlStylesheet";
 import { button, html, showMenuAt, type MenuEntry } from "./dom";
 
@@ -104,7 +107,8 @@ interface PageMenuRequest {
  * (a link within the page, and a mailto: link, is left alone); a click on a
  * javascript: link that the page itself did not handle runs the link's code
  * in the page; a right-click the page does not handle is reported with the
- * selection and the link under it; a deleted arXiv stylesheet is replaced
+ * selection and the link under it; a deleted arXiv stylesheet is replaced;
+ * a link's equation, figure, table or reference is shown in a box
  */
 const LINK_SCRIPT = `"use strict";
 function linkOf(event) {
@@ -185,7 +189,8 @@ addEventListener("DOMContentLoaded", function (event) {
   if (event.target === content.document) letPointerThroughContentsBox();
 }, true);
 if (content.document.readyState !== "loading") letPointerThroughContentsBox();
-${RESTORE_STYLESHEET_SCRIPT}`;
+${RESTORE_STYLESHEET_SCRIPT}
+${HTML_PREVIEW_SCRIPT}`;
 const LINK_SCRIPT_URL = `data:application/javascript;charset=utf-8,${encodeURIComponent(LINK_SCRIPT)}`;
 
 const WEB_ADDRESS = /^https?:\/\//i;

@@ -177,6 +177,7 @@ The **HTML** button in the detail pane and the `</>` button on each row (hidden 
 In the window, the page has the detail pane's width (drag the divider or enlarge the window for more room). **‹ Details** above it, or focusing another paper in the list, returns to the details; **Open in the Web Browser** opens the same page there.
 
 - Links within the page (sections, citations, footnotes) move within it; links to elsewhere (abstract page, PDF, DOIs) open in your web browser. The buttons of arXiv's page header work, including the table of contents and the reading mode.
+- Resting the pointer on a link to an equation, a figure, a table or a reference shows it in a small box beside the link: the equation with its number, the figure or table with its caption, the reference with its links. The box stays while the pointer is in it (its links work) and closes when the pointer leaves it, on a click elsewhere, on scrolling the page and with `Escape` in the page.
 - `Ctrl/Cmd+F` finds in the page: `Ctrl/Cmd+G` and `Ctrl/Cmd+Shift+G` go to the next and previous match, `Escape` closes the find bar. The find bar is the Firefox platform's and is in English; `ss` and `ß` do not match each other.
 - Keys pressed in the page belong to the page (`Space`, arrows, `Ctrl/Cmd+C`, `Ctrl/Cmd+A`). Right-click copies the selection and, on a link, opens it or copies its address.
 

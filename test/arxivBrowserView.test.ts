@@ -2112,6 +2112,15 @@ describe("arXiv browser: the HTML version beside the list", () => {
       // A deleted arXiv stylesheet replaced (arxivHtmlStylesheet.test.ts)
       ["error", true],
       ["load", true],
+      // Previews of a link's equation, figure, table or reference
+      // (arxivHtmlPreview.test.ts)
+      ["mouseover", false],
+      ["mouseout", false],
+      ["mousedown", true],
+      ["scroll", true],
+      ["keydown", true],
+      ["resize", true],
+      ["pagehide", true],
     ]);
     // arXiv's empty box for the table of contents, over the text in a
     // narrow view, lets the pointer through once the page is read; the
