@@ -19,7 +19,11 @@
 // are the page's own.) It puts back arXiv's stylesheet when the page links
 // one that arXiv has deleted (see arxivHtmlStylesheet). And it shows, while
 // the pointer rests on a link to an equation, a figure, a table or a
-// reference, that element in a small box (see arxivHtmlPreview).
+// reference, that element in a small box (see arxivHtmlPreview). Text
+// selected across citations gives, as the plugin's look-up in the PDF
+// reader, a bar with their numbers and INSPIRE's card of the reference the
+// pointer is on (see arxivHtmlSelection); the pane has them shown by
+// `citations` (CitationCards).
 // Zotero's browsers follow web links only (its setting
 // network.protocol-handler.expose-all is off), so a javascript: link — the
 // buttons of arXiv's page header that show the table of contents and switch
@@ -40,8 +44,16 @@
 
 import { getString } from "../../../utils/locale";
 import { renderMathContent } from "../../inspire/mathRenderer";
+import type { PositionRect } from "../../inspire/panel/HoverPreviewRenderer";
+import { parseArxivId } from "../arxivId";
 import { HTML_PREVIEW_SCRIPT } from "../arxivHtmlPreview";
+import {
+  CITATIONS_MESSAGE,
+  HTML_SELECTION_SCRIPT,
+  SELECTION_MESSAGE,
+} from "../arxivHtmlSelection";
 import { RESTORE_STYLESHEET_SCRIPT } from "../arxivHtmlStylesheet";
+import type { HtmlReferenceEntry } from "../htmlReferences";
 import { button, html, showMenuAt, type MenuEntry } from "./dom";
 
 /** The paper whose HTML version is shown */
@@ -72,6 +84,29 @@ interface FindBar extends Element {
   close?(): void;
 }
 
+/** A citation in the page: the entry of the bibliography, and its number */
+export interface HtmlPaneCitation {
+  id: string;
+  label: string;
+}
+
+/** The look-up of the citations selected in the page shown */
+export interface HtmlPaneCitations {
+  /** The entries of the bibliography of the page of the paper `paperId` */
+  entries(paperId: string, entries: HtmlReferenceEntry[]): void;
+  /**
+   * The citations selected in the paper's page, the selection's last line
+   * at `rect` (in the window); none: the bar goes
+   */
+  select(
+    paperId: string,
+    citations: HtmlPaneCitation[],
+    rect: PositionRect,
+  ): void;
+  /** The bar and the card go: the page goes */
+  clear(): void;
+}
+
 export interface HtmlPaneOptions {
   /** The right-hand side's element for the pane (hidden while not shown) */
   container: HTMLElement;
@@ -83,6 +118,8 @@ export interface HtmlPaneOptions {
   onToggle(shown: boolean): void;
   /** Loads a page in the browser element (default: Zotero's loadURI) */
   load?: (browser: PageBrowser, url: string) => void;
+  /** INSPIRE's cards of the page's citations */
+  citations?: HtmlPaneCitations;
 }
 
 /** The message of a click on a link that leads out of the page */
@@ -108,7 +145,8 @@ interface PageMenuRequest {
  * javascript: link that the page itself did not handle runs the link's code
  * in the page; a right-click the page does not handle is reported with the
  * selection and the link under it; a deleted arXiv stylesheet is replaced;
- * a link's equation, figure, table or reference is shown in a box
+ * a link's equation, figure, table or reference is shown in a box; the
+ * citations of a selection are reported
  */
 const LINK_SCRIPT = `"use strict";
 function linkOf(event) {
@@ -190,7 +228,8 @@ addEventListener("DOMContentLoaded", function (event) {
 }, true);
 if (content.document.readyState !== "loading") letPointerThroughContentsBox();
 ${RESTORE_STYLESHEET_SCRIPT}
-${HTML_PREVIEW_SCRIPT}`;
+${HTML_PREVIEW_SCRIPT}
+${HTML_SELECTION_SCRIPT}`;
 const LINK_SCRIPT_URL = `data:application/javascript;charset=utf-8,${encodeURIComponent(LINK_SCRIPT)}`;
 
 const WEB_ADDRESS = /^https?:\/\//i;
@@ -263,6 +302,57 @@ export class HtmlPane {
       Number(request.x) || 0,
       Number(request.y) || 0,
     );
+  };
+  /** The page's entries of its bibliography */
+  private readonly onCitationsMessage = (message: {
+    target?: unknown;
+    data?: { page?: unknown; entries?: unknown } | null;
+  }): void => {
+    const paperId = this.pageOf(message);
+    const given = message.data?.entries;
+    if (!paperId || !Array.isArray(given)) return;
+    // The page's process is not trusted: entries of strings only
+    const entries: HtmlReferenceEntry[] = given
+      .filter(
+        (entry) =>
+          typeof entry?.id === "string" &&
+          typeof entry.text === "string" &&
+          Array.isArray(entry.links),
+      )
+      .map((entry) => ({
+        id: entry.id,
+        text: entry.text,
+        links: entry.links.filter(
+          (link: unknown): link is string => typeof link === "string",
+        ),
+      }));
+    this.options.citations?.entries(paperId, entries);
+  };
+  /** The citations selected in the page, or none */
+  private readonly onSelectionMessage = (message: {
+    target?: unknown;
+    data?: {
+      page?: unknown;
+      citations?: unknown;
+      rect?: Partial<PositionRect> | null;
+    } | null;
+  }): void => {
+    const paperId = this.pageOf(message);
+    const { citations, rect } = message.data ?? {};
+    if (!paperId || !this.browser || !Array.isArray(citations)) return;
+    const selected = citations.filter(
+      (citation): citation is HtmlPaneCitation =>
+        typeof citation?.id === "string" && typeof citation.label === "string",
+    );
+    // From the page's corner to the window's
+    const frame = this.browser.getBoundingClientRect();
+    const at = (value: unknown) => Number(value) || 0;
+    this.options.citations?.select(paperId, selected, {
+      left: frame.left + at(rect?.left),
+      top: frame.top + at(rect?.top),
+      right: frame.left + at(rect?.right),
+      bottom: frame.top + at(rect?.bottom),
+    });
   };
   private shown: HtmlPanePaper | null = null;
 
@@ -380,8 +470,10 @@ export class HtmlPane {
       this.findBar = findBar;
     } else {
       // Another paper in the same element: the find bar closes (its field
-      // keeps what was sought, as a web browser's does)
+      // keeps what was sought, as a web browser's does), and a citation's
+      // card
       this.closeFind();
+      this.options.citations?.clear();
     }
     this.loading.hidden = false;
     (this.options.load ?? loadPage)(this.browser, paper.url);
@@ -392,6 +484,7 @@ export class HtmlPane {
   close(): void {
     if (!this.shown) return;
     this.shown = null;
+    this.options.citations?.clear();
     this.dropBrowser();
     this.options.container.hidden = true;
     this.options.onToggle(false);
@@ -404,6 +497,14 @@ export class HtmlPane {
       this.links.removeDelayedFrameScript(LINK_SCRIPT_URL);
       this.links.removeMessageListener(LINK_MESSAGE, this.onLinkMessage);
       this.links.removeMessageListener(MENU_MESSAGE, this.onMenuMessage);
+      this.links.removeMessageListener(
+        CITATIONS_MESSAGE,
+        this.onCitationsMessage,
+      );
+      this.links.removeMessageListener(
+        SELECTION_MESSAGE,
+        this.onSelectionMessage,
+      );
       this.links = null;
     }
   }
@@ -421,7 +522,27 @@ export class HtmlPane {
     manager.loadFrameScript(LINK_SCRIPT_URL, true);
     manager.addMessageListener(LINK_MESSAGE, this.onLinkMessage);
     manager.addMessageListener(MENU_MESSAGE, this.onMenuMessage);
+    manager.addMessageListener(CITATIONS_MESSAGE, this.onCitationsMessage);
+    manager.addMessageListener(SELECTION_MESSAGE, this.onSelectionMessage);
     this.links = manager;
+  }
+
+  /**
+   * The arXiv identifier of the paper shown, when `message` is from its page
+   * (/html/<id>, maybe with a version): a message from a page that was
+   * shown before is not taken for this one's
+   */
+  private pageOf(message: {
+    target?: unknown;
+    data?: { page?: unknown } | null;
+  }): string | null {
+    const paper = this.shown;
+    const page = message.data?.page;
+    if (!paper || message.target !== this.browser || typeof page !== "string") {
+      return null;
+    }
+    const path = page.match(/^\/html\/(.+?)\/?$/);
+    return path && parseArxivId(path[1])?.id === paper.id ? paper.id : null;
   }
 
   private dropBrowser(): void {

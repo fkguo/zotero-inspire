@@ -48,7 +48,11 @@ vi.mock("../src/modules/inspire/apiUtils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/modules/inspire/apiUtils")>()),
   ...clipboard,
 }));
-// The batch import's duplicate check: none of the papers is in the library
+// The batch import's duplicate check, and the in-library marks of papers
+// cited in an HTML version: none of the papers is in the library
+const libraryMarks = vi.hoisted(() => ({
+  refresh: vi.fn(async (_papers: unknown[]) => [] as unknown[]),
+}));
 vi.mock(
   "../src/modules/inspire/library/localStatus",
   async (importOriginal) => ({
@@ -56,6 +60,7 @@ vi.mock(
       typeof import("../src/modules/inspire/library/localStatus")
     >()),
     findDuplicates: async () => new Map(),
+    refreshLocalState: (papers: unknown[]) => libraryMarks.refresh(papers),
   }),
 );
 
@@ -2121,6 +2126,13 @@ describe("arXiv browser: the HTML version beside the list", () => {
       ["keydown", true],
       ["resize", true],
       ["pagehide", true],
+      // The citations of a selection (arxivHtmlSelection.test.ts)
+      ["mouseup", true],
+      ["keyup", true],
+      ["mousedown", true],
+      ["scroll", true],
+      ["resize", true],
+      ["pagehide", true],
     ]);
     // arXiv's empty box for the table of contents, over the text in a
     // narrow view, lets the pointer through once the page is read; the
@@ -2206,6 +2218,259 @@ describe("arXiv browser: the HTML version beside the list", () => {
     expect(press("text", "contextmenu", 2).sent[0][1]).toMatchObject({
       link: "",
     });
+  });
+
+  /**
+   * The window showing the HTML version of ID, the page's bibliography told:
+   * entry 1 a paper of INSPIRE's list (by its arXiv link), entry 2 a book
+   */
+  async function lookUp(
+    references: (
+      id: string,
+    ) => Promise<Array<Record<string, unknown>> | null> = async (id) =>
+      // A copy: adding the paper marks it
+      id === ID ? [{ ...ANASTASIOU }] : null,
+  ) {
+    const target = {
+      libraryID: 1,
+      primaryRowID: "L1",
+      collectionIDs: [],
+      tags: [],
+      note: "",
+    };
+    const pickTarget = vi.fn(async () => target);
+    const addRecord = vi.fn(async () => ({ id: 901 }) as Zotero.Item);
+    const citationReferences = vi.fn(references);
+    const env = await loaded({ citationReferences, pickTarget, addRecord });
+    Object.assign((globalThis as any).Zotero, {
+      Libraries: {
+        get: (libraryID: number) => ({
+          libraryID,
+          name: "My Library",
+          editable: true,
+        }),
+      },
+    });
+    const { root } = env;
+    env.htmlButton(ID).click();
+    const page = env.page()!;
+    page.getBoundingClientRect = () =>
+      ({ left: 600, top: 100, right: 1155, bottom: 840 }) as DOMRect;
+    const path = `/html/${ID}`;
+    const tell = (entries: unknown[], from = path) =>
+      pageMessages.get("zoteroinspire:arxiv-html-citations")!({
+        target: page,
+        data: { page: from, entries },
+      });
+    const selected = (data: Record<string, unknown>, from: unknown = page) =>
+      pageMessages.get("zoteroinspire:arxiv-html-selection")!({
+        target: from,
+        data: {
+          page: path,
+          rect: { left: 10, top: 20, right: 60, bottom: 40 },
+          ...data,
+        },
+      });
+    const bar = () => root.querySelector(".zoteroinspire-citation-bar");
+    const buttons = () => [...bar()!.querySelectorAll("button")];
+    const card = () =>
+      [...root.querySelectorAll<HTMLElement>(".zinspire-preview-card")].find(
+        (element) => element.style.display !== "none",
+      );
+    /** The card's library lookup, and the card's delays (real timers) */
+    const settled = async (ms: number) => {
+      await flushPromises();
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      await flushPromises();
+    };
+    /** The pointer onto the bar's button `index` (off the one it was on) */
+    let on: HTMLElement | null = null;
+    const point = async (index: number) => {
+      on?.dispatchEvent(new win.MouseEvent("mouseleave"));
+      on = buttons()[index];
+      on.dispatchEvent(new win.MouseEvent("mouseenter"));
+      await settled(300);
+    };
+    const notices = () =>
+      [...root.querySelectorAll(".arxiv-browser__notice")].map(
+        (notice) => notice.textContent,
+      );
+    tell(ENTRIES);
+    return {
+      ...env,
+      target,
+      pickTarget,
+      addRecord,
+      citationReferences,
+      page,
+      path,
+      tell,
+      selected,
+      bar,
+      buttons,
+      card,
+      settled,
+      point,
+      notices,
+    };
+  }
+  const ANASTASIOU = {
+    id: "entry-635943",
+    recid: "635943",
+    title: "High precision QCD at hadron colliders",
+    authors: ["Charalampos Anastasiou"],
+    authorText: "Charalampos Anastasiou",
+    arxivDetails: { id: "hep-ph/0312266" },
+  };
+  const ENTRIES = [
+    {
+      id: "bib.bib1",
+      text: "C. Anastasiou et al., Phys. Rev. D 69 (2004) 094008",
+      links: ["http://arxiv.org/abs/hep-ph/0312266"],
+    },
+    { id: "bib.bib2", text: "A book (1996).", links: [] },
+  ];
+  const CITATIONS = [
+    { id: "bib.bib1", label: "1" },
+    { id: "bib.bib2", label: "2" },
+  ];
+
+  it("shows a bar for citations selected in the page, and INSPIRE's card of the one the pointer is on, as the PDF reader's look-up", async () => {
+    const env = await lookUp();
+    const { bar, buttons, card, selected, point, citationReferences } = env;
+    // From another element, or the page of another paper: no bar
+    selected({ citations: CITATIONS }, {});
+    selected({ page: "/html/2510.00001", citations: CITATIONS });
+    expect(bar()).toBeNull();
+    expect(citationReferences).not.toHaveBeenCalled();
+
+    selected({ citations: CITATIONS });
+    // INSPIRE's list asked for with the first citations, once
+    expect(citationReferences).toHaveBeenCalledExactlyOnceWith(
+      ID,
+      expect.anything(),
+    );
+    expect(bar()!.textContent).toContain("Refs.");
+    expect(buttons().map((button) => button.textContent)).toEqual(["1", "2"]);
+    // Not the PDF look-up's "Look up in INSPIRE Refs." (no click action here)
+    expect(buttons()[0].title).toBe("");
+
+    // The pointer on a number: INSPIRE's card of the reference
+    await point(0);
+    expect(card()!.textContent).toContain(
+      "High precision QCD at hadron colliders",
+    );
+    // Add: where the user chooses, from the INSPIRE record
+    const add = [...card()!.querySelectorAll("button")].find(
+      (button) => button.textContent === msg("references-panel-button-add"),
+    )!;
+    add.click();
+    await env.settled(10);
+    expect(env.pickTarget).toHaveBeenCalledTimes(1);
+    expect(env.addRecord).toHaveBeenCalledWith(
+      "635943",
+      expect.objectContaining(env.target),
+    );
+    expect(env.notices()).toContainEqual(
+      expect.stringContaining(
+        msg("arxiv-browser-added", {
+          id: "“High precision QCD at hadron colliders”",
+          target: "My Library",
+        }),
+      ),
+    );
+    // The card says so
+    expect(card()!.textContent).not.toContain(
+      msg("references-panel-button-add"),
+    );
+
+    // A reference INSPIRE's list does not have: the page's entry
+    await point(1);
+    expect(card()!.textContent).toBe("A book (1996).");
+    buttons()[1].dispatchEvent(new win.MouseEvent("mouseleave"));
+    await env.settled(300);
+    expect(card()).toBeUndefined();
+
+    // The selection without citations: the bar goes
+    selected({ citations: [] });
+    expect(bar()).toBeNull();
+    // Another selection of the same page: no new request
+    selected({ citations: CITATIONS.slice(1) });
+    expect(bar()!.textContent).toContain("Refs. [2]");
+    expect(citationReferences).toHaveBeenCalledTimes(1);
+    // The pane closed: the bar goes
+    env.pane
+      .querySelector<HTMLButtonElement>(".arxiv-browser__html-bar button")!
+      .click();
+    expect(bar()).toBeNull();
+  });
+
+  it("matches the entries of another version's page of the paper again (their numbering can differ), without asking INSPIRE again", async () => {
+    const env = await lookUp();
+    const { card, selected, point, tell, path } = env;
+    selected({ citations: CITATIONS });
+    await point(0);
+    expect(card()!.textContent).toContain("High precision QCD");
+    // Version 1: the paper is its second entry, the book its first
+    tell(
+      [
+        { ...ENTRIES[1], id: "bib.bib1" },
+        { ...ENTRIES[0], id: "bib.bib2" },
+      ],
+      `${path}v1`,
+    );
+    selected({ page: `${path}v1`, citations: CITATIONS });
+    await point(0);
+    expect(card()!.textContent).toBe("A book (1996).");
+    await point(1);
+    expect(card()!.textContent).toContain("High precision QCD");
+    expect(env.citationReferences).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks INSPIRE again with the next citations selected after it could not be reached, the page's entries meanwhile", async () => {
+    let reached = false;
+    const env = await lookUp(async () => {
+      if (!reached) throw new Error("INSPIRE not reached");
+      return [{ ...ANASTASIOU }];
+    });
+    const { card, selected, point } = env;
+    selected({ citations: CITATIONS });
+    await point(0);
+    expect(card()!.textContent).toBe(ENTRIES[0].text);
+    // Pointing at the numbers asks nothing more
+    await point(1);
+    expect(card()!.textContent).toBe(ENTRIES[1].text);
+    expect(env.citationReferences).toHaveBeenCalledTimes(1);
+    reached = true;
+    selected({ citations: CITATIONS });
+    expect(env.citationReferences).toHaveBeenCalledTimes(2);
+    await point(0);
+    expect(card()!.textContent).toContain("High precision QCD");
+  });
+
+  it("does not add a cited paper when the library cannot be read", async () => {
+    const env = await lookUp();
+    env.selected({ citations: CITATIONS });
+    await env.point(0);
+    libraryMarks.refresh.mockImplementationOnce(async (papers) => {
+      for (const paper of papers as Array<{ localStatusUnknown?: boolean }>) {
+        paper.localStatusUnknown = true;
+      }
+      return papers;
+    });
+    [...env.card()!.querySelectorAll("button")]
+      .find(
+        (button) => button.textContent === msg("references-panel-button-add"),
+      )!
+      .click();
+    await env.settled(10);
+    expect(env.pickTarget).not.toHaveBeenCalled();
+    expect(env.addRecord).not.toHaveBeenCalled();
+    expect(env.notices()).toContainEqual(
+      expect.stringContaining(
+        msg("references-panel-library-lookup-failed-add"),
+      ),
+    );
   });
 
   it("finds in the page with the platform's find bar: Ctrl/Cmd+F, Ctrl/Cmd+G, Escape", async () => {
