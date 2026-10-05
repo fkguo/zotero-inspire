@@ -145,31 +145,33 @@ export type ArxivApiVersionAnswer =
   | { ok: false; reason: ArxivApiFailureReason; message: string };
 
 /**
- * Version `version` of paper `id`, one request: the API then gives that
- * version's title, abstract, authors, comments and categories, with
- * `updated` the submission of that version (`published` stays version 1's)
+ * Version `version` of paper `id` (without `version`: its newest), one
+ * request: the API then gives that version's title, abstract, authors,
+ * comments and categories, with `updated` the submission of that version
+ * (`published` stays version 1's)
  */
 export async function fetchArxivApiVersion(
   id: string,
-  version: number,
+  version: number | undefined,
   options: ArxivApiOptions = {},
 ): Promise<ArxivApiVersionAnswer> {
+  const asked = version === undefined ? id : `${id}v${version}`;
   const answer = await fetchBatch(
     options.scheduler ?? getArxivApiScheduler(),
     options.parseXml ??
       ((xml: string) =>
         new DOMParser().parseFromString(xml, "application/xml")),
-    [`${id}v${version}`],
+    [asked],
     options.signal,
   );
   if (!answer.ok) return answer;
   const entry = answer.entries.get(id);
-  return entry?.version === version
+  return entry && (version === undefined || entry.version === version)
     ? { ok: true, entry }
     : {
         ok: false,
         reason: "parse",
-        message: `The arXiv API gave no ${id}v${version}`,
+        message: `The arXiv API gave no ${asked}`,
       };
 }
 

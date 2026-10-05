@@ -147,6 +147,12 @@
   gap: 6px;
 }
 
+/* Back and Forward, at the start of the toolbar */
+.arxiv-browser__navigation {
+  display: inline-flex;
+  gap: 2px;
+}
+
 .arxiv-browser__label {
   display: inline-flex;
   align-items: center;

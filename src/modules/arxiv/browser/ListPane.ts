@@ -303,7 +303,9 @@ export class ListPane {
 
   /**
    * Show the arranged list where the reader was (`position`, kept before):
-   * back from the search results to the days
+   * back from the search results to the days, Back and Forward. The focused
+   * paper, when listed, on its page and in view (the list may be arranged
+   * otherwise now: a filter, days added); else the page and scroll kept.
    */
   restore(
     arranged: ArrangedList,
@@ -313,14 +315,16 @@ export class ListPane {
     this.message = null;
     this.arranged = arranged;
     this.sort = sort;
-    this.page = Math.min(position.page, this.pages - 1);
-    this.setFocus(null, false);
-    this.render("top");
-    this.list.scrollTop = position.scrollTop;
     const focused = position.focused;
-    if (focused && arranged.entries.some((entry) => entry.id === focused)) {
-      this.setFocus(focused, false);
+    const page = focused ? pageOfEntry(arranged, focused, this.pageSize) : -1;
+    this.page = page >= 0 ? page : Math.min(position.page, this.pages - 1);
+    // The paper focused already stays so (its details stay as they are)
+    if (page < 0 || focused !== this.focusedKey) this.setFocus(null, false);
+    this.render("top");
+    if (page < 0 || page === position.page) {
+      this.list.scrollTop = position.scrollTop;
     }
+    if (focused && page >= 0) this.setFocus(focused, true);
   }
 
   /** Whether more search results can be fetched after the last page */
@@ -447,6 +451,17 @@ export class ListPane {
 
   clearFocus(): void {
     this.setFocus(null, false);
+  }
+
+  /** Focus the paper of row `key`, on its page, in view */
+  focusEntry(key: string): void {
+    const page = pageOfEntry(this.arranged, key, this.pageSize);
+    if (page < 0) return;
+    if (page !== this.page) {
+      this.page = page;
+      this.render("top");
+    }
+    this.setFocus(key, true);
   }
 
   /** Show or hide the focused paper's abstract */

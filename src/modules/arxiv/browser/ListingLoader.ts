@@ -116,6 +116,31 @@ export class ListingLoader {
     return this.report;
   }
 
+  /**
+   * The current run, counted from the window's first: each load, Reload,
+   * Continue and day retry is a new one (Back and Forward tell runs apart by
+   * it)
+   */
+  get runNumber(): number {
+    return this.generation;
+  }
+
+  /**
+   * The days of the choice once the runs know them, as Continue needs them
+   * (those listed, those without announcement, those not loaded), newest
+   * first; undefined during a run, and while the newest day or the last five
+   * days are not known (stopped before arXiv named them)
+   */
+  get choiceDates(): IsoDate[] | undefined {
+    if (this.run || !this.pending) return undefined;
+    const dates = new Set([
+      ...this.loaded.map((day) => day.date),
+      ...this.withoutAnnouncement,
+      ...this.pending,
+    ]);
+    return [...dates].sort().reverse();
+  }
+
   /** Chosen days that had no announcement (holidays), oldest first */
   get daysWithoutAnnouncement(): IsoDate[] {
     return [...this.withoutAnnouncement].sort();

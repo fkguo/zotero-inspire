@@ -69,7 +69,11 @@ import {
   type OpeningSelection,
 } from "./ListingLoader";
 import { ListPane, type ListPosition, type ListUpdate } from "./ListPane";
-import { SearchLoader, type FetchSearchPage } from "./SearchLoader";
+import {
+  SearchLoader,
+  searchResultEntry,
+  type FetchSearchPage,
+} from "./SearchLoader";
 import { AuthorPreviewController } from "../../inspire/panel/AuthorPreviewController";
 import { HoverPreviewController } from "../../inspire/panel/HoverPreviewController";
 import {
@@ -107,7 +111,18 @@ import { htmlSnapshotAmong } from "../arxivHtmlSnapshot";
 import { arxivPdfVersion } from "../arxivPdf";
 import { countAuthorPapers } from "../../inspire/library/authorCount";
 import { DetailPane } from "./DetailPane";
-import { HtmlPane, type HtmlPaneOptions } from "./HtmlPane";
+import { HtmlPane, type HtmlPaneOptions, type HtmlPanePaper } from "./HtmlPane";
+import {
+  pageCanGoBack,
+  pageCanGoForward,
+  PlaceHistory,
+  sameDays,
+  sameSelection,
+  type DaysRecord,
+  type ListRecord,
+  type PaneRecord,
+  type Place,
+} from "./placeHistory";
 import { CitationCards, type CitationCardsOptions } from "./CitationCards";
 import { loadReferenceList } from "../htmlReferences";
 import { fetchBibTeX } from "../../inspire/metadataService";
@@ -209,6 +224,41 @@ export interface ArxivBrowserViewOptions {
     BatchImportManagerOptions,
     "canImport" | "prepareImport" | "importEntry"
   >;
+}
+
+/**
+ * The key of Back or Forward, as Zotero's reader has them: Cmd+[ and Cmd+]
+ * on macOS, Alt+← and Alt+→ elsewhere
+ */
+export function navigationKey(
+  event: Pick<
+    KeyboardEvent,
+    "key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey"
+  >,
+  mac: boolean,
+): "back" | "forward" | null {
+  if (event.ctrlKey || event.shiftKey) return null;
+  if (mac) {
+    // [ and ] may need Option on the keyboard (German, French)
+    if (!event.metaKey) return null;
+    return event.key === "[" ? "back" : event.key === "]" ? "forward" : null;
+  }
+  if (!event.altKey || event.metaKey) return null;
+  return event.key === "ArrowLeft"
+    ? "back"
+    : event.key === "ArrowRight"
+      ? "forward"
+      : null;
+}
+
+/** Whether the list is at reading place `a` already */
+function samePosition(a: ListPosition | null, b: ListPosition): boolean {
+  return (
+    !!a &&
+    a.page === b.page &&
+    a.focused === b.focused &&
+    a.scrollTop === b.scrollTop
+  );
 }
 
 /** Page size from the settings, kept within 10–500 */
@@ -321,6 +371,31 @@ export class ArxivBrowserView {
   private checkedDays = new WeakSet<DayListing>();
   /** Search results looked up in the library since it last changed */
   private checkedResults = new WeakSet<BrowserEntry>();
+  /**
+   * The paper the detail pane shows that the list does not (its details
+   * asked for from its HTML version, shown from outside the window), until
+   * the list's focus moves
+   */
+  private outside: BrowserEntry | null = null;
+  /** The paper whose record is being fetched for the detail pane */
+  private fetchingDetails: string | null = null;
+  /** The window's places, for Back and Forward */
+  private readonly places = new PlaceHistory();
+  /** Back or Forward puts a place back: what that does makes no new place */
+  private restoring = false;
+  /**
+   * The list's reading place is put back (Back, Forward, the days again
+   * after a search): the focus moves, and a page shown stays
+   */
+  private keepPage = false;
+  /** The record of the days loaded (also under a search's results) */
+  private daysRecord: DaysRecord | null = null;
+  /** The days record the load going on belongs to (its days noted there) */
+  private runRecord: DaysRecord | null = null;
+  /** The reading place to put back once the list being loaded has come */
+  private wantedPosition: ListPosition | null = null;
+  private readonly backButton: HTMLButtonElement;
+  private readonly forwardButton: HTMLButtonElement;
   /** Counts the library's changes: a lookup older than one is not written */
   private libraryChanges = 0;
   private readonly stopFollowingLibrary: (() => void) | undefined;
@@ -372,6 +447,21 @@ export class ArxivBrowserView {
         this.arrange("focus");
       },
     });
+    // Back and Forward, at the start of the toolbar
+    const mac = Boolean(Zotero.isMac);
+    this.backButton = button(doc, "‹", () => this.goBack());
+    this.backButton.title = getString("arxiv-browser-back", {
+      args: { key: mac ? "⌘[" : "Alt+←" },
+    });
+    this.forwardButton = button(doc, "›", () => this.goForward());
+    this.forwardButton.title = getString("arxiv-browser-forward", {
+      args: { key: mac ? "⌘]" : "Alt+→" },
+    });
+    this.backButton.disabled = true;
+    this.forwardButton.disabled = true;
+    const navigation = html(doc, "span", "arxiv-browser__navigation");
+    navigation.append(this.backButton, this.forwardButton);
+    this.subscriptions.element.prepend(navigation);
 
     // Days (the calendar), reload / cancel, status
     const daysBar = html(doc, "div", "arxiv-browser__bar");
@@ -663,7 +753,7 @@ export class ArxivBrowserView {
       // Otherwise arXiv's newest (which may be newer than the listing's):
       // no number
       const older = version === entry.listing.version ? undefined : version;
-      this.htmlPane.show({
+      this.openPage({
         id,
         version: older,
         title:
@@ -791,6 +881,8 @@ export class ArxivBrowserView {
           onToggle: (shown) => {
             detailContainer.hidden = shown;
           },
+          details: (paper) => this.showDetailsOf(paper),
+          onPage: (kind) => this.onPageMove(kind),
           load: options.loadHtmlPage,
           citations: this.citationCards,
         })
@@ -933,7 +1025,7 @@ export class ArxivBrowserView {
       this.actions.openHtml(paper.id);
       return;
     }
-    this.htmlPane.show({
+    this.openPage({
       id: paper.id,
       title: paper.title,
       url: htmlUrl(paper.id),
@@ -1034,6 +1126,7 @@ export class ArxivBrowserView {
   private load(): void {
     const subscription = this.subscription;
     if (!subscription) return;
+    if (!this.restoring) this.enterDays(subscription);
     this.leaveSearch();
     this.entryByKey.clear();
     // The selection is of the rows of the listing loaded before
@@ -1049,8 +1142,28 @@ export class ArxivBrowserView {
 
   private onLoaderChange(): void {
     if (this.disposed) return;
+    // A load (Reload, Continue, a retry) belongs to the days' record; its
+    // days are noted once it has settled them
+    const record = this.daysRecord;
+    const run = this.loader.runNumber;
+    if (this.loader.running) {
+      if (record && this.runRecord?.run !== run) {
+        record.run = run;
+        this.runRecord = record;
+      }
+    } else if (this.runRecord?.run === run) {
+      const dates = this.loader.choiceDates;
+      if (dates) this.runRecord.dates = dates;
+    }
     // Days loading behind a search's results wait to be shown
     if (!this.search.active) this.arrange("keep-page");
+    // Back or Forward to other days: the reader's place in them, once they
+    // have come, unless the reader has moved meanwhile
+    const position = this.wantedPosition;
+    if (position && !this.loader.running && !this.search.active) {
+      this.wantedPosition = null;
+      if (!this.listPane.focused) this.arrange("focus", position);
+    }
     this.renderStatus();
     this.listPane.setRetryEnabled(!this.loader.running);
     void this.markLibraryPapers();
@@ -1114,8 +1227,16 @@ export class ArxivBrowserView {
       specs: subscription.categories,
       categories: this.categories,
     });
-    if (position) this.listPane.restore(list, this.sort, position);
-    else this.listPane.setList(list, this.sort, update);
+    if (position) {
+      this.keepPage = true;
+      try {
+        this.listPane.restore(list, this.sort, position);
+      } finally {
+        this.keepPage = false;
+      }
+    } else {
+      this.listPane.setList(list, this.sort, update);
+    }
     this.showFocused();
   }
 
@@ -1131,9 +1252,115 @@ export class ArxivBrowserView {
    * its place goes (one being read stays when the list loses its focus)
    */
   private showDetail(entry: BrowserEntry | null): void {
-    this.detail.show(entry);
+    // A move to another paper while a page is shown closes the page: a new
+    // place (the page's notes the paper focused before the move)
     const read = this.htmlPane?.paper;
-    if (read && entry && read.id !== entry.listing.id) this.htmlPane?.close();
+    const closes =
+      !!read &&
+      !!entry &&
+      read.id !== entry.listing.id &&
+      !this.keepPage &&
+      !this.restoring;
+    if (closes)
+      this.leave(this.outside ? null : (this.detail.entry?.id ?? null));
+    this.outside = null;
+    this.fetchingDetails = null;
+    this.detail.show(entry);
+    if (closes) {
+      this.htmlPane?.close();
+      this.enterList();
+    }
+  }
+
+  /**
+   * "‹ Details" in the HTML pane: the details of the paper whose page is
+   * shown, in its place. Its row when the list shows the paper; otherwise
+   * (a page asked for from outside the window) the paper alone, the list
+   * as it is without a focus: a row of it the window has (hidden by a
+   * filter, a search's), else its record from the arXiv API. Moving in the
+   * list shows the list's papers again.
+   */
+  private showDetailsOf(paper: HtmlPanePaper): void {
+    const pane = this.htmlPane;
+    if (!pane) return;
+    const { id } = paper;
+    // The page was opened from these details, in this list: Back, straight
+    // to them (not through the page's own steps)
+    const previous = this.places.previous;
+    const current = this.places.current;
+    if (
+      previous &&
+      previous.list === current?.list &&
+      this.showsDetailsOf(previous, id)
+    ) {
+      this.goBack(true);
+      return;
+    }
+    this.leave();
+    this.showDetailsHere(paper);
+    this.enterList();
+  }
+
+  /** Whether `place` shows the details of paper `id` */
+  private showsDetailsOf(place: Place, id: string): boolean {
+    const { pane, position } = place;
+    if (pane.kind === "outside") return pane.id === id;
+    if (pane.kind !== "detail" || !position?.focused) return false;
+    return this.entryByKey.get(position.focused)?.listing.id === id;
+  }
+
+  /** "‹ Details" as a new place: see showDetailsOf */
+  private showDetailsHere(paper: HtmlPanePaper): void {
+    const pane = this.htmlPane!;
+    const { id } = paper;
+    if (this.detail.entry?.listing.id !== id) {
+      const row = this.listPane.entries.find(
+        (entry) => entry.listing.id === id,
+      );
+      if (row) this.listPane.focusEntry(row.id);
+    }
+    if (this.detail.entry?.listing.id === id) {
+      pane.close();
+      return;
+    }
+    this.listPane.clearFocus();
+    pane.close();
+    this.showOutsidePaper(id);
+  }
+
+  /**
+   * Paper `id`, which the list does not show, alone in the detail pane: a
+   * row of it the window has, else its record from the arXiv API
+   */
+  private showOutsidePaper(id: string): void {
+    const known = this.rowsOfPaper(id)[0];
+    if (known) {
+      this.showOutside(known);
+      return;
+    }
+    this.outside = null;
+    this.fetchingDetails = id;
+    this.detail.showText(
+      getString("arxiv-browser-detail-fetching", {
+        args: { id: `arXiv:${id}` },
+      }),
+    );
+    void this.actions.paperVersion(id).then((record) => {
+      if (this.disposed || this.fetchingDetails !== id) return;
+      this.fetchingDetails = null;
+      // Failed: the user was told why
+      if (!record) this.detail.show(null);
+      else this.showOutside(toBrowserEntry(searchResultEntry(record)));
+    });
+  }
+
+  /** A paper the list does not show, in the detail pane */
+  private showOutside(entry: BrowserEntry): void {
+    // A record still being fetched for another page's details is not wanted
+    this.fetchingDetails = null;
+    this.outside = entry;
+    this.detail.show(entry);
+    void this.markLibraryPapers();
   }
 
   /** The detail pane follows the focused paper */
@@ -1142,6 +1369,295 @@ export class ArxivBrowserView {
     if (focused && focused !== this.detail.entry) this.showDetail(focused);
     // More of the day's categories may list the paper shown
     else this.detail.refreshSections();
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Back and Forward (placeHistory)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * A paper's page in the detail pane's place: a new place. The page shown
+   * asked for again is loaded anew in its place, no new place.
+   */
+  private openPage(paper: HtmlPanePaper): void {
+    const pane = this.htmlPane!;
+    const again = pane.shows(paper);
+    if (!again && !this.restoring) this.leave();
+    pane.show(paper);
+    if (!again && !this.restoring) this.enterList();
+  }
+
+  /**
+   * Days loaded for the reader (the calendar, another subscription): a new
+   * place, unless the list stays the same — the same subscription, and the
+   * same choice of days or the days it settled; its record then takes the
+   * load
+   */
+  private enterDays(subscription: ArxivSubscription): void {
+    const record = this.daysRecord;
+    const selection = this.selection;
+    if (
+      record &&
+      !this.search.active &&
+      this.places.current?.list === record &&
+      record.subscriptionId === subscription.id &&
+      (sameSelection(record.selection, selection) ||
+        (selection.kind === "days" &&
+          sameDays([...selection.dates].sort().reverse(), record.dates)))
+    ) {
+      record.selection = selection;
+      return;
+    }
+    this.leave();
+    this.wantedPosition = null;
+    const next: DaysRecord = {
+      kind: "days",
+      subscriptionId: subscription.id,
+      selection,
+      run: this.loader.runNumber,
+    };
+    this.daysRecord = next;
+    this.enterList(next);
+  }
+
+  /**
+   * A new place after the current one (left before the change): the list
+   * `list` (default the current one's) and what the right side shows now
+   */
+  private enterList(list?: ListRecord): void {
+    const shown = list ?? this.places.current?.list;
+    if (!shown) return;
+    this.places.push({ list: shown, position: null, pane: this.paneNow() });
+    this.refreshNavigation();
+  }
+
+  /**
+   * The current place is left: it notes the reader's place in its list
+   * (`focused`: the paper focused before a move that closes a page) and
+   * what the right side shows
+   */
+  private leave(focused?: string | null): void {
+    const place = this.places.current;
+    if (!place) return;
+    const listed =
+      place.list.kind === "search"
+        ? this.search.active && this.search.query === place.list.text
+        : !this.search.active && place.list === this.daysRecord;
+    if (this.wantedPosition) {
+      // Its list is still coming: the place it is to show
+      place.position = this.wantedPosition;
+    } else if (listed) {
+      const position = this.listPane.position;
+      place.position =
+        focused === undefined ? position : { ...position, focused };
+    }
+    const pane = place.pane;
+    place.pane = this.paneNow(
+      pane.kind === "page" && pane.element === this.htmlPane?.history?.element
+        ? pane.start
+        : undefined,
+    );
+  }
+
+  /**
+   * What the right side shows, as a place notes it. A page: its element,
+   * the reader's place in it, and where the place begins in the page's
+   * history (`start`; default where it is now)
+   */
+  private paneNow(start?: number): PaneRecord {
+    const pane = this.htmlPane;
+    const paper = pane?.paper;
+    const page = pane?.history;
+    if (pane && paper && page) {
+      return {
+        kind: "page",
+        paper,
+        address: pane.address ?? paper.url,
+        element: page.element,
+        start: start ?? Math.max(page.index, 0),
+      };
+    }
+    const outside = this.outside?.listing.id ?? this.fetchingDetails;
+    return outside ? { kind: "outside", id: outside } : { kind: "detail" };
+  }
+
+  /** The buttons tell whether Back and Forward lead anywhere */
+  private refreshNavigation(): void {
+    const place = this.places.current;
+    const page = this.htmlPane?.history ?? null;
+    this.backButton.disabled =
+      !this.places.previous && !pageCanGoBack(place, page);
+    this.forwardButton.disabled =
+      !this.places.next && !pageCanGoForward(place, this.places.next, page);
+  }
+
+  /**
+   * The page moved in its history or told the reader's place. A jump the
+   * reader made in the page is a new step: the places after this one go.
+   */
+  private onPageMove(kind: "jump" | "move"): void {
+    if (kind === "jump") {
+      const pane = this.places.current?.pane;
+      const page = this.htmlPane?.history;
+      if (pane?.kind === "page" && page?.element === pane.element) {
+        this.places.dropForward();
+      }
+    }
+    this.refreshNavigation();
+  }
+
+  /**
+   * Back: a step back in the page shown, within this place's steps; else
+   * the place before (`direct`: straight to it, as "‹ Details")
+   */
+  private goBack(direct = false): void {
+    const pane = this.htmlPane;
+    if (!direct && pane && pageCanGoBack(this.places.current, pane.history)) {
+      pane.goBack();
+      return;
+    }
+    if (!this.places.previous) return;
+    this.leave();
+    let place = this.places.back();
+    // A place of a subscription deleted since: the one before it
+    while (place && !this.canRestore(place)) {
+      this.places.dropCurrent();
+      place = this.places.back();
+    }
+    if (place) this.restorePlace(place);
+    this.refreshNavigation();
+  }
+
+  /** Forward: a step forward in the page shown, else the place after */
+  private goForward(): void {
+    const pane = this.htmlPane;
+    const left = this.places.current;
+    if (pane && pageCanGoForward(left, this.places.next, pane.history)) {
+      pane.goForward();
+      return;
+    }
+    if (!this.places.next) return;
+    this.leave();
+    let place = this.places.forward();
+    while (place && !this.canRestore(place)) {
+      this.places.dropCurrent();
+      place = this.places.current === left ? null : this.places.current;
+    }
+    if (place) this.restorePlace(place);
+    this.refreshNavigation();
+  }
+
+  /** Whether `place` can be shown again (its subscription still exists) */
+  private canRestore(place: Place): boolean {
+    return (
+      place.list.kind === "search" ||
+      this.subscriptions.has(place.list.subscriptionId)
+    );
+  }
+
+  /** Show `place` again: its list, then the right side */
+  private restorePlace(place: Place): void {
+    this.restoring = true;
+    try {
+      this.restoreList(place);
+      this.restoreRight(place);
+    } finally {
+      this.restoring = false;
+    }
+  }
+
+  private restoreList(place: Place): void {
+    const list = place.list;
+    if (list.kind === "search") {
+      this.searchBox.input.value = list.text;
+      this.showSearchClear();
+      if (this.search.active && this.search.query === list.text) {
+        // Its results shown: where the reader was in them (arrangeResults)
+        if (!samePosition(place.position, this.listPane.position)) {
+          this.wantedPosition = place.position;
+          this.arrange("focus");
+        }
+      } else {
+        this.wantedPosition = place.position;
+        this.runSearch(list.text);
+      }
+      return;
+    }
+    const subscription = this.subscription;
+    const loaded = this.daysRecord;
+    if (
+      subscription?.id === list.subscriptionId &&
+      this.loadedFor === loadedFor(subscription) &&
+      loaded &&
+      (loaded === list || sameDays(loaded.dates, list.dates))
+    ) {
+      // The days loaded: back to them where the reader was (once they
+      // have come, when a reload has emptied the list)
+      this.daysRecord = list;
+      const position = place.position;
+      const later = !this.loader.days.length;
+      this.wantedPosition = later ? position : null;
+      if (this.search.active) {
+        this.daysPosition = later ? null : position;
+        this.endSearch();
+      } else if (
+        position &&
+        !later &&
+        !samePosition(position, this.listPane.position)
+      ) {
+        this.arrange("focus", position);
+      }
+      return;
+    }
+    // Other days: as they were listed (the days settled, else the choice)
+    this.selection = list.dates
+      ? { kind: "days", dates: list.dates }
+      : list.selection;
+    this.showSelection();
+    this.daysRecord = list;
+    this.wantedPosition = place.position;
+    if (subscription?.id === list.subscriptionId) this.load();
+    // Its change loads the days
+    else this.subscriptions.choose(list.subscriptionId);
+  }
+
+  private restoreRight(place: Place): void {
+    const pane = place.pane;
+    const html = this.htmlPane;
+    if (pane.kind !== "outside") {
+      // The details of the list's focused paper (also behind a page); a
+      // paper alone, or its record still fetched, of another place goes
+      const stale = this.outside || this.fetchingDetails;
+      this.outside = null;
+      this.fetchingDetails = null;
+      const focused = this.listPane.focused;
+      if (stale || this.detail.entry !== focused) this.detail.show(focused);
+    }
+    if (pane.kind === "page") {
+      if (!html) return;
+      const shown = html.history;
+      if (shown?.element === pane.element) return;
+      if (shown && html.shows(pane.paper)) {
+        // The paper's page shown, in another element (it was closed and
+        // opened again between): it stays as it is, and is this place's
+        pane.element = shown.element;
+        pane.start = Math.max(shown.index, 0);
+        return;
+      }
+      // The page was closed since: in a new element, where the reader was
+      html.show(pane.paper, pane.address);
+      const page = html.history;
+      if (page) {
+        pane.element = page.element;
+        pane.start = 0;
+      }
+      return;
+    }
+    if (html?.paper) html.close();
+    if (pane.kind === "outside") {
+      this.listPane.clearFocus();
+      this.showOutsidePaper(pane.id);
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -1154,6 +1670,20 @@ export class ArxivBrowserView {
       this.endSearch();
       return;
     }
+    // Another search than the one shown: a new place
+    const current = this.places.current?.list;
+    const another =
+      !this.restoring &&
+      !(
+        current?.kind === "search" &&
+        this.search.active &&
+        current.text === text.trim()
+      );
+    if (another) {
+      this.leave();
+      // A reading place still to be put back belongs to the list left
+      this.wantedPosition = null;
+    }
     if (!this.search.active) this.daysPosition = this.listPane.position;
     // The selection is of the rows shown before
     this.batch.clearSelection();
@@ -1164,13 +1694,24 @@ export class ArxivBrowserView {
         this.reporter.notify(this.searchFailureText());
       }
     });
+    if (another) this.enterList({ kind: "search", text: text.trim() });
   }
 
   /** The clear control: back to the days, where the reader was */
   private endSearch(): void {
+    // Back to the days: a new place (with the days' record: no load)
+    const enter =
+      !this.restoring &&
+      this.search.active &&
+      this.places.current?.list.kind === "search";
+    if (enter) {
+      this.leave();
+      this.wantedPosition = null;
+    }
     this.searchBox.clear();
     this.showSearchClear();
     this.search.clear();
+    if (enter && this.daysRecord) this.enterList(this.daysRecord);
   }
 
   /** Leave the search without going back to the reader's place (a load) */
@@ -1233,6 +1774,8 @@ export class ArxivBrowserView {
       search.canFetchMore ? (search.running ? "loading" : "available") : "none",
     );
     if (!results.length) {
+      // Back to a search that now finds nothing: no place to put back
+      if (!search.running) this.wantedPosition = null;
       this.listPane.showMessage(
         search.running
           ? getString("arxiv-browser-search-running")
@@ -1246,7 +1789,19 @@ export class ArxivBrowserView {
       filter: filterGroups(this.filterText),
       quick: this.quickFilter(),
     });
-    this.listPane.setList(list, this.sort, update);
+    // Back or Forward to this search: where the reader was in it
+    const position = this.wantedPosition;
+    if (position && !search.running) {
+      this.wantedPosition = null;
+      this.keepPage = true;
+      try {
+        this.listPane.restore(list, this.sort, position);
+      } finally {
+        this.keepPage = false;
+      }
+    } else {
+      this.listPane.setList(list, this.sort, update);
+    }
     const wanted = this.wantedIndex;
     if (wanted !== null && !search.running) {
       this.wantedIndex = null;
@@ -1319,6 +1874,14 @@ export class ArxivBrowserView {
     const results = this.search.entries
       .map(this.resultEntry)
       .filter((entry) => !this.checkedResults.has(entry));
+    const outside = this.outside;
+    if (
+      outside &&
+      !this.checkedResults.has(outside) &&
+      !results.includes(outside)
+    ) {
+      results.push(outside);
+    }
     if (!days.length && !results.length) return;
     for (const day of days) this.checkedDays.add(day);
     for (const entry of results) this.checkedResults.add(entry);
@@ -1399,11 +1962,19 @@ export class ArxivBrowserView {
     this.completion.recount();
   }
 
-  /** The rows loaded that show the paper `id` (one per announcement day) */
+  /**
+   * The rows loaded that show the paper `id` (one per announcement day),
+   * and the paper the detail pane shows apart from the list
+   */
   private rowsOfPaper(id: string): BrowserEntry[] {
-    return [...this.entryByKey.values()].filter(
+    const rows = [...this.entryByKey.values()].filter(
       (entry) => entry.listing.id === id,
     );
+    const outside = this.outside;
+    if (outside?.listing.id === id && !rows.includes(outside)) {
+      rows.push(outside);
+    }
+    return rows;
   }
 
   /**
@@ -1669,6 +2240,14 @@ export class ArxivBrowserView {
         event.preventDefault();
         this.dayPicker.close();
       }
+      return;
+    }
+    // Back and Forward, also in the page shown and in text fields
+    const step = navigationKey(event, Boolean(Zotero.isMac));
+    if (step) {
+      event.preventDefault();
+      if (step === "back") this.goBack();
+      else this.goForward();
       return;
     }
     // While a paper's HTML version is shown: find in it (also from the find

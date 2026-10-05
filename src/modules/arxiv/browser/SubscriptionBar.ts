@@ -104,6 +104,25 @@ export class SubscriptionBar {
     return this.subscriptions.find((item) => item.id === this.currentId);
   }
 
+  /** Whether there is a subscription `id` (it may have been deleted) */
+  has(id: string): boolean {
+    return this.subscriptions.some((item) => item.id === id);
+  }
+
+  /**
+   * Choose subscription `id`, as if picked in the list (Back and Forward);
+   * false when there is no such subscription
+   */
+  choose(id: string): boolean {
+    if (!this.subscriptions.some((item) => item.id === id)) return false;
+    if (id !== this.currentId) {
+      this.currentId = id;
+      this.render();
+      this.options.onChange(this.current);
+    }
+    return true;
+  }
+
   /** Open the editor for a new subscription (or `subscription`) */
   openEditor(subscription: ArxivSubscription | undefined): void {
     this.editor?.close();
