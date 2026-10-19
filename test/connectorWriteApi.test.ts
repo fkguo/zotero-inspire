@@ -9,9 +9,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const tokenMocks = vi.hoisted(() => ({
   ensureExternalToken: vi.fn(),
 }));
+const itemMocks = vi.hoisted(() => ({
+  createItemFromInspireRecord: vi.fn(),
+  findItemByRecid: vi.fn(),
+}));
 
 vi.mock("../src/utils/externalToken", () => ({
   ensureExternalToken: tokenMocks.ensureExternalToken,
+}));
+vi.mock("../src/modules/inspire/library/itemCreation", () => ({
+  createItemFromInspireRecord: itemMocks.createItemFromInspireRecord,
+}));
+vi.mock("../src/modules/inspire/library/arxivIndex", () => ({
+  findItemByRecid: itemMocks.findItemByRecid,
 }));
 
 import {
@@ -87,11 +97,31 @@ beforeEach(() => {
   waitForDataLoad = vi.fn(async () => undefined);
   renameFile = vi.fn(async (_path: string, newName: string) => newName);
   logError = vi.fn();
+  itemMocks.createItemFromInspireRecord.mockReset();
+  itemMocks.findItemByRecid.mockReset();
+  itemMocks.findItemByRecid.mockResolvedValue(null);
+  itemMocks.createItemFromInspireRecord.mockResolvedValue({
+    id: 101,
+    key: "NEWITEM1",
+    libraryID: 1,
+  });
 
   vi.stubGlobal("Zotero", {
     debug: vi.fn(),
     logError,
-    Libraries: { userLibraryID: 1, get: () => ({ waitForDataLoad }) },
+    Libraries: {
+      userLibraryID: 1,
+      get: () => ({ waitForDataLoad, editable: true, name: "My Library" }),
+    },
+    Collections: {
+      get: (id: number) => ({
+        id,
+        key: "COLL0001",
+        name: "Collection",
+        libraryID: 1,
+        deleted: false,
+      }),
+    },
     Items: { getByLibraryAndKeyAsync, trashTx },
     Attachments: {
       linkFromFile,
@@ -127,7 +157,13 @@ describe("dispatchWriteOp: ping", () => {
     expect(body.ok).toBe(true);
     expect(body.op).toBe("ping");
     expect(body.capabilities).toEqual(
-      expect.arrayContaining(["attach_file", "trash_item", "erase_item"]),
+      expect.arrayContaining([
+        "attach_file",
+        "trash_item",
+        "erase_item",
+        "add_item",
+        "pick_save_target",
+      ]),
     );
     expect(typeof body.version).toBe("string");
   });
@@ -530,6 +566,89 @@ describe("library_id resolution", () => {
       expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("dispatchWriteOp: add_item", () => {
+  it("creates an item in the selected target", async () => {
+    const { status, body } = parse(
+      await dispatchWriteOp({
+        op: "add_item",
+        recid: "1234567",
+        library_id: 1,
+        collection_ids: [7],
+        tags: ["test"],
+        note: "a note",
+      }),
+    );
+    expect(status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      op: "add_item",
+      status: "added",
+      item_key: "NEWITEM1",
+      item_id: 101,
+      library_id: 1,
+      collection_ids: [7],
+    });
+    expect(itemMocks.findItemByRecid).toHaveBeenCalledWith("1234567");
+    expect(itemMocks.createItemFromInspireRecord).toHaveBeenCalledWith(
+      "1234567",
+      {
+        libraryID: 1,
+        collectionIDs: [7],
+        tags: ["test"],
+        note: "a note",
+      },
+    );
+  });
+
+  it("returns an existing item instead of creating a duplicate", async () => {
+    itemMocks.findItemByRecid.mockResolvedValueOnce({
+      id: 55,
+      key: "OLDITEM1",
+      libraryID: 1,
+    });
+    const { status, body } = parse(
+      await dispatchWriteOp({ op: "add_item", recid: "1234567" }),
+    );
+    expect(status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      status: "existing",
+      item_key: "OLDITEM1",
+      item_id: 55,
+    });
+    expect(itemMocks.createItemFromInspireRecord).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid recid before touching Zotero", async () => {
+    const { status, body } = parse(
+      await dispatchWriteOp({ op: "add_item", recid: "abc" }),
+    );
+    expect(status).toBe(400);
+    expect(body.code).toBe("INVALID_RECID");
+    expect(itemMocks.findItemByRecid).not.toHaveBeenCalled();
+    expect(itemMocks.createItemFromInspireRecord).not.toHaveBeenCalled();
+  });
+
+  it("reports an INSPIRE record that does not exist", async () => {
+    itemMocks.createItemFromInspireRecord.mockResolvedValueOnce(null);
+    const { status, body } = parse(
+      await dispatchWriteOp({ op: "add_item", recid: "1234567" }),
+    );
+    expect(status).toBe(404);
+    expect(body.code).toBe("INSPIRE_RECORD_NOT_FOUND");
+  });
+
+  it("fails closed when the library index cannot be read", async () => {
+    itemMocks.findItemByRecid.mockRejectedValueOnce(new Error("index down"));
+    const { status, body } = parse(
+      await dispatchWriteOp({ op: "add_item", recid: "1234567" }),
+    );
+    expect(status).toBe(503);
+    expect(body.code).toBe("LIBRARY_UNAVAILABLE");
+    expect(itemMocks.createItemFromInspireRecord).not.toHaveBeenCalled();
+  });
 });
 
 describe("endpoint token auth (init)", () => {

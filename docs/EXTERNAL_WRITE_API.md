@@ -2,8 +2,9 @@
 
 zotero-inspire registers an authenticated HTTP endpoint on Zotero's built-in
 connector server so that **trusted local tools can perform writes that Zotero's
-native Local API cannot** — attaching a local file to an item, and trashing or
-erasing items.
+native Local API cannot** — attaching a local file to an item, adding an item
+from an INSPIRE record into a target chosen in the plugin's picker, and trashing
+or erasing items.
 
 ## Why this exists
 
@@ -57,7 +58,14 @@ Response:
   "addon": "...",
   "addon_id": "...",
   "version": "3.0.3",
-  "capabilities": ["ping", "attach_file", "trash_item", "erase_item"]
+  "capabilities": [
+    "ping",
+    "attach_file",
+    "trash_item",
+    "erase_item",
+    "add_item",
+    "pick_save_target"
+  ]
 }
 ```
 
@@ -107,6 +115,102 @@ renamed).
 > on the parent item's metadata. Prefer `import` when the source file must not be
 > mutated.
 
+### `add_item`
+
+> `add_item` and `pick_save_target` are advertised by newer plugin builds.
+> Clients must check the `capabilities` array from `ping`; do not infer support
+> from the plugin version alone.
+
+Create a new library item from an INSPIRE record. The target is normally chosen
+with the plugin's own save-target picker first (see
+[`/connector/zinspirePickSaveTarget`](#choosing-a-target-connectorzinspirepicksavetarget));
+this operation only performs the create and the duplicate check.
+
+| field            | required | notes                                                     |
+| ---------------- | -------- | --------------------------------------------------------- |
+| `recid`          | yes      | positive INSPIRE record id                                |
+| `library_id`     | no       | defaults to the user library; must be an editable library |
+| `collection_ids` | no       | collection ids in that library; at most 100               |
+| `tags`           | no       | tag strings; at most 100, each at most 200 characters     |
+| `note`           | no       | child note text; at most 20000 characters                 |
+
+Request:
+
+```json
+{
+  "op": "add_item",
+  "recid": "1234567",
+  "library_id": 1,
+  "collection_ids": [42],
+  "tags": ["test"],
+  "note": "imported from Particle Library"
+}
+```
+
+Response when a new item is created:
+
+```json
+{
+  "ok": true,
+  "op": "add_item",
+  "status": "added",
+  "item_key": "ABCD1234",
+  "item_id": 101,
+  "library_id": 1,
+  "collection_ids": [42]
+}
+```
+
+If any accessible library already has an item for the recid, nothing is created:
+
+```json
+{
+  "ok": true,
+  "op": "add_item",
+  "status": "existing",
+  "item_key": "OLDITEM1",
+  "item_id": 55,
+  "library_id": 1
+}
+```
+
+The duplicate check fails closed: if the library index cannot be read, the
+operation returns `503 LIBRARY_UNAVAILABLE` and adds nothing.
+
+### Choosing a target (`/connector/zinspirePickSaveTarget`)
+
+The plugin's own save-target picker is exposed on the same connector server, with
+the same `x-zinspire-token` authentication. Start a picker with `wait:false`, then
+poll with the returned `requestID`:
+
+```json
+{ "wait": false, "multi": true, "includeTagsNote": true }
+```
+
+```json
+{ "requestID": "..." }
+```
+
+The poll response is `status: "pending"` until the user finishes, then either:
+
+```json
+{
+  "ok": true,
+  "requestID": "...",
+  "status": "done",
+  "libraryID": 1,
+  "collectionIDs": [42],
+  "collectionKeys": ["COLL0001"],
+  "selectedPath": "My Library / Collection",
+  "tags": [],
+  "note": ""
+}
+```
+
+or `status: "cancelled"` / `"expired"` / `"error"`. A `409 BUSY` means another
+picker is already open. Pass the returned `libraryID`, `collectionIDs`, `tags`
+and `note` to `add_item`; the App does not need its own collection picker.
+
 ### `trash_item`
 
 Move an item to the Zotero trash (**recoverable**).
@@ -136,7 +240,10 @@ responses are capped at 1 MiB.
 | 404    | —                                                                                          | endpoint not registered (plugin < 3.0.3 / disabled) |
 | 400    | `INVALID_OP`                                                                               | missing or unsupported operation                    |
 | 400    | `INVALID_PARAMS` / `INVALID_LIBRARY_ID` / `INVALID_PATH` / `INVALID_PARENT` / `NOT_A_FILE` | bad request                                         |
-| 404    | `ITEM_NOT_FOUND` / `FILE_NOT_FOUND`                                                        | target item or file does not exist                  |
+| 400    | `INVALID_RECID` / `INVALID_COLLECTION_ID`                                                  | bad INSPIRE/collection identifier                   |
+| 404    | `ITEM_NOT_FOUND` / `FILE_NOT_FOUND` / `INSPIRE_RECORD_NOT_FOUND`                           | target item, file or INSPIRE record does not exist  |
+| 502    | `INSPIRE_LOOKUP_FAILED`                                                                    | the INSPIRE record could not be fetched             |
+| 503    | `LIBRARY_UNAVAILABLE`                                                                      | the Zotero library index could not be read          |
 | 413    | `RESPONSE_TOO_LARGE`                                                                       | response would exceed the 1 MiB JSON limit          |
 | 500    | `INTERNAL_ERROR`                                                                           | unexpected failure                                  |
 

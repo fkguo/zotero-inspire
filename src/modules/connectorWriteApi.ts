@@ -1,5 +1,7 @@
 import { config, version } from "../../package.json";
 import { ensureExternalToken } from "../utils/externalToken";
+import { createItemFromInspireRecord } from "./inspire/library/itemCreation";
+import { findItemByRecid } from "./inspire/library/arxivIndex";
 
 /**
  * External write API for zotero-inspire.
@@ -32,6 +34,8 @@ const CAPABILITIES = [
   "attach_file",
   "trash_item",
   "erase_item",
+  "add_item",
+  "pick_save_target",
 ] as const;
 
 let previousEndpoint: any;
@@ -90,6 +94,73 @@ function requireString(value: unknown, field: string): string {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalPositiveIntArray(value: unknown, field: string): number[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new WriteError(
+      400,
+      "INVALID_PARAMS",
+      `${field} must be an array of at most 100 integers`,
+    );
+  }
+  const result: number[] = [];
+  for (const entry of value) {
+    const id = typeof entry === "number" ? entry : Number.NaN;
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new WriteError(
+        400,
+        "INVALID_PARAMS",
+        `${field} must contain positive integers`,
+      );
+    }
+    result.push(id);
+  }
+  return result;
+}
+
+function optionalStringArray(value: unknown, field: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new WriteError(
+      400,
+      "INVALID_PARAMS",
+      `${field} must be an array of at most 100 strings`,
+    );
+  }
+  const result: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      throw new WriteError(
+        400,
+        "INVALID_PARAMS",
+        `${field} must contain strings`,
+      );
+    }
+    const text = entry.trim();
+    if (text.length > 200) {
+      throw new WriteError(
+        400,
+        "INVALID_PARAMS",
+        `${field} entries must be at most 200 characters`,
+      );
+    }
+    if (text) result.push(text);
+  }
+  return result;
+}
+
+function optionalNote(value: unknown): string {
+  if (value === undefined) return "";
+  if (typeof value !== "string" || value.length > 20000) {
+    throw new WriteError(
+      400,
+      "INVALID_PARAMS",
+      "note must be a string of at most 20000 characters",
+    );
+  }
+  return value;
 }
 
 /** Resolve an explicit library_id, defaulting to the user library. */
@@ -343,6 +414,114 @@ async function handleEraseItem(
 }
 
 /**
+ * Create an item from an INSPIRE record in the target returned by
+ * `zinspirePickSaveTarget`. The picker itself stays in that endpoint; this op
+ * only performs the create and duplicate check.
+ */
+async function handleAddItem(
+  body: Record<string, any>,
+): Promise<EndpointResult> {
+  const recid = requireString(body.recid, "recid");
+  if (!/^[1-9]\d{0,18}$/.test(recid)) {
+    throw new WriteError(
+      400,
+      "INVALID_RECID",
+      "recid must be a positive integer",
+    );
+  }
+  const libraryID = resolveLibraryID(body.library_id);
+  const library = Zotero.Libraries.get(libraryID) as any;
+  if (!library || !library.editable) {
+    throw new WriteError(
+      400,
+      "INVALID_LIBRARY_ID",
+      `Library ${libraryID} is not editable`,
+    );
+  }
+
+  const collectionIDs = optionalPositiveIntArray(
+    body.collection_ids,
+    "collection_ids",
+  );
+  for (const collectionID of collectionIDs) {
+    const collection = Zotero.Collections.get(collectionID) as any;
+    if (
+      !collection ||
+      collection.deleted ||
+      collection.libraryID !== libraryID
+    ) {
+      throw new WriteError(
+        400,
+        "INVALID_COLLECTION_ID",
+        `Collection ${collectionID} is not in library ${libraryID}`,
+      );
+    }
+  }
+
+  const tags = optionalStringArray(body.tags, "tags");
+  const note = optionalNote(body.note);
+
+  // Adding the same INSPIRE record twice is almost never intended. Fail
+  // closed if the index cannot be read rather than risk a duplicate.
+  let existing: Zotero.Item | null = null;
+  try {
+    existing = await findItemByRecid(recid);
+  } catch (_err) {
+    throw new WriteError(
+      503,
+      "LIBRARY_UNAVAILABLE",
+      "The Zotero library index is unavailable; nothing was added",
+    );
+  }
+  if (existing?.id) {
+    return jsonResult(200, {
+      ok: true,
+      op: "add_item",
+      status: "existing",
+      item_key: existing.key,
+      item_id: existing.id,
+      library_id: existing.libraryID,
+    });
+  }
+
+  let item: Zotero.Item | null;
+  try {
+    item = await createItemFromInspireRecord(recid, {
+      libraryID,
+      collectionIDs,
+      tags,
+      note,
+    });
+  } catch (_err) {
+    throw new WriteError(
+      502,
+      "INSPIRE_LOOKUP_FAILED",
+      "Could not fetch the INSPIRE record; nothing was added",
+    );
+  }
+  if (!item) {
+    throw new WriteError(
+      404,
+      "INSPIRE_RECORD_NOT_FOUND",
+      `INSPIRE has no record ${recid}`,
+    );
+  }
+
+  debug(
+    `[${config.addonName}] write add_item ok: ${recid} -> ${item.key} (library ${item.libraryID})`,
+  );
+  return jsonResult(200, {
+    ok: true,
+    op: "add_item",
+    status: "added",
+    item_key: item.key,
+    item_id: item.id,
+    library_id: item.libraryID,
+    collection_ids: collectionIDs,
+  });
+}
+
+/**
  * Dispatch a validated, authenticated write request to the matching op handler.
  * Exported for unit testing without the connector server.
  */
@@ -369,6 +548,8 @@ export async function dispatchWriteOp(
         return await handleTrashItem(body);
       case "erase_item":
         return await handleEraseItem(body);
+      case "add_item":
+        return await handleAddItem(body);
       default:
         return jsonResult(400, {
           ok: false,
