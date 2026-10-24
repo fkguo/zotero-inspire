@@ -12,6 +12,8 @@ The **arXiv browser** works for every arXiv category, from mathematics and compu
 
 ## New features
 
+**4.1.1**: Removes the toolkit's deprecated external plugin-installation and code-execution links. Right-click menus now use Zotero's native menu API. Restart Zotero after upgrading to clear handlers registered by earlier versions.
+
 **4.0.0** (requires Zotero 10):
 
 - **[arXiv browser](#arxiv-browser)**: a separate Zotero window for reading arXiv listings of any field. Subscribe to any categories, pick announcement days in a calendar, read titles, authors and abstracts with rendered formulas, search arXiv, and add papers to your library (through INSPIRE when it has the paper, otherwise from arXiv's data) or relate them to your items.

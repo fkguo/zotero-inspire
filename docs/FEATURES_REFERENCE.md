@@ -5,6 +5,8 @@
 
 ---
 
+Since 4.1.1, the plugin uses only `BasicTool`, `UITool` and `ProgressWindowHelper` from toolkit 6.0.0. INSPIRE context menus use `Zotero.MenuManager`, with explicit cleanup on plugin shutdown. The plugin does not register the toolkit's external plugin-installation or debug-execution protocol handlers.
+
 ## 1. INSPIRE References Panel
 
 ### 1.1 View Modes
