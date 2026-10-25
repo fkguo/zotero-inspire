@@ -2,6 +2,7 @@ startup-begin = 插件正在加载
 startup-finish = 插件已准备就绪
 menuitem-label = 插件模板：辅助示例
 menupopup-label = INSPIRE
+menuitem-open-inspire = 在 INSPIRE 中查看
 menuitem-submenulabel0 = 包含摘要
 menuitem-submenulabel1 = 不含摘要
 menuitem-submenulabel2 = 仅引用次数

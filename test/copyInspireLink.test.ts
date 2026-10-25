@@ -75,6 +75,21 @@ afterEach(() => {
 const notices = () => mocks.lines.map((line) => `${line.type} ${line.text}`);
 
 describe("main window: Copy INSPIRE link", () => {
+  it("uses an explicit paper from a PDF tab instead of the library selection", async () => {
+    selected = [item({ archive: "INSPIRE", archiveLocation: "1111111" })];
+    const paper = item({ archive: "INSPIRE", archiveLocation: "3071234" });
+    await new ZInspire().copyInspireLink([paper as Zotero.Item]);
+    expect(mocks.copy).toHaveBeenCalledWith(
+      "https://inspirehep.net/literature/3071234",
+    );
+  });
+
+  it("does not fall back to the library selection when the explicit list is empty", async () => {
+    selected = [item({ archive: "INSPIRE", archiveLocation: "1111111" })];
+    await new ZInspire().copyInspireLink([]);
+    expect(mocks.copy).not.toHaveBeenCalled();
+  });
+
   it("copies the link of the item's recid", async () => {
     selected = [item({ archive: "INSPIRE", archiveLocation: "3071234" })];
     await new ZInspire().copyInspireLink();

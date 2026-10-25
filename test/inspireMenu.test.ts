@@ -17,6 +17,15 @@ beforeEach(() => {
   dom = new JSDOM("<!DOCTYPE html><body></body>");
   registrations = [];
   registerMenu = vi.fn((options: MenuOptions) => {
+    // Zotero's MenuManager rejects top-level separators on grouped targets.
+    if (
+      ["main/library/item", "main/library/collection"].includes(
+        options.target,
+      ) &&
+      options.menus.some((entry) => entry.menuType === "separator")
+    ) {
+      return false;
+    }
     registrations.push(options);
     return `${options.pluginID}-${options.menuID}`;
   });
@@ -78,7 +87,7 @@ function label(entry: MenuData): string | null {
 }
 
 async function command(options: MenuOptions, key: string) {
-  const entry = options.menus[1].menus!.find(
+  const entry = options.menus[0].menus!.find(
     (entry) => label(entry) === `${config.addonRef}-${key}`,
   );
   expect(entry, key).toBeDefined();
@@ -101,10 +110,18 @@ describe("native INSPIRE context menus", () => {
     ]);
     for (const options of registrations) {
       expect(options.pluginID).toBe(config.addonID);
-      expect(label(options.menus[1])).toBe(
+      expect(options.menus).toHaveLength(1);
+      expect(options.menus[0].menuType).toBe("submenu");
+      expect(label(options.menus[0])).toBe(
         `${config.addonRef}-menupopup-label`,
       );
-      for (const entry of options.menus[1].menus!) {
+      const root = dom.window.document.createElement("menu");
+      options.menus[0].onShowing!(new dom.window.Event("popupshowing"), {
+        menuElem: root,
+      } as unknown as _ZoteroTypes.MenuManager.LibraryMenuContext);
+      expect(root.getAttribute("image")).toBe(options.menus[0].icon);
+      expect(root.style.listStyleImage).toContain("inspire-menu.png");
+      for (const entry of options.menus[0].menus!) {
         if (entry.menuType === "menuitem") expect(label(entry)).toBeTruthy();
       }
     }

@@ -1,6 +1,5 @@
 import { config } from "../../../package.json";
-import type { FluentMessageId } from "../../../typings/i10n";
-import { getString } from "../../utils/locale";
+import { INSPIRE_MENU_ICON, menuLabel } from "./menuAppearance";
 
 type MenuData =
   _ZoteroTypes.MenuManager.MenuData<_ZoteroTypes.MenuManager.LibraryMenuContext>;
@@ -33,23 +32,16 @@ export class ZInsMenu {
       target:
         context === "item" ? "main/library/item" : "main/library/collection",
       menus: [
-        { menuType: "separator" },
+        // Zotero groups these targets and inserts the top-level separator.
         {
           menuType: "submenu",
-          onShowing: this.setLabel("menupopup-label"),
+          onShowing: menuLabel("menupopup-label", true),
           menus: this.buildMenuChildren(context),
-          icon: `chrome://${config.addonRef}/content/icons/inspire.svg`,
+          icon: INSPIRE_MENU_ICON,
         },
       ],
     });
     if (id) this.registeredMenus[context] = id;
-  }
-
-  // These labels already live in addon.ftl, loaded by the plugin's Localization.
-  private static setLabel(key: FluentMessageId): MenuData["onShowing"] {
-    return (_event, { menuElem }) => {
-      menuElem.setAttribute("label", getString(key));
-    };
   }
 
   private static buildMenuChildren(context: "item" | "collection"): MenuData[] {
@@ -66,23 +58,23 @@ export class ZInsMenu {
     const children: MenuData[] = [
       {
         menuType: "menuitem",
-        onShowing: this.setLabel("menuitem-submenulabel0"),
+        onShowing: menuLabel("menuitem-submenulabel0"),
         onCommand: () => updateHandler("full"),
       },
       {
         menuType: "menuitem",
-        onShowing: this.setLabel("menuitem-submenulabel1"),
+        onShowing: menuLabel("menuitem-submenulabel1"),
         onCommand: () => updateHandler("noabstract"),
       },
       {
         menuType: "menuitem",
-        onShowing: this.setLabel("menuitem-submenulabel2"),
+        onShowing: menuLabel("menuitem-submenulabel2"),
         onCommand: () => updateHandler("citations"),
       },
       { menuType: "separator" },
       {
         menuType: "menuitem",
-        onShowing: this.setLabel("menuitem-download-cache"),
+        onShowing: menuLabel("menuitem-download-cache"),
         onCommand: () => cacheHandler(),
       },
     ];
@@ -93,7 +85,7 @@ export class ZInsMenu {
         { menuType: "separator" },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-citation-graph-merge"),
+          onShowing: menuLabel("menuitem-citation-graph-merge"),
           onCommand: () => {
             _globalThis.inspire.openCombinedCitationGraphFromSelection?.();
           },
@@ -105,49 +97,49 @@ export class ZInsMenu {
         { menuType: "separator" },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-copy-bibtex"),
+          onShowing: menuLabel("menuitem-copy-bibtex"),
           onCommand: () => {
             _globalThis.inspire.copyBibTeX();
           },
         },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-copy-citation-key"),
+          onShowing: menuLabel("menuitem-copy-citation-key"),
           onCommand: () => {
             _globalThis.inspire.copyCitationKey();
           },
         },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-copy-inspire-recid"),
+          onShowing: menuLabel("menuitem-copy-inspire-recid"),
           onCommand: () => {
             _globalThis.inspire.copyInspireRecid();
           },
         },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-copy-inspire-link"),
+          onShowing: menuLabel("menuitem-copy-inspire-link"),
           onCommand: () => {
             _globalThis.inspire.copyInspireLink();
           },
         },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-copy-inspire-link-md"),
+          onShowing: menuLabel("menuitem-copy-inspire-link-md"),
           onCommand: () => {
             _globalThis.inspire.copyInspireLinkMarkdown();
           },
         },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-copy-zotero-link"),
+          onShowing: menuLabel("menuitem-copy-zotero-link"),
           onCommand: () => {
             _globalThis.inspire.copyZoteroLink();
           },
         },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-copy-funding"),
+          onShowing: menuLabel("menuitem-copy-funding"),
           onCommand: () => {
             _globalThis.inspire.copyFundingInfo();
           },
@@ -156,7 +148,7 @@ export class ZInsMenu {
         { menuType: "separator" },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("collab-tag-menu-add"),
+          onShowing: menuLabel("collab-tag-menu-add"),
           onCommand: () => {
             _globalThis.inspire.addCollabTagsToSelection?.();
           },
@@ -165,7 +157,7 @@ export class ZInsMenu {
         { menuType: "separator" },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("preprint-check-menu"),
+          onShowing: menuLabel("preprint-check-menu"),
           onCommand: () => {
             _globalThis.inspire.checkSelectedItemsPreprints?.();
           },
@@ -173,7 +165,7 @@ export class ZInsMenu {
         // Favorite paper (FTR-FAVORITE-PAPERS)
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-favorite-paper"),
+          onShowing: menuLabel("menuitem-favorite-paper"),
           onCommand: () => {
             _globalThis.inspire.toggleFavoritePaperFromMenu?.();
           },
@@ -185,7 +177,7 @@ export class ZInsMenu {
         { menuType: "separator" },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("menuitem-citation-graph-merge"),
+          onShowing: menuLabel("menuitem-citation-graph-merge"),
           onCommand: () => {
             _globalThis.inspire.openCombinedCitationGraphFromCollection?.();
           },
@@ -197,7 +189,7 @@ export class ZInsMenu {
         { menuType: "separator" },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("preprint-check-collection-menu"),
+          onShowing: menuLabel("preprint-check-collection-menu"),
           onCommand: async () => {
             Zotero.debug(
               "[zotero-inspire] Menu: checkPreprintsInCollection clicked",
@@ -213,7 +205,7 @@ export class ZInsMenu {
         },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("preprint-check-all-menu"),
+          onShowing: menuLabel("preprint-check-all-menu"),
           onCommand: async () => {
             Zotero.debug(
               "[zotero-inspire] Menu: checkAllPreprintsInLibrary clicked",
@@ -231,7 +223,7 @@ export class ZInsMenu {
         { menuType: "separator" },
         {
           menuType: "menuitem",
-          onShowing: this.setLabel("collab-tag-menu-reapply"),
+          onShowing: menuLabel("collab-tag-menu-reapply"),
           onCommand: () => {
             _globalThis.inspire.reapplyCollabTagsToCollection?.();
           },
@@ -243,7 +235,7 @@ export class ZInsMenu {
       { menuType: "separator" },
       {
         menuType: "menuitem",
-        onShowing: this.setLabel("menuitem-cancel-update"),
+        onShowing: menuLabel("menuitem-cancel-update"),
         onCommand: () => {
           _globalThis.inspire.cancelUpdate();
         },

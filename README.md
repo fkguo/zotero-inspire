@@ -12,6 +12,8 @@ The **arXiv browser** works for every arXiv category, from mathematics and compu
 
 ## New features
 
+**4.1.2**: Restores the INSPIRE item and collection context menus, adds INSPIRE actions to PDF-tab context menus, and uses centered, bold menu icons. PDF-tab commands act on the clicked tab's paper, including background tabs.
+
 **4.1.1**: Removes the toolkit's deprecated external plugin-installation and code-execution links. Right-click menus now use Zotero's native menu API. Restart Zotero after upgrading to clear handlers registered by earlier versions.
 
 **4.0.0** (requires Zotero 10):
@@ -363,6 +365,8 @@ Click the export button in the toolbar:
 ---
 
 ## PDF Reader Integration
+
+Right-click an open PDF's tab and choose **INSPIRE** to update its paper's metadata, view its INSPIRE record, copy BibTeX or links, extract funding information, check publication status, or toggle its favorite status. The commands use the clicked tab's paper, including when that tab is in the background.
 
 When reading a PDF in Zotero:
 

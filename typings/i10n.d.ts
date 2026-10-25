@@ -376,6 +376,7 @@ export type FluentMessageId =
   | 'menuitem-download-cache'
   | 'menuitem-favorite-paper'
   | 'menuitem-label'
+  | 'menuitem-open-inspire'
   | 'menuitem-submenulabel0'
   | 'menuitem-submenulabel1'
   | 'menuitem-submenulabel2'

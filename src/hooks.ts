@@ -21,6 +21,8 @@ import {
   registerInspireItemTreeColumns,
   unregisterInspireItemTreeColumns,
   refreshInspireItemTreeColumns,
+  registerInspireReaderTabMenu,
+  unregisterInspireReaderTabMenu,
 } from "./modules/inspire";
 import {
   ENRICH_BATCH_RANGE,
@@ -92,6 +94,7 @@ async function onStartup() {
   registerArxivBrowserMenu(openArxivBrowser);
   ZInsMenu.registerRightClickMenuPopup();
   ZInsMenu.registerRightClickCollectionMenu();
+  registerInspireReaderTabMenu();
 
   // One-time migration: the legacy china-only boolean (FTR-FUNDING-EXTRACTION)
   // is superseded by funding_filter_mode. funding_filter_mode has a default of
@@ -236,6 +239,7 @@ function onShutdown(): void {
   closeArxivBrowser();
   unregisterArxivBrowserMenu();
   ZInsMenu.unregisterMenus();
+  unregisterInspireReaderTabMenu();
   unregisterArxivBrowserSidenav();
   for (const win of Zotero.getMainWindows()) {
     removeArxivBrowserButton(win);

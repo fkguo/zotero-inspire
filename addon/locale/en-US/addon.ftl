@@ -2,6 +2,7 @@ startup-begin = Addon is loading
 startup-finish = Addon is ready
 menuitem-label = Addon Template: Helper Examples
 menupopup-label = INSPIRE
+menuitem-open-inspire = View on INSPIRE
 menuitem-submenulabel0 = With abstracts
 menuitem-submenulabel1 = Without abstracts
 menuitem-submenulabel2 = Citation counts only
