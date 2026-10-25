@@ -1794,6 +1794,8 @@ describe("arXiv browser: the HTML version beside the list", () => {
     expect(page.parentElement).toBe(pane);
     // Web content, moved to a content process when the page loads
     expect(page.getAttribute("type")).toBe("content");
+    // Firefox 153 treats even remote="false" as enabling remote mode.
+    expect(page.hasAttribute("remote")).toBe(false);
     expect(page.getAttribute("maychangeremoteness")).toBe("true");
     expect(load).toHaveBeenCalledExactlyOnceWith(page, URL);
     // arXiv's newest version (maybe newer than the listing's): no number

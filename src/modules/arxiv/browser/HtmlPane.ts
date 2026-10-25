@@ -586,7 +586,8 @@ export class HtmlPane {
       };
       const browser = doc.createXULElement("browser") as PageBrowser;
       browser.setAttribute("type", "content");
-      browser.setAttribute("remote", "false");
+      // Start non-remote by omitting the attribute: Firefox 153 treats
+      // remote="false" as remote too. The page load can still switch it.
       browser.setAttribute("maychangeremoteness", "true");
       browser.setAttribute("disableglobalhistory", "true");
       // The find bar's actor serves this group's browsers

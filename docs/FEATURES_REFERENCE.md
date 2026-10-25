@@ -3,6 +3,9 @@
 > This document provides technical details for the INSPIRE References Panel, the arXiv browser (section 15) and related functionality.
 > It serves as a reference for developers and advanced users. The plugin requires Zotero 10.
 
+See [Zotero 11 beta compatibility](ZOTERO_11_COMPATIBILITY.md) for preparation
+status and the checks required before declaring support.
+
 ---
 
 Since 4.1.1, the plugin uses only `BasicTool`, `UITool` and `ProgressWindowHelper` from toolkit 6.0.0. INSPIRE context menus use `Zotero.MenuManager`, with explicit cleanup on plugin shutdown. The plugin does not register the toolkit's external plugin-installation or debug-execution protocol handlers.
