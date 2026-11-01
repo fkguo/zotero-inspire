@@ -36,7 +36,7 @@
   },
   "dependencies": {
     "eta": "^4.6.0",
-    "js-yaml": "^5.2.1",
+    "js-yaml": "^5.5.0",
     "pako": "^2.1.0",
     "zotero-plugin-toolkit": "6.0.0"
   },
