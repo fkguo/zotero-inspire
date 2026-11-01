@@ -41,7 +41,7 @@
     "zotero-plugin-toolkit": "6.0.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.14.0",
+    "@eslint/js": "^10.0.1",
     "@fluent/syntax": "^0.19.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
